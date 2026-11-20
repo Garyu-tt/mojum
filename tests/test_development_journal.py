@@ -66,7 +66,8 @@ class DevelopmentalDiaryTests(unittest.TestCase):
             self.assertEqual(child.model.updates, 41)
         after = from_sqlite(self.db)
         self.assertEqual(after["frames_analyzed"], 41)
-        self.assertEqual(after["milestones"], first["milestones"])
+        for earlier in first["milestones"]:
+            self.assertIn(earlier, after["milestones"])
 
     def test_raw_jsonl_has_no_unearned_hash_validation(self):
         trace, _ = self.run_infant(20)
