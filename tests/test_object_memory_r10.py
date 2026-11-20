@@ -138,12 +138,23 @@ class ObservedObjectContinuityTests(unittest.TestCase):
                             expected_revision=first.revision)
         sensor2, bearing2 = observation(scene, second)
         middle = memory.observe(sensor2, bearing2, [second.x, second.y])
-        # If the coarse beam already yields an overlap the behavior must
-        # be ambiguous; otherwise it must never assert verified identity.
-        self.assertFalse(middle["identity_verified"])
-        self.assertIn(middle["status"], (
-            "new_hypothesis", "continuous_candidate", "ambiguous_identity"
-        ))
+        self.assertEqual(middle["status"], "new_hypothesis")
+        self.assertEqual(middle["hypothesis"], "h0002")
+        self.assertEqual(len(memory.tracks), 2)
+        before = memory.snapshot()
+        third, _ = advance(scene.room, second, tick=2, dx=-.5, dy=-.2,
+                           expected_revision=second.revision)
+        sensor3, bearing3 = observation(scene, third)
+        contradiction = memory.observe(
+            sensor3, bearing3, [third.x, third.y],
+            scene.probe(third, sensor3),
+        )
+        self.assertEqual(contradiction["status"], "ambiguous_identity")
+        self.assertIsNone(contradiction["hypothesis"])
+        self.assertEqual(contradiction["candidates"], ["h0001", "h0002"])
+        self.assertFalse(contradiction["identity_verified"])
+        self.assertEqual(memory.tracks, before["tracks"])
+        self.assertEqual(memory.touch_updates, before["touch_updates"])
 
     def test_directional_sensor_has_no_privileged_labels_or_response(self):
         scene = ToyScene()
