@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from pathlib import Path
 
 from .infant_play import ACTIONS, SCHEMA as INFANT_SCHEMA
 from .noosphere import LocalNoosphere
@@ -30,7 +31,12 @@ class DiaryError(ValueError):
 
 
 def _finite(value):
-    return type(value) in (int, float) and math.isfinite(value)
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 def _check_frame(frame, previous):
@@ -77,7 +83,8 @@ def _check_frame(frame, previous):
         raise DiaryError("movement effect score mismatch")
     if outcome["blocked"] and effect != 0:
         raise DiaryError("blocked move cannot be effective")
-    if frame.get("inference", {}).get("not") != "thought_or_feeling_or_general_reasoning":
+    if (not isinstance(frame.get("inference"), dict)
+            or frame["inference"].get("not") != "thought_or_feeling_or_general_reasoning"):
         raise DiaryError("unsupported inner-life inference")
     return tick
 
@@ -171,7 +178,10 @@ def summarize(frames, *, event_hashes=None, source_integrity="unverified_local_t
 
 def from_sqlite(db, agent_id="dante-fixture-001"):
     """Validate a local Noosphere chain; read PRIVATE events only by explicit CLI request."""
-    with LocalNoosphere(db, agent_id) as store:
+    path = Path(db)
+    if not path.is_file() or path.is_symlink():
+        raise DiaryError("existing regular SQLite journal required")
+    with LocalNoosphere(path, agent_id) as store:
         verdict = store.verify_chain()
         if not 1 <= verdict["count"] <= MAX_FRAMES + 1:
             raise DiaryError("journal outside infant replay budget")
