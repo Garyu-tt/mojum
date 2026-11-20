@@ -92,6 +92,17 @@ class GoalFreeAffordanceTests(unittest.TestCase):
             b.record(frame, True, choice, world_outcome(tick, blocked=tick % 4 == 0))
         self.assertEqual(a.snapshot(), b.snapshot())
 
+    def test_one_measured_blockage_can_override_prior_success_streak(self):
+        m = AffordanceMemory()
+        for tick in range(6):
+            frame = sensor(tick)
+            command = m.choose(frame, False)
+            self.assertEqual(command["action"], "x+")
+            m.record(frame, False, command,
+                     world_outcome(tick, blocked=tick == 5))
+        self.assertEqual(m.updates, 6)
+        self.assertNotEqual(m.choose(sensor(6), False)["action"], "x+")
+
     def test_transaction_candidate_does_not_touch_committed_model(self):
         original = AffordanceMemory()
         before = original.snapshot()
