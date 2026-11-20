@@ -62,9 +62,11 @@ both dimensions numerically equivalent.
 
 ## Boundaries and safety
 
-- A paused single-writer source is required. Before/after head and checkpoint
-  comparison detects straightforward concurrent changes but is not a
-  cross-component atomic barrier or a concurrent-writer lock.
+- The exporter now uses Aquarium.freeze_checkpoint(), blocking supported
+  step()/acquire() calls and reserving the local SQLite journal against other
+  writers with BEGIN IMMEDIATE throughout component capture. It fails closed
+  on stale local journal heads and releases the barrier after capture.
+  This is local coordination only, not an atomic cross-service snapshot.
 - The shadow predictor is a small synthetic online heartbeat learner, not a
   complete brain. The room is a point fixture, not a MuJoCo simulation.
 - Body data intentionally contains NOT_CAPTURED_ACTUATORS_DISABLED. Import
