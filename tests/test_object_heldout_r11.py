@@ -106,6 +106,9 @@ class ObjectContinuityHeldOutQA(unittest.TestCase):
         ))
         self.assertEqual(compact, compact_report(self.report))
         self.assertEqual(detail, self.report)
+        # Compact synthetic-only metrics are safe for public CI logs and
+        # make later baseline claims independently reproducible.
+        print("MOJUM_OBJECT_QA_COMPACT=" + json.dumps(compact, sort_keys=True))
         self.assertTrue(any(
             row["oracle_only"] is not None
             for row in detail["cases"]["static_same_color_separated"]["timeline_for_qa_only"]
