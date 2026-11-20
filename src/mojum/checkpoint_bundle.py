@@ -13,6 +13,11 @@ MAX_COMPONENT_BYTES = 4_000_000
 def _decode(data):
     if type(data) is not str:
         raise ValueError("component encoding must be text")
+    # Bound the encoded input before decoding: unpack() is a public in-memory
+    # API and can be called without the 30 MB loads() wire-size guard.
+    max_encoded = 4 * ((MAX_COMPONENT_BYTES + 2) // 3)
+    if len(data) > max_encoded:
+        raise ValueError("oversized base64 component")
     try:
         raw = base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as exc:
