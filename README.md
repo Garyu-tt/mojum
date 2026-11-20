@@ -17,7 +17,21 @@ Mojum is **not just a physics library or a Node-RED fork**. The universal, porta
 
 ## Truthful status
 
-**R0.1 bootstrapping.** Work is starting from an empty repository. Existing GraphForge R0.1–R0.14 prototypes were developed externally and are **not automatically integrated**. The first PR is intended to establish a *small CPU-only graph interpreter* with a synthetic heartbeat, static world fixture, explicit placeholder brain and in-memory episode sink. It does **not** include a trained brain, Noosphere persistence, calibrated body, or a MuJoCo integration.
+**Experimental synthetic alpha, not a complete digital organism.** The CPU-only standalone Aquarium already runs a deterministic graph / GENESIS fixture, synthetic heartbeat, obstacle-aware point-room and a PRIVATE local SQLite event journal with replay on restart. A small pulse predictor learns only in **shadow mode**: it does **not** control the body. The graph's `brain.placeholder` remains `UNIMPLEMENTED`. No MuJoCo body, trusted cross-device replication, autonomous cognition or Android background-service support is shipped. Separate unmerged PRs explore sensory learning, spectator UI and portable checkpoint formats; their features are **not** part of current `main`.
+
+### Local fixture startup
+
+With CPython 3.11+ and local `setuptools>=61` build tooling already installed:
+
+```sh
+python -m pip install --no-index --no-build-isolation --no-deps .
+mojum-aquarium --db ./dante-fixture.sqlite3 --ticks 120 --neural-mode shadow
+mojum-aquarium --db ./dante-fixture.sqlite3 --ticks 30 --neural-mode shadow
+```
+
+The second command resumes the same local journal (150 simulation ticks and 151 stored events). This example does **not** make the program a persistent background service. If offline build tooling is missing, installation fails without silently contacting an online package index. Details, limits and overrides: [local install R0.1](docs/LOCAL_INSTALL_R01.md).
+
+Existing GraphForge prototypes are external and **not automatically integrated**. Do not treat synthetic sensor traces as real visual perception or proof of consciousness.
 
 ## Development
 
