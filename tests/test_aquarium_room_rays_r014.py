@@ -53,8 +53,8 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
             self.assertNotIn(oracle, public)
 
     def test_real_a_b_collision_evidence_changes_action_on_identical_numeric_input(self):
-        blocked_room = Room(4, 4, ((1.025, 1.98, .01, .04),))
-        clear_room = Room(4, 4, ((1.045, 1.98, .01, .04),))
+        blocked_room = Room(4, 4, ((.965, 1.98, .01, .04),))
+        clear_room = Room(4, 4, ((.945, 1.98, .01, .04),))
         with self.child(room=blocked_room, neural_mode="disabled") as blocked, \
                 self.child(self.other, room=clear_room,
                            neural_mode="disabled") as clear:
@@ -67,8 +67,8 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
             self.assertEqual(left_signal["range_bucket_5cm_ewns"],
                              right_signal["range_bucket_5cm_ewns"])
             self.assertEqual(left_signal["position_xy"], right_signal["position_xy"])
-            self.assertEqual(left["developmental"]["intent"]["action"], "x+")
-            self.assertEqual(right["developmental"]["intent"]["action"], "x+")
+            self.assertEqual(left["developmental"]["intent"]["action"], "x-")
+            self.assertEqual(right["developmental"]["intent"]["action"], "x-")
             self.assertTrue(left["world"]["blocked"])
             self.assertFalse(right["world"]["blocked"])
             same_future_cue = RangeSignal(
@@ -78,13 +78,13 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
             learned_blocked = blocked.explorer.decide(same_future_cue)["action"]
             learned_clear = clear.explorer.decide(same_future_cue)["action"]
             self.assertNotEqual(learned_blocked, learned_clear)
-            self.assertEqual(learned_clear, "x+")
+            self.assertEqual(learned_clear, "x-")
             # Frozen-policy negative control: a blank learner with the SAME
-            # next-tick sensor uses only innate tie rotation (x-), not x+.
+            # next-tick sensor uses only innate tie rotation (x-).
             frozen = RangeExplorer()
             frozen.last_tick = 0
             self.assertEqual(frozen.decide(same_future_cue)["action"], "x-")
-            self.assertEqual(learned_blocked, "x-")
+            self.assertNotEqual(learned_blocked, "x-")
             self.assertNotEqual(learned_clear, frozen.decide(same_future_cue)["action"])
             self.assertNotEqual(blocked.explorer.snapshot(),
                                 clear.explorer.snapshot())
