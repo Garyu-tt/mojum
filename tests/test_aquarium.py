@@ -67,7 +67,11 @@ class AquariumIntegrationTests(unittest.TestCase):
         with self.aquarium() as new:
             self.assertEqual(new.checkpoint(), expected)
             self.assertEqual(new.tick, 42)
-            self.assertEqual(new.world.x, 1 + 42 * .025)
+            self.assertLessEqual(new.world.x, 2.0)  # swept wall blocks the 41st crossing
+            self.assertGreater(new.world.x, 1.9)
+            frame = new.step(dx=.025)
+            self.assertTrue(frame["world"]["blocked"])
+            self.assertEqual(new.world.x, frame["world"]["position"][0])
             self.assertEqual(new.store.count(), 43)
             self.assertEqual(new.store.verify_chain()["count"], 43)
 
