@@ -113,14 +113,15 @@ class GoalFreeInputBoundaryTests(unittest.TestCase):
     def test_invalid_scripted_displacement_does_not_bootstrap_sqlite(self):
         env = os.environ.copy()
         env["PYTHONPATH"] = str(ROOT / "src")
-        for movement in (("dx", "nan"), ("dy", "-inf"),
-                         ("dx", "1001"), ("dy", "-1001")):
+        for movement in (("--dx", "nan"), ("--dy=-inf",),
+                         ("--dy", "inf"), ("--dx", "1001"),
+                         ("--dy", "-1001")):
             with self.subTest(movement=movement), tempfile.TemporaryDirectory() as tmp:
                 db = Path(tmp) / "invalid-scripted.sqlite3"
                 completed = subprocess.run(
                     [sys.executable, "-m", "mojum.aquarium",
                      "--db", str(db), "--ticks", "1",
-                     "--" + movement[0], movement[1]],
+                     *movement],
                     cwd=ROOT, env=env, text=True, capture_output=True,
                     timeout=30, check=False,
                 )
