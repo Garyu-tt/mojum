@@ -34,8 +34,11 @@ def validate(graph):
             raise GraphError("Every node requires a nonempty string ID")
         if n["id"] in by_id:
             raise GraphError("Duplicate node ID: " + n["id"])
-        if n.get("kind") not in PORTS:
-            raise GraphError("Unsupported node kind: " + str(n.get("kind")))
+        kind = n.get("kind")
+        # JSON graph kinds must be plain strings before dictionary lookup.
+        # Unhashable input (list/dict) must fail as GraphError, not TypeError.
+        if type(kind) is not str or kind not in PORTS:
+            raise GraphError("Unsupported node kind: " + str(kind))
         if not isinstance(n.get("config"), dict) or not isinstance(n.get("notes"), dict):
             raise GraphError("Every node needs config and notes objects")
         if not n["notes"].get("purpose"):
