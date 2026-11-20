@@ -54,7 +54,8 @@ const identityStatus={
  "continuous_candidate":"Вероятное продолжение наблюдения",
  "possible_reencounter":"Возможная повторная встреча",
  "no_visible_signal":"Сейчас ничего не обнаружено",
- "ambiguous_identity":"Несколько подходящих гипотез — неопределённо"
+ "ambiguous_identity":"Несколько подходящих гипотез — неопределённо",
+ "contact_conflict_abstention":"Касание противоречит прежнему опыту — сопоставление отклонено"
 };
 let rows=[],position=0,timer=0;
 function stop(){if(timer){clearInterval(timer);timer=0;}el("play").textContent="▶";}
