@@ -45,7 +45,12 @@ def _keys(value, required, path):
 def canonical(value):
     """Stable serialization; rejects NaN, infinity, unknown object types."""
     try:
-        return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        wire = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        # JSON coerces integer object keys to strings and arrays from tuples.
+        # Reject such lossy inputs before assigning a provenance hash.
+        if json.loads(wire) != value:
+            raise GenesisError("Genome is not lossless canonical JSON")
+        return wire
     except (TypeError, ValueError, OverflowError) as exc:
         raise GenesisError("Genome is not canonical JSON") from exc
 
