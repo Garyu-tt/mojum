@@ -26,6 +26,7 @@ from .world_room import Room, advance, initial_state
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 10_000
+_OMITTED_MOVEMENT = object()  # Distinguish omitted defaults from explicit None.
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
     "world.room", "brain.placeholder", "memory.episode",
@@ -174,8 +175,9 @@ class Aquarium:
             intent = next_explorer.decide(signal)
             dx, dy = intent["dx"], intent["dy"]
         else:
-            dx = _movement(0.02 if dx is None else dx)
-            dy = _movement(0.0 if dy is None else dy)
+            # Scripted mode must reject explicit None just as before R0.13.
+            dx = _movement(dx)
+            dy = _movement(dy)
         new_world, world_obs = advance(
             self.room, self.world, tick=self.tick + 1, dx=dx, dy=dy,
             expected_revision=self.world.revision,
@@ -230,8 +232,16 @@ class Aquarium:
             raise AquariumError("developmental experience replay mismatch")
         self.explorer = clone
 
-    def step(self, *, dx=None, dy=None):
-        payload, next_world, next_learner = self._calculate(dx, dy)
+    def step(self, *, dx=_OMITTED_MOVEMENT, dy=_OMITTED_MOVEMENT):
+        if self.explorer is not None:
+            # Even explicit None is an external command, not an omission.
+            if dx is not _OMITTED_MOVEMENT or dy is not _OMITTED_MOVEMENT:
+                raise AquariumError("goal-free mode rejects externally scripted movement")
+            arguments = (None, None)
+        else:
+            arguments = (0.02 if dx is _OMITTED_MOVEMENT else dx,
+                         0.0 if dy is _OMITTED_MOVEMENT else dy)
+        payload, next_world, next_learner = self._calculate(*arguments)
         self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                             self.tick * self.dt_ns, self.genome.revision)
         self._adopt_developmental(payload)
