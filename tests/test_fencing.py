@@ -45,9 +45,9 @@ class FencingTests(unittest.TestCase):
                 self.assertEqual(Lease(1, writer, 0).writer, writer)
 
     def test_invalid_writer_ids_rejected(self):
-        for writer in ('', ' ', ' node ', 'node ', 'node\\x00two',
-                       'node\\nlog-forgery', 'n' * 129, '.', '../a', 'a/b',
-                       'a..b', 'a--b', 'a@b', 'пиксель', 'a\\tb', 'a\\x7fb'):
+        for writer in ('', ' ', ' node ', 'node ', 'node\x00two',
+                       'node\nlog-forgery', 'n' * 129, '.', '../a', 'a/b',
+                       'a..b', 'a--b', 'a@b', 'пиксель', 'a\tb', 'a\x7fb'):
             with self.subTest(writer=writer), self.assertRaises(FenceError):
                 Lease(1, writer, 0)
 
