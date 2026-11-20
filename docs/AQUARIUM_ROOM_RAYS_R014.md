@@ -52,8 +52,9 @@ so both newborn learners choose `x-`. The swept AABB collision engine
 reports one blocked move and one successful move. When tested with an
 *identical subsequent numeric input*, the one with measured success again
 chooses `x-`, while the one with measured blockage selects another
-direction. An otherwise blank/frozen learner selects `x-` by innate rotation.
-The difference from the frozen control is therefore due to recorded
+direction (`y+` in the controlled tick-one input). An otherwise
+blank/frozen learner also selects `y+` by innate rotation. The difference
+from the frozen control is therefore due to recorded
 experience, not a different clock phase or a hidden wall coordinate.
 
 This is a **controlled synthetic causal witness**. It does not establish
