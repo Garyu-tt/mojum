@@ -118,7 +118,7 @@ const milestoneDefinitions=[
  ["first_blocked_motion","Первое столкновение",f=>f.outcome.blocked===true],
  ["first_repeated_action","Повторил знакомое действие",f=>f.memory.times_tried>1],
  ["first_confirmed_prediction","Впервые совпало ожидание",f=>f.experiment.action!=="rest"&&f.memory.times_tried>1&&Math.abs(f.memory.prediction_error)<=0.05],
- ["first_prediction_surprise","Впервые удивил результат",f=>f.memory.times_tried>1&&Math.abs(f.memory.prediction_error)>=0.25]
+ ["first_prediction_surprise","Первая крупная ошибка прогноза",f=>f.memory.times_tried>1&&Math.abs(f.memory.prediction_error)>=0.25]
 ];
 function renderMilestones(){
  const root=$("milestones");root.replaceChildren();
