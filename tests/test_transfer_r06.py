@@ -53,13 +53,26 @@ class HeldoutTransferQATests(unittest.TestCase):
         """Prove reachability with an explicit witness, not the learned policy."""
         room = ROOMS["detour_required"][0]
         state = initial_state(room, *START)
+        # Same 4 cm per-tick displacement ceiling as the synthetic policies.
+        # Unlike their goal-only action set, the witness first moves AWAY
+        # from the goal to pass over the top of the obstacle.
         waypoints = ((1.0, 3.9), (3.5, 3.9), GOAL)
-        for tick, (x, y) in enumerate(waypoints, start=1):
-            state, observation = advance(
-                room, state, tick=tick, dx=x - state.x, dy=y - state.y,
-                expected_revision=state.revision,
-            )
-            self.assertFalse(observation["blocked"])
+        tick = 0
+        for target_x, target_y in waypoints:
+            while abs(target_x - state.x) > 1e-9 or abs(target_y - state.y) > 1e-9:
+                remaining_x, remaining_y = target_x - state.x, target_y - state.y
+                dx = (max(-0.04, min(0.04, remaining_x))
+                      if abs(remaining_x) > 1e-9 else 0.0)
+                dy = (max(-0.04, min(0.04, remaining_y))
+                      if dx == 0.0 and abs(remaining_y) > 1e-9 else 0.0)
+                self.assertLessEqual(abs(dx) + abs(dy), 0.040000001)
+                tick += 1
+                self.assertLess(tick, 200, "detour witness failed to progress")
+                state, observation = advance(
+                    room, state, tick=tick, dx=dx, dy=dy,
+                    expected_revision=state.revision,
+                )
+                self.assertFalse(observation["blocked"])
         self.assertAlmostEqual(state.x, GOAL[0])
         self.assertAlmostEqual(state.y, GOAL[1])
 
