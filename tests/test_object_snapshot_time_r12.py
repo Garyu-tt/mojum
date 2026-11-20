@@ -10,7 +10,23 @@ import unittest
 
 from mojum.object_memory import ProvisionalObjectMemory
 from mojum.sensory_play import CuriosityError
-from tests.test_object_noise_r11 import numeric_frame
+from mojum.object_memory import BEARING_SCHEMA
+from mojum.sensory_play import SENSE_SCHEMA
+
+
+def numeric_frame(tick, color):
+    sensor = {
+        "schema": SENSE_SCHEMA, "tick": tick,
+        "world_revision": "a" * 64, "visible": True,
+        "reflectance_rgb": list(color), "range_bucket_10cm": 1,
+        "source": "synthetic_local_proximity_not_camera",
+    }
+    direction = {
+        "schema": BEARING_SCHEMA, "tick": tick,
+        "world_revision": "a" * 64, "octant": 0,
+        "source": "synthetic_direction_quantization_not_camera",
+    }
+    return sensor, direction
 
 
 class TemporalObjectSnapshotTests(unittest.TestCase):
