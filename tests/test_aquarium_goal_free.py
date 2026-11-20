@@ -144,6 +144,35 @@ class CanonicalDevelopmentalAquariumTests(unittest.TestCase):
             self.assertEqual(records[-1]["learning_observer"]["motor_intention"], None)
             self.assertEqual(a.checkpoint()["neural_mode"], "shadow")
 
+    def test_two_actual_rooms_diverge_only_after_different_collision_experience(self):
+        # A walled-in sandbox and an open sandbox share seed, heartbeat and
+        # starting proprioception, but produce different *measured* collisions.
+        walls = (
+            (1.01, 1.98, .01, .04),
+            (.98, 1.98, .01, .04),
+            (.98, 2.01, .04, .01),
+            (.98, 1.98, .04, .01),
+        )
+        with self.baby(room=Room(4, 4, walls), neural_mode="disabled") as confined, \
+                self.baby(self.second_db, room=Room(4, 4),
+                          neural_mode="disabled") as open_room:
+            observed_different_outcome = False
+            later_action_diverged = False
+            for _ in range(40):
+                a, b = confined.step(), open_room.step()
+                left = a["developmental"]["intent"]["action"]
+                right = b["developmental"]["intent"]["action"]
+                if not observed_different_outcome:
+                    self.assertEqual(left, right)
+                elif left != right:
+                    later_action_diverged = True
+                if a["world"]["blocked"] != b["world"]["blocked"]:
+                    observed_different_outcome = True
+            self.assertTrue(observed_different_outcome)
+            self.assertTrue(later_action_diverged)
+            self.assertEqual(confined.explorer.updates, 40)
+            self.assertEqual(open_room.explorer.updates, 40)
+
     def test_policy_action_changes_after_distinct_measured_experience(self):
         success = Explorer()
         blocked = Explorer()
