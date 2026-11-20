@@ -190,6 +190,10 @@ class ProvisionalObjectMemory:
             and math.hypot(estimate[0] - tr["estimate"][0],
                            estimate[1] - tr["estimate"][1]) <= ASSOCIATION_RADIUS_M
         )
+        # Do not advance local episode time before capacity checks: callers
+        # using this learner directly must be able to retry rejected ticks.
+        if not candidates and len(self.tracks) >= MAX_TRACKS:
+            raise CuriosityError("provisional object-memory capacity exhausted")
         self.last_tick = tick
         if len(candidates) > 1:
             # Fail closed on conflicting identity candidates; don't assign
@@ -217,8 +221,6 @@ class ProvisionalObjectMemory:
                     "basis": "observed_contact_contradicts_local_prediction",
                 }
         if not candidates:
-            if len(self.tracks) >= MAX_TRACKS:
-                raise CuriosityError("provisional object-memory capacity exhausted")
             key = f"h{self.next_track:04d}"
             self.next_track += 1
             self.tracks[key] = {
