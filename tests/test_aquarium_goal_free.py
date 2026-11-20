@@ -106,7 +106,14 @@ class CanonicalDevelopmentalAquariumTests(unittest.TestCase):
             left.step()
             with self.assertRaises(NoosphereError):
                 right.step()
-            self.assertEqual(right.checkpoint(), before)
+            # A second SQLite connection sees the externally advanced
+            # durable head; only this writer's speculative RAM must stay put.
+            after = right.checkpoint()
+            for field in ("tick", "sim_time_ns", "genome_revision",
+                          "world_revision", "neural_state",
+                          "developmental_state"):
+                self.assertEqual(after[field], before[field])
+            self.assertNotEqual(after["journal_head"], before["journal_head"])
             self.assertEqual(right.explorer.updates, 0)
 
     def test_restart_recovers_append_before_ram_adoption(self):
