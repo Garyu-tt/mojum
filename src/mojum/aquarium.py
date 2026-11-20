@@ -17,6 +17,7 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
+from .near_field import RangeExplorer, RangeSignal, MODEL_SCHEMA as RANGE_MODEL_SCHEMA, sense_room_rays
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -76,8 +77,8 @@ class Aquarium:
             raise AquariumError("invalid agent ID")
         if neural_mode not in ("shadow", "disabled"):
             raise AquariumError("neural_mode must be shadow or disabled")
-        if exploration_mode not in ("scripted", "goal_free"):
-            raise AquariumError("exploration_mode must be scripted or goal_free")
+        if exploration_mode not in ("scripted", "goal_free", "goal_free_rays"):
+            raise AquariumError("invalid exploration_mode")
         self.exploration_mode = exploration_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
@@ -108,11 +109,12 @@ class Aquarium:
         }
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
-        self.explorer = Explorer() if exploration_mode == "goal_free" else None
+        self.explorer = (Explorer() if exploration_mode == "goal_free" else
+                         RangeExplorer() if exploration_mode == "goal_free_rays" else None)
         self.tick = 0
         if self.explorer is not None:
-            self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
-            self.manifest["exploration_mode"] = "goal_free"
+            self.manifest["developmental_schema"] = (RANGE_MODEL_SCHEMA if exploration_mode == "goal_free_rays" else DEVELOPMENT_SCHEMA)
+            self.manifest["exploration_mode"] = exploration_mode
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
@@ -167,11 +169,8 @@ class Aquarium:
                 raise AquariumError("goal-free mode rejects externally scripted movement")
             # Only pre-action proprioception and own pulse reach this policy.
             # Obstacle geometry, hidden objects and future frames stay private.
-            signal = Proprioception(
-                self.tick, self.world.revision, self.world.x, self.world.y,
-                sensory["heartbeat"]["pulse"],
-            )
-            next_explorer = Explorer.from_snapshot(self.explorer.snapshot())
+            signal = self._developmental_signal(sensory["heartbeat"]["pulse"])
+            next_explorer = type(self.explorer).from_snapshot(self.explorer.snapshot())
             intent = next_explorer.decide(signal)
             dx, dy = intent["dx"], intent["dy"]
         else:
@@ -202,7 +201,7 @@ class Aquarium:
         if next_explorer is not None:
             measured = next_explorer.observe(signal, intent, world_obs["blocked"])
             payload["developmental"] = {
-                "schema": DEVELOPMENT_SCHEMA,
+                "schema": self.manifest["developmental_schema"],
                 "observation": signal.public(),
                 "intent": intent,
                 "learning": measured,
@@ -211,18 +210,24 @@ class Aquarium:
             }
         return payload, new_world, next_learner
 
+    def _developmental_signal(self, pulse):
+        if self.exploration_mode == "goal_free_rays":
+            return RangeSignal(self.tick, self.world.revision,
+                               self.world.x, self.world.y, pulse,
+                               sense_room_rays(self.room, self.world))
+        return Proprioception(self.tick, self.world.revision,
+                              self.world.x, self.world.y, pulse)
+
     def _adopt_developmental(self, payload):
         if self.explorer is None:
             return
         # Compute against a copy, validate the persisted causal event and
         # adopt only after the SQLite CAS append or successful replay.
-        cue = Proprioception(
-            self.tick, self.world.revision, self.world.x, self.world.y,
-            payload["interoception"]["heartbeat"]["pulse"],
-        )
-        clone = Explorer.from_snapshot(self.explorer.snapshot())
+        cue = self._developmental_signal(payload["interoception"]["heartbeat"]["pulse"])
+        clone = type(self.explorer).from_snapshot(self.explorer.snapshot())
         claimed = payload["developmental"]
-        if (claimed["observation"] != cue.public()
+        if (claimed["schema"] != self.manifest["developmental_schema"]
+                or claimed["observation"] != cue.public()
                 or claimed["intent"] != clone.decide(cue)
                 or claimed["motor_capability"] != "SYNTHETIC_POINT_ROOM_ONLY"):
             raise AquariumError("developmental observation/intent mismatch")
@@ -354,21 +359,23 @@ def main():
     parser.add_argument("--dx", type=float, default=0.02)
     parser.add_argument("--dy", type=float, default=0.0)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
-    parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
+    parser.add_argument("--exploration-mode", choices=("scripted", "goal_free", "goal_free_rays"),
                         default="scripted")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    # Validate forbidden movement overrides before constructing SQLite.
+    # Failed commands must not bootstrap a new private organism journal.
+    if args.exploration_mode in ("goal_free", "goal_free_rays") and (
+            args.dx != 0.02 or args.dy != 0.0):
+        parser.error("--dx/--dy cannot override goal-free exploratory intentions")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
     ) as aquarium:
-        if args.exploration_mode == "goal_free" and (
-                args.dx != 0.02 or args.dy != 0.0):
-            parser.error("--dx/--dy cannot override goal-free exploratory intentions")
         for _ in range(args.ticks):
-            if args.exploration_mode == "goal_free":
+            if args.exploration_mode in ("goal_free", "goal_free_rays"):
                 aquarium.step()
             else:
                 aquarium.step(dx=args.dx, dy=args.dy)
