@@ -420,6 +420,15 @@ def main():
     if args.exploration_mode == "goal_free" and (
             args.dx is not None or args.dy is not None):
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
+    if args.exploration_mode == "scripted":
+        # Invalid scripted motion is a CLI error, not an organism birth.
+        # Reject NaN, infinite and out-of-budget displacement before SQLite
+        # opens and writes the otherwise valid bootstrap event.
+        try:
+            _movement(0.02 if args.dx is None else args.dx)
+            _movement(0.0 if args.dy is None else args.dy)
+        except AquariumError as exc:
+            parser.error(str(exc))
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
