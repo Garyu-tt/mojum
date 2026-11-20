@@ -91,6 +91,48 @@ R0.9 journal cannot be reopened as R0.10 without an explicit
 migration (none exists). Start a separate private database for new
 experiments; old data and code retain their interpretation.
 
+## Optional contact-consistency safety guard (strictly synthetic)
+
+R0.10 now also supports an **opt-in measured-contact contradiction
+guard** on **new journals**:
+
+```bash
+PYTHONPATH=src python -m mojum.sensory_play \
+  --db ./dante_guarded_private.sqlite3 \
+  --object-tracking --contact-guard \
+  --ticks 180 --watch > ./dante_guarded_private.jsonl
+```
+
+When a candidate track is selected by local color and position but
+its **newly measured probe deflection** disagrees by more than **0.30**
+with that track's previously measured mean, the tracker returns
+`contact_conflict_abstention` instead of attaching that measurement
+to the questionable track. The browser displays the conflict without
+asserting identity. No hard-coded toy names/material categories are
+supplied to the learner.
+
+The *same crossing scenario* that produces **two wrong associations
+and two contaminated per-object contact updates** without the guard
+produces **two abstentions and zero contaminated per-object updates**
+when the guard is enabled. These are four deterministic synthetic
+samples, **not** a validated recognition benchmark. Without a probe,
+the guard cannot identify a contradiction; it may also reject a
+legitimate change in how a material responds.
+
+Only tentative **per-hypothesis** contact profiles are protected:
+the separate R0.9 global RGB-only association can still aggregate
+responses from different same-RGB objects by construction.
+
+The optional guard setting is pinned in the private journal's
+bootstrap manifest and snapshot, so reopening requires the same
+`--object-tracking --contact-guard` flags. Omitting one cannot
+silently replay a guarded organism as an unguarded model. The old
+default model, private schema and existing journal behavior remain
+byte-for-byte unchanged.
+
+See `docs/OBJECT_HELDOUT_QA_R11.md` for the full fixed QA suite
+including known failures from RGB jitter and moving toys.
+
 ## Storage and safety
 
 All tracks live in each organism's **PRIVATE** SQLite Noosphere event
