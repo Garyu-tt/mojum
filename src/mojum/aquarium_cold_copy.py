@@ -6,6 +6,7 @@ cryptographic authentication. Files are PRIVATE and contain plaintext history.
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import os
 from pathlib import Path
@@ -133,7 +134,7 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
         )
         os.close(fd)
         try:
-            with sqlite3.connect(temporary) as target:
+            with closing(sqlite3.connect(temporary)) as target:
                 connection.backup(target)
             with Aquarium(temporary, seed, graph,
                           external_expected_head=before["journal_head"],
