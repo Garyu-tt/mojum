@@ -35,15 +35,17 @@ archive**. Never take the expected revision from an untrusted archive if
 anti-rollback is a concern.
 
 ```bash
+# Set to the 64-character digest independently recorded from device A.
+TRUSTED_MANIFEST_SHA="your-64-character-lowercase-hex-digest"
 PYTHONPATH=src python -m mojum.checkpoint_handoff verify \
   --archive ./dante-transfer.mojum.json \
-  --organism-id dante-fixture-001 --revision 17 \\
-  --manifest-sha256 <trusted-64-character-lowercase-hex>
+  --organism-id dante-fixture-001 --revision 17 \
+  --manifest-sha256 "$TRUSTED_MANIFEST_SHA"
 
 PYTHONPATH=src python -m mojum.checkpoint_handoff restore \
   --archive ./dante-transfer.mojum.json \
   --organism-id dante-fixture-001 --revision 17 \
-  --manifest-sha256 <trusted-64-character-lowercase-hex> \
+  --manifest-sha256 "$TRUSTED_MANIFEST_SHA" \
   --directory ./dante-verified-components
 ```
 
