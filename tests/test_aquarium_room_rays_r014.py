@@ -72,7 +72,7 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
             self.assertTrue(left["world"]["blocked"])
             self.assertFalse(right["world"]["blocked"])
             same_future_cue = RangeSignal(
-                1, "a" * 64, 1., 2., False,
+                1, "a" * 64, 1., 2., True,
                 tuple(left_signal["range_bucket_5cm_ewns"]),
             )
             learned_blocked = blocked.explorer.decide(same_future_cue)["action"]
@@ -80,11 +80,11 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
             self.assertNotEqual(learned_blocked, learned_clear)
             self.assertEqual(learned_clear, "x-")
             # Frozen-policy negative control: a blank learner with the SAME
-            # next-tick sensor uses only innate tie rotation (x-).
+            # next-tick sensor uses only innate rotation (y+) with pulse=True.
             frozen = RangeExplorer()
             frozen.last_tick = 0
-            self.assertEqual(frozen.decide(same_future_cue)["action"], "x-")
-            self.assertNotEqual(learned_blocked, "x-")
+            self.assertEqual(frozen.decide(same_future_cue)["action"], "y+")
+            self.assertEqual(learned_blocked, "y+")
             self.assertNotEqual(learned_clear, frozen.decide(same_future_cue)["action"])
             self.assertNotEqual(blocked.explorer.snapshot(),
                                 clear.explorer.snapshot())
