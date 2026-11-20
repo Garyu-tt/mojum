@@ -39,11 +39,11 @@ input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events
 </style>
 </head>
 <body><main>
-<header><div><div class="eyebrow">Mechanicus · Mojum / R0.7</div><h1>Наблюдение за Данте</h1><p class="sub">Как опыт становится памятью. Без заранее заданного маршрута.</p></div><span class="pill"><span class="dot"></span> Локальный просмотр · нет отправки данных</span></header>
-<section class="upload" id="drop"><div><strong>Открой журнал наблюдения</strong><div class="small sub">Файл JSONL, записанный параметром <code>--watch</code>. Обрабатывается только в браузере.</div></div><label class="file-btn" for="trace">Выбрать JSONL<input type="file" id="trace" accept=".jsonl,.txt,application/json,text/plain"></label></section>
+<header><div><div class="eyebrow">Mechanicus · Mojum / R0.8</div><h1>Наблюдение за Данте</h1><p class="sub">Как опыт становится памятью. Без заранее заданного маршрута.</p></div><span class="pill"><span class="dot"></span> Локальный просмотр · нет отправки данных</span></header>
+<section class="upload" id="drop"><div><strong>Открой журнал наблюдения</strong><div class="small sub">Файл JSONL, записанный параметром <code>--watch</code>. Обрабатывается только в браузере.</div></div><div class="hrow"><button type="button" id="liveFile">● Живой просмотр файла</button><label class="file-btn" for="trace">Выбрать JSONL<input type="file" id="trace" accept=".jsonl,.txt,application/json,text/plain"></label></div></section>
 <div class="layout">
 <div class="stacked">
-<section class="card"><div class="hrow"><h2>Виртуальная комната</h2><span class="pill" id="sceneLabel">Синтетическая 2D-сцена</span></div><canvas id="scene" width="800" height="520" role="img" aria-label="Траектория движения экспериментального агента в виртуальной комнате"></canvas><div class="playbar"><button id="prev" disabled aria-label="Предыдущий такт">←</button><button id="play" disabled>▶</button><button id="next" disabled aria-label="Следующий такт">→</button><input id="seek" type="range" min="0" max="0" value="0" disabled aria-label="Позиция во временной шкале"></div><div class="stats"><div class="stat"><b id="ticks">—</b><span>такт наблюдения</span></div><div class="stat"><b id="tries">—</b><span>обновлений опыта</span></div><div class="stat"><b id="novel">—</b><span>новых проб до этого момента</span></div></div><p class="note">Геометрия комнаты доступна зрителю, но <strong>не передаётся</strong> обучающему контроллеру. Это не камера Данте.</p></section>
+<section class="card"><div class="hrow"><h2>Виртуальная комната</h2><span class="pill" id="sceneLabel">Синтетическая 2D-сцена</span></div><canvas id="scene" width="800" height="520" role="img" aria-label="Траектория движения экспериментального агента в виртуальной комнате"></canvas><div class="playbar"><button id="prev" disabled aria-label="Предыдущий такт">←</button><button id="play" disabled>▶</button><button id="next" disabled aria-label="Следующий такт">→</button><button id="resumeLatest" disabled aria-label="Следить за последним тактом">Последний такт</button><input id="seek" type="range" min="0" max="0" value="0" disabled aria-label="Позиция во временной шкале"></div><div class="stats"><div class="stat"><b id="ticks">—</b><span>такт наблюдения</span></div><div class="stat"><b id="tries">—</b><span>обновлений опыта</span></div><div class="stat"><b id="novel">—</b><span>новых проб до этого момента</span></div></div><p class="note">Геометрия комнаты доступна зрителю, но <strong>не передаётся</strong> обучающему контроллеру. Это не камера Данте.</p></section>
 <section class="card"><div class="hrow"><h2>История экспериментов</h2><span class="small sub" id="count">Нет записей</span></div><div class="history" id="history"><div class="empty">Загрузите локальный журнал, чтобы увидеть накопление опыта.</div></div></section>
 </div>
 <div class="stacked">
@@ -58,6 +58,9 @@ input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events
 const $=id=>document.getElementById(id);
 const canvas=$("scene"), ctx=canvas.getContext("2d");
 let frames=[], cursor=0, running=false, timer=0;
+let liveHandle=null, liveTimer=0, readingLive=false, liveOffset=0;
+let liveTail="", liveDecoder=null, followLatest=true;
+const MAX_TRACE_BYTES=12_000_000, MAX_TRACE_ROWS=10_000;
 const labels={"rest":"Покой","x+":"Шаг вправо","x-":"Шаг влево","y+":"Шаг вверх","y-":"Шаг вниз"};
 const conclusions={
   this_action_did_not_move_me:"Действие не изменило положение.",
@@ -108,7 +111,7 @@ function refreshHistory(){
   const a=document.createElement("span");a.className="tick";a.textContent="#"+String(f.tick).padStart(4,"0");
   const label=document.createElement("span");label.textContent=(labels[f.experiment.action]??f.experiment.action)+
    (f.outcome.blocked?" · препятствие":f.experiment.novel_attempt?" · впервые":" · повтор");
-  b.append(a,label);b.addEventListener("click",()=>show(i));root.append(b);
+  b.append(a,label);b.addEventListener("click",()=>{followLatest=false;stop();show(i)});root.append(b);
  }
  const active=root.querySelector(".selected");active?.scrollIntoView({block:"nearest"});
 }
@@ -154,6 +157,7 @@ function validFrame(v){
   && num(v.spectator_scene.height) && Array.isArray(v.spectator_scene.obstacles);
 }
 async function load(file){
+ stopFollow();
  stop();
  if(!file)return;
  if(file.size>12_000_000){$("status").textContent="Журнал превышает локальный лимит 12 МБ.";return;}
@@ -170,20 +174,100 @@ async function load(file){
   if(!parsed.length)throw Error("В файле нет записей mojum.observation.trace/1.");
   for(let i=1;i<parsed.length;i++)if(parsed[i].tick!==parsed[i-1].tick+1)
    throw Error("Временная последовательность содержит пропуск или смешанные журналы.");
-  frames=parsed;cursor=0;$("seek").max=String(frames.length-1);
+  frames=parsed;cursor=0;followLatest=false;$("seek").max=String(frames.length-1);
   for(const id of ["prev","next","play","seek"])$(id).disabled=false;
   show(0);$("status").textContent="Загружено "+frames.length+" синтетических записей из "+file.name+". Данные не отправлялись в сеть.";
  }catch(e){frames=[];$("status").textContent="Ошибка локального журнала: "+e.message;}
 }
+function stopFollow(){
+ if(liveTimer){clearInterval(liveTimer);liveTimer=0;}
+ liveHandle=null;liveOffset=0;liveTail="";liveDecoder=null;
+ $("liveFile").textContent="● Живой просмотр файла";
+ $("resumeLatest").disabled=true;
+}
+async function pollLive(){
+ if(readingLive||!liveHandle)return;
+ readingLive=true;
+ const active=liveHandle;
+ try{
+  const file=await active.getFile();
+  if(liveHandle!==active)return;
+  if(file.size>MAX_TRACE_BYTES)throw Error("Файл превысил лимит 12 МБ; сохраните новую часть журнала.");
+  if(file.size<liveOffset)throw Error("Файл был обнулён или усечён. Выберите его заново.");
+  if(file.size===liveOffset)return;
+  const bytes=await file.slice(liveOffset).arrayBuffer();
+  if(liveHandle!==active)return;
+  // Decode incrementally: UTF-8 codepoints and partial JSON lines can
+  // straddle file-appending writes. Never accept incomplete committed rows.
+  liveOffset=file.size;
+  liveTail+=liveDecoder.decode(new Uint8Array(bytes),{stream:true});
+  const lines=liveTail.split(/\r?\n/);
+  liveTail=lines.pop()??"";
+  let appended=0;
+  for(const line of lines){
+   if(!line.trim())continue;
+   const row=JSON.parse(line);
+   if(row&&row.checkpoint)continue; // CLI summary, not a sensory event.
+   if(!validFrame(row))throw Error("Неверный формат события наблюдения.");
+   const prior=frames.length?frames[frames.length-1]:null;
+   if(prior&&row.tick!==prior.tick+1)throw Error("Разрыв тактов или смешанные записи разных запусков.");
+   if(frames.length>=MAX_TRACE_ROWS)throw Error("Лимит локальной шкалы: 10000 тактов.");
+   frames.push(row);appended++;
+  }
+  if(appended){
+   $("seek").max=String(frames.length-1);
+   for(const id of ["prev","next","play","seek"])$(id).disabled=false;
+   if(followLatest)show(frames.length-1);
+   else $("count").textContent=frames.length+" тактов · новые события доступны";
+   $("status").textContent="Живое наблюдение: "+frames.length+" подтверждённых строк локального файла. Никаких сетевых запросов.";
+  }
+ }catch(error){
+  if(liveHandle===active){stopFollow();$("status").textContent="Живое наблюдение остановлено: "+String(error.message??error);}
+ }finally{readingLive=false;}
+}
+async function startLive(){
+ if(liveHandle){stopFollow();$("status").textContent="Живой просмотр остановлен. История осталась доступной.";return;}
+ if(typeof window.showOpenFilePicker!=="function"){
+  $("status").textContent="Этот браузер не поддерживает доступ к обновляемому локальному файлу. Доступен обычный импорт JSONL.";
+  return;
+ }
+ try{
+  // The permission prompt is initiated only by a direct click.
+  const handles=await window.showOpenFilePicker({
+   multiple:false,types:[{description:"Локальный журнал JSONL",
+    accept:{"text/plain":[".jsonl",".txt"]}}]
+  });
+  if(!handles.length)return;
+  stop();stopFollow();
+  frames=[];cursor=0;followLatest=true;
+  liveHandle=handles[0];liveOffset=0;liveTail="";
+  liveDecoder=new TextDecoder("utf-8",{fatal:true});
+  $("liveFile").textContent="■ Остановить наблюдение";
+  $("resumeLatest").disabled=false;
+  $("count").textContent="Ожидание записей";
+  $("status").textContent="Наблюдение за локальным файлом включено. Ожидаю новые подтверждённые строки...";
+  await pollLive();
+  if(liveHandle)liveTimer=setInterval(pollLive,600);
+ }catch(error){
+  if(error?.name!=="AbortError"){
+   $("status").textContent="Не удалось открыть локальный журнал: "+String(error.message??error);
+  }
+ }
+}
+$("liveFile").addEventListener("click",startLive);
+$("resumeLatest").addEventListener("click",()=>{
+ if(!frames.length)return;
+ followLatest=true;stop();show(frames.length-1);
+});
 $("trace").addEventListener("change",e=>load(e.target.files?.[0]));
 $("drop").addEventListener("dragover",e=>{e.preventDefault();});
 $("drop").addEventListener("drop",e=>{e.preventDefault();load(e.dataTransfer?.files?.[0]);});
-$("prev").addEventListener("click",()=>{stop();show(cursor-1)});
-$("next").addEventListener("click",()=>{stop();show(cursor+1)});
-$("seek").addEventListener("input",e=>{stop();show(Number(e.target.value))});
+$("prev").addEventListener("click",()=>{followLatest=false;stop();show(cursor-1)});
+$("next").addEventListener("click",()=>{followLatest=false;stop();show(cursor+1)});
+$("seek").addEventListener("input",e=>{followLatest=false;stop();show(Number(e.target.value))});
 $("play").addEventListener("click",()=>{
  if(running){stop();return;}if(!frames.length)return;
- running=true;$("play").textContent="⏸";
+ followLatest=false;running=true;$("play").textContent="⏸";
  timer=setInterval(()=>{if(cursor>=frames.length-1){stop();return;}show(cursor+1)},240);
 });
 window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change",()=>draw(cursor));
