@@ -66,6 +66,28 @@ operator action. Eventually the UI should render spatial movement, attention,
 action ratings, before/after prediction, memory timeline, and hypotheses
 with exact links back to the underlying events.
 
+## Offline visual observer (implemented)
+
+The standalone `examples/infant_observer.html` file is a no-dependency
+local web page. It does not open a network socket or call a remote API.
+It reads an explicitly selected JSONL trace in the browser, shows the
+2D room, action trail, observer attention, action scores, prediction
+error, memories, conclusions, and a step-by-step replay timeline.
+
+```bash
+PYTHONPATH=src python -m mojum.infant_play --db ./dante_infant.sqlite3 --ticks 150 --watch > ./dante_infant_trace.jsonl
+# Open examples/infant_observer.html locally and choose dante_infant_trace.jsonl.
+```
+
+The geometry displayed in the viewer comes from *spectator-only scene
+metadata*. It does **not** imply that the organism already sees the
+walls. That distinction is essential for the product's credibility.
+
+The current observer is a replay of a saved file, not a live network
+service, SaaS product, public stream or authenticated multi-person UI.
+Future public sharing must use separately reviewed read-only
+projections rather than revealing raw PRIVATE journal entries.
+
 ## Privacy, safety and pacing
 
 - All SQLite journal records are **PRIVATE**. Ordinary dataset export
