@@ -19,7 +19,12 @@ class ControllerError(ValueError):
 
 
 def _number(value):
-    return type(value) in (int, float) and math.isfinite(value)
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
 
 
 def checked_goal(room, goal):
