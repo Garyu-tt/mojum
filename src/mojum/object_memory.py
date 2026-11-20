@@ -18,6 +18,24 @@ MAX_TRACKS = 64
 MAX_FRAMES = 3999
 ASSOCIATION_RADIUS_M = 0.32
 CONTACT_CONFLICT_THRESHOLD = 0.30
+MAX_RGB_L1_TOLERANCE = 6
+
+
+def _compatible_numeric_cues(observed, remembered, tolerance):
+    """Same numerical RGB cue within an optional L1 sensor-jitter budget.
+
+    A small difference is **not** evidence of identity. Spatial uniqueness
+    and the optional measured-contact contradiction guard remain mandatory.
+    """
+    if observed == remembered:
+        return True
+    if tolerance == 0:
+        return False
+    # Both strings were separately validated as exactly three bounded RGB
+    # integer channels by ContactAssociations._key / from_snapshot.
+    a = [int(x) for x in observed.split(":")]
+    b = [int(x) for x in remembered.split(":")]
+    return sum(abs(x - y) for x, y in zip(a, b)) <= tolerance
 
 
 def _finite(value):
@@ -71,10 +89,13 @@ def _contact(sensor, result):
 class ProvisionalObjectMemory:
     """Local, evidence-counted identity hypotheses, **not** verified objects."""
 
-    def __init__(self, *, contact_guard=False):
+    def __init__(self, *, contact_guard=False, rgb_tolerance=0):
         if type(contact_guard) is not bool:
             raise CuriosityError("contact guard must be true or false")
+        if type(rgb_tolerance) is not int or not 0 <= rgb_tolerance <= MAX_RGB_L1_TOLERANCE:
+            raise CuriosityError("numeric RGB tolerance must be within 0..6")
         self.contact_guard = contact_guard
+        self.rgb_tolerance = rgb_tolerance
         self.tracks = {}
         self.next_track = 1
         self.last_tick = -1
@@ -92,6 +113,8 @@ class ProvisionalObjectMemory:
         # memory includes an explicit mode marker to prevent silent replay.
         if self.contact_guard:
             result["contact_guard"] = True
+        if self.rgb_tolerance:
+            result["rgb_tolerance_l1"] = self.rgb_tolerance
         return result
 
     @classmethod
@@ -100,9 +123,13 @@ class ProvisionalObjectMemory:
             "schema", "tracks", "next_track", "last_tick",
             "accepted_sightings", "touch_updates",
         }
+        optional = {"contact_guard", "rgb_tolerance_l1"}
         if (not isinstance(snap, dict)
-                or set(snap) not in (keys, keys | {"contact_guard"})
+                or not keys.issubset(snap) or set(snap) - keys - optional
                 or ("contact_guard" in snap and snap["contact_guard"] is not True)
+                or ("rgb_tolerance_l1" in snap and (
+                    type(snap["rgb_tolerance_l1"]) is not int or
+                    not 1 <= snap["rgb_tolerance_l1"] <= MAX_RGB_L1_TOLERANCE))
                 or snap["schema"] != SCHEMA or not isinstance(snap["tracks"], dict)
                 or len(snap["tracks"]) > MAX_TRACKS
                 or type(snap["next_track"]) is not int
@@ -148,7 +175,8 @@ class ProvisionalObjectMemory:
             touches += tr["contacts"]
         if accepted != snap["accepted_sightings"] or touches != snap["touch_updates"]:
             raise CuriosityError("inconsistent object evidence totals")
-        fresh = cls(contact_guard=snap.get("contact_guard", False))
+        fresh = cls(contact_guard=snap.get("contact_guard", False),
+                    rgb_tolerance=snap.get("rgb_tolerance_l1", 0))
         fresh.tracks = copy.deepcopy(snap["tracks"])
         fresh.next_track = snap["next_track"]
         fresh.last_tick = snap["last_tick"]
@@ -186,7 +214,7 @@ class ProvisionalObjectMemory:
         ]
         candidates = sorted(
             key for key, tr in self.tracks.items()
-            if tr["cue"] == cue
+            if _compatible_numeric_cues(cue, tr["cue"], self.rgb_tolerance)
             and math.hypot(estimate[0] - tr["estimate"][0],
                            estimate[1] - tr["estimate"][1]) <= ASSOCIATION_RADIUS_M
         )
