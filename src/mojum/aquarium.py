@@ -291,8 +291,11 @@ def main():
             aquarium.step(dx=args.dx, dy=args.dy)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
-        checkpoint["status"] = ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
-                                if aquarium.neural_mode == "shadow" else\n                                "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
+        checkpoint["status"] = (
+            "SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
+            if aquarium.neural_mode == "shadow"
+            else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
+        )
         print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
 
 
