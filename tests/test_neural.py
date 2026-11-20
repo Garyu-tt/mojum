@@ -12,7 +12,7 @@ def sample(tick, *, phase=None, pulse=None, dt_ns=10_000_000):
         "observed_at_ns": tick * dt_ns,
         "heartbeat": {
             "phase_milli": p,
-            "pulse": (p < 125) if pulse is None else pulse,
+            "pulse": (p < 125 if type(p) is int else False) if pulse is None else pulse,
             "synthetic": True,
         },
     }
