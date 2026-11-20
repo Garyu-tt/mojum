@@ -97,6 +97,9 @@ def capture_quiescent_aquarium(aquarium):
         "world": _canonical_bytes({
             "schema": WORLD_SCHEMA, "graph": aquarium.graph,
             "manifest": aquarium.manifest, "position": position,
+            "room_raw": {"width": aquarium.room.width,
+                         "height": aquarium.room.height,
+                         "obstacles": [list(o) for o in aquarium.room.obstacles]},
             "checkpoint": before,
         }),
         "memory": _canonical_bytes({
@@ -155,7 +158,7 @@ def _validated_payloads(parts, *, expected_id, expected_tick):
     if body["status"] != "NOT_CAPTURED_ACTUATORS_DISABLED":
         raise ValueError("cold replay cannot inherit motor capability")
     world = _parse_component(parts["world"], WORLD_SCHEMA,
-                             {"schema", "graph", "manifest", "position", "checkpoint"})
+                             {"schema", "graph", "manifest", "position", "room_raw", "checkpoint"})
     memory = _parse_component(parts["memory"], MEMORY_SCHEMA,
                               {"schema", "head", "count", "items"})
     checkpoint = world["checkpoint"]
@@ -179,18 +182,27 @@ def _validated_payloads(parts, *, expected_id, expected_tick):
             or manifest.get("neural_mode") != neural["mode"]):
         raise ValueError("inconsistent cold replay components")
     room_value = manifest.get("room")
+    raw_room = world["room_raw"]
+    if (type(raw_room) is not dict or set(raw_room) !=
+            {"width", "height", "obstacles"}):
+        raise ValueError("invalid original room geometry")
     if (type(room_value) is not dict or set(room_value) !=
             {"width", "height", "obstacles", "start"}):
         raise ValueError("invalid room manifest")
     if (type(room_value["obstacles"]) is not list
+            or type(raw_room["obstacles"]) is not list
             or type(room_value["start"]) is not list
             or len(room_value["start"]) != 2
             or any(type(o) is not list or len(o) != 4
-                   for o in room_value["obstacles"])):
+                   for o in raw_room["obstacles"])):
         raise ValueError("invalid room geometry")
     try:
-        room = Room(room_value["width"], room_value["height"],
-                    tuple(tuple(x) for x in room_value["obstacles"]))
+        room = Room(raw_room["width"], raw_room["height"],
+                    tuple(tuple(x) for x in raw_room["obstacles"]))
+        if (float(room.width) != room_value["width"]
+                or float(room.height) != room_value["height"]
+                or [list(o) for o in room.obstacles] != room_value["obstacles"]):
+            raise ValueError("original room differs from bootstrap geometry")
     except (ValueError, TypeError, OverflowError) as exc:
         raise ValueError("invalid room geometry") from exc
     if type(manifest.get("dt_ns")) is not int:
