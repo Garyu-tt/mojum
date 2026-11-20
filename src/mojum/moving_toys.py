@@ -20,7 +20,12 @@ MAX_SIM_TICKS = 3999
 
 
 def _numeric(value):
-    return type(value) in (int, float) and math.isfinite(value)
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 def _bounce(initial, velocity, tick, lo, hi):
