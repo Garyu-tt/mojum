@@ -497,10 +497,17 @@ def main():
                    help="abstain when a measured touch contradicts stored local object response; needs --object-tracking")
     p.add_argument("--rgb-tolerance", type=int, default=0,
                    help="opt-in bounded RGB L1 jitter tolerance (0..6); needs --object-tracking and a fresh journal")
+    p.add_argument("--moving-toys", action="store_true",
+                   help="opt into the synthetic kinematic moving-toy world; a fresh journal is required")
     args = p.parse_args()
     if not 0 <= args.ticks <= 1000:
         p.error("--ticks must be within 0..1000")
+    moving_scene = None
+    if args.moving_toys:
+        from .moving_toys import MovingToyScene
+        moving_scene = MovingToyScene()
     with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8")),
+                    scene=moving_scene,
                     object_tracking=args.object_tracking,
                     contact_guard=args.contact_guard,
                     rgb_tolerance=args.rgb_tolerance) as baby:
