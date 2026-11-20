@@ -3,6 +3,7 @@
 This is a local test fixture, not a distributed consensus implementation.
 """
 from dataclasses import dataclass
+from .mesh_contract import _NODE_ID
 
 
 class FenceError(ValueError):
@@ -20,8 +21,11 @@ class Lease:
             raise FenceError("epoch must be a positive integer")
         if type(self.revision) is not int or self.revision < 0:
             raise FenceError("revision must be a nonnegative integer")
-        if not isinstance(self.writer, str) or not self.writer.strip():
-            raise FenceError("writer must be nonempty")
+        # Keep writer identity consistent with the existing mesh node-ID grammar.
+        # This is syntactic validation, not authentication or an authority grant.
+        if (not isinstance(self.writer, str) or not (1 <= len(self.writer) <= 128)
+                or _NODE_ID.fullmatch(self.writer) is None):
+            raise FenceError("writer must be a canonical mesh node id")
 
 
 def authorize(current: Lease, proposal: Lease) -> Lease:
