@@ -154,7 +154,23 @@ const frame=(tick,blocked)=>({
     disabled:oversized("play").disabled,
     status:oversized("status").textContent
   };
-  process.stdout.write(JSON.stringify({firstState,secondState,error,large})+"\n");
+  const racing=fakeDOM();
+  const racingInput=racing("file");
+  let resolveSlow;
+  racingInput.files=[{size:1024,name:"old.jsonl",
+     text:()=>new Promise(resolve=>{resolveSlow=resolve;})}];
+  const olderPromise=racingInput.listeners.change.call(racingInput);
+  racingInput.files=[{size:1024,name:"current.jsonl",
+     text:async()=>valid}];
+  await racingInput.listeners.change.call(racingInput);
+  resolveSlow(JSON.stringify(frame(100,false)));
+  await olderPromise;
+  const latest={
+    tick:racing("tick").textContent,
+    status:racing("status").textContent,
+    reusableInput:racingInput.value
+  };
+  process.stdout.write(JSON.stringify({firstState,secondState,error,large,latest})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1);});
 """
 
@@ -208,6 +224,10 @@ class OfflineTraceViewerTests(unittest.TestCase):
         oversized = result["large"]
         self.assertTrue(oversized["disabled"])
         self.assertIn("24 МБ", oversized["status"])
+        newest = result["latest"]
+        self.assertEqual(newest["tick"], "4")
+        self.assertIn("current.jsonl", newest["status"])
+        self.assertEqual(newest["reusableInput"], "")
 
 
 if __name__ == "__main__":
