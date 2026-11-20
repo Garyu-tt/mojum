@@ -72,8 +72,8 @@ class AquariumIntegrationTests(unittest.TestCase):
             frame = new.step(dx=.025)
             self.assertTrue(frame["world"]["blocked"])
             self.assertEqual(new.world.x, frame["world"]["position"][0])
-            self.assertEqual(new.store.count(), 43)
-            self.assertEqual(new.store.verify_chain()["count"], 43)
+            self.assertEqual(new.store.count(), 44)
+            self.assertEqual(new.store.verify_chain()["count"], 44)
 
     def test_fresh_rerun_adds_events_not_duplicate_boot(self):
         with self.aquarium() as first:
