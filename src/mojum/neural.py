@@ -19,7 +19,12 @@ class NeuralError(ValueError):
 
 
 def _finite(value):
-    return type(value) in (float, int) and math.isfinite(value)
+    if type(value) not in (float, int):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
 
 
 def _hash(value):
