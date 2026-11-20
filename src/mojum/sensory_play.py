@@ -276,7 +276,8 @@ class SensoryPlay:
 
     def __init__(self, db_path, graph, *, scene=None, start=(1.0, 2.0),
                  agent_id="dante-sensory-fixture-001", rng_seed=SEED,
-                 dt_ns=10_000_000, object_tracking=False):
+                 dt_ns=10_000_000, object_tracking=False,
+                 contact_guard=False):
         if not isinstance(agent_id, str) or not agent_id.strip():
             raise CuriosityError("invalid agent")
         if type(rng_seed) is not int or not 0 <= rng_seed < 2**32:
@@ -285,6 +286,8 @@ class SensoryPlay:
             raise CuriosityError("invalid virtual clock")
         if type(object_tracking) is not bool:
             raise CuriosityError("object_tracking must be true or false")
+        if type(contact_guard) is not bool or (contact_guard and not object_tracking):
+            raise CuriosityError("contact_guard requires opt-in object tracking")
         validate_graph(graph)
         kinds = {n["kind"]: n["id"] for n in graph["nodes"]}
         if "sensory.interoception" not in kinds:
@@ -303,7 +306,9 @@ class SensoryPlay:
         self.object_memory = None
         if object_tracking:
             from .object_memory import ProvisionalObjectMemory
-            self.object_memory = ProvisionalObjectMemory()
+            self.object_memory = ProvisionalObjectMemory(
+                contact_guard=contact_guard,
+            )
         self.rng = rng_seed
         self.tick = 0
         self.manifest = {
@@ -317,6 +322,11 @@ class SensoryPlay:
         if object_tracking:
             self.manifest["object_tracking_schema"] = "mojum.object-memory.provisional/1"
             self.manifest["direction_sensor_schema"] = "mojum.sensor.synthetic-azimuth/1"
+            if contact_guard:
+                self.manifest["object_contact_guard"] = {
+                    "enabled": True, "threshold": 0.30,
+                    "scope": "measured_synthetic_probe_only",
+                }
         self.store = LocalNoosphere(db_path, self.agent_id)
         try:
             if self.store.count() == 0:
@@ -468,11 +478,14 @@ def main():
                    help="emit synthetic PRIVATE numeric evidence to local stdout")
     p.add_argument("--object-tracking", action="store_true",
                    help="enable provisional object-memory hypotheses; requires a fresh journal")
+    p.add_argument("--contact-guard", action="store_true",
+                   help="abstain when a measured touch contradicts stored local object response; needs --object-tracking")
     args = p.parse_args()
     if not 0 <= args.ticks <= 1000:
         p.error("--ticks must be within 0..1000")
     with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8")),
-                    object_tracking=args.object_tracking) as baby:
+                    object_tracking=args.object_tracking,
+                    contact_guard=args.contact_guard) as baby:
         for _ in range(args.ticks):
             row = baby.step()
             if args.watch:
