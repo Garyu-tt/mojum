@@ -4,6 +4,7 @@ Also keep the public proprioception validation contract stable for huge integers
 that make CPython's math.isfinite raise OverflowError.
 """
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -58,6 +59,56 @@ class GoalFreeInputBoundaryTests(unittest.TestCase):
             self.assertEqual(outcome.returncode, 2, outcome.stderr)
             self.assertEqual(db.read_bytes(), before)
             self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), before_files)
+
+    def test_nominal_explicit_goal_free_values_rejected_without_bootstrap(self):
+        # An explicit --dx 0.02 used to be silently accepted because it
+        # equaled argparse's default, despite being an external motor input.
+        candidates = (
+            ("--dx", "0.02"), ("--dy", "0"),
+            ("--dx", "0.02", "--dy", "0"),
+            ("--dx", "-0.0"), ("--dy", "-0.0"),
+        )
+        for args in candidates:
+            with self.subTest(args=args), tempfile.TemporaryDirectory() as tmp:
+                db = Path(tmp) / "never-created.sqlite3"
+                outcome = self.run_cli(db, *args)
+                self.assertEqual(outcome.returncode, 2, outcome.stderr)
+                self.assertIn("cannot override goal-free", outcome.stderr)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_nominal_override_rejected_without_changing_existing_goal_free_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "existing.sqlite3"
+            self.assertEqual(self.run_cli(db).returncode, 0)
+            prior = db.read_bytes()
+            files = sorted(p.name for p in Path(tmp).iterdir())
+            for args in (("--dx", "0.02"), ("--dy", "0.0")):
+                with self.subTest(args=args):
+                    outcome = self.run_cli(db, *args)
+                    self.assertEqual(outcome.returncode, 2, outcome.stderr)
+                    self.assertEqual(db.read_bytes(), prior)
+                    self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), files)
+
+    def test_scripted_cli_default_and_explicit_nominal_values_remain_equivalent(self):
+        # The new argparse omission sentinel is CLI-only: it must not alter
+        # the default scripted movement or its event-chain bytes.
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(ROOT / "src")
+            checkpoints = []
+            for idx, opts in enumerate(((), ("--dx", "0.02", "--dy", "0.0"))):
+                db = Path(tmp) / f"scripted-{idx}.sqlite3"
+                completed = subprocess.run(
+                    [sys.executable, "-m", "mojum.aquarium", "--db", str(db),
+                     "--ticks", "3", *opts],
+                    cwd=ROOT, env=env, text=True, capture_output=True,
+                    check=False, timeout=30,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertTrue(db.exists())
+                checkpoints.append(json.loads(completed.stdout))
+            self.assertEqual(checkpoints[0], checkpoints[1])
+            self.assertEqual(checkpoints[0]["stored_events"], 4)
 
     def test_huge_integer_proprioception_fails_as_development_error(self):
         gigantic = 10 ** 5000
