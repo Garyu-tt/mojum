@@ -64,7 +64,7 @@ def loads(wire, *, expected_revision=None):
     try:
         bundle = json.loads(wire, object_pairs_hook=unique,
                             parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid JSON constant")))
-    except (TypeError, json.JSONDecodeError) as exc:
+    except (TypeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("invalid bundle JSON") from exc
     unpack(bundle, expected_revision=expected_revision)
     if dumps(bundle) != wire:
