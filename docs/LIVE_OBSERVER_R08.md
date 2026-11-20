@@ -86,6 +86,44 @@ API exists; do not promise support on all browsers or mobile devices.
   point-room. The spectator's obstacle view is **not** camera vision
   experienced by the agent.
 
+## Developmental diary (evidence, not scripted personality)
+
+The spectator now has a **Дневник развития** panel showing evidence-based
+"firsts": first available observation, first rest, successful movement,
+collision, repeated attempt, prediction confirmed by a later result and
+large prediction error. Each card jumps directly to the source tick
+in the locally loaded trace.
+
+The independent `mojum.development_journal` CPU module derives the
+same category of chronological facts from the **existing committed
+Noosphere infant.frame events**. It changes no motor policy, reward,
+learned weights, clock or PRIVATE event. It does not ask a language model
+to invent feelings, thoughts, identity, or traits. Individual scores
+still grade only the observed action effect.
+
+```bash
+PYTHONPATH=src python -m mojum.development_journal \
+  --db ./dante_infant.sqlite3 > ./dante_private_development.json
+```
+
+This explicit command reads an existing infant journal, checks its
+hash chain, rejects incompatible/non-infant events, and prints a
+compact **private** aggregate: per-action attempts and empirical
+effectiveness, source event IDs, event hashes, first/last observed
+ticks, prediction errors and first-event milestones. The output
+remains private; **never upload it to a public dashboard by default**.
+
+The local journal hash chain verifies consistency only. Without an
+independent trusted anchor it does not provide forensic authentication
+against an administrator rewriting both events and hashes. The browser
+timeline reads unverified user-selected JSONL and **does not pretend**
+to know the SQLite source hashes. For authoritative verification, use
+the journal-side report.
+
+The offline observer file limit and the current 10,000-event replay
+budget are deliberately not extended by this feature. No automatic
+public/private memory bridge or cross-agent profile inference exists.
+
 ## Checks and next useful increments
 
 Run:
