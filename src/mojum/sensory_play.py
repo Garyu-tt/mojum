@@ -143,7 +143,15 @@ class ContactAssociations:
 
     @staticmethod
     def _key(sensor):
-        if (not isinstance(sensor, dict) or sensor.get("schema") != SENSE_SCHEMA
+        if (not isinstance(sensor, dict) or set(sensor) != {
+                "schema", "tick", "world_revision", "visible",
+                "reflectance_rgb", "range_bucket_10cm", "source",
+            } or sensor.get("schema") != SENSE_SCHEMA
+                or sensor.get("source") != "synthetic_local_proximity_not_camera"
+                or type(sensor.get("tick")) is not int or sensor["tick"] < 0
+                or not isinstance(sensor.get("world_revision"), str)
+                or len(sensor["world_revision"]) != 64
+                or any(c not in "0123456789abcdef" for c in sensor["world_revision"])
                 or type(sensor.get("visible")) is not bool):
             raise CuriosityError("invalid near-field observation")
         if not sensor["visible"]:
@@ -207,7 +215,8 @@ class ContactAssociations:
             raise CuriosityError("stale association prediction")
         if (not isinstance(measurement, dict) or type(measurement.get("contact")) is not bool
                 or measurement.get("instrument") != "synthetic_probe_not_material_classifier"
-                or type(measurement.get("source_tick")) is not int):
+                or type(measurement.get("source_tick")) is not int
+                or measurement["source_tick"] != sensor["tick"]):
             raise CuriosityError("invalid measured probe feedback")
         if measurement["contact"]:
             value = measurement.get("measured_deflection")
