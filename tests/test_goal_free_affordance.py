@@ -207,6 +207,29 @@ class GoalFreeAffordanceTests(unittest.TestCase):
             m.record(frame, False, proposed, world_outcome(MAX_CONTEXTS))
         self.assertEqual(m.snapshot(), before)
 
+    def test_reproducible_witness_runs_in_separate_python_process(self):
+        import json
+        import os
+        from pathlib import Path
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parent.parent
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(root / "src")
+        cmd = [sys.executable, str(root / "examples" / "affordance_witness.py")]
+        first = json.loads(subprocess.check_output(cmd, env=env, text=True))
+        second = json.loads(subprocess.check_output(cmd, env=env, text=True))
+        self.assertEqual(first, second)
+        self.assertEqual(first["schema"], "mojum.affordance-witness/1")
+        clear = first["clear_room"]["actions"]
+        blocked = first["blocked_room"]["actions"]
+        self.assertEqual(clear[0]["action"], blocked[0]["action"])
+        self.assertFalse(clear[0]["blocked"])
+        self.assertTrue(blocked[0]["blocked"])
+        self.assertNotEqual(clear[1]["action"], blocked[1]["action"])
+
+
 
 if __name__ == "__main__":
     unittest.main()
