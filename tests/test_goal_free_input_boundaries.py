@@ -110,6 +110,46 @@ class GoalFreeInputBoundaryTests(unittest.TestCase):
             self.assertEqual(checkpoints[0], checkpoints[1])
             self.assertEqual(checkpoints[0]["stored_events"], 4)
 
+    def test_invalid_scripted_displacement_does_not_bootstrap_sqlite(self):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(ROOT / "src")
+        for movement in (("dx", "nan"), ("dy", "-inf"),
+                         ("dx", "1001"), ("dy", "-1001")):
+            with self.subTest(movement=movement), tempfile.TemporaryDirectory() as tmp:
+                db = Path(tmp) / "invalid-scripted.sqlite3"
+                completed = subprocess.run(
+                    [sys.executable, "-m", "mojum.aquarium",
+                     "--db", str(db), "--ticks", "1",
+                     "--" + movement[0], movement[1]],
+                    cwd=ROOT, env=env, text=True, capture_output=True,
+                    timeout=30, check=False,
+                )
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertIn("movement is nonfinite or outside", completed.stderr)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_invalid_scripted_displacement_preserves_existing_journal(self):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(ROOT / "src")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "existing.sqlite3"
+            base = [sys.executable, "-m", "mojum.aquarium",
+                    "--db", str(db), "--ticks", "1"]
+            first = subprocess.run(
+                base, cwd=ROOT, env=env, text=True, capture_output=True,
+                timeout=30, check=False,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            previous = db.read_bytes()
+            existing_files = sorted(p.name for p in Path(tmp).iterdir())
+            failed = subprocess.run(
+                [*base, "--dx", "nan"], cwd=ROOT, env=env,
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(failed.returncode, 2, failed.stderr)
+            self.assertEqual(previous, db.read_bytes())
+            self.assertEqual(existing_files, sorted(p.name for p in Path(tmp).iterdir()))
+
     def test_huge_integer_proprioception_fails_as_development_error(self):
         gigantic = 10 ** 5000
         for x, y in ((gigantic, 1), (1, gigantic)):
