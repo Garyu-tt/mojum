@@ -221,6 +221,26 @@ class LearnedAquariumTests(unittest.TestCase):
                     a.step(**values)
             self.assertEqual(a.checkpoint(), before)
 
+    def test_malicious_policy_proposal_is_rejected_before_journal_commit(self):
+        original = TabularAxisPolicy.propose
+        with self.open() as aquarium:
+            baseline = aquarium.checkpoint()
+            for mutation in (
+                {"motor_command": {"joint": "real_servo", "target": 1}},
+                {"dx": 99.0}, {"actuation": "HARDWARE"},
+                {"world_revision": "stale"}, {"observed_at_ns": 17},
+            ):
+                def attack(policy, *args, **kwargs):
+                    proposal = original(policy, *args, **kwargs)
+                    proposal.update(mutation)
+                    return proposal
+                with patch.object(TabularAxisPolicy, "propose", attack):
+                    with self.subTest(mutation=mutation):
+                        with self.assertRaises(PolicyError):
+                            aquarium.step()
+                self.assertEqual(aquarium.checkpoint(), baseline)
+                self.assertEqual(aquarium.store.count(), 1)
+
     def test_mode_and_goal_immutable_without_migration(self):
         with self.open() as a:
             a.step()
