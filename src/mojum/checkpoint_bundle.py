@@ -34,7 +34,7 @@ def pack(organism_id, revision, components):
             "payloads": {name: base64.b64encode(components[name]).decode("ascii") for name in NAMES}}
 
 
-def unpack(bundle, *, expected_revision=None):
+def unpack(bundle, *, expected_revision=None, expected_organism_id=None):
     """Validate everything before exposing any component bytes to a caller."""
     if type(bundle) is not dict or set(bundle) != {"schema", "manifest", "payloads"}:
         raise ValueError("invalid bundle shape")
@@ -42,6 +42,12 @@ def unpack(bundle, *, expected_revision=None):
         raise ValueError("unsupported schema or components")
     payloads = {name: _decode(bundle["payloads"][name]) for name in NAMES}
     verify_manifest(bundle["manifest"], payloads, expected_revision=expected_revision)
+    # Each organism has its own checkpoint namespace. A valid digest and
+    # revision alone cannot prevent restoring another organism\'s payload.
+    if expected_organism_id is not None and (
+            type(expected_organism_id) is not str
+            or bundle["manifest"]["organism_id"] != expected_organism_id):
+        raise ValueError("checkpoint organism identity mismatch")
     return payloads
 
 
@@ -51,7 +57,7 @@ def dumps(bundle):
     return json.dumps(bundle, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
 
 
-def loads(wire, *, expected_revision=None):
+def loads(wire, *, expected_revision=None, expected_organism_id=None):
     if type(wire) is not str or len(wire) > 30_000_000:
         raise ValueError("invalid bundle wire")
     def unique(pairs):
@@ -66,7 +72,8 @@ def loads(wire, *, expected_revision=None):
                             parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid JSON constant")))
     except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError("invalid bundle JSON") from exc
-    unpack(bundle, expected_revision=expected_revision)
+    unpack(bundle, expected_revision=expected_revision,
+           expected_organism_id=expected_organism_id)
     if dumps(bundle) != wire:
         raise ValueError("noncanonical bundle JSON")
     return bundle
