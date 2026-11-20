@@ -17,6 +17,8 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
+from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
+from .sensory_bridge import ToyContactBridge, validate_scene, SCHEMA as TOY_CONTACT_SCHEMA
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -67,7 +69,7 @@ class Aquarium:
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
-        exploration_mode="scripted",
+        exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -77,7 +79,14 @@ class Aquarium:
             raise AquariumError("neural_mode must be shadow or disabled")
         if exploration_mode not in ("scripted", "goal_free"):
             raise AquariumError("exploration_mode must be scripted or goal_free")
+        if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
+            raise AquariumError("sensory_mode must be none or toy_probe")
+        if sensory_mode == "toy_probe" and exploration_mode != "goal_free":
+            raise AquariumError("toy_probe requires goal_free exploration")
+        if sensory_mode == "none" and sensory_scene is not None:
+            raise AquariumError("unused synthetic sensory scene")
         self.exploration_mode = exploration_mode
+        self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
         self.dt_ns = dt_ns
@@ -108,10 +117,20 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.explorer = Explorer() if exploration_mode == "goal_free" else None
+        self.sensory_bridge = None
+        if sensory_mode == "toy_probe":
+            scene = ToyScene() if sensory_scene is None else sensory_scene
+            self.sensory_bridge = ToyContactBridge(validate_scene(self.room, scene))
         self.tick = 0
         if self.explorer is not None:
             self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
             self.manifest["exploration_mode"] = "goal_free"
+        if self.sensory_bridge is not None:
+            self.manifest["sensory_mode"] = "toy_probe"
+            self.manifest["sensory_schema"] = SENSE_SCHEMA
+            self.manifest["sensory_model_schema"] = MODEL_SCHEMA
+            self.manifest["sensory_scene"] = self.sensory_bridge.scene.manifest()
+            self.manifest["contact_bridge_schema"] = TOY_CONTACT_SCHEMA
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
@@ -207,6 +226,9 @@ class Aquarium:
                 "policy_sha256": digest(next_explorer.snapshot()),
                 "motor_capability": "SYNTHETIC_POINT_ROOM_ONLY",
             }
+        if self.sensory_bridge is not None:
+            sensory_frame, _ = self.sensory_bridge.evaluate(self.world)
+            payload["toy_contact"] = sensory_frame
         return payload, new_world, next_learner
 
     def _adopt_developmental(self, payload):
@@ -230,10 +252,15 @@ class Aquarium:
             raise AquariumError("developmental experience replay mismatch")
         self.explorer = clone
 
+    def _adopt_sensory(self, payload):
+        if self.sensory_bridge is not None:
+            self.sensory_bridge.adopt(self.world, payload["toy_contact"])
+
     def step(self, *, dx=None, dy=None):
         payload, next_world, next_learner = self._calculate(dx, dy)
         self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                             self.tick * self.dt_ns, self.genome.revision)
+        self._adopt_sensory(payload)
         self._adopt_developmental(payload)
         self.world = next_world
         self.learner = next_learner
@@ -309,6 +336,7 @@ class Aquarium:
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
+                self._adopt_sensory(payload)
                 self._adopt_developmental(payload)
                 self.world = next_world
                 self.learner = next_learner
@@ -331,6 +359,8 @@ class Aquarium:
         }
         if self.explorer is not None:
             result["developmental_state"] = self.explorer.snapshot()
+        if self.sensory_bridge is not None:
+            result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
         return result
 
 
@@ -346,6 +376,10 @@ def main():
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
                         default="scripted")
+    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
+                        default="none")
+    parser.add_argument("--watch", action="store_true",
+                        help="emit PRIVATE synthetic experience frames to local stdout")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
@@ -353,15 +387,19 @@ def main():
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
+        sensory_mode=args.sensory_mode,
     ) as aquarium:
         if args.exploration_mode == "goal_free" and (
                 args.dx != 0.02 or args.dy != 0.0):
             parser.error("--dx/--dy cannot override goal-free exploratory intentions")
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
-                aquarium.step()
+                frame = aquarium.step()
             else:
-                aquarium.step(dx=args.dx, dy=args.dy)
+                frame = aquarium.step(dx=args.dx, dy=args.dy)
+            if args.watch:
+                print(json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                                 allow_nan=False), flush=True)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (
@@ -369,7 +407,8 @@ def main():
             if aquarium.neural_mode == "shadow"
             else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
         )
-        print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
+        print(json.dumps(checkpoint, indent=None if args.watch else 2,
+                         ensure_ascii=False, allow_nan=False))
 
 
 if __name__ == "__main__":
