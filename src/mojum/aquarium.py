@@ -117,11 +117,10 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.explorer = Explorer() if exploration_mode == "goal_free" else None
-        scene = (ToyScene() if sensory_scene is None else sensory_scene)
-        self.sensory_bridge = (
-            ToyContactBridge(validate_scene(self.room, scene))
-            if sensory_mode == "toy_probe" else None
-        )
+        self.sensory_bridge = None
+        if sensory_mode == "toy_probe":
+            scene = ToyScene() if sensory_scene is None else sensory_scene
+            self.sensory_bridge = ToyContactBridge(validate_scene(self.room, scene))
         self.tick = 0
         if self.explorer is not None:
             self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
@@ -408,7 +407,8 @@ def main():
             if aquarium.neural_mode == "shadow"
             else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
         )
-        print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
+        print(json.dumps(checkpoint, indent=None if args.watch else 2,
+                         ensure_ascii=False, allow_nan=False))
 
 
 if __name__ == "__main__":
