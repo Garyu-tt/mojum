@@ -59,11 +59,22 @@ Run from the repository checkout (Python standard library only):
 PYTHONPATH=src python -m mojum.aquarium --db ./dante_learned_r05.sqlite3 --ticks 120 --control-mode learned_fixture
 PYTHONPATH=src python -m mojum.aquarium --db ./dante_learned_r05.sqlite3 --ticks 60 --control-mode learned_fixture
 PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=src python examples/evaluate_point_room_policies.py --ticks 350
 ```
 
 Use a new SQLite file. An existing database built with manual or R0.4
 mode is not automatically converted. The default mode remains manual,
 and previously recorded manual/reactive events retain their exact schemas.
+
+## Fixed-room experimental comparison
+
+The optional CPU-only benchmark runs the R0.4 reactive fixture and R0.5
+tabular fixture in two fresh SQLite databases with the same room, goal,
+GENESIS heartbeat and number of virtual ticks. It reports blocked steps,
+distance from goal, first-goal tick, updates and (for R0.5) total reward.
+It does **not** claim that the learned controller is superior, that either
+controller generalizes to unseen rooms, or that the numbers measure
+consciousness. Results must be interpreted before changing architecture.
 
 ## Next independent acceptance
 
