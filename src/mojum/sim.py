@@ -1,0 +1,83 @@
+"""Minimal deterministic virtual-clock runner; no physical or neural claims."""
+
+import copy
+import hashlib
+import json
+from .graph import GraphError, validate
+
+
+def canonical(obj):
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def digest(obj):
+    return hashlib.sha256(canonical(obj).encode("utf-8")).hexdigest()
+
+
+class Simulation:
+    def __init__(self, graph, dt_ns=10_000_000):
+        self.graph = copy.deepcopy(graph)
+        self.nodes, self.incoming, self.order = validate(self.graph)
+        if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
+            raise GraphError("dt_ns must be integer in [1000, 1000000000]")
+        self.dt_ns = dt_ns
+        self.graph_hash = digest(graph)
+        self.tick = 0
+        self.episodes = []
+
+    def step(self):
+        results = {}
+        time_ns = self.tick * self.dt_ns
+        for nid in self.order:
+            spec = self.nodes[nid]
+            inp = {port: results[source][out] for port, (source, out) in self.incoming[nid].items()}
+            kind, config = spec["kind"], spec["config"]
+            if kind == "genesis.seed":
+                bpm = config.get("bpm", 60)
+                if type(bpm) is not int or not 30 <= bpm <= 180:
+                    raise GraphError("Genome bpm must be an integer in [30,180]")
+                result = {"genome": {"fixture": True, "heartbeat_bpm": bpm, "genotype_status": "SEED_ONLY"}}
+            elif kind == "body.heartbeat":
+                bpm = inp["genome"]["heartbeat_bpm"]
+                period_ns = 60_000_000_000 // bpm
+                phase_ns = time_ns % period_ns
+                result = {"pulse": {"beat_index": time_ns // period_ns, "phase_milli": 1000 * phase_ns // period_ns, "pulse": phase_ns < period_ns // 8, "synthetic": True}}
+            elif kind == "sensory.interoception":
+                result = {"sensory": {"kind": "interoception", "heartbeat": inp["pulse"], "observed_at_ns": time_ns}}
+            elif kind == "world.room":
+                level = config.get("light", "dim")
+                if level not in ("dark", "dim", "bright"):
+                    raise GraphError("Invalid world.room light fixture")
+                result = {"world": {"kind": "static-room-fixture", "light": level, "observed_at_ns": time_ns}}
+            elif kind == "brain.placeholder":
+                result = {"observation": {"status": "UNIMPLEMENTED", "sensory_kind": inp["sensory"]["kind"], "world_light": inp["world"]["light"], "action": None}}
+            elif kind == "memory.episode":
+                episode = {"tick": self.tick, "observed_at_ns": time_ns, "sensory": inp["sensory"], "brain_observation": inp["observation"], "provenance": "in-memory-fixture-not-Noosphere"}
+                self.episodes.append(copy.deepcopy(episode))
+                result = {"episode": episode}
+            else:
+                raise GraphError("Unsupported executor node kind")
+            results[nid] = result
+        self.tick += 1
+        return copy.deepcopy(results)
+
+    def snapshot(self):
+        state = {"schema": "mojum.sim-checkpoint/0.1", "graph_sha256": self.graph_hash, "tick": self.tick, "dt_ns": self.dt_ns, "episodes": copy.deepcopy(self.episodes)}
+        return {"state": state, "sha256": digest(state)}
+
+    def restore(self, snapshot):
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("state"), dict):
+            raise GraphError("Invalid snapshot")
+        state = snapshot["state"]
+        if snapshot.get("sha256") != digest(state):
+            raise GraphError("Snapshot checksum mismatch")
+        if state.get("schema") != "mojum.sim-checkpoint/0.1" or state.get("graph_sha256") != self.graph_hash or state.get("dt_ns") != self.dt_ns:
+            raise GraphError("Snapshot version, graph or dt mismatch")
+        tick = state.get("tick")
+        episodes = state.get("episodes")
+        if type(tick) is not int or tick < 0 or not isinstance(episodes, list) or len(episodes) != tick:
+            raise GraphError("Inconsistent snapshot state")
+        if any(not isinstance(e, dict) or e.get("tick") != i or e.get("observed_at_ns") != i * self.dt_ns for i, e in enumerate(episodes)):
+            raise GraphError("Inconsistent episode sequence")
+        self.tick = tick
+        self.episodes = copy.deepcopy(episodes)

@@ -1,0 +1,10 @@
+{
+  "schema": "mojum.genesis.genotype/1",
+  "genome_id": "dante-fixture-001",
+  "revision": "fixture-r1",
+  "inherited": {
+    "heartbeat_bpm": 60,
+    "body_scale_milli": 1000,
+    "sensory_gain_milli": 1000
+  }
+}
