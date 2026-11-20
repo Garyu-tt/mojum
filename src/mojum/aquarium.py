@@ -401,8 +401,10 @@ def main():
     parser.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
     parser.add_argument("--ticks", type=int, default=120)
-    parser.add_argument("--dx", type=float, default=0.02)
-    parser.add_argument("--dy", type=float, default=0.0)
+    # None means the option was absent; a supplied nominal value is still an
+    # external motor request and must not be silently accepted in goal_free.
+    parser.add_argument("--dx", type=float, default=None)
+    parser.add_argument("--dy", type=float, default=None)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
                         default="scripted")
@@ -416,7 +418,7 @@ def main():
     # Reject a forbidden external movement before opening/bootstrapping SQLite.
     # A failed CLI invocation must not create a new organism or journal.
     if args.exploration_mode == "goal_free" and (
-            args.dx != 0.02 or args.dy != 0.0):
+            args.dx is not None or args.dy is not None):
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
@@ -428,7 +430,10 @@ def main():
             if args.exploration_mode == "goal_free":
                 frame = aquarium.step()
             else:
-                frame = aquarium.step(dx=args.dx, dy=args.dy)
+                frame = aquarium.step(
+                    dx=0.02 if args.dx is None else args.dx,
+                    dy=0.0 if args.dy is None else args.dy,
+                )
             if args.watch:
                 print(json.dumps(frame, sort_keys=True, ensure_ascii=False,
                                  allow_nan=False), flush=True)
