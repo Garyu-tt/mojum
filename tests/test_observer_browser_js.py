@@ -46,7 +46,7 @@ class ObserverBrowserSyntaxTests(unittest.TestCase):
         js = parser.scripts[0]
         for token in (
             "function renderMilestones()", "function pollLive()", "function show(i)",
-            'source', 'first_repeated_action', "first_blocked_motion",
+            "spectator_scene", "first_repeated_action", "first_blocked_motion",
             "first_confirmed_prediction", "first_prediction_surprise",
             'addEventListener("click"', "textContent", "showOpenFilePicker",
         ):
