@@ -37,7 +37,9 @@ dt{font-size:12px;color:var(--muted)}dd{margin:0;font-weight:600;word-break:brea
 <section class="card"><h2>История действий</h2><div id="history" class="history"><p class="muted">Откройте локальный журнал экспериментов.</p></div></section></div>
 <div class="stack">
 <section class="card"><h2>Что он воспринял</h2><dl id="perception"></dl><h3>Что попробовал</h3><dl id="action"></dl></section>
-<section class="card"><h2>Какой результат получил</h2><dl id="outcome"></dl><h3>Что запомнил</h3><dl id="learning"></dl></section></div>
+<section class="card"><h2>Какой результат получил</h2><dl id="outcome"></dl><h3>Что запомнил</h3><dl id="learning"></dl></section>
+<section class="card"><h2>Память о предполагаемом объекте</h2><dl id="objects"></dl>
+<p class="muted" style="font-size:12px">Номера гипотез назначаются из истории наблюдений. Это не настоящие ID предметов. Неоднозначные встречи остаются неопределёнными.</p></section></div>
 </div>
 <p class="foot" id="status" role="status">Офлайн-наблюдатель. Данные остаются в этом браузере и не отправляются на сервер. Файл может содержать частный опыт цифрового существа.</p>
 </main><script>
@@ -47,6 +49,13 @@ const cnv=el("scene"),ctx=cnv.getContext("2d");
 const COLORS={bg:"--inner",edge:"--border",stroke:"--accent",fg:"--text",blocked:"--warn"};
 const format=x=>typeof x==="number"?x.toFixed(3):String(x);
 const actionNames={"rest":"Покой","x+":"Вправо","x-":"Влево","y+":"Вверх","y-":"Вниз","probe":"Коснуться"};
+const identityStatus={
+ "new_hypothesis":"Впервые сформирована гипотеза",
+ "continuous_candidate":"Вероятное продолжение наблюдения",
+ "possible_reencounter":"Возможная повторная встреча",
+ "no_visible_signal":"Сейчас ничего не обнаружено",
+ "ambiguous_identity":"Несколько подходящих гипотез — неопределённо"
+};
 let rows=[],position=0,timer=0;
 function stop(){if(timer){clearInterval(timer);timer=0;}el("play").textContent="▶";}
 function field(id,items){
@@ -93,6 +102,20 @@ function show(i){
   ["Ошибка прогноза",m.prediction_error===null?"Не вычисляется":format(m.prediction_error)],
   ["Доказательств",m.evidence_count],
   ["Результат","Измерение"+(m.learned?" сохранено":" не получено")]]);
+ const obj=r.object_hypothesis;
+ if(obj){
+  field("objects",[
+    ["Статус",identityStatus[obj.status]??"Неизвестная гипотеза"],
+    ["Номер",obj.hypothesis??"Не установлен"],
+    ["Наблюдений",obj.sightings],
+    ["Касаний",obj.touches],
+    ["Оценка отклика",obj.mean_deflection===null?"Пока неизвестна":format(obj.mean_deflection)],
+    ["Перерыв",obj.gap_ticks===null?"Не определён":obj.gap_ticks+" тактов"],
+    ["Подлинность идентичности","Не подтверждена"]
+  ]);
+ }else{
+  field("objects",[["Трекинг","Не включён; R0.9 наблюдает только числовой сигнал"]]);
+ }
  const root=el("history");root.replaceChildren();
  for(let j=Math.max(0,position-7);j<Math.min(rows.length,position+8);j++){
   const f=rows[j],button=document.createElement("button");button.className="event"+(j===position?" active":"");
@@ -114,7 +137,19 @@ function valid(row){
   &&scene.toys.every(t=>Number.isFinite(t.x)&&Number.isFinite(t.y)&&Number.isFinite(t.radius_m)
     &&Array.isArray(t.rgb)&&t.rgb.length===3&&t.rgb.every(x=>Number.isInteger(x)&&x>=0&&x<=255))
   &&Array.isArray(row.world?.position)&&row.world.position.length===2
-  &&row.world.position.every(Number.isFinite);
+  &&row.world.position.every(Number.isFinite)
+  &&(row.object_hypothesis===undefined||(
+   row.directional_cue?.schema==="mojum.sensor.synthetic-azimuth/1"
+   &&row.directional_cue.tick===row.tick
+   &&(row.directional_cue.octant===null||
+     (Number.isInteger(row.directional_cue.octant)&&row.directional_cue.octant>=0&&row.directional_cue.octant<=7))
+   &&row.object_hypothesis?.identity_verified===false
+   &&Object.hasOwn(identityStatus,row.object_hypothesis.status)
+   &&(row.object_hypothesis.hypothesis===null||
+      /^h[0-9]{4}$/.test(row.object_hypothesis.hypothesis))
+   &&Number.isInteger(row.object_hypothesis.sightings)
+   &&Number.isInteger(row.object_hypothesis.touches)
+  ));
 }
 async function load(file){
  stop();if(!file)return;
@@ -135,7 +170,7 @@ async function load(file){
   show(0);
   el("status").textContent="Загружено "+rows.length+" локальных синтетических событий. Подлинность файла не подтверждается этим просмотрщиком.";
  }catch(error){
-  rows=[];position=0;field("perception",[]);field("action",[]);field("outcome",[]);field("learning",[]);
+  rows=[];position=0;field("perception",[]);field("action",[]);field("outcome",[]);field("learning",[]);field("objects",[]);
   el("history").replaceChildren();draw(null);
   for(const id of ["previous","next","play","seek"])el(id).disabled=true;
   el("status").textContent="Ошибка журнала: "+error.message;
