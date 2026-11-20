@@ -167,7 +167,13 @@ class AffordanceMemory:
                     scores[name] = 0.0
                 else:
                     good = row["samples"] - row["blocked"]
-                    scores[name] = (good - row["blocked"]) / (row["samples"] + 1)
+                    # One actual blockage contradicts the simple local
+                    # affordance: explore other actions rather than ramming
+                    # the same wall after a long success streak.
+                    scores[name] = (
+                        good / (row["samples"] + 1) if row["blocked"] == 0
+                        else -row["blocked"] / (row["samples"] + 1)
+                    )
             # Rotate only ties. An experienced successful action wins over
             # unseen; an observed blocked action loses to unseen.
             rotation = tick % len(ACTIONS)
