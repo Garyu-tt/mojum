@@ -33,7 +33,7 @@ Switching an existing DB from `scripted` or `goal_free` to `toy_probe`, changing
 
 ## Source reuse and integration dependencies
 
-The bridge imports the **identical** source blob `src/mojum/sensory_play.py` (Git blob `b3d3fb2fd04c13377ff3bde0f6debe818065f837`) already QA-hardened in stacked PR #56 over R0.9 PR #33. No forked sensor/probe or association implementation is introduced. This new PR is stacked on exact head of R0.13 slice A, PR #59. Review/integrate dependencies **#33 → #56**, and **#59**, before promoting this bridge. Source overlap should be reconciled when merging upstream, not accepted twice or overwritten.
+The bridge starts from the identical QA-hardened R0.9 `src/mojum/sensory_play.py` source in stacked PR #56 (base Git blob `b3d3fb2fd04c13377ff3bde0f6debe818065f837`). Follow-up adversarial QA also removes a **spectator-ID tie-breaker** for equidistant toys so that arbitrary label changes cannot change numeric sensing or measured probe results. This is a narrow fix to the existing sensor, not a forked sensor/probe or association implementation. This new PR is stacked on exact head of R0.13 slice A, PR #59. Review/integrate dependencies **#33 → #56**, and **#59**, before promoting this bridge. Source overlap should be reconciled when merging upstream, not accepted twice or overwritten.
 
 ## Tests and limitations
 
