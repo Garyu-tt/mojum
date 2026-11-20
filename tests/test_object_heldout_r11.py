@@ -51,6 +51,25 @@ class ObjectContinuityHeldOutQA(unittest.TestCase):
         self.assertTrue(all(row["identity_verified"] is False
                             for row in result["timeline_for_qa_only"]))
 
+    def test_opt_in_numeric_tolerance_handles_one_step_rgb_jitter(self):
+        raw = self.cases["small_rgb_jitter"]["counts"]
+        tolerant = self.cases["small_rgb_jitter_tolerant"]["counts"]
+        self.assertEqual(raw["splits"], 2)
+        self.assertEqual(raw["hypotheses"], 3)
+        self.assertEqual(tolerant["splits"], 0)
+        self.assertEqual(tolerant["hypotheses"], 1)
+        self.assertEqual(tolerant["identity_switches"], 0)
+        self.assertEqual(tolerant["matched_reencounters"], 11)
+        self.assertEqual(tolerant["measured_contacts"], 12)
+
+    def test_color_tolerance_does_not_disable_measured_contact_guard(self):
+        tolerant = self.cases["crossing_identical_colors_guarded_tolerant"]["counts"]
+        strict = self.cases["crossing_identical_colors_guarded"]["counts"]
+        self.assertEqual(tolerant["contaminated_contacts"], 0)
+        self.assertEqual(tolerant["identity_switches"], 0)
+        self.assertEqual(tolerant["contact_conflict_abstentions"], 2)
+        self.assertEqual(tolerant["hypotheses"], strict["hypotheses"])
+
     def test_moving_single_object_can_fragment_into_several_tracks(self):
         result = self.cases["moving_held_out_toy"]
         c = result["counts"]
@@ -101,7 +120,11 @@ class ObjectContinuityHeldOutQA(unittest.TestCase):
         self.assertEqual(report["schema"], "mojum.qa.object-continuity.heldout/1")
         self.assertEqual(report["oracle_scope"], "external_qa_only_never_a_policy_input")
         self.assertEqual(set(report["cases"]),
-                         set(scenarios()) | {"crossing_identical_colors_guarded"})
+                         set(scenarios()) | {
+                             "crossing_identical_colors_guarded",
+                             "crossing_identical_colors_guarded_tolerant",
+                             "small_rgb_jitter_tolerant",
+                         })
         self.assertNotIn('"oracle_mapping_for_qa_only"', encoded)
         self.assertNotIn('"timeline_for_qa_only"', encoded)
         self.assertNotIn('"final_memory_snapshot"', encoded)
