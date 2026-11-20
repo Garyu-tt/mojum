@@ -152,7 +152,26 @@ class GuardedAquarium:
                 # Fail closed after journal commit even if registry commit or
                 # subsequent data verification fails. No auto-retry.
                 self._poisoned = True
-                result = method(*args, **kwargs)
+                try:
+                    result = method(*args, **kwargs)
+                except BaseException:
+                    # Invalid user input or a failed pre-commit CAS must NOT
+                    # permanently poison the writer when no journal entry
+                    # was committed. If inspection fails, stay poisoned.
+                    # A committed event always changes head and event count.
+                    try:
+                        self._check_path_identity()
+                        unchanged = (
+                            self._aq.store.head() == row["head"]
+                            and self._aq.store.count() == row["event_count"]
+                            and self._aq._known_head == row["head"]
+                            and self._aq.tick == row["tick"]
+                        )
+                        if unchanged:
+                            self._poisoned = False
+                    except BaseException:
+                        pass
+                    raise
                 self._anchor_advance(
                     row, expected_tick=row["tick"] + (1 if advance_tick else 0),
                 )
