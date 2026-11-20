@@ -1,0 +1,25 @@
+name: Mojum R0.2 offline aquarium integration
+on:
+  push:
+  pull_request:
+jobs:
+  aquarium-stdlib:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run combined graph, GENESIS, world, Noosphere and aquarium tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+      - name: Offline habitat smoke and restart
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m mojum.aquarium --db ${{ runner.temp }}/mojum-r02.sqlite3 --ticks 120
+          python -m mojum.aquarium --db ${{ runner.temp }}/mojum-r02.sqlite3 --ticks 30
