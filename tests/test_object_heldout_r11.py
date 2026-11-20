@@ -75,12 +75,33 @@ class ObjectContinuityHeldOutQA(unittest.TestCase):
         self.assertNotEqual(events[0]["oracle_only"], events[2]["oracle_only"])
         self.assertEqual(events[0]["candidate"], events[2]["candidate"])
 
+    def test_guarded_crossing_abstains_instead_of_poisoning_contact_memory(self):
+        raw = self.cases["crossing_identical_colors"]["counts"]
+        guarded = self.cases["crossing_identical_colors_guarded"]["counts"]
+        self.assertEqual(raw["identity_switches"], 2)
+        self.assertEqual(raw["contaminated_contacts"], 2)
+        self.assertEqual(guarded["identity_switches"], 0)
+        self.assertEqual(guarded["contaminated_contacts"], 0)
+        self.assertEqual(guarded["contact_conflict_abstentions"], 2)
+        self.assertEqual(guarded["hypotheses"], 2)
+        self.assertEqual(guarded["measured_contacts"], 4)
+        self.assertEqual(
+            self.cases["crossing_identical_colors_guarded"]["timeline_for_qa_only"][2]["status"],
+            "contact_conflict_abstention",
+        )
+        # No inference of true identity: abstention is a safety trade-off.
+        self.assertTrue(all(
+            record["identity_verified"] is False
+            for record in self.cases["crossing_identical_colors_guarded"]["timeline_for_qa_only"]
+        ))
+
     def test_default_report_has_no_oracle_timeline_or_scene_geometry(self):
         report = compact_report(self.report)
         encoded = json.dumps(report, sort_keys=True)
         self.assertEqual(report["schema"], "mojum.qa.object-continuity.heldout/1")
         self.assertEqual(report["oracle_scope"], "external_qa_only_never_a_policy_input")
-        self.assertEqual(set(report["cases"]), set(scenarios()))
+        self.assertEqual(set(report["cases"]),
+                         set(scenarios()) | {"crossing_identical_colors_guarded"})
         self.assertNotIn('"oracle_mapping_for_qa_only"', encoded)
         self.assertNotIn('"timeline_for_qa_only"', encoded)
         self.assertNotIn('"final_memory_snapshot"', encoded)
