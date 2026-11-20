@@ -18,6 +18,7 @@ def project_episodes(episodes, *, allowed_sources, max_records=1000):
     if not isinstance(episodes, (list, tuple)) or len(episodes) > 100000:
         raise ValueError("episodes must be a bounded sequence")
     seen = {}
+    identities = {}
     for event in episodes:
         if not isinstance(event, Mapping) or set(event) != {"id", "source", "visibility", "tick", "observation"}:
             raise ValueError("invalid episode")
@@ -30,11 +31,16 @@ def project_episodes(episodes, *, allowed_sources, max_records=1000):
             raise ValueError("invalid tick")
         if not isinstance(obs, str) or len(obs) > 4096:
             raise ValueError("invalid observation")
+        # Check global event identity *before* applying the visibility/source
+        # policy. Otherwise a PUBLIC copy of a PRIVATE event ID can silently
+        # replace it in an export, hiding a conflicting classification.
+        identity = (src, visibility, tick, obs)
+        if eid in identities and identities[eid] != identity:
+            raise ValueError("conflicting duplicate id")
+        identities[eid] = identity
         if visibility != "PUBLIC" or src not in allowed_sources:
             continue
         record = {"id": eid, "source": src, "tick": tick, "observation": obs}
-        if eid in seen and seen[eid] != record:
-            raise ValueError("conflicting duplicate id")
         seen[eid] = record
     records = sorted(seen.values(), key=lambda r: (r["tick"], r["id"]))
     if len(records) > max_records:
