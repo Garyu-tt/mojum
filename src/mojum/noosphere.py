@@ -229,12 +229,14 @@ class LocalNoosphere:
             expected_seq += 1
         if external_expected_head is not None and prev != external_expected_head:
             raise NoosphereError("hash head differs from independent external anchor")
-        return {"schema": STORE_SCHEMA, "agent_id": self.agent_id, "count": self.count(), "head": prev, "integrity": "chain-verified-not-authenticated"}
+        return {"schema": STORE_SCHEMA, "agent_id": self.agent_id, "count": expected_seq - 1, "head": prev, "integrity": "chain-verified-not-authenticated"}
 
-    def dataset(self, *, topic=None, as_of_recorded_ns=None, valid_at_ns=None, include_nonpublic=False, limit=1000):
+    def dataset(self, *, topic=None, source=None, as_of_recorded_ns=None, valid_at_ns=None, include_nonpublic=False, limit=1000):
         """Read-only reproducible dataset projection; PRIVATE never exported by default."""
         if topic is not None:
             _text(topic, "topic")
+        if source is not None:
+            _text(source, "source")
         if as_of_recorded_ns is not None:
             _integer(as_of_recorded_ns, "as_of_recorded_ns")
         if valid_at_ns is not None:
@@ -249,6 +251,9 @@ class LocalNoosphere:
         if topic is not None:
             where.append("topic = ?")
             args.append(topic)
+        if source is not None:
+            where.append("json_extract(wire_json, '$.source') = ?")
+            args.append(source)
         if as_of_recorded_ns is not None:
             where.append("recorded_at_ns <= ?")
             args.append(as_of_recorded_ns)
@@ -262,7 +267,7 @@ class LocalNoosphere:
         projection = {
             "schema": DATASET_SCHEMA,
             "agent_id": self.agent_id,
-            "filters": {"topic": topic, "as_of_recorded_ns": as_of_recorded_ns,
+            "filters": {"topic": topic, "source": source, "as_of_recorded_ns": as_of_recorded_ns,
                         "valid_at_ns": valid_at_ns, "include_nonpublic": include_nonpublic, "limit": limit},
             "items": items,
         }
