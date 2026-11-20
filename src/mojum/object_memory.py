@@ -138,6 +138,8 @@ class ProvisionalObjectMemory:
                 or not -1 <= snap["last_tick"] < MAX_FRAMES
                 or type(snap["accepted_sightings"]) is not int
                 or not 0 <= snap["accepted_sightings"] <= MAX_FRAMES
+                or snap["accepted_sightings"] > snap["last_tick"] + 1
+                or len(snap["tracks"]) > snap["accepted_sightings"]
                 or type(snap["touch_updates"]) is not int
                 or not 0 <= snap["touch_updates"] <= snap["accepted_sightings"]):
             raise CuriosityError("invalid object-memory snapshot")
@@ -164,6 +166,7 @@ class ProvisionalObjectMemory:
                     or type(tr["last_tick"]) is not int
                     or not 0 <= tr["first_tick"] <= tr["last_tick"] <= snap["last_tick"]
                     or type(tr["sightings"]) is not int or not 1 <= tr["sightings"] <= MAX_FRAMES
+                    or tr["sightings"] > tr["last_tick"] - tr["first_tick"] + 1
                     or type(tr["contacts"]) is not int or not 0 <= tr["contacts"] <= tr["sightings"]):
                 raise CuriosityError("invalid hypothesis position or evidence")
             if tr["contacts"] == 0:
