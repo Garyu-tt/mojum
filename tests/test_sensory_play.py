@@ -2,7 +2,9 @@
 
 import copy
 import json
+from html.parser import HTMLParser
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -210,6 +212,54 @@ class SensoryCuriosityTests(unittest.TestCase):
                     baby.step()
             self.assertEqual(baby.checkpoint(), before)
             self.assertEqual(baby.store.count(), 1)
+
+    def test_offline_observer_is_valid_inline_javascript_and_requires_no_network(self):
+        page = (ROOT / "examples/sensory_observer.html").read_text(encoding="utf-8")
+        class Scripts(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.inside = False
+                self.scripts = []
+                self.external = []
+            def handle_starttag(self, tag, attrs):
+                if tag == "script":
+                    attributes = dict(attrs)
+                    if "src" in attributes:
+                        self.external.append(attributes["src"])
+                    else:
+                        self.inside = True
+                        self.scripts.append("")
+            def handle_endtag(self, tag):
+                if tag == "script":
+                    self.inside = False
+            def handle_data(self, data):
+                if self.inside:
+                    self.scripts[-1] += data
+
+        parser = Scripts()
+        parser.feed(page)
+        self.assertEqual(parser.external, [])
+        self.assertEqual(len(parser.scripts), 1)
+        js = parser.scripts[0]
+        for key in (
+            "mojum.sensory-curiosity.frame/1",
+            "mojum.sensor.synthetic-near-field/1",
+            "spectator_only_toy_identity_and_softness",
+            "predicted_deflection",
+            "measured_deflection",
+            "file.text()",
+        ):
+            self.assertIn(key, js)
+        for key in ("fetch(", "WebSocket(", "XMLHttpRequest",
+                    "https://", "localStorage", "innerHTML"):
+            self.assertNotIn(key, page)
+        node = shutil.which("node")
+        if node:
+            result = subprocess.run(
+                [node, "--check", "-"], input=js, text=True,
+                capture_output=True, timeout=12,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_cli_restarts_on_same_private_journal(self):
         command = [
