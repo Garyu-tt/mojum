@@ -210,10 +210,16 @@ class JournalLineageTests(unittest.TestCase):
         self.assertEqual(fork.returncode, 3, fork.stderr)
         self.assertEqual(json.loads(fork.stdout)["classification"],
                          "FORK_DETECTED_STOP")
+        # A strict prefix relationship is reported without granting authority.
+        ancestor_cmd = list(cmd)
+        ancestor_cmd[ancestor_cmd.index("--left-archive") + 1] = str(self.baseline)
+        ancestor_cmd[ancestor_cmd.index("--right-archive") + 1] = str(self.left_archive)
+        ancestor_cmd[ancestor_cmd.index("--left-tick") + 1] = "3"
         ancestor = subprocess.run(
-            [*cmd[:],], env=env, text=True, capture_output=True
+            ancestor_cmd, env=env, text=True, capture_output=True,
         )
-        self.assertEqual(ancestor.returncode, 3)
+        self.assertEqual(ancestor.returncode, 0, ancestor.stderr)
+        self.assertEqual(json.loads(ancestor.stdout)["classification"], "LEFT_ANCESTOR")
         # Comparison with its own exact history does not signal a conflict.
         same_cmd = list(cmd)
         same_cmd[same_cmd.index("--right-archive") + 1] = str(self.left_archive)
