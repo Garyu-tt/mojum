@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import math
 from pathlib import Path
+import sqlite3
+import threading
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
@@ -103,7 +106,10 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.tick = 0
+        self._mutation_lock = threading.RLock()
+        self._freeze_active = False
         self.store = LocalNoosphere(db_path, agent_id)
+        self._known_head = self.store.head()
         try:
             if self.store.count() == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
@@ -113,7 +119,10 @@ class Aquarium:
             raise
 
     def close(self):
-        self.store.close()
+        with self._mutation_lock:
+            if self._freeze_active:
+                raise AquariumError("cannot close Aquarium during checkpoint freeze")
+            self.store.close()
 
     def __enter__(self):
         return self
@@ -134,7 +143,9 @@ class Aquarium:
         if self.store.count() >= MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
-        return self.store.append(event, expected_head=self.store.head())
+        committed = self.store.append(event, expected_head=self._known_head)
+        self._known_head = committed
+        return committed
 
     def _calculate(self, dx, dy):
         dx, dy = _movement(dx), _movement(dy)
@@ -175,6 +186,12 @@ class Aquarium:
         return payload, new_world, next_learner
 
     def step(self, *, dx=0.02, dy=0.0):
+        with self._mutation_lock:
+            if self._freeze_active:
+                raise AquariumError("Aquarium writes forbidden during checkpoint freeze")
+            return self._step_unlocked(dx=dx, dy=dy)
+
+    def _step_unlocked(self, *, dx=0.02, dy=0.0):
         payload, next_world, next_learner = self._calculate(dx, dy)
         self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                             self.tick * self.dt_ns, self.genome.revision)
@@ -185,6 +202,12 @@ class Aquarium:
 
     def acquire(self, acquired):
         """Persist an acquired-gene event. Only future/current ticks allowed."""
+        with self._mutation_lock:
+            if self._freeze_active:
+                raise AquariumError("Aquarium writes forbidden during checkpoint freeze")
+            return self._acquire_unlocked(acquired)
+
+    def _acquire_unlocked(self, acquired):
         if not isinstance(acquired, dict):
             raise AquariumError("acquired change must be an event object")
         if acquired.get("valid_from_tick", -1) < self.tick:
@@ -201,7 +224,7 @@ class Aquarium:
         return self.genome.revision
 
     def _replay(self, external_expected_head):
-        self.store.verify_chain(external_expected_head=external_expected_head)
+        verified = self.store.verify_chain(external_expected_head=external_expected_head)
         count = self.store.count()
         if count > MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 replay exceeds 10,000 journal events; streaming pending")
@@ -253,8 +276,15 @@ class Aquarium:
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
+        if self.store.head() != verified["head"] or self.store.count() != count:
+            raise AquariumError("journal changed during deterministic replay")
+        self._known_head = verified["head"]
 
     def checkpoint(self):
+        with self._mutation_lock:
+            return self._checkpoint_unlocked()
+
+    def _checkpoint_unlocked(self):
         return {
             "schema": "mojum.aquarium.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
@@ -267,6 +297,43 @@ class Aquarium:
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
+
+
+    @contextmanager
+    def freeze_checkpoint(self):
+        """Cooperative local barrier for exact Aquarium/Noosphere cold capture.
+
+        Serializes this instance's step/acquire calls and holds a SQLite
+        BEGIN IMMEDIATE writer reservation so *other* SQLite connections
+        cannot commit to this local journal until the snapshot is released.
+        It does not freeze separate neural services, devices or raw external
+        code bypassing these APIs. No distributed quorum is implied.
+        """
+        with self._mutation_lock:
+            if self._freeze_active:
+                raise AquariumError("recursive checkpoint freeze is not supported")
+            try:
+                self.store._db.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                raise AquariumError("could not reserve local Noosphere journal") from exc
+            self._freeze_active = True
+            try:
+                if self.store.head() != self._known_head:
+                    raise AquariumError("source journal differs from local replayed state")
+                before = self._checkpoint_unlocked()
+                verified = self.store.verify_chain(external_expected_head=self._known_head)
+                count = verified["count"]
+                if self.store.count() != count:
+                    raise AquariumError("journal count mismatch at checkpoint freeze")
+                yield {"checkpoint": copy.deepcopy(before), "journal_head": verified["head"],
+                       "event_count": count}
+                if (self._checkpoint_unlocked() != before
+                        or self.store.head() != verified["head"]
+                        or self.store.count() != count):
+                    raise AquariumError("Aquarium changed during checkpoint freeze")
+            finally:
+                self._freeze_active = False
+                self.store._db.execute("ROLLBACK")
 
 
 def main():
