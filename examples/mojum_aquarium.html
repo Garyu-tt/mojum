@@ -24,7 +24,7 @@ h1{font-size:clamp(27px,3vw,43px);line-height:1.1;margin:0 0 8px;letter-spacing:
   <p class="lede">Первый игровой аквариум Данте. Простейший автономный агент воспринимает объекты, выбирает действия, тратит энергию и накапливает локальную историю. Никаких серверов и обязательной GPU.</p>
   <section class="layout" aria-label="Симуляция">
     <div class="panel world">
-      <div class="panel-header"><div><div class="eyebrow">Среда обитания / 01</div><div class="heading">Комната с едой и препятствиями</div></div><div class="world-tags"><span class="tiny-tag">SANDBOX</span><span class="tiny-tag">LIVE TICKS</span></div></div>
+      <div class="panel-header"><div><div class="eyebrow">Среда обитания / 01</div><div class="heading">Комната с едой и растениями</div></div><div class="world-tags"><span class="tiny-tag">SANDBOX</span><span class="tiny-tag">LIVE TICKS</span></div></div>
       <div class="canvas-wrap"><canvas id="habitat" width="960" height="540" aria-label="Интерактивный аквариум: нажмите для добавления еды"></canvas><div class="world-overlay"><strong id="moodLabel">Данте исследует комнату</strong><small id="worldClock">Цикл 00:00 · День</small></div></div>
       <div class="world-bottom"><div class="controls"><button id="pauseBtn" class="btn primary" type="button">⏸ Пауза</button><button id="feedBtn" class="btn" type="button">＋ Еда</button><button id="resetBtn" class="btn ghost" type="button">↻ Перезапуск</button><label class="slider-wrap">Скорость <input id="speed" type="range" min="1" max="4" step="1" value="1" aria-label="Скорость симуляции"><output id="speedLabel">1×</output></label></div><div class="hint">Нажмите на комнату, чтобы положить еду · <span class="kbd">Space</span> пауза · <span class="kbd">R</span> заново</div></div>
     </div>
@@ -66,7 +66,7 @@ class Aquarium{
  }
  mood(){if(this.energy<24)return "Уставший";if(this.hunger>76)return "Голодный";if(this.mode==="forage")return "Сосредоточенный";if(this.curiosity>57)return "Любопытный";return "Спокойный";}
 }
-const sim=new Aquarium();const canvas=$("habitat"),ctx=canvas.getContext("2d");const heartCanvas=$("heartline"),hc=heartCanvas.getContext("2d");let paused=false,speed=1,last=0,acc=0,uiClock=0;const bpm=[];
+const sim=new Aquarium();const canvas=$("habitat"),ctx=canvas.getContext("2d");const heartCanvas=$("heartline"),hc=heartCanvas.getContext("2d");let paused=false,speed=1,last=0,acc=0,uiClock=0;
 function resize(){const r=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2);const w=Math.max(200,Math.round(r.width*dpr)),h=Math.max(120,Math.round(r.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;} }
 function scenery(w,h){const grad=ctx.createLinearGradient(0,0,0,h);grad.addColorStop(0,"#134759");grad.addColorStop(.6,"#0a2c41");grad.addColorStop(1,"#082234");ctx.fillStyle=grad;ctx.fillRect(0,0,w,h);
  const daylight=.4+.35*Math.cos(sim.time/180*Math.PI*2);let shine=ctx.createRadialGradient(w*.48,0,w*.06,w*.48,0,w*.9);shine.addColorStop(0,`rgba(90,197,188,${daylight*.23})`);shine.addColorStop(1,"rgba(50,124,164,0)");ctx.fillStyle=shine;ctx.fillRect(0,0,w,h);
