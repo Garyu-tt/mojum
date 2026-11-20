@@ -8,8 +8,10 @@ supplies five already-consistent component byte streams. No network is used.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -87,7 +89,8 @@ def export_new_archive(organism_id, revision, paths, destination):
     return bundle["manifest"]
 
 
-def read_verified_archive(path, *, expected_organism_id, expected_revision=None):
+def read_verified_archive(path, *, expected_organism_id, expected_revision=None,
+                          expected_manifest_sha256=None):
     """Validate canonical wire, all digests, and explicit destination identity."""
     if type(expected_organism_id) is not str or not expected_organism_id:
         raise ValueError("expected_organism_id must be a nonempty string")
@@ -104,10 +107,19 @@ def read_verified_archive(path, *, expected_organism_id, expected_revision=None)
         bundle, expected_revision=expected_revision,
         expected_organism_id=expected_organism_id,
     )
-    return bundle["manifest"], parts
+    manifest = bundle["manifest"]
+    if expected_manifest_sha256 is not None:
+        if type(expected_manifest_sha256) is not str or re.fullmatch(
+            r"[0-9a-f]{64}", expected_manifest_sha256,
+        ) is None:
+            raise ValueError("expected manifest SHA-256 must be lowercase hex")
+        if not hmac.compare_digest(manifest["manifest_sha256"], expected_manifest_sha256):
+            raise ValueError("trusted manifest SHA-256 mismatch")
+    return manifest, parts
 
 
-def restore_new_directory(archive, destination, *, expected_organism_id, expected_revision=None):
+def restore_new_directory(archive, destination, *, expected_organism_id,
+                          expected_revision=None, expected_manifest_sha256=None):
     """Stage verified bytes and publish a new directory; never restore a live runtime.
 
     The destination parent must be trusted and single-writer. The portable
@@ -117,6 +129,7 @@ def restore_new_directory(archive, destination, *, expected_organism_id, expecte
     manifest, parts = read_verified_archive(
         archive, expected_organism_id=expected_organism_id,
         expected_revision=expected_revision,
+        expected_manifest_sha256=expected_manifest_sha256,
     )
     dest = _target(destination)
     if os.path.lexists(dest):
@@ -163,6 +176,7 @@ def main(argv=None):
         sub.add_argument("--archive", type=Path, required=True)
         sub.add_argument("--organism-id", required=True)
         sub.add_argument("--revision", type=int)
+        sub.add_argument("--manifest-sha256", help="independently trusted manifest digest")
         if command == "restore":
             sub.add_argument("--directory", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -175,12 +189,14 @@ def main(argv=None):
             manifest, _ = read_verified_archive(
                 args.archive, expected_organism_id=args.organism_id,
                 expected_revision=args.revision,
+                expected_manifest_sha256=args.manifest_sha256,
             )
             location = args.archive
         else:
             manifest = restore_new_directory(
                 args.archive, args.directory, expected_organism_id=args.organism_id,
                 expected_revision=args.revision,
+                expected_manifest_sha256=args.manifest_sha256,
             )
             location = args.directory
     except (OSError, ValueError) as exc:
