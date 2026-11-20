@@ -522,4 +522,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Running `python -m mojum.sensory_play` executes this source as
+    # __main__. A moving scene imports mojum.sensory_play as a proper
+    # package module; constructing classes from both copies would make
+    # isinstance(ToyScene) falsely reject the moving scene. Dispatch
+    # through the canonical imported module so class identities match.
+    from . import sensory_play as _canonical_sensory_play
+    _canonical_sensory_play.main()
