@@ -87,6 +87,12 @@ and raw event payloads are **not returned through the socket**.
 - If the registry is frozen, unavailable, replaced, or its generation
   differs, the service rejects new writes. No automatic promotion, timeout
   takeover or safety reset is implemented.
+- Malformed requests, invalid movement ranges and rejected acquisition
+  events are checked before a committed Noosphere mutation. If a rejected
+  mutation leaves the journal head/count/tick unchanged, the guarded writer
+  can continue accepting later valid requests; **only** a possible
+  post-commit/pre-anchor failure poisons it. Unbounded floating-point
+  exponents such as JSON 1e999 are rejected at the RPC parser.
 - An existing socket path is never removed at startup; on graceful shutdown
   the process removes only its own socket inode. No remote fallback.
 - The service's exported checkpoints still contain plaintext PRIVATE events
