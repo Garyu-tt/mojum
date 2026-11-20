@@ -316,5 +316,49 @@ class WriterServiceTests(unittest.TestCase):
         self.assertEqual(self.state()["event_count"], 2)
 
 
+    def test_invalid_step_before_commit_does_not_poison_writer_service(self):
+        self.launch()
+        rejected = self.send({"op": "step", "expected_generation": 1,
+                              "dx": 1001, "dy": 0})
+        self.assertFalse(rejected["ok"])
+        self.assertEqual(self.state()["event_count"], 2)
+        self.assertEqual(self.status()["generation"], 1)
+        good = self.send({"op": "step", "expected_generation": 1,
+                          "dx": .01, "dy": 0})
+        self.assertTrue(good["ok"], good)
+        self.assertEqual(good["result"]["generation"], 2)
+        self.assertEqual(self.state()["event_count"], 3)
+
+    def test_invalid_acquisition_before_commit_does_not_poison_service(self):
+        self.launch()
+        invalid = acquired(1)
+        invalid["gene"] = "unknown-gene"
+        rejection = self.send({"op": "acquire", "expected_generation": 1,
+                               "event": invalid})
+        self.assertFalse(rejection["ok"])
+        self.assertEqual(self.state()["event_count"], 2)
+        accepted = self.send({"op": "acquire", "expected_generation": 1,
+                              "event": acquired(1)})
+        self.assertTrue(accepted["ok"], accepted)
+        self.assertEqual(accepted["result"]["generation"], 2)
+        self.assertEqual(self.state()["event_count"], 3)
+
+    def test_json_float_overflow_rejected_before_mutator(self):
+        self.launch()
+        packet = b'{"op":"step","expected_generation":1,"dx":1e999,"dy":0}'
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(2)
+            connection.connect(str(self.sock))
+            connection.sendall(struct.pack("!I", len(packet)) + packet)
+            data = connection.recv(4)
+            self.assertEqual(len(data), 4)
+            size = struct.unpack("!I", data)[0]
+            result = json.loads(connection.recv(size))
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.status()["generation"], 1)
+        self.assertTrue(self.send({"op": "step", "expected_generation": 1,
+                                   "dx": .01, "dy": 0})["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
