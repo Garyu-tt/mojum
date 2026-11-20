@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
+from .reactive_controller import ControllerError, SCHEMA as CONTROLLER_SCHEMA, checked_goal, decide
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -66,6 +67,7 @@ class Aquarium:
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
+        control_mode="manual", goal=None,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -73,6 +75,9 @@ class Aquarium:
             raise AquariumError("invalid agent ID")
         if neural_mode not in ("shadow", "disabled"):
             raise AquariumError("neural_mode must be shadow or disabled")
+        if control_mode not in ("manual", "reactive_fixture"):
+            raise AquariumError("unsupported control_mode")
+        self.control_mode = control_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
         self.dt_ns = dt_ns
@@ -91,6 +96,16 @@ class Aquarium:
         if not isinstance(self.room, Room) or len(start) != 2:
             raise AquariumError("invalid room or start")
         self.start = (float(start[0]), float(start[1]))
+        self.goal = None
+        if self.control_mode == "reactive_fixture":
+            selected_goal = (self.room.width * 0.875, self.room.height * 0.875) if goal is None else goal
+            try:
+                self.goal = checked_goal(self.room, selected_goal)
+            except ControllerError as exc:
+                raise AquariumError("invalid reactive point-room goal") from exc
+        elif goal is not None:
+            raise AquariumError("goal requires reactive_fixture control mode")
+        self._last_feedback = None
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
@@ -100,6 +115,14 @@ class Aquarium:
             "room": _room_manifest(self.room, self.start),
             "source_classification": "synthetic_only_brain_unimplemented_no_mujoco",
         }
+        if self.control_mode == "reactive_fixture":
+            # Additive bootstrap fields: existing manual journals remain compatible
+            # with the pre-controller R0.3 manifest and frames.
+            self.manifest.update({
+                "control_mode": "reactive_fixture",
+                "controller_schema": CONTROLLER_SCHEMA,
+                "goal": list(self.goal),
+            })
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.tick = 0
@@ -137,7 +160,10 @@ class Aquarium:
         return self.store.append(event, expected_head=self.store.head())
 
     def _calculate(self, dx, dy):
-        dx, dy = _movement(dx), _movement(dy)
+        if self.control_mode == "manual":
+            dx, dy = _movement(dx), _movement(dy)
+        elif dx is not None or dy is not None:
+            raise AquariumError("reactive_fixture rejects external movement overrides")
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
         adapted = copy.deepcopy(self.graph)
@@ -149,12 +175,18 @@ class Aquarium:
         runtime = Simulation(adapted, dt_ns=self.dt_ns)
         runtime.tick = self.tick
         output = runtime.step()
+        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
+        controller = None
+        if self.control_mode == "reactive_fixture":
+            controller = decide(
+                self.room, self.world, sensory, self.goal, self._last_feedback,
+            )
+            dx, dy = controller["dx"], controller["dy"]
         new_world, world_obs = advance(
             self.room, self.world, tick=self.tick + 1, dx=dx, dy=dy,
             expected_revision=self.world.revision,
         )
-        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
-        sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         # Calculate against a copy. The predictor is committed only *after*
         # the SQLite append succeeds, and replay derives identical weights.
         next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot())
@@ -172,14 +204,25 @@ class Aquarium:
             "movement_request": {"dx": dx, "dy": dy},
             "physical_model": "NONE_FIXTURE_ONLY",
         }
+        if controller is not None:
+            payload["controller"] = controller
         return payload, new_world, next_learner
 
-    def step(self, *, dx=0.02, dy=0.0):
+    def step(self, *, dx=None, dy=None):
+        if self.control_mode == "manual":
+            dx = 0.02 if dx is None else dx
+            dy = 0.0 if dy is None else dy
         payload, next_world, next_learner = self._calculate(dx, dy)
         self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                             self.tick * self.dt_ns, self.genome.revision)
         self.world = next_world
         self.learner = next_learner
+        if self.control_mode == "reactive_fixture":
+            self._last_feedback = {
+                "dx": payload["movement_request"]["dx"],
+                "dy": payload["movement_request"]["dy"],
+                "blocked": payload["world"]["blocked"],
+            }
         self.tick += 1
         return copy.deepcopy(payload)
 
@@ -244,12 +287,21 @@ class Aquarium:
                 move = event["payload"].get("movement_request")
                 if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
                     raise AquariumError("invalid replayed movement")
-                payload, next_world, next_learner = self._calculate(move["dx"], move["dy"])
+                payload, next_world, next_learner = (
+                    self._calculate(move["dx"], move["dy"])
+                    if self.control_mode == "manual" else self._calculate(None, None)
+                )
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
                 self.world = next_world
                 self.learner = next_learner
+                if self.control_mode == "reactive_fixture":
+                    self._last_feedback = {
+                        "dx": payload["movement_request"]["dx"],
+                        "dy": payload["movement_request"]["dy"],
+                        "blocked": payload["world"]["blocked"],
+                    }
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
@@ -264,6 +316,9 @@ class Aquarium:
             "journal_head": self.store.head(),
             "neural_mode": self.neural_mode,
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
+            **({"control_mode": self.control_mode, "goal": list(self.goal),
+                 "last_feedback": copy.deepcopy(self._last_feedback)}
+               if self.control_mode == "reactive_fixture" else {}),
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
@@ -276,25 +331,30 @@ def main():
     parser.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
     parser.add_argument("--ticks", type=int, default=120)
-    parser.add_argument("--dx", type=float, default=0.02)
-    parser.add_argument("--dy", type=float, default=0.0)
+    parser.add_argument("--dx", type=float, default=None)
+    parser.add_argument("--dy", type=float, default=None)
+    parser.add_argument("--control-mode", choices=("manual", "reactive_fixture"), default="manual")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    if args.control_mode == "reactive_fixture" and (args.dx is not None or args.dy is not None):
+        parser.error("--dx/--dy are not accepted for reactive_fixture")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
-        neural_mode=args.neural_mode,
+        neural_mode=args.neural_mode, control_mode=args.control_mode,
     ) as aquarium:
         for _ in range(args.ticks):
             aquarium.step(dx=args.dx, dy=args.dy)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (
-            "SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
-            if aquarium.neural_mode == "shadow"
-            else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
+            "SYNTHETIC_REACTIVE_FIXTURE_NOT_LEARNED_MOTOR_POLICY_OR_MUJOCO"
+            if aquarium.control_mode == "reactive_fixture"
+            else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
+                  if aquarium.neural_mode == "shadow"
+                  else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
         )
         print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
 
