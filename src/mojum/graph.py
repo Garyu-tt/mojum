@@ -50,6 +50,8 @@ def validate(graph):
             sid, sport, did, dport = src["node"], src["port"], dst["node"], dst["port"]
         except (TypeError, KeyError):
             raise GraphError("Malformed edge endpoint") from None
+        if not all(isinstance(value, str) for value in (sid, sport, did, dport)):
+            raise GraphError("Malformed edge endpoint")
         if sid not in by_id or did not in by_id:
             raise GraphError("Edge references absent node")
         if sport not in PORTS[by_id[sid]["kind"]][1] or dport not in PORTS[by_id[did]["kind"]][0]:
