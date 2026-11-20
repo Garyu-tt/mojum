@@ -26,7 +26,15 @@ class DevelopmentError(ValueError):
 
 
 def _finite(x):
-    return type(x) in (int, float) and math.isfinite(x)
+    if type(x) not in (int, float):
+        return False
+    try:
+        return math.isfinite(x)
+    except (OverflowError, TypeError, ValueError):
+        # Very large Python integers cannot be converted to a C float.
+        # An untrusted numeric cue must raise DevelopmentError, not leak
+        # an implementation-level OverflowError.
+        return False
 
 
 @dataclass(frozen=True)
