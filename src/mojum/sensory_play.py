@@ -100,9 +100,16 @@ class ToyScene:
         }
 
     def _nearest(self, state):
+        # Ties must be settled by observable scene geometry/reflectance, not
+        # arbitrary *spectator-only* names or hidden softness. Otherwise just
+        # renaming two equidistant toys changes the agent's numeric sensor and
+        # the measured probe response, violating the no-oracle contract.
         return min(
             self.toys,
-            key=lambda t: (math.hypot(state.x - t.x, state.y - t.y), t.id),
+            key=lambda t: (
+                math.hypot(state.x - t.x, state.y - t.y),
+                t.x, t.y, t.radius_m, t.rgb,
+            ),
             default=None,
         )
 
