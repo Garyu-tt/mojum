@@ -113,6 +113,14 @@ class PulseLearningTests(unittest.TestCase):
             with self.subTest(rate=rate), self.assertRaises(NeuralError):
                 PulsePredictor(rate)
 
+    def test_large_integer_learning_rate_and_corrupt_snapshot_rejected(self):
+        with self.assertRaises(NeuralError):
+            PulsePredictor(10**5000)
+        state = PulsePredictor().snapshot()
+        state["weights"][0] = 10**5000
+        with self.assertRaises(NeuralError):
+            PulsePredictor.from_snapshot(state)
+
     def test_snapshot_rejects_nan_weight(self):
         p = PulsePredictor()
         p.observe(sample(0))
