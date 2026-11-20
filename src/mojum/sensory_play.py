@@ -409,6 +409,13 @@ class SensoryPlay:
             object_hypothesis = next_object_memory.observe(
                 sense, direction, [self.world.x, self.world.y], touch,
             )
+        # Dynamic spectator geometry is derived from the same immutable
+        # virtual tick as the sensor. The organism sees neither toy IDs nor
+        # scripted trajectories; plain R0.9/R0.10 payloads stay unchanged.
+        from .moving_toys import MovingToyScene
+        spectator = (self.scene.spectator_at(self.world.tick)
+                     if isinstance(self.scene, MovingToyScene)
+                     else self.scene.manifest())
         payload = {
             "schema": SCHEMA, "tick": self.tick,
             "synthetic_heartbeat": heartbeat,
@@ -420,7 +427,7 @@ class SensoryPlay:
             },
             "prediction_before": prediction, "contact_result": touch,
             "world": world, "learning": learned,
-            "spectator_scene": self.scene.manifest(),
+            "spectator_scene": spectator,
             "inference_scope": "observed_numeric_cue_contact_association_only",
             "brain_status": "NOT_A_NEURAL_BRAIN",
         }
