@@ -288,6 +288,55 @@ class ObservedObjectContinuityTests(unittest.TestCase):
         with self.assertRaises(CuriosityError):
             SensoryPlay(self.path, GRAPH)
 
+    def test_contact_consistency_guard_is_opt_in_and_version_pinned(self):
+        from mojum.object_memory import ProvisionalObjectMemory
+        guarded = ProvisionalObjectMemory(contact_guard=True)
+        snap = guarded.snapshot()
+        self.assertIs(snap["contact_guard"], True)
+        self.assertEqual(ProvisionalObjectMemory.from_snapshot(snap).snapshot(), snap)
+        with self.assertRaises(CuriosityError):
+            ProvisionalObjectMemory(contact_guard=1)
+        for invalid in (False, 0, "true"):
+            with self.assertRaises(CuriosityError):
+                ProvisionalObjectMemory.from_snapshot(dict(snap, contact_guard=invalid))
+        with self.assertRaises(CuriosityError):
+            SensoryPlay(self.path, GRAPH, contact_guard=True, object_tracking=False)
+        self.assertFalse(self.path.exists())
+
+        with self.open(contact_guard=True) as infant:
+            for _ in range(24):
+                infant.step()
+            checkpoint = infant.checkpoint()
+            self.assertTrue(checkpoint["object_memory"]["contact_guard"])
+            self.assertTrue(infant.manifest["object_contact_guard"]["enabled"])
+            self.assertEqual(infant.store.dataset()["projection"]["items"], [])
+        with self.open(contact_guard=True) as infant:
+            self.assertEqual(infant.checkpoint(), checkpoint)
+            infant.step()
+        with self.assertRaises(CuriosityError):
+            self.open(contact_guard=False)
+        with self.assertRaises(CuriosityError):
+            SensoryPlay(self.path, GRAPH)
+
+    def test_cli_contact_guard_resume_and_flag_validation(self):
+        args = [sys.executable, "-m", "mojum.sensory_play",
+                "--db", str(self.path), "--object-tracking", "--contact-guard",
+                "--ticks", "5", "--watch"]
+        first = [json.loads(x) for x in subprocess.check_output(args, text=True).splitlines()]
+        second = [json.loads(x) for x in subprocess.check_output(args, text=True).splitlines()]
+        self.assertEqual([f["tick"] for f in first[:-1]], list(range(5)))
+        self.assertEqual([f["tick"] for f in second[:-1]], list(range(5, 10)))
+        self.assertTrue(second[-1]["checkpoint"]["object_memory"]["contact_guard"])
+        self.assertFalse(second[0]["object_hypothesis"]["identity_verified"])
+        missing_tracking = self.path.with_name("bad.sqlite3")
+        result = subprocess.run(
+            [sys.executable, "-m", "mojum.sensory_play", "--db", str(missing_tracking),
+             "--contact-guard", "--ticks", "1"],
+            text=True, capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(missing_tracking.exists())
+
     def test_cli_opt_in_tracking_is_private_and_resumable(self):
         args = [sys.executable, "-m", "mojum.sensory_play",
                 "--db", str(self.path), "--object-tracking", "--ticks", "6",
