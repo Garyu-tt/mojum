@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -35,9 +36,17 @@ def _unique(pairs):
     return result
 
 
+def _finite_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("nonfinite JSON number")
+    return result
+
+
 def _json(raw):
     try:
         result = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique,
+                            parse_float=_finite_float,
                             parse_constant=lambda _: (_ for _ in ()).throw(
                                 ValueError("nonfinite JSON constant")))
     except (UnicodeError, RecursionError, json.JSONDecodeError) as exc:
