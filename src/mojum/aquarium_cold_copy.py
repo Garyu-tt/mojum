@@ -161,3 +161,47 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
             "journal_head": before["journal_head"],
             "db_sha256": checksum, "event_count": count,
             "status": "VERIFIED_SYNTHETIC_REPLAY_NOT_LIVE_MIGRATION"}
+
+
+def main():
+    """Offline single-host CLI. Prints only verification metadata, never events."""
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(
+        description="PRIVATE synthetic Aquarium SQLite cold-copy/replay check",
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    for mode in ("export", "verify"):
+        p = modes.add_parser(mode)
+        p.add_argument("--db", type=Path, required=True)
+        p.add_argument("--genome", type=Path, default=Path(__file__).resolve().parents[2]
+                       / "examples/genesis_seed.json")
+        p.add_argument("--graph", type=Path, default=Path(__file__).resolve().parents[2]
+                       / "examples/first_loop.json")
+        p.add_argument("--agent-id", default="dante-fixture-001")
+        p.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
+        if mode == "export":
+            p.add_argument("--output", type=Path, required=True)
+        else:
+            p.add_argument("--expected-head", required=True)
+            p.add_argument("--expected-sha256")
+            p.add_argument("--expected-tick", type=int)
+    args = parser.parse_args()
+    seed = json.loads(args.genome.read_text(encoding="utf-8"))
+    graph = json.loads(args.graph.read_text(encoding="utf-8"))
+    if args.mode == "export":
+        result = export_cold_copy(args.db, args.output, seed, graph,
+                                  agent_id=args.agent_id, neural_mode=args.neural_mode)
+    else:
+        result = verify_cold_copy(args.db, seed, graph,
+                                  expected_agent_id=args.agent_id,
+                                  expected_journal_head=args.expected_head,
+                                  expected_sha256=args.expected_sha256,
+                                  expected_tick=args.expected_tick,
+                                  neural_mode=args.neural_mode)
+    print(json.dumps(result, sort_keys=True, allow_nan=False))
+
+
+if __name__ == "__main__":
+    main()
