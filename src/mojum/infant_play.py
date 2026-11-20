@@ -293,6 +293,15 @@ class InfantPlay:
                 "prediction_error": learning["prediction_error"],
                 "total_updates": learning["updates"],
             },
+            "assessment": {
+                "metric": "local_movement_effectiveness_not_personality_score",
+                "score_0_to_5": (
+                    round(5 * learning["actual_effect"], 3)
+                    if proposal["action"] != "rest" else None
+                ),
+                "basis": "fraction_of_requested_synthetic_displacement",
+                "grade_of": "single_action_result_not_the_organism",
+            },
             "inference": {
                 "kind": "local_empirical_action_effect",
                 "text": (
