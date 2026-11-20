@@ -17,6 +17,7 @@ BEARING_SCHEMA = "mojum.sensor.synthetic-azimuth/1"
 MAX_TRACKS = 64
 MAX_FRAMES = 3999
 ASSOCIATION_RADIUS_M = 0.32
+CONTACT_CONFLICT_THRESHOLD = 0.30
 
 
 def _finite(value):
@@ -70,7 +71,10 @@ def _contact(sensor, result):
 class ProvisionalObjectMemory:
     """Local, evidence-counted identity hypotheses, **not** verified objects."""
 
-    def __init__(self):
+    def __init__(self, *, contact_guard=False):
+        if type(contact_guard) is not bool:
+            raise CuriosityError("contact guard must be true or false")
+        self.contact_guard = contact_guard
         self.tracks = {}
         self.next_track = 1
         self.last_tick = -1
@@ -78,19 +82,28 @@ class ProvisionalObjectMemory:
         self.touch_updates = 0
 
     def snapshot(self):
-        return {
+        result = {
             "schema": SCHEMA, "tracks": copy.deepcopy(self.tracks),
             "next_track": self.next_track, "last_tick": self.last_tick,
             "accepted_sightings": self.accepted_sightings,
             "touch_updates": self.touch_updates,
         }
+        # The default v1 snapshot is bit-for-bit unchanged. Opt-in guarded
+        # memory includes an explicit mode marker to prevent silent replay.
+        if self.contact_guard:
+            result["contact_guard"] = True
+        return result
 
     @classmethod
     def from_snapshot(cls, snap):
-        if (not isinstance(snap, dict) or set(snap) != {
+        keys = {
             "schema", "tracks", "next_track", "last_tick",
             "accepted_sightings", "touch_updates",
-        } or snap["schema"] != SCHEMA or not isinstance(snap["tracks"], dict)
+        }
+        if (not isinstance(snap, dict)
+                or set(snap) not in (keys, keys | {"contact_guard"})
+                or ("contact_guard" in snap and snap["contact_guard"] is not True)
+                or snap["schema"] != SCHEMA or not isinstance(snap["tracks"], dict)
                 or len(snap["tracks"]) > MAX_TRACKS
                 or type(snap["next_track"]) is not int
                 or not 1 <= snap["next_track"] <= MAX_TRACKS + 1
@@ -135,7 +148,7 @@ class ProvisionalObjectMemory:
             touches += tr["contacts"]
         if accepted != snap["accepted_sightings"] or touches != snap["touch_updates"]:
             raise CuriosityError("inconsistent object evidence totals")
-        fresh = cls()
+        fresh = cls(contact_guard=snap.get("contact_guard", False))
         fresh.tracks = copy.deepcopy(snap["tracks"])
         fresh.next_track = snap["next_track"]
         fresh.last_tick = snap["last_tick"]
@@ -188,6 +201,21 @@ class ProvisionalObjectMemory:
                 "gap_ticks": None, "identity_verified": False,
                 "basis": "multiple_compatible_local_hypotheses",
             }
+        if len(candidates) == 1 and self.contact_guard and measurement is not None:
+            prior = self.tracks[candidates[0]]
+            if (prior["contacts"] > 0
+                    and abs(measurement - prior["mean_deflection"])
+                    > CONTACT_CONFLICT_THRESHOLD):
+                # An already learned contact response contradicts this
+                # location-based identity. Without extra sensory evidence,
+                # abstain; do not corrupt the old object's measurements.
+                return {
+                    "status": "contact_conflict_abstention", "hypothesis": None,
+                    "estimated_position": estimate, "candidates": candidates,
+                    "sightings": 0, "touches": 0, "mean_deflection": None,
+                    "gap_ticks": None, "identity_verified": False,
+                    "basis": "observed_contact_contradicts_local_prediction",
+                }
         if not candidates:
             if len(self.tracks) >= MAX_TRACKS:
                 raise CuriosityError("provisional object-memory capacity exhausted")
