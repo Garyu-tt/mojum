@@ -169,8 +169,18 @@ class NoosphereTests(unittest.TestCase):
         self.assertEqual(len(self.store.dataset(topic="heartbeat")["projection"]["items"]), 1)
         self.assertEqual(len(self.store.dataset(limit=1)["projection"]["items"]), 1)
 
+    def test_source_filter_and_provenance(self):
+        first = event("a")
+        second = event("b", observed=30, recorded=40)
+        second["source"] = "world.fixture"
+        self.store.append(first, expected_head=self.store.head())
+        self.store.append(second, expected_head=self.store.head())
+        view = self.store.dataset(source="world.fixture")
+        self.assertEqual([r["event"]["event_id"] for r in view["projection"]["items"]], ["b"])
+        self.assertEqual(view["projection"]["filters"]["source"], "world.fixture")
+
     def test_invalid_dataset_parameters_fail(self):
-        for kwargs in ({"limit": 0}, {"limit": True}, {"include_nonpublic": "yes"}, {"valid_at_ns": -1}):
+        for kwargs in ({"limit": 0}, {"limit": True}, {"include_nonpublic": "yes"}, {"valid_at_ns": -1}, {"source": ""}):
             with self.assertRaises(NoosphereError):
                 self.store.dataset(**kwargs)
 
