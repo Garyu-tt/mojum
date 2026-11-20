@@ -124,6 +124,8 @@ class Aquarium:
         }
 
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
+        if self.store.count() >= MAX_REPLAY_EVENTS:
+            raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
         return self.store.append(event, expected_head=self.store.head())
 
@@ -196,9 +198,8 @@ class Aquarium:
         if not items:
             raise AquariumError("bootstrap event missing")
         first = items[0]["event"]
-        if (first["topic"] != "aquarium.bootstrap" or
-                first["event_id"] != "aquarium-bootstrap" or
-                first["payload"] != self.manifest):
+        if first != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
+                                 0, self.graph_sha256):
             raise AquariumError("aquarium seed, room, graph or clock mismatch")
         for entry in items[1:]:
             event = entry["event"]
@@ -212,10 +213,16 @@ class Aquarium:
                     raise AquariumError("invalid acquisition envelope")
                 if raw.get("valid_from_tick", -1) < self.tick:
                     raise AquariumError("retroactive committed acquisition")
+                if raw.get("recorded_at_ns") != event["recorded_at_ns"]:
+                    raise AquariumError("acquisition and journal recorded time differ")
                 next_ledger = GenomeLedger.from_snapshot(self.genome.snapshot())
                 next_ledger.append(raw, next_ledger.revision)
                 if next_ledger.revision != event["source_revision"]:
                     raise AquariumError("acquired gene revision mismatch")
+                if event != self._record("genesis.acquisition", event["event_id"],
+                                         event["payload"], self.tick * self.dt_ns,
+                                         next_ledger.revision):
+                    raise AquariumError("noncanonical acquired event envelope")
                 self.genome = next_ledger
             elif event["topic"] == "aquarium.frame":
                 if event["event_id"] != f"frame-{self.tick:012d}":
@@ -224,7 +231,8 @@ class Aquarium:
                 if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
                     raise AquariumError("invalid replayed movement")
                 payload, next_world = self._calculate(move["dx"], move["dy"])
-                if event["payload"] != payload or event["source_revision"] != self.genome.revision:
+                if event != self._record("aquarium.frame", event["event_id"], payload,
+                                         self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
                 self.world = next_world
                 self.tick += 1
