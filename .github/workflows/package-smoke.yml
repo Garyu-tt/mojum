@@ -1,0 +1,51 @@
+name: Mojum installed-wheel synthetic aquarium smoke
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'src/mojum/**'
+      - 'tests/test_installable_package.py'
+      - '.github/workflows/package-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  installed-stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install actual local project with no runtime dependencies
+        run: python -m pip install --no-deps .
+      - name: Run installed console command outside checkout and verify resume
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/mojum-installed"
+          cd "$RUNNER_TEMP/mojum-installed"
+          mojum-aquarium --db ./journal.sqlite3 --ticks 2 --neural-mode disabled > first.json
+          mojum-aquarium --db ./journal.sqlite3 --ticks 1 --neural-mode disabled > second.json
+          python - <<'PY'
+          import json
+          import pathlib
+          from importlib.resources import files
+          import mojum
+
+          first = json.loads(pathlib.Path("first.json").read_text(encoding="utf-8"))
+          second = json.loads(pathlib.Path("second.json").read_text(encoding="utf-8"))
+          assert first["tick"] == 2 and first["stored_events"] == 3
+          assert second["tick"] == 3 and second["stored_events"] == 4
+          assert first["status"] == "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
+          assert files("mojum").joinpath("data/genesis_seed.json").read_text()
+          assert files("mojum").joinpath("data/first_loop.json").read_text()
+          assert pathlib.Path(mojum.__file__).resolve().is_relative_to(pathlib.Path.home()) or "site-packages" in str(pathlib.Path(mojum.__file__).resolve())
+          assert pathlib.Path("journal.sqlite3").is_file()
+          PY
