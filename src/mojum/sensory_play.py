@@ -120,6 +120,27 @@ class ToyScene:
             "source": "synthetic_local_proximity_not_camera",
         }
 
+    def directional_cue(self, state, sensor):
+        """R0.10 opt-in egocentric eight-sector cue; no toy identity or material.
+
+        Computed from fixture geometry INSIDE the synthetic sensor. The agent
+        receives only a quantized sector, never the privileged coordinates.
+        """
+        if not isinstance(sensor, dict) or sensor != self.sense(state):
+            raise CuriosityError("stale or forged near-field frame")
+        octant = None
+        if sensor["visible"]:
+            nearest = self._nearest(state)
+            angle = math.atan2(nearest.y - state.y, nearest.x - state.x)
+            octant = int(math.floor(((angle % (2 * math.pi)) + math.pi / 8)
+                                    / (math.pi / 4))) % 8
+        return {
+            "schema": "mojum.sensor.synthetic-azimuth/1",
+            "tick": state.tick, "world_revision": state.revision,
+            "octant": octant,
+            "source": "synthetic_direction_quantization_not_camera",
+        }
+
     def probe(self, state, sensor):
         """One bounded virtual touch; return measurement, not hidden material."""
         if (not isinstance(sensor, dict) or sensor != self.sense(state)):
@@ -255,13 +276,21 @@ class SensoryPlay:
 
     def __init__(self, db_path, graph, *, scene=None, start=(1.0, 2.0),
                  agent_id="dante-sensory-fixture-001", rng_seed=SEED,
-                 dt_ns=10_000_000):
+                 dt_ns=10_000_000, object_tracking=False,
+                 contact_guard=False, rgb_tolerance=0):
         if not isinstance(agent_id, str) or not agent_id.strip():
             raise CuriosityError("invalid agent")
         if type(rng_seed) is not int or not 0 <= rng_seed < 2**32:
             raise CuriosityError("invalid exploration seed")
         if type(dt_ns) is not int or not 1000 <= dt_ns <= 1_000_000_000:
             raise CuriosityError("invalid virtual clock")
+        if type(object_tracking) is not bool:
+            raise CuriosityError("object_tracking must be true or false")
+        if type(contact_guard) is not bool or (contact_guard and not object_tracking):
+            raise CuriosityError("contact_guard requires opt-in object tracking")
+        if (type(rgb_tolerance) is not int or not 0 <= rgb_tolerance <= 6
+                or (rgb_tolerance and not object_tracking)):
+            raise CuriosityError("RGB noise tolerance 0..6 requires opt-in object tracking")
         validate_graph(graph)
         kinds = {n["kind"]: n["id"] for n in graph["nodes"]}
         if "sensory.interoception" not in kinds:
@@ -277,6 +306,12 @@ class SensoryPlay:
         self.agent_id = agent_id
         self.dt_ns = dt_ns
         self.model = ContactAssociations()
+        self.object_memory = None
+        if object_tracking:
+            from .object_memory import ProvisionalObjectMemory
+            self.object_memory = ProvisionalObjectMemory(
+                contact_guard=contact_guard, rgb_tolerance=rgb_tolerance,
+            )
         self.rng = rng_seed
         self.tick = 0
         self.manifest = {
@@ -287,6 +322,19 @@ class SensoryPlay:
             "scope": "synthetic_near_field_motor_and_contact_only",
             "goal": None, "imported_object_knowledge": None,
         }
+        if object_tracking:
+            self.manifest["object_tracking_schema"] = "mojum.object-memory.provisional/1"
+            self.manifest["direction_sensor_schema"] = "mojum.sensor.synthetic-azimuth/1"
+            if contact_guard:
+                self.manifest["object_contact_guard"] = {
+                    "enabled": True, "threshold": 0.30,
+                    "scope": "measured_synthetic_probe_only",
+                }
+            if rgb_tolerance:
+                self.manifest["object_rgb_tolerance"] = {
+                    "l1_budget": rgb_tolerance,
+                    "scope": "numeric_synthetic_rgb_only",
+                }
         self.store = LocalNoosphere(db_path, self.agent_id)
         try:
             if self.store.count() == 0:
@@ -349,6 +397,18 @@ class SensoryPlay:
             "updates": clone.updates,
             "status": "not_probed",
         }
+        next_object_memory = None
+        direction = None
+        object_hypothesis = None
+        if self.object_memory is not None:
+            from .object_memory import ProvisionalObjectMemory
+            direction = self.scene.directional_cue(self.world, sense)
+            next_object_memory = ProvisionalObjectMemory.from_snapshot(
+                self.object_memory.snapshot(),
+            )
+            object_hypothesis = next_object_memory.observe(
+                sense, direction, [self.world.x, self.world.y], touch,
+            )
         payload = {
             "schema": SCHEMA, "tick": self.tick,
             "synthetic_heartbeat": heartbeat,
@@ -364,13 +424,17 @@ class SensoryPlay:
             "inference_scope": "observed_numeric_cue_contact_association_only",
             "brain_status": "NOT_A_NEURAL_BRAIN",
         }
-        return payload, updated, clone, next_rng
+        if next_object_memory is not None:
+            payload["directional_cue"] = direction
+            payload["object_hypothesis"] = object_hypothesis
+        return payload, updated, clone, next_rng, next_object_memory
 
     def step(self):
-        payload, next_world, next_model, next_rng = self._calculate()
+        payload, next_world, next_model, next_rng, next_objects = self._calculate()
         self._append("sensory.frame", f"sensory-frame-{self.tick:012d}",
                      payload, self.tick * self.dt_ns)
         self.world, self.model, self.rng = next_world, next_model, next_rng
+        self.object_memory = next_objects
         self.tick += 1
         return copy.deepcopy(payload)
 
@@ -387,7 +451,7 @@ class SensoryPlay:
         ):
             raise CuriosityError("incompatible sensory play bootstrap")
         for row in rows[1:]:
-            payload, world, model, rng = self._calculate()
+            payload, world, model, rng, objects = self._calculate()
             expected = self._event(
                 "sensory.frame", f"sensory-frame-{self.tick:012d}",
                 payload, self.tick * self.dt_ns,
@@ -395,10 +459,11 @@ class SensoryPlay:
             if row["event"] != expected:
                 raise CuriosityError("sensory experience replay mismatch")
             self.world, self.model, self.rng = world, model, rng
+            self.object_memory = objects
             self.tick += 1
 
     def checkpoint(self):
-        return {
+        snap = {
             "schema": "mojum.sensory-curiosity.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "world_revision": self.world.revision,
@@ -406,6 +471,9 @@ class SensoryPlay:
             "rng": self.rng, "head": self.store.head(),
             "integrity": "local_checksum_not_authenticated",
         }
+        if self.object_memory is not None:
+            snap["object_memory"] = self.object_memory.snapshot()
+        return snap
 
 
 def main():
@@ -416,10 +484,19 @@ def main():
     p.add_argument("--ticks", type=int, default=120)
     p.add_argument("--watch", action="store_true",
                    help="emit synthetic PRIVATE numeric evidence to local stdout")
+    p.add_argument("--object-tracking", action="store_true",
+                   help="enable provisional object-memory hypotheses; requires a fresh journal")
+    p.add_argument("--contact-guard", action="store_true",
+                   help="abstain when a measured touch contradicts stored local object response; needs --object-tracking")
+    p.add_argument("--rgb-tolerance", type=int, default=0,
+                   help="opt-in bounded RGB L1 jitter tolerance (0..6); needs --object-tracking and a fresh journal")
     args = p.parse_args()
     if not 0 <= args.ticks <= 1000:
         p.error("--ticks must be within 0..1000")
-    with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8"))) as baby:
+    with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8")),
+                    object_tracking=args.object_tracking,
+                    contact_guard=args.contact_guard,
+                    rgb_tolerance=args.rgb_tolerance) as baby:
         for _ in range(args.ticks):
             row = baby.step()
             if args.watch:
