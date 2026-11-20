@@ -1,11 +1,17 @@
 name: Mojum motor-gate independent QA
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 jobs:
   motor-gate-stdlib:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     steps:
