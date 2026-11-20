@@ -38,6 +38,9 @@ class InfantTests(unittest.TestCase):
             self.assertEqual(frame["experiment"]["prior_visits"], 0)
             self.assertTrue(frame["viewer"]["experiment"]["novel_attempt"])
             self.assertEqual(frame["viewer"]["inference"]["kind"], "local_empirical_action_effect")
+            self.assertFalse(frame["viewer"]["spectator_scene"]["available_to_agent"])
+            self.assertEqual(frame["viewer"]["spectator_scene"]["obstacles"],
+                             [[2, 1, .1, 2]])
             self.assertEqual(frame["viewer"]["source"],
                              "DETERMINISTIC_SYNTHETIC_TRACE_NOT_CONSCIOUS_EXPERIENCE")
             self.assertIn("single_action_result_not_the_organism",
@@ -197,6 +200,17 @@ class InfantTests(unittest.TestCase):
         self.assertEqual(a[-1]["checkpoint"]["tick"], 8)
         self.assertEqual(b[-1]["checkpoint"]["tick"], 16)
         self.assertEqual(b[-1]["events"], 17)
+
+    def test_offline_browser_observer_is_file_only_without_remote_dependencies(self):
+        page = (ROOT / "examples/infant_observer.html").read_text(encoding="utf-8")
+        self.assertIn('mojum.observation.trace/1', page)
+        self.assertIn('id="scene"', page)
+        self.assertIn('id="history"', page)
+        self.assertIn('spectator_scene', page)
+        self.assertIn('file.text()', page)
+        self.assertNotIn('fetch(', page)
+        self.assertNotIn('https://', page)
+        self.assertNotIn('<script src=', page)
 
     def test_no_network_or_public_viewer_server_by_default(self):
         with self.open() as infant:
