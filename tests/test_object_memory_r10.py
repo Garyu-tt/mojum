@@ -241,7 +241,12 @@ class ObservedObjectContinuityTests(unittest.TestCase):
             a.step()
             with self.assertRaises(NoosphereError):
                 b.step()
-            self.assertEqual(b.checkpoint(), old)
+            current = b.checkpoint()
+            # The *shared SQLite head* now belongs to the other writer.
+            # Local world, RNG and both learned models must remain unchanged.
+            for field in ("tick", "world_revision", "association_model",
+                          "object_memory", "rng"):
+                self.assertEqual(current[field], old[field])
 
     def test_legacy_r09_journal_stays_compatible_without_opt_in(self):
         with SensoryPlay(self.path, GRAPH) as legacy:
