@@ -9,7 +9,7 @@ This module is a **genuinely persistent** CPU-only event store for **one digital
 - All event fields validated strictly and bounded to <=128 KiB of serialized event data; no binary attachments, dynamic Python code or automatic plugin execution.
 - Append via `BEGIN IMMEDIATE` + `expected_head` compare-and-swap. Concurrent writers do not silently overwrite. Duplicate IDs and nonmonotonic record times rejected.
 - SQLite `BEFORE UPDATE/DELETE` triggers protect append-only access through normal SQL statements; complete transactions are atomic. `verify_chain()` checks full event representation against indexed columns, contiguous sequence and cumulative SHA-256 event chain.
-- `dataset()` is read-only, ordered, filtered and deterministic for a fixed database state and parameter set; exports `PUBLIC` only unless `include_nonpublic=True` is explicitly supplied by the trusted same-owner process. Supports topic, as-of recorded time, valid-at time and row limit.
+- `dataset()` is read-only, ordered, filtered and deterministic for a fixed database state and parameter set; exports `PUBLIC` only unless `include_nonpublic=True` is explicitly supplied by the trusted same-owner process. Supports topic, source, as-of recorded time, valid-at time and row limit.
 
 ## Security boundary — IMPORTANT
 
