@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
+from .neural import PulsePredictor
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -64,12 +65,16 @@ class Aquarium:
     def __init__(
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
-        external_expected_head=None,
+        external_expected_head=None, neural_mode="shadow",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
         if not isinstance(agent_id, str) or not agent_id.strip():
             raise AquariumError("invalid agent ID")
+        if neural_mode not in ("shadow", "disabled"):
+            raise AquariumError("neural_mode must be shadow or disabled")
+        self.neural_mode = neural_mode
+        self.learner = PulsePredictor() if neural_mode == "shadow" else None
         self.dt_ns = dt_ns
         self.agent_id = agent_id
         self.seed = validate_seed(seed)
@@ -90,6 +95,8 @@ class Aquarium:
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
             "graph_sha256": self.graph_sha256,
+            "neural_mode": self.neural_mode,
+            "neural_model_schema": "mojum.neural.delayed-pulse/1" if self.learner is not None else None,
             "room": _room_manifest(self.room, self.start),
             "source_classification": "synthetic_only_brain_unimplemented_no_mujoco",
         }
@@ -147,6 +154,12 @@ class Aquarium:
             expected_revision=self.world.revision,
         )
         brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
+        # Calculate against a copy. The predictor is committed only *after*
+        # the SQLite append succeeds, and replay derives identical weights.
+        next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot())
+                        if self.learner is not None else None)
+        learning = next_learner.observe(sensory) if next_learner is not None else None
         if brain.get("status") != "UNIMPLEMENTED" or brain.get("action") is not None:
             raise AquariumError("unexpected privileged brain behavior in fixture")
         payload = {
@@ -154,18 +167,19 @@ class Aquarium:
             "genome_revision": self.genome.revision,
             "phenotype": pheno,
             "graph_execution_sha256": runtime.graph_hash,
-            "interoception": output[self.kind_ids["sensory.interoception"]]["sensory"],
-            "brain": brain, "world": world_obs,
+            "interoception": sensory,
+            "brain": brain, "learning_observer": learning, "world": world_obs,
             "movement_request": {"dx": dx, "dy": dy},
             "physical_model": "NONE_FIXTURE_ONLY",
         }
-        return payload, new_world
+        return payload, new_world, next_learner
 
     def step(self, *, dx=0.02, dy=0.0):
-        payload, next_world = self._calculate(dx, dy)
+        payload, next_world, next_learner = self._calculate(dx, dy)
         self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                             self.tick * self.dt_ns, self.genome.revision)
         self.world = next_world
+        self.learner = next_learner
         self.tick += 1
         return copy.deepcopy(payload)
 
@@ -230,11 +244,12 @@ class Aquarium:
                 move = event["payload"].get("movement_request")
                 if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
                     raise AquariumError("invalid replayed movement")
-                payload, next_world = self._calculate(move["dx"], move["dy"])
+                payload, next_world, next_learner = self._calculate(move["dx"], move["dy"])
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
                 self.world = next_world
+                self.learner = next_learner
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
@@ -247,6 +262,8 @@ class Aquarium:
             "genome_revision": self.genome.revision,
             "world_revision": self.world.revision,
             "journal_head": self.store.head(),
+            "neural_mode": self.neural_mode,
+            "neural_state": self.learner.snapshot() if self.learner is not None else None,
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
@@ -261,12 +278,14 @@ def main():
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--dx", type=float, default=0.02)
     parser.add_argument("--dy", type=float, default=0.0)
+    parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
-        json.loads(args.graph.read_text(encoding="utf-8"))
+        json.loads(args.graph.read_text(encoding="utf-8")),
+        neural_mode=args.neural_mode,
     ) as aquarium:
         for _ in range(args.ticks):
             aquarium.step(dx=args.dx, dy=args.dy)
