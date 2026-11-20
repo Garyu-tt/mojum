@@ -29,7 +29,10 @@ class PolicyEvaluationTests(unittest.TestCase):
         print("FIXTURE_POLICY_COMPARISON=" + json.dumps(metrics, sort_keys=True))
         cases = metrics["controller_comparison"]
         self.assertEqual(metrics["case"], "single_fixed_room_and_goal_not_generalizable")
-        self.assertEqual(cases["learned_fixture"]["learned_updates"], 350)
+        # Once the goal is reached, future frames are idle; they must
+        # not invent rewards or additional training updates.
+        expected_updates = cases["learned_fixture"]["first_goal_tick"] or 350
+        self.assertEqual(cases["learned_fixture"]["learned_updates"], expected_updates)
         for result in cases.values():
             self.assertEqual(result["ticks"], 350)
             self.assertGreaterEqual(result["blocked_steps"], 0)
