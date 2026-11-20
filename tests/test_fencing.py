@@ -38,5 +38,19 @@ class FencingTests(unittest.TestCase):
             authorize({}, Lease(1, 'a', 0))
 
 
+    def test_canonical_writer_ids_accepted(self):
+        for writer in ('a', 'node-1', 'node_2', 'node.3', 'node:4', 'A9',
+                       'a.b-c_d:42', 'n' * 128):
+            with self.subTest(writer=writer):
+                self.assertEqual(Lease(1, writer, 0).writer, writer)
+
+    def test_invalid_writer_ids_rejected(self):
+        for writer in ('', ' ', ' node ', 'node ', 'node\\x00two',
+                       'node\\nlog-forgery', 'n' * 129, '.', '../a', 'a/b',
+                       'a..b', 'a--b', 'a@b', 'пиксель', 'a\\tb', 'a\\x7fb'):
+            with self.subTest(writer=writer), self.assertRaises(FenceError):
+                Lease(1, writer, 0)
+
+
 if __name__ == '__main__':
     unittest.main()
