@@ -65,6 +65,33 @@ No GPU, MuJoCo, real-world sensor, hardware actuator, internet service
 or access to another user's Noosphere is used. The 4 x 4 m space is an
 inert point-room fixture rather than a full body.
 
+## Initial measured results (fixed-seed diagnostic)
+
+GitHub Actions on 2026-11-20 reported the following for
+`--ticks 180 --train-ticks 160 --seeds 3` using seeds 1979, 1981, 1983.
+Each cell is goals reached out of three fresh runs. The benchmark is
+explicitly synthetic and deterministic, not a random population sample.
+
+| Held-out room | Reactive | Fresh R0.5 online | Transfer frozen | Transfer online |
+| --- | ---: | ---: | ---: | ---: |
+| open_floor | 3/3 | 3/3 | 3/3 | 3/3 |
+| shifted_barrier | 3/3 | 3/3 | 3/3 | 3/3 |
+| upper_barrier | 3/3 | 3/3 | **1/3** | 3/3 |
+| detour_required | 0/3 | 0/3 | 0/3 | 0/3 |
+| sealed_barrier | 0/3 | 0/3 | 0/3 | 0/3 |
+
+**Negative transfer exists in the upper-barrier fixture**: the frozen
+pretrained table averaged 63 blocked movements across the three seeds,
+versus 3.667 for scratch learning and 2 for online adaptation. This
+observation **does not prove** either general advantage or disadvantage
+in new environments. The table is tied to one trained model, the fixed
+room suite and fixed exploratory seed list.
+
+The detour fixture is physically traversable using a fixed bounded
+waypoint witness, but R0.4 and R0.5 actions are constrained to move
+toward the goal; they cannot travel to the required higher Y waypoint.
+No number of tabular Q updates alone lifts that action-set restriction.
+
 ## Interpretation and acceptance
 
 **Pass conditions for QA tooling**, not claims of learning quality:
