@@ -7,26 +7,51 @@ runtime, make any network request, import SQLite directly, or show fictional
 thoughts. The file remains in local browser memory; no localStorage or
 IndexedDB is used.
 
-## How to make real source data
+## Create the source Aquarium on plain main (no R0.13 dependency)
 
-The unmerged R0.13 canonical toy-contact branch [PR #65](https://github.com/Garyu-tt/mojum/pull/65) adds --watch to
-python -m mojum.aquarium. With that branch checked out and Python 3.11+:
-
-    PYTHONPATH=src python -m mojum.aquarium \
-      --db ./dante.sqlite3 --ticks 120 \
-      --exploration-mode goal_free --sensory-mode toy_probe \
-      --watch > ./dante.private.jsonl
-
-The saved file contains **PRIVATE** frame payloads and a final compact
-checkpoint line. Transfer it only through a channel you trust. Never attach
-this journal to a public issue, PR, CI artifact or sample website. You can
-generate another consecutive segment by using >> and the same database,
-provided no ticks were skipped between segments:
+The trace exporter in this PR reads real committed events from the **already
+existing** CPU-only canonical Aquarium SQLite database. First, run the
+unchanged default scripted fixture (from the repository root):
 
     PYTHONPATH=src python -m mojum.aquarium \
-      --db ./dante.sqlite3 --ticks 30 \
+      --db ./dante.sqlite3 --ticks 120
+    PYTHONPATH=src python -m mojum.aquarium \
+      --db ./dante.sqlite3 --ticks 30
+
+Then export the **entire replay-verified history** into a new local file
+with an explicit PRIVATE-export acknowledgement:
+
+    PYTHONPATH=src python -m mojum.aquarium_trace_export \
+      --db ./dante.sqlite3 \
+      --output ./dante.private.jsonl \
+      --allow-private-export
+
+The source SQLite is opened in read-only mode; a SQLite Backup API snapshot
+is verified by deterministic Aquarium replay **in private scratch space**.
+The original journal is not bootstrapped, written or altered by the exporter.
+The output is created with restrictive mode 0600 on POSIX, cannot overwrite
+an existing destination, and is at most 24 MiB/5000 frames. CLI stdout
+contains metadata only, **never PRIVATE frames**. An optional --expected-head
+argument pins the captured snapshot against a separately stored journal head.
+Without an independent anchor, a self-consistent malicious rewrite cannot be
+authenticated. Backup staging can read committed WAL pages while the original
+Aquarium is open; no multi-device migration or continuous live-feed claim.
+
+## Optional live-produced JSONL on unmerged R0.13 branch
+
+The [PR #65](https://github.com/Garyu-tt/mojum/pull/65) feature branch
+also offers --watch, which emits real goal-free movement and toy-contact
+frames as consecutive newline-delimited JSON. That mode is **not on main**:
+
+    PYTHONPATH=src python -m mojum.aquarium \
+      --db ./dante_toy.sqlite3 --ticks 120 \
       --exploration-mode goal_free --sensory-mode toy_probe \
-      --watch >> ./dante.private.jsonl
+      --watch > ./dante_toy.private.jsonl
+
+Do not expose either PRIVATE file publicly. On the main-based branch,
+the read-only exporter is suitable for examining existing recorded
+scripted Aquarium history without requiring #65. Once a later review
+integrates #65 / RC #75, this viewer can open the richer --watch files too.
 
 Open examples/aquarium_trace_viewer.html directly in a browser with a
 file:// URL, then select the JSONL trace using the file picker. There is
@@ -51,9 +76,10 @@ A single frame may contain:
 
 ## Boundaries
 
-- **No full memory export from SQLite.** The HTML accepts only saved JSONL,
-  not a .sqlite3 database. The current unmodified main does not yet
-  support canonical R0.13 --watch; run the feature branch noted above.
+- **The browser itself does not open SQLite.** The new Python exporter
+  reads and verifies a real source SQLite snapshot into a PRIVATE JSONL
+  file; the HTML then reads only that local JSONL file. Original main
+  still lacks the R0.13 live --watch producer.
 - It skips standalone summary lines of the known checkpoint schema.
   Frame ticks must be consecutive; repeated or missing ticks are rejected.
 - Input is limited to **24 MiB**, **5000** frames and **64k characters per
