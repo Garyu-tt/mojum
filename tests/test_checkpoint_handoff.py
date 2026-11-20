@@ -86,6 +86,29 @@ class OfflineCheckpointHandoffTests(unittest.TestCase):
             restore_new_directory(self.archive, dest, expected_organism_id="dante-a")
         self.assertFalse(dest.exists())
 
+    def test_out_of_band_trusted_manifest_anchor(self):
+        manifest = self.export()
+        good = manifest["manifest_sha256"]
+        checked, parts = read_verified_archive(
+            self.archive, expected_organism_id="dante-fixture-001",
+            expected_manifest_sha256=good,
+        )
+        self.assertEqual(checked, manifest)
+        self.assertEqual(parts, self.parts)
+        dest = self.root / "bad-anchor"
+        with self.assertRaisesRegex(ValueError, "trusted manifest SHA-256 mismatch"):
+            restore_new_directory(
+                self.archive, dest, expected_organism_id="dante-fixture-001",
+                expected_manifest_sha256="0" * 64 if good != "0" * 64 else "1" * 64,
+            )
+        self.assertFalse(dest.exists())
+        for anchor in (True, "not-a-sha", good.upper(), "a" * 63):
+            with self.subTest(anchor=anchor), self.assertRaises(ValueError):
+                read_verified_archive(
+                    self.archive, expected_organism_id="dante-fixture-001",
+                    expected_manifest_sha256=anchor,
+                )
+
     def test_reject_stale_revision_before_creation(self):
         self.export()
         dest = self.root / "wrong-revision"
