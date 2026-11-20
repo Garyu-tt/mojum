@@ -1,11 +1,17 @@
 name: Mojum R0.3 online-learning aquarium regression
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 jobs:
   aquarium-stdlib:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     steps:
@@ -13,6 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Compile all source and test modules
+        run: python -m compileall -q src tests
       - name: Run full graph, GENESIS, world, Noosphere and neural regression
         env:
           PYTHONPATH: src
