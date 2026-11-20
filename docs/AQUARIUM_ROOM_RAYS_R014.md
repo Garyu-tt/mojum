@@ -47,13 +47,14 @@ network learning weights.
 `tests/test_aquarium_room_rays_r014.py` constructs **two actual point-room
 worlds** with different hidden obstacle distances, but the **same
 quantized four-ray observation** (both show east bucket `0` from the
-starting state). Both newborn learners choose `x+`. The swept AABB
-collision engine reports one blocked move and one successful move. When
-tested with an *identical subsequent numeric input*, the one with measured
-success chooses `x+`, while the one with measured blockage chooses `x-`.
-An otherwise blank/frozen learner also chooses `x-` by innate rotation.
+starting state). At tick zero the synthetic heartbeat pulse rotates the innate preference,
+so both newborn learners choose `x-`. The swept AABB collision engine
+reports one blocked move and one successful move. When tested with an
+*identical subsequent numeric input*, the one with measured success again
+chooses `x-`, while the one with measured blockage selects another
+direction. An otherwise blank/frozen learner selects `x-` by innate rotation.
 The difference from the frozen control is therefore due to recorded
-experience, not a new clock phase or a hidden wall coordinate.
+experience, not a different clock phase or a hidden wall coordinate.
 
 This is a **controlled synthetic causal witness**. It does not establish
 learning that generalizes to real perception or arbitrary 3D worlds.
