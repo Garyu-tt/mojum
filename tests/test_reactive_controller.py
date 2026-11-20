@@ -92,6 +92,7 @@ class ReactiveControllerTests(unittest.TestCase):
 
     def test_stale_sqlite_head_does_not_mutate_controller_feedback(self):
         with self.open() as a, self.open() as b:
+            before_head = b.store.head()
             before_tick = b.tick
             before_world = b.world
             before_feedback = b._last_feedback
@@ -104,7 +105,7 @@ class ReactiveControllerTests(unittest.TestCase):
             self.assertEqual(b._last_feedback, before_feedback)
             self.assertEqual(b.learner.snapshot(), before_neural)
             # The shared SQLite head *does* move because another writer committed.
-            self.assertNotEqual(b.store.head(), a.manifest["graph_sha256"])
+            self.assertNotEqual(b.store.head(), before_head)
 
     def test_mode_or_goal_switch_fails_closed_on_reopen(self):
         with self.open() as aquarium:
