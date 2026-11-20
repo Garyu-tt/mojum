@@ -15,7 +15,9 @@ from mojum.object_memory import (
     ProvisionalObjectMemory, ASSOCIATION_RADIUS_M,
     BEARING_SCHEMA, SCHEMA as MODEL_SCHEMA,
 )
-from mojum.sensory_play import CuriosityError, SensoryPlay, Toy, ToyScene
+from mojum.sensory_play import (
+    ContactAssociations, CuriosityError, SensoryPlay, Toy, ToyScene,
+)
 from mojum.world_room import advance, initial_state
 
 
@@ -97,6 +99,16 @@ class ObservedObjectContinuityTests(unittest.TestCase):
         self.assertEqual(memory.tracks["h0001"]["cue"], memory.tracks["h0002"]["cue"])
         self.assertAlmostEqual(memory.tracks["h0001"]["mean_deflection"], .1)
         self.assertAlmostEqual(memory.tracks["h0002"]["mean_deflection"], .9)
+        # Exact same two measurements collide in the R0.9 RGB-only
+        # baseline; this is a controlled witness, not a population metric.
+        color_only = ContactAssociations()
+        first_guess = color_only.predict(sight)
+        color_only.learn(sight, scene.probe(a, sight), first_guess)
+        second_guess = color_only.predict(sight2)
+        self.assertAlmostEqual(second_guess["predicted_deflection"], .1)
+        color_only.learn(sight2, scene.probe(b, sight2), second_guess)
+        self.assertEqual(len(color_only.table), 1)
+        self.assertAlmostEqual(next(iter(color_only.table.values()))["mean_deflection"], .5)
         self.assertNotIn("hidden.one", json.dumps(memory.snapshot()))
         self.assertNotIn("hidden.two", json.dumps(memory.snapshot()))
 
