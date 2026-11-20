@@ -224,11 +224,11 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     draw();
     if(!frames.length)return;
     const f=frames[current], heart=f.interoception.heartbeat;
-    const dev=f.developmental || {};
+    const dev=f.developmental || {}, devObs=dev.observation || {};
     const toy=f.toy_contact || {}, obs=toy.observation || {};
     const probe=toy.probe_intent || {}, measured=toy.measured_contact || {};
     const prediction=toy.prediction_before || {};
-    const learning=f.toy_contact_state || f.learning_observer || {};
+    const learning=dev.learning || f.learning_observer || {};
     $("seek").value = String(current);
     setField("counter",String(current+1)+" / "+frames.length);
     setField("tick",String(f.tick));
@@ -239,7 +239,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     setField("action",String(action));
     setField("blocked",f.world.blocked?"Заблокировано":"Прошло");
     let range="Не измерен";
-    if(Array.isArray(obs.range_bucket_5cm_ewns))range=obs.range_bucket_5cm_ewns.join(" / ")+" × 5 см";
+    if(Array.isArray(devObs.range_bucket_5cm_ewns))range=devObs.range_bucket_5cm_ewns.join(" / ")+" × 5 см";
     else if(obs.visible === true)range=fmt(obs.range_bucket_10cm)+" × 10 см";
     else if(obs.visible === false)range="Нет сигнала";
     setField("range",range);
@@ -248,6 +248,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
       measured.contact===false?"Контакта нет":"—");
     setField("prediction",fmt(prediction.predicted_deflection));
     setField("learned",Number.isSafeInteger(prediction.model_updates)?String(prediction.model_updates):
+      Number.isSafeInteger(learning.total_updates)?String(learning.total_updates):
       Number.isSafeInteger(learning.updates)?String(learning.updates):"—");
     setField("brain",String(f.brain && f.brain.status || "нет модели"));
     $("events").replaceChildren();
