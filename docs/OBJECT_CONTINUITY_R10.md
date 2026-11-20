@@ -42,6 +42,25 @@ triangulated SLAM, vision or cognitive understanding. Different items
 close together can alias; noisy position and range can fragment a real
 object into several hypotheses. The tests explicitly check ambiguity.
 
+## Controlled comparison with the R0.9 baseline
+
+In an explicit **two-sighting fixture** (not a statistical or
+held-out generalization benchmark), two distant toys share the same
+RGB cue but produce measured contact deflections **0.1** and **0.9**.
+
+- **R0.9 RGB-only association:** after both observations, one shared
+  mean prediction of **0.5**, losing the distinction.
+- **R0.10 provisional spatial tracks:** two separate local hypotheses
+  retain contact estimates **0.1** and **0.9**.
+- **R0.10 ambiguity control:** when a later observation falls within
+  range of two hypotheses, **no identity assignment** and **no contact
+  profile update** is performed.
+
+This demonstrates only that a simple local cue+location hypothesis
+avoids one constructed RGB-aliasing failure. It does not establish
+reliable object recognition across moving scenes, occlusions, noise
+or real cameras.
+
 ## Run from a checkout of this branch
 
 ```bash
