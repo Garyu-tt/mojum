@@ -277,6 +277,12 @@ class InfantPlay:
                 "heartbeat_pulse": pulse, "position": [self.world.x, self.world.y],
                 "world_revision": self.world.revision,
             },
+            # Scene geometry is spectator metadata, NOT a sense the policy used.
+            "spectator_scene": {
+                "width": self.room.width, "height": self.room.height,
+                "obstacles": [list(x) for x in self.room.obstacles],
+                "available_to_agent": False,
+            },
             "experiment": {
                 "action": proposal["action"], "displacement": [proposal["dx"], proposal["dy"]],
                 "novel_attempt": proposal["prior_visits"] == 0,
