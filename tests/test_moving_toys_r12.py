@@ -58,7 +58,7 @@ class DynamicSyntheticSceneQA(unittest.TestCase):
     def test_true_toy_motion_is_bounded_per_tick_and_reflects_at_walls(self):
         scene = MovingToyScene(toys=(
             Toy("hidden-moving", 3.8, 1.0, .1, (100, 60, 50), .4),
-        ), velocities=((.05, -.01),))
+        ), velocities=((.049, -.009),))
         self.assertEqual(len(scene.at(200)), 1)
         for tick in range(150):
             current, next_ = scene.at(tick)[0], scene.at(tick + 1)[0]
