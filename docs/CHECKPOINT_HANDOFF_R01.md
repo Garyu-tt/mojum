@@ -29,17 +29,21 @@ keep it on a trusted device or encrypted storage and transfer it manually
 ## Verify and stage on device B
 
 Use the **expected local organism ID**, not the ID read from the archive.
-Never take the expected revision from an untrusted archive if anti-rollback
-is a concern.
+The `--manifest-sha256` must be recorded and verified independently (e.g.
+a trusted previously saved fingerprint), **not copied from the untrusted
+archive**. Never take the expected revision from an untrusted archive if
+anti-rollback is a concern.
 
 ```bash
 PYTHONPATH=src python -m mojum.checkpoint_handoff verify \
   --archive ./dante-transfer.mojum.json \
-  --organism-id dante-fixture-001 --revision 17
+  --organism-id dante-fixture-001 --revision 17 \\
+  --manifest-sha256 <trusted-64-character-lowercase-hex>
 
 PYTHONPATH=src python -m mojum.checkpoint_handoff restore \
   --archive ./dante-transfer.mojum.json \
   --organism-id dante-fixture-001 --revision 17 \
+  --manifest-sha256 <trusted-64-character-lowercase-hex> \
   --directory ./dante-verified-components
 ```
 
@@ -61,6 +65,8 @@ these operations; such failures abort rather than silently degrade.
 - This is **not a snapshot of the live Aquarium**. The five supplied byte
   streams are caller-controlled fixtures. No agreement protocol connects
   a simultaneous GENESIS/neural/body/world/Noosphere revision.
+- The optional trusted SHA-256 anchor detects substitution relative to an
+  independently held digest; it is still not a digital signature.
 - There is no built-in network transport, device pairing, encryption,
   authentication, signature, trust-on-first-use or authorization. A manifest
   SHA-256 detects corruption against an independently trusted reference;
