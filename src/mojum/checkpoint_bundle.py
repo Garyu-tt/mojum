@@ -43,7 +43,7 @@ def unpack(bundle, *, expected_revision=None, expected_organism_id=None):
     payloads = {name: _decode(bundle["payloads"][name]) for name in NAMES}
     verify_manifest(bundle["manifest"], payloads, expected_revision=expected_revision)
     # Each organism has its own checkpoint namespace. A valid digest and
-    # revision alone cannot prevent restoring another organism\'s payload.
+    # revision alone cannot prevent restoring another organism's payload.
     if expected_organism_id is not None and (
             type(expected_organism_id) is not str
             or bundle["manifest"]["organism_id"] != expected_organism_id):
