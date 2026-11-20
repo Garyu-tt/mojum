@@ -75,8 +75,9 @@ def scenarios():
     }
 
 
-def evaluate_case(samples, name, *, contact_guard=False):
-    memory = ProvisionalObjectMemory(contact_guard=contact_guard)
+def evaluate_case(samples, name, *, contact_guard=False, rgb_tolerance=0):
+    memory = ProvisionalObjectMemory(contact_guard=contact_guard,
+                                    rgb_tolerance=rgb_tolerance)
     first_scene = ToyScene(toys=samples[0]["toys"])
     world = initial_state(first_scene.room, *samples[0]["xy"])
     # Mapping belongs to this external evaluator, *not* the tracker.
@@ -173,6 +174,15 @@ def run_suite():
     cases["crossing_identical_colors_guarded"] = evaluate_case(
         scenarios()["crossing_identical_colors"],
         "crossing_identical_colors_guarded", contact_guard=True,
+    )
+    cases["small_rgb_jitter_tolerant"] = evaluate_case(
+        scenarios()["small_rgb_jitter"],
+        "small_rgb_jitter_tolerant", rgb_tolerance=1,
+    )
+    cases["crossing_identical_colors_guarded_tolerant"] = evaluate_case(
+        scenarios()["crossing_identical_colors"],
+        "crossing_identical_colors_guarded_tolerant",
+        contact_guard=True, rgb_tolerance=1,
     )
     return {
         "schema": SCHEMA,
