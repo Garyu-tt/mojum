@@ -8,6 +8,8 @@ import copy
 import json
 import math
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -214,6 +216,54 @@ class DynamicSyntheticSceneQA(unittest.TestCase):
             for field in ("tick", "world_revision", "rng",
                           "object_memory", "association_model"):
                 self.assertEqual(saved[field], actual[field])
+
+    def test_cli_moving_world_is_real_per_tick_and_replayable(self):
+        args = [
+            sys.executable, "-m", "mojum.sensory_play",
+            "--db", str(self.db), "--ticks", "8", "--watch",
+            "--moving-toys", "--object-tracking", "--contact-guard",
+            "--rgb-tolerance", "1",
+        ]
+        first = [json.loads(line) for line in
+                 subprocess.check_output(args, text=True).splitlines()]
+        second = [json.loads(line) for line in
+                  subprocess.check_output(args, text=True).splitlines()]
+        self.assertEqual([f["tick"] for f in first[:-1]], list(range(8)))
+        self.assertEqual([f["tick"] for f in second[:-1]], list(range(8, 16)))
+        self.assertNotEqual(
+            first[0]["spectator_scene"]["toys"],
+            second[0]["spectator_scene"]["toys"],
+        )
+        self.assertEqual(
+            second[-1]["checkpoint"]["tick"], 16,
+        )
+        self.assertEqual(second[-1]["private_events"], 17)
+        self.assertEqual(
+            second[0]["spectator_scene"]["kinematic_source"], MOTION_SOURCE,
+        )
+        self.assertNotIn("toys", second[0]["sensor"])
+        self.assertNotIn("velocity", second[0]["sensor"])
+
+    def test_cli_rejects_reinterpretation_as_static_without_moving_flag(self):
+        moving_args = [
+            sys.executable, "-m", "mojum.sensory_play",
+            "--db", str(self.db), "--ticks", "3", "--moving-toys",
+        ]
+        subprocess.check_output(moving_args, text=True)
+        plain_args = [
+            sys.executable, "-m", "mojum.sensory_play",
+            "--db", str(self.db), "--ticks", "1",
+        ]
+        wrong = subprocess.run(
+            plain_args, text=True, capture_output=True,
+            timeout=15,
+        )
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertIn("incompatible", wrong.stderr)
+        with SensoryPlay(
+            self.db, GRAPH, scene=MovingToyScene(),
+        ) as child:
+            self.assertEqual(child.tick, 3)
 
     def test_r09_static_scene_checkpoint_and_spectator_remain_unchanged(self):
         scene = ToyScene()
