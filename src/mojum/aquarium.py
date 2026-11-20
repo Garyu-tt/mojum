@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
+from .learned_policy import SCHEMA as POLICY_SCHEMA, TabularAxisPolicy, gate_fixture_proposal
 from .reactive_controller import ControllerError, SCHEMA as CONTROLLER_SCHEMA, checked_goal, decide
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
@@ -75,11 +76,13 @@ class Aquarium:
             raise AquariumError("invalid agent ID")
         if neural_mode not in ("shadow", "disabled"):
             raise AquariumError("neural_mode must be shadow or disabled")
-        if control_mode not in ("manual", "reactive_fixture"):
+        if control_mode not in ("manual", "reactive_fixture", "learned_fixture"):
             raise AquariumError("unsupported control_mode")
         self.control_mode = control_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
+        self.policy = TabularAxisPolicy() if control_mode == "learned_fixture" else None
+        self._pending_policy = None
         self.dt_ns = dt_ns
         self.agent_id = agent_id
         self.seed = validate_seed(seed)
@@ -97,14 +100,14 @@ class Aquarium:
             raise AquariumError("invalid room or start")
         self.start = (float(start[0]), float(start[1]))
         self.goal = None
-        if self.control_mode == "reactive_fixture":
+        if self.control_mode in ("reactive_fixture", "learned_fixture"):
             selected_goal = (self.room.width * 0.875, self.room.height * 0.875) if goal is None else goal
             try:
                 self.goal = checked_goal(self.room, selected_goal)
             except ControllerError as exc:
                 raise AquariumError("invalid reactive point-room goal") from exc
         elif goal is not None:
-            raise AquariumError("goal requires reactive_fixture control mode")
+            raise AquariumError("goal requires a fixture controller mode")
         self._last_feedback = None
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
@@ -122,6 +125,14 @@ class Aquarium:
                 "control_mode": "reactive_fixture",
                 "controller_schema": CONTROLLER_SCHEMA,
                 "goal": list(self.goal),
+            })
+        if self.control_mode == "learned_fixture":
+            self.manifest.update({
+                "control_mode": "learned_fixture",
+                "controller_schema": POLICY_SCHEMA,
+                "goal": list(self.goal),
+                "policy_rng_seed": 1979,
+                "policy_reward": "bounded_progress_or_blocked_v1",
             })
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
@@ -163,7 +174,7 @@ class Aquarium:
         if self.control_mode == "manual":
             dx, dy = _movement(dx), _movement(dy)
         elif dx is not None or dy is not None:
-            raise AquariumError("reactive_fixture rejects external movement overrides")
+            raise AquariumError("fixture controller rejects external movement overrides")
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
         adapted = copy.deepcopy(self.graph)
@@ -178,11 +189,19 @@ class Aquarium:
         brain = output[self.kind_ids["brain.placeholder"]]["observation"]
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         controller = None
+        next_policy = None
         if self.control_mode == "reactive_fixture":
             controller = decide(
                 self.room, self.world, sensory, self.goal, self._last_feedback,
             )
             dx, dy = controller["dx"], controller["dy"]
+        elif self.control_mode == "learned_fixture":
+            # Exploration and learning operate on a disposable policy clone.
+            next_policy = TabularAxisPolicy.from_snapshot(self.policy.snapshot())
+            controller = next_policy.propose(self.room, self.world, sensory, self.goal)
+            dx, dy = gate_fixture_proposal(
+                self.room, self.world, sensory, self.goal, controller,
+            )
         new_world, world_obs = advance(
             self.room, self.world, tick=self.tick + 1, dx=dx, dy=dy,
             expected_revision=self.world.revision,
@@ -192,6 +211,12 @@ class Aquarium:
         next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot())
                         if self.learner is not None else None)
         learning = next_learner.observe(sensory) if next_learner is not None else None
+        policy_learning = None
+        if next_policy is not None:
+            # Reward is computed only after the point-room world response.
+            policy_learning = next_policy.learn(
+                self.room, self.world, new_world, world_obs, self.goal, controller,
+            )
         if brain.get("status") != "UNIMPLEMENTED" or brain.get("action") is not None:
             raise AquariumError("unexpected privileged brain behavior in fixture")
         payload = {
@@ -206,18 +231,28 @@ class Aquarium:
         }
         if controller is not None:
             payload["controller"] = controller
+        if policy_learning is not None:
+            payload["policy_learning"] = policy_learning
+        self._pending_policy = next_policy
         return payload, new_world, next_learner
 
     def step(self, *, dx=None, dy=None):
         if self.control_mode == "manual":
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
-        payload, next_world, next_learner = self._calculate(dx, dy)
-        self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
-                            self.tick * self.dt_ns, self.genome.revision)
+        try:
+            payload, next_world, next_learner = self._calculate(dx, dy)
+            self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
+                                self.tick * self.dt_ns, self.genome.revision)
+        except BaseException:
+            self._pending_policy = None
+            raise
         self.world = next_world
         self.learner = next_learner
-        if self.control_mode == "reactive_fixture":
+        if self.control_mode == "learned_fixture":
+            self.policy = self._pending_policy
+        self._pending_policy = None
+        if self.control_mode in ("reactive_fixture", "learned_fixture"):
             self._last_feedback = {
                 "dx": payload["movement_request"]["dx"],
                 "dy": payload["movement_request"]["dy"],
@@ -296,7 +331,10 @@ class Aquarium:
                     raise AquariumError("non-deterministic or mismatched committed frame")
                 self.world = next_world
                 self.learner = next_learner
-                if self.control_mode == "reactive_fixture":
+                if self.control_mode == "learned_fixture":
+                    self.policy = self._pending_policy
+                self._pending_policy = None
+                if self.control_mode in ("reactive_fixture", "learned_fixture"):
                     self._last_feedback = {
                         "dx": payload["movement_request"]["dx"],
                         "dy": payload["movement_request"]["dy"],
@@ -318,7 +356,9 @@ class Aquarium:
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
             **({"control_mode": self.control_mode, "goal": list(self.goal),
                  "last_feedback": copy.deepcopy(self._last_feedback)}
-               if self.control_mode == "reactive_fixture" else {}),
+               if self.control_mode in ("reactive_fixture", "learned_fixture") else {}),
+            **({"policy_state": self.policy.snapshot()}
+               if self.control_mode == "learned_fixture" else {}),
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
@@ -333,13 +373,13 @@ def main():
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--dx", type=float, default=None)
     parser.add_argument("--dy", type=float, default=None)
-    parser.add_argument("--control-mode", choices=("manual", "reactive_fixture"), default="manual")
+    parser.add_argument("--control-mode", choices=("manual", "reactive_fixture", "learned_fixture"), default="manual")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
-    if args.control_mode == "reactive_fixture" and (args.dx is not None or args.dy is not None):
-        parser.error("--dx/--dy are not accepted for reactive_fixture")
+    if args.control_mode != "manual" and (args.dx is not None or args.dy is not None):
+        parser.error("--dx/--dy are not accepted for fixture controller modes")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
@@ -350,11 +390,13 @@ def main():
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (
-            "SYNTHETIC_REACTIVE_FIXTURE_NOT_LEARNED_MOTOR_POLICY_OR_MUJOCO"
-            if aquarium.control_mode == "reactive_fixture"
-            else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
-                  if aquarium.neural_mode == "shadow"
-                  else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
+            "SYNTHETIC_TABULAR_REWARD_LEARNING_NOT_NEURAL_BRAIN_OR_MUJOCO"
+            if aquarium.control_mode == "learned_fixture"
+            else ("SYNTHETIC_REACTIVE_FIXTURE_NOT_LEARNED_MOTOR_POLICY_OR_MUJOCO"
+                  if aquarium.control_mode == "reactive_fixture"
+                  else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
+                        if aquarium.neural_mode == "shadow"
+                        else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"))
         )
         print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
 
