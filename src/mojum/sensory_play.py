@@ -277,7 +277,7 @@ class SensoryPlay:
     def __init__(self, db_path, graph, *, scene=None, start=(1.0, 2.0),
                  agent_id="dante-sensory-fixture-001", rng_seed=SEED,
                  dt_ns=10_000_000, object_tracking=False,
-                 contact_guard=False):
+                 contact_guard=False, rgb_tolerance=0):
         if not isinstance(agent_id, str) or not agent_id.strip():
             raise CuriosityError("invalid agent")
         if type(rng_seed) is not int or not 0 <= rng_seed < 2**32:
@@ -288,6 +288,9 @@ class SensoryPlay:
             raise CuriosityError("object_tracking must be true or false")
         if type(contact_guard) is not bool or (contact_guard and not object_tracking):
             raise CuriosityError("contact_guard requires opt-in object tracking")
+        if (type(rgb_tolerance) is not int or not 0 <= rgb_tolerance <= 6
+                or (rgb_tolerance and not object_tracking)):
+            raise CuriosityError("RGB noise tolerance 0..6 requires opt-in object tracking")
         validate_graph(graph)
         kinds = {n["kind"]: n["id"] for n in graph["nodes"]}
         if "sensory.interoception" not in kinds:
@@ -307,7 +310,7 @@ class SensoryPlay:
         if object_tracking:
             from .object_memory import ProvisionalObjectMemory
             self.object_memory = ProvisionalObjectMemory(
-                contact_guard=contact_guard,
+                contact_guard=contact_guard, rgb_tolerance=rgb_tolerance,
             )
         self.rng = rng_seed
         self.tick = 0
@@ -326,6 +329,11 @@ class SensoryPlay:
                 self.manifest["object_contact_guard"] = {
                     "enabled": True, "threshold": 0.30,
                     "scope": "measured_synthetic_probe_only",
+                }
+            if rgb_tolerance:
+                self.manifest["object_rgb_tolerance"] = {
+                    "l1_budget": rgb_tolerance,
+                    "scope": "numeric_synthetic_rgb_only",
                 }
         self.store = LocalNoosphere(db_path, self.agent_id)
         try:
@@ -480,12 +488,15 @@ def main():
                    help="enable provisional object-memory hypotheses; requires a fresh journal")
     p.add_argument("--contact-guard", action="store_true",
                    help="abstain when a measured touch contradicts stored local object response; needs --object-tracking")
+    p.add_argument("--rgb-tolerance", type=int, default=0,
+                   help="opt-in bounded RGB L1 jitter tolerance (0..6); needs --object-tracking and a fresh journal")
     args = p.parse_args()
     if not 0 <= args.ticks <= 1000:
         p.error("--ticks must be within 0..1000")
     with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8")),
                     object_tracking=args.object_tracking,
-                    contact_guard=args.contact_guard) as baby:
+                    contact_guard=args.contact_guard,
+                    rgb_tolerance=args.rgb_tolerance) as baby:
         for _ in range(args.ticks):
             row = baby.step()
             if args.watch:
