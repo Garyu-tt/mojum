@@ -75,8 +75,8 @@ def scenarios():
     }
 
 
-def evaluate_case(samples, name):
-    memory = ProvisionalObjectMemory()
+def evaluate_case(samples, name, *, contact_guard=False):
+    memory = ProvisionalObjectMemory(contact_guard=contact_guard)
     first_scene = ToyScene(toys=samples[0]["toys"])
     world = initial_state(first_scene.room, *samples[0]["xy"])
     # Mapping belongs to this external evaluator, *not* the tracker.
@@ -85,8 +85,8 @@ def evaluate_case(samples, name):
     counter = {
         "sightings": 0, "matched_reencounters": 0,
         "identity_switches": 0, "splits": 0,
-        "ambiguous_abstentions": 0, "no_signal": 0,
-        "possible_reencounters": 0,
+        "ambiguous_abstentions": 0, "contact_conflict_abstentions": 0,
+        "no_signal": 0, "possible_reencounters": 0,
         "measured_contacts": 0, "contaminated_contacts": 0,
     }
     stream = []
@@ -125,6 +125,8 @@ def evaluate_case(samples, name):
         oracle = sample["oracle"]
         if status == "ambiguous_identity":
             counter["ambiguous_abstentions"] += 1
+        if status == "contact_conflict_abstention":
+            counter["contact_conflict_abstentions"] += 1
         if status == "possible_reencounter":
             counter["possible_reencounters"] += 1
         if not sensor["visible"]:
@@ -166,14 +168,18 @@ def evaluate_case(samples, name):
 
 
 def run_suite():
-    result = {
+    cases = {name: evaluate_case(samples, name)
+             for name, samples in scenarios().items()}
+    cases["crossing_identical_colors_guarded"] = evaluate_case(
+        scenarios()["crossing_identical_colors"],
+        "crossing_identical_colors_guarded", contact_guard=True,
+    )
+    return {
         "schema": SCHEMA,
         "purpose": "heldout_synthetic_failure_characterization_not_object_recognition_claim",
         "oracle_scope": "external_qa_only_never_a_policy_input",
-        "cases": {name: evaluate_case(samples, name)
-                  for name, samples in scenarios().items()},
+        "cases": cases,
     }
-    return result
 
 
 def compact_report(result):
