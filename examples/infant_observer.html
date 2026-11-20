@@ -214,7 +214,11 @@ async function load(file){
   frames=parsed;cursor=0;followLatest=false;$("seek").max=String(frames.length-1);
   for(const id of ["prev","next","play","seek"])$(id).disabled=false;
   show(0);renderMilestones();$("status").textContent="Загружено "+frames.length+" синтетических записей из "+file.name+". Данные не отправлялись в сеть.";
- }catch(e){frames=[];$("status").textContent="Ошибка локального журнала: "+e.message;}
+ }catch(e){
+  frames=[];cursor=0;renderMilestones();$("history").replaceChildren();
+  for(const id of ["prev","next","play","seek"])$(id).disabled=true;
+  draw(0);$("status").textContent="Ошибка локального журнала: "+e.message;
+ }
 }
 function stopFollow(){
  if(liveTimer){clearInterval(liveTimer);liveTimer=0;}
@@ -278,7 +282,8 @@ async function startLive(){
   if(!handles.length)return;
   stop();stopFollow();
   frames=[];cursor=0;followLatest=true;
-  renderMilestones();
+  renderMilestones();$("history").replaceChildren();draw(0);
+  for(const id of ["prev","next","play","seek"])$(id).disabled=true;
   liveHandle=handles[0];liveOffset=0;liveTail="";
   liveDecoder=new TextDecoder("utf-8",{fatal:true});
   $("liveFile").textContent="■ Остановить наблюдение";
