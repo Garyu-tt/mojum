@@ -160,6 +160,30 @@ class ColdAquariumCopyTests(unittest.TestCase):
             self._export()
         self.assertEqual(protected.read_bytes(), b"protected-data")
 
+    def test_cli_export_then_verify_in_two_processes(self):
+        import subprocess
+        import sys
+
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            for _ in range(6):
+                child.step()
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(ROOT / "src")
+        prefix = [sys.executable, "-m", "mojum.aquarium_cold_copy"]
+        exported = json.loads(subprocess.check_output(
+            [*prefix, "export", "--db", str(self.source),
+             "--output", str(self.exported)], text=True, env=env))
+        verified = json.loads(subprocess.check_output(
+            [*prefix, "verify", "--db", str(self.exported),
+             "--expected-head", exported["journal_head"],
+             "--expected-sha256", exported["db_sha256"],
+             "--expected-tick", "6"], text=True, env=env))
+        self.assertEqual(exported["tick"], verified["tick"])
+        self.assertEqual(exported["journal_head"], verified["journal_head"])
+        self.assertEqual(verified["event_count"], 7)
+        self.assertNotIn("payload", json.dumps(verified))
+
+
 
 if __name__ == "__main__":
     unittest.main()
