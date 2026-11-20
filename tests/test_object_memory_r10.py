@@ -81,7 +81,7 @@ class ObservedObjectContinuityTests(unittest.TestCase):
             Toy("hidden.two", 3.1, 3.0, .12, rgb, .9),
         ))
         memory = ProvisionalObjectMemory()
-        a = initial_state(scene.room, 0.7, 1)
+        a = initial_state(scene.room, 0.75, 1)
         sight, direction = observation(scene, a)
         o1 = memory.observe(sight, direction, [a.x, a.y], scene.probe(a, sight))
         self.assertEqual(o1["status"], "new_hypothesis")
