@@ -63,10 +63,20 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 The JSONL file includes both sensory frames and a final checkpoint
-summary per invocation. It is **not** currently accepted by the
-R0.7/R0.8 motor-only HTML viewer: schema is different. A future
-viewer should use an explicitly versioned adapter rather than
-pretending the numeric contact stream is camera vision.
+summary per invocation. Open the standalone local
+`examples/sensory_observer.html` page in a browser and choose
+`dante_sensory_private.jsonl`. This dedicated, offline viewer shows
+the spectator's toy-room scene, what numerical cue the organism received,
+whether it tried to probe, the real synthetic contact feedback,
+the numeric prediction before/after, its error, and memory evidence count.
+
+The browser uses only an explicitly selected local file; it makes no
+network requests or third-party imports. Its validation is for UI hygiene,
+not cryptographic authenticity. This is a replay after file creation,
+**not** live file-following yet. The existing R0.7/R0.8 motor-only HTML
+viewer is a different schema and must not silently mix trace formats.
+The viewer also has access to spectator-only scene geometry; that
+metadata does **not** mean the organism sees it.
 
 ## Source truth and privacy
 
