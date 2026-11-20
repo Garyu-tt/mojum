@@ -133,6 +133,55 @@ byte-for-byte unchanged.
 See `docs/OBJECT_HELDOUT_QA_R11.md` for the full fixed QA suite
 including known failures from RGB jitter and moving toys.
 
+## Optional bounded RGB noise tolerance (R0.11 QA hardening)
+
+The default R0.10 model still compares exact RGB numbers; in the
+fixed QA fixture, one toy with ±1 changes in a single RGB channel
+is incorrectly divided into **three object hypotheses (two false
+splits)**.
+
+A separate opt-in `--rgb-tolerance 1` permits the tracker to associate
+numeric cues whose **sum of absolute channel differences is at most 1**,
+*only when exactly one nearby local spatial hypothesis matches*.
+A candidate must still lie within the existing **0.32m** spatial
+distance and must still pass the independent `--contact-guard` check
+when enabled.
+
+```bash
+PYTHONPATH=src python -m mojum.sensory_play \
+  --db ./dante_r11_private.sqlite3 \
+  --object-tracking --contact-guard --rgb-tolerance 1 \
+  --ticks 180 --watch > ./dante_r11_private.jsonl
+```
+
+This **does not add synthetic noise** to an ordinary run; it alters
+the tolerance applied to the object's *measured cue* if noise is
+present. The benchmark separately perturbs the sensor input in a
+controlled scenario. Its one-step jitter now yields **one** tentative
+track and **zero** false splits in 12 synthetic observations, compared
+with three tracks and two splits in the strict baseline. This is
+a *fixed synthetic witness*, not proof of robust generalization.
+
+The accepted integer tolerance range is **0..6** total RGB L1 units;
+bools, floating values and larger tolerances are rejected. Zero is
+the default and keeps existing model snapshots/behavior identical.
+A nonzero tolerance is tagged in both the private journal bootstrap
+and learned memory snapshot; mismatched options on reopening fail
+closed. A wider tolerance can **increase false merges** when similar
+objects are physically close. When more than one spatially compatible
+color hypothesis exists, the tracker returns `ambiguous_identity`
+and refuses to update either object's evidence.
+
+The global R0.9 RGB-only response predictor is **not** modified by
+this option. Only the provisional local-hypothesis layer uses
+color tolerance. Source truth, observer names, hidden toy properties,
+real-world cameras and object labels are never consumed by the
+learner.
+
+An additional test ensures that a full **64-track** memory rejects
+the next new object without advancing its in-memory tick, allowing
+a failed step to remain atomic and retryable.
+
 ## Storage and safety
 
 All tracks live in each organism's **PRIVATE** SQLite Noosphere event
