@@ -233,6 +233,17 @@ class AquariumIntegrationTests(unittest.TestCase):
         with self.aquarium() as q:
             self.assertEqual(q.checkpoint()["trust"], "checksum_only_not_authenticated")
 
+    def test_event_budget_is_fail_closed_before_appending(self):
+        from unittest.mock import patch
+        with patch("mojum.aquarium.MAX_REPLAY_EVENTS", 2):
+            with self.aquarium() as q:
+                q.step()  # bootstrap + one frame = exactly two events
+                prior = q.checkpoint()
+                with self.assertRaises(AquariumError):
+                    q.step()
+                self.assertEqual(q.checkpoint(), prior)
+                self.assertEqual(q.store.count(), 2)
+
     def test_cli_restarts_same_database(self):
         env = dict(os.environ)
         cmd = [
