@@ -57,7 +57,7 @@ def standalone_html(*, html_path=HTML, js_path=JS) -> bytes:
 
     # Never silently publish a "standalone" page retaining another script
     # dependency (including unknown, duplicated or malformed source tags).
-    external = re.findall(r"<script\\b[^>]*\\bsrc\\b[^>]*>", html, flags=re.I)
+    external = re.findall(r"<script\b[^>]*\bsrc\b[^>]*>", html, flags=re.I)
     if sorted(external) != sorted(tag for tag, _ in scripts):
         raise PackagingError("unexpected or duplicate external room script dependency")
 
@@ -69,8 +69,8 @@ def standalone_html(*, html_path=HTML, js_path=JS) -> bytes:
         if tag == SCRIPT_TAG and "MojumRoomDesignerCore" not in js:
             raise PackagingError("wrong room editor JavaScript source")
         # Keep browser execution order identical to the adjacent scripts.
-        bundled = bundled.replace(tag, "<script>\n" + js.rstrip() + "\\n</script>", 1)
-    if re.search(r"<script\\b[^>]*\\bsrc\\b[^>]*>", bundled, flags=re.I):
+        bundled = bundled.replace(tag, "<script>\n" + js.rstrip() + "\n</script>", 1)
+    if re.search(r"<script\b[^>]*\bsrc\b[^>]*>", bundled, flags=re.I):
         raise PackagingError("room editor still requires a sibling script")
     if len(bundled.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
         raise PackagingError("single file exceeds bounded portable HTML budget")
