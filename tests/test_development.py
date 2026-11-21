@@ -120,6 +120,23 @@ class DevelopmentFixtureTests(unittest.TestCase):
         with self.assertRaises(DevelopmentError):
             initial_state(p, "x", "rev")
 
+    def test_reject_unpaired_surrogate_identities_before_bootstrap_or_snapshot(self):
+        for field in ("organism_id", "genome_revision"):
+            for bad in ("\\ud800", "\\udfff"):
+                with self.subTest(field=field, bad=repr(bad)):
+                    args = {"organism_id": "fixture", "genome_revision": "synthetic-rev"}
+                    args[field] = bad
+                    with self.assertRaisesRegex(DevelopmentError, "UTF-8"):
+                        initial_state(self.program, **args)
+                    invalid = copy.deepcopy(self.state)
+                    invalid[field] = bad
+                    with self.assertRaisesRegex(DevelopmentError, "UTF-8"):
+                        snapshot(invalid, self.program)
+                    saved = snapshot(self.state, self.program)
+                    saved["state"][field] = bad
+                    with self.assertRaises(DevelopmentError):
+                        restore(saved, self.program)
+
     def test_tamper_detection_and_program_pin(self):
         record = snapshot(self.state, self.program)
         record["state"]["regions"]["cortex"]["mature"] += 1
