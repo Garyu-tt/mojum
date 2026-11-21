@@ -84,6 +84,12 @@ browser and select the exported file. At tick 5 the selected move is north.
 The viewer reports a prediction based on one earlier observation and the
 recorded change from range bucket 0 to 1.
 
+Current exports must retain their SHA-256 frame metadata: the viewer rejects
+a modern checkpoint whose proof has been stripped, even if the JSONL frames
+themselves still parse. Only a genuinely older checkpoint without the
+current trace-range marker can be opened through the viewer's explicit
+legacy checkbox, and it remains visibly marked as unverified.
+
 The exporter verifies the complete journal on a temporary SQLite copy. Use the
 same mode flags as the recording. Add `--expected-head SHA256` when verifying
 against a separately recorded journal head. For longer histories, add
