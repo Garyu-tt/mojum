@@ -77,6 +77,36 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Versioned epoch continuation (opt-in)
+
+For a separate bounded long-run motor journal, use the new `local_cell_v4`
+policy. It carries an absolute logical tick and commits an explicit epoch
+marker at the 9,999-tick boundary; existing scripted, v2 and v3 journals are
+not reinterpreted. Use `sensory_mode=none` and repeat bounded batches:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+```
+
+For a wall-paced foreground session on the same one-device journal, use the
+bounded host with the v4 selectors explicit:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_PRIVATE.sqlite3 --ticks 1000 --interval-ms 1000 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none \
+  --neural-mode disabled
+```
+
+The host prints metadata only and admits the epoch marker in its event-budget
+preflight; repeat the bounded command to continue after a clean restart.
+
+The v4 path is still bounded by the 100,000-event local journal budget and the
+current checksum-only replay contract. It is not a neural brain, an
+authenticated segment archive, a physical device runtime, or proof of
+conscious experience. See [the epoch contract](docs/LOCAL_CELL_V4_EPOCH_R01.md).
+
 ### Bounded foreground host
 
 For a paced, restartable one-device session around the same canonical loop,
@@ -210,16 +240,17 @@ to 512 active cells and evicts the least recently observed cell when a
 new one arrives at capacity. The journal records evictions and forgotten
 observations. The SQLite journal still has a 10,000-event budget.
 
-Use `--motor-mode local_cell_v4` for a new opt-in journal that keeps v3's
-bounded retention and adds a bounded rest rule (issue #106): a move with no
+Use `--motor-mode local_cell_v5` for the opt-in anti-stall policy. It keeps
+the v4 epoch contract (absolute tick, explicit 9,999-tick markers, bounded
+LRU retention) and adds a bounded rest rule for issue #106: a move with no
 measured block always outranks rest, and after at most three consecutive
 rests the policy re-probes the least-attempted direction instead of resting
 forever. Outcomes report `forced_probe`, `rest_streak` and eviction totals;
-`mojum.cell_policy_v4.summarize_transcript` reports attempts, blocked moves,
+`mojum.cell_policy_v5.summarize_transcript` reports attempts, blocked moves,
 successful movement, longest rest streak, idle fraction and visited cells
 together so a rest collapse cannot look like fewer collisions. Existing
-`/2` and `/3` journals are never reinterpreted; opening them in v4 mode
-fails before any append. See [the v4 contract](docs/LOCAL_CELL_V4_R015.md).
+`/2`, `/3` and `/4` journals are never reinterpreted; opening them in v5 mode
+fails before any append. See [the v5 contract](docs/LOCAL_CELL_V5_R015.md).
 
 To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only

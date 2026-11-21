@@ -1,9 +1,9 @@
-"""Anti-stall / rest-collapse contract for the opt-in Local Cell v4 policy.
+"""Anti-stall / rest-collapse contract for the opt-in Local Cell v5 policy.
 
-The frozen v3 policy can stop moving for an unbounded time: `rest` is never
-blocked, so once every 4cm move has one blocked outcome in a cell, `rest`
-wins forever. It also places `rest` inside the rotated action order, so it
-rests on 1 of every 5 fresh cells even when all four moves are untried.
+The frozen v3/v4 selection rule can stop moving for an unbounded time: `rest`
+is never blocked, so once every 4cm move has one blocked outcome in a cell,
+`rest` wins forever. It also places `rest` inside the rotated action order, so
+it rests on 1 of every 5 fresh cells even when all four moves are untried.
 
 These tests are purely synthetic and make no claim about real navigation.
 """
@@ -13,34 +13,33 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE
+from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE, V5_MODE
 from mojum.aquarium_wire import inspect_journal
 from mojum.cell_policy_v3 import CellExplorerV3
-from mojum.cell_policy_v4 import (
+from mojum.cell_policy_v5 import (
     MAX_CELLS,
     MAX_REST_STREAK,
     SCHEMA,
-    CellExplorerV4,
-    CellV4Error,
+    CellExplorerV5,
+    CellV5Error,
     summarize_transcript,
 )
+from mojum.epoch_sense_v2 import EPOCH_TICKS, EpochProprioception
 from mojum.local_cell_sense import Proprioception, STEP_METERS
 from mojum.world_room import Room, advance, initial_state
-
-import json
-import tempfile
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
 GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
-
 REVISION = "b" * 64
 MOVE_ACTIONS = ("x+", "y+", "x-", "y-")
 
 
 def cue(tick, x=0.0, y=0.0, pulse=False, revision=REVISION):
-    return Proprioception(tick, revision, x, y, pulse)
+    return EpochProprioception(
+        tick, tick // EPOCH_TICKS, tick % EPOCH_TICKS,
+        revision, x, y, pulse,
+    )
 
 
 def drive(model, ticks, *, x=0.0, y=0.0, pulse_rule=lambda t: False,
@@ -64,29 +63,49 @@ def longest(values, predicate):
 
 
 class FreshCellChoiceTests(unittest.TestCase):
-    def test_v4_never_rests_while_an_untried_move_exists(self):
-        model = CellExplorerV4()
+    def test_v5_never_rests_while_an_untried_move_exists(self):
+        model = CellExplorerV5()
         actions = []
         for tick in range(40):
             sense = cue(tick, pulse=tick % 2 == 0)
-            actions.append(model.decide(sense)["action"])
-            model.observe(sense, model.decide(sense), False)
-        # Four distinct (tick+pulse) rotations cover the shift where v3
+            intent = model.decide(sense)
+            actions.append(intent["action"])
+            model.observe(sense, intent, False)
+        # Four distinct (tick+pulse) rotations cover the shift where v3/v4
         # puts "rest" first.
         self.assertNotIn("rest", actions)
         self.assertTrue({"x+", "y+", "x-", "y-"} <= set(actions))
 
     def test_v3_rests_on_a_rotation_that_starts_with_rest(self):
         # Guard the reported defect this policy version deliberately fixes.
-        sense = cue(0, pulse=False)  # (tick + pulse) % 5 == 0
+        sense = Proprioception(0, REVISION, 0.0, 0.0, False)
         self.assertEqual(CellExplorerV3().decide(sense)["action"], "rest")
-        self.assertNotEqual(CellExplorerV4().decide(sense)["action"], "rest")
+        self.assertNotEqual(CellExplorerV5().decide(cue(0))["action"], "rest")
 
     def test_decision_is_pure_and_repeatable(self):
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         sense = cue(0)
         self.assertEqual(model.decide(sense), model.decide(sense))
         self.assertEqual(model.updates, 0)
+
+    def test_crossing_an_epoch_boundary_keeps_absolute_ticks(self):
+        model = CellExplorerV5()
+        observed = []
+        for tick in range(EPOCH_TICKS + 4):
+            sense = cue(tick, (tick % 3) * STEP_METERS)
+            intent = model.decide(sense)
+            if tick >= EPOCH_TICKS - 1:
+                observed.append((tick, intent["epoch_index"]))
+            model.observe(sense, intent, False)
+        self.assertEqual(observed, [
+            (EPOCH_TICKS - 1, 0), (EPOCH_TICKS, 1), (EPOCH_TICKS + 1, 1),
+            (EPOCH_TICKS + 2, 1), (EPOCH_TICKS + 3, 1),
+        ])
+        self.assertEqual(model.last_tick, EPOCH_TICKS + 3)
+        self.assertEqual(
+            CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
 
 
 class RestCollapseTests(unittest.TestCase):
@@ -94,15 +113,15 @@ class RestCollapseTests(unittest.TestCase):
         model = CellExplorerV3()
         actions = []
         for tick in range(60):
-            sense = cue(tick)
+            sense = Proprioception(tick, REVISION, 0.0, 0.0, False)
             intent = model.decide(sense)
             actions.append(intent["action"])
             model.observe(sense, intent, intent["action"] != "rest")
         self.assertGreater(longest(actions, lambda a: a == "rest"), 40)
         self.assertGreaterEqual(actions.count("rest"), 50)
 
-    def test_v4_bounds_the_longest_rest_streak(self):
-        model = CellExplorerV4()
+    def test_v5_bounds_the_longest_rest_streak(self):
+        model = CellExplorerV5()
         actions = []
         for tick in range(200):
             sense = cue(tick)
@@ -121,12 +140,12 @@ class RestCollapseTests(unittest.TestCase):
         )
         # Repeated probes are legitimate evidence; the model still restores.
         self.assertEqual(
-            CellExplorerV4.from_snapshot(model.snapshot()).snapshot(),
+            CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
             model.snapshot(),
         )
 
     def test_forced_probe_reports_itself_in_the_measured_outcome(self):
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         forced = []
         for tick in range(60):
             sense = cue(tick)
@@ -141,17 +160,16 @@ class RestCollapseTests(unittest.TestCase):
             self.assertGreaterEqual(outcome["observed_outcomes"], 1)
         self.assertEqual(model.forced_probes, len(forced))
 
-    def test_sealed_room_keeps_task_attempts_with_v4(self):
+    def test_sealed_room_keeps_task_attempts_with_v5(self):
         # Every 4cm step from the centre leaves this 2cm room, so each
         # attempted move is genuinely blocked and the position cannot change.
         world = Room(0.02, 0.02)
         state = initial_state(world, 0.01, 0.01)
         actions, blocked = [], []
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         for tick in range(120):
-            sense = Proprioception(
-                tick, state.revision, state.x, state.y, tick % 2 == 0,
-            )
+            sense = cue(tick, state.x, state.y, tick % 2 == 0,
+                        revision=state.revision)
             intent = model.decide(sense)
             state, result = advance(
                 world, state, tick=tick + 1, dx=intent["dx"],
@@ -172,7 +190,7 @@ class RestCollapseTests(unittest.TestCase):
 
 class RetentionTests(unittest.TestCase):
     def test_exceeds_512_cells_without_growth_and_with_anti_stall(self):
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         first_eviction = None
         for tick in range(2400):
             sense = cue(tick, (tick + 1) * STEP_METERS, 0.0, tick % 7 == 0)
@@ -188,8 +206,8 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(len(model.records), MAX_CELLS)
 
     def test_restart_is_bit_identical_to_continuous_run(self):
-        first = CellExplorerV4()
-        second = CellExplorerV4()
+        first = CellExplorerV5()
+        second = CellExplorerV5()
         for tick in range(150):
             sense = cue(tick, (tick % 9) * STEP_METERS,
                         (tick % 5) * STEP_METERS, tick % 2 == 0)
@@ -198,23 +216,25 @@ class RetentionTests(unittest.TestCase):
                 intent = model.decide(sense)
                 model.observe(sense, intent, blocked)
             if tick == 73:
-                second = CellExplorerV4.from_snapshot(second.snapshot())
+                second = CellExplorerV5.from_snapshot(second.snapshot())
         self.assertEqual(first.snapshot(), second.snapshot())
 
     def test_snapshot_rejects_forged_or_cross_version_envelopes(self):
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         for tick in range(40):
             sense = cue(tick)
             intent = model.decide(sense)
             model.observe(sense, intent, intent["action"] != "rest")
         good = model.snapshot()
-        self.assertEqual(CellExplorerV4.from_snapshot(good).snapshot(), good)
+        self.assertEqual(CellExplorerV5.from_snapshot(good).snapshot(), good)
         mutations = (
+            ("schema", "mojum.developmental.local-cell/4"),
             ("schema", "mojum.developmental.local-cell/3"),
-            ("schema", "mojum.developmental.local-cell/2"),
             ("cell_size_m", 0.5),
             ("updates", good["updates"] + 1),
             ("last_tick", True),
+            ("last_epoch_index", -1),
+            ("last_epoch_index", 1),
             ("rest_streak", -1),
             ("rest_streak", MAX_REST_STREAK + 1),
             ("rest_streak", True),
@@ -229,31 +249,31 @@ class RetentionTests(unittest.TestCase):
         for field, replacement in mutations:
             with self.subTest(field=field, value=replacement):
                 changed = dict(good, **{field: replacement})
-                with self.assertRaises(CellV4Error):
-                    CellExplorerV4.from_snapshot(changed)
-        with self.assertRaises(CellV4Error):
-            CellExplorerV4.from_snapshot(dict(good, **{"extra": 1}))
+                with self.assertRaises(CellV5Error):
+                    CellExplorerV5.from_snapshot(changed)
+        with self.assertRaises(CellV5Error):
+            CellExplorerV5.from_snapshot(dict(good, **{"extra": 1}))
 
     def test_restore_detaches_from_original_snapshot(self):
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         sense = cue(0)
         model.observe(sense, model.decide(sense), True)
         checkpoint = model.snapshot()
-        alias = CellExplorerV4.from_snapshot(checkpoint)
+        alias = CellExplorerV5.from_snapshot(checkpoint)
         alias.records.clear()
         alias.last_seen_at.clear()
         self.assertEqual(model.snapshot(), checkpoint)
 
     def test_observe_is_atomic_on_forgery(self):
-        model = CellExplorerV4()
+        model = CellExplorerV5()
         sense = cue(0)
         intent = model.decide(sense)
         before = model.snapshot()
-        with self.assertRaises(CellV4Error):
+        with self.assertRaises(CellV5Error):
             model.observe(sense, dict(intent, action="rest"), False)
-        with self.assertRaises(CellV4Error):
+        with self.assertRaises(CellV5Error):
             model.observe(sense, intent, "blocked")
-        with self.assertRaises(CellV4Error):
+        with self.assertRaises(CellV5Error):
             model.observe(cue(5), intent, False)
         self.assertEqual(model.snapshot(), before)
 
@@ -268,7 +288,7 @@ class TranscriptSummaryTests(unittest.TestCase):
 
     def test_summary_matches_hand_counted_transcript(self):
         transcript = []
-        drive(CellExplorerV4(), 12, transcript=transcript)
+        drive(CellExplorerV5(), 12, transcript=transcript)
         report = summarize_transcript(transcript)
         actions = [item[0]["action"] for item in transcript]
         blocked = [item[1]["measured_blocked"] for item in transcript]
@@ -294,29 +314,27 @@ class TranscriptSummaryTests(unittest.TestCase):
             [({"action": "x+"}, {})],
         ):
             with self.subTest(bad=bad):
-                with self.assertRaises(CellV4Error):
+                with self.assertRaises(CellV5Error):
                     summarize_transcript(bad)
 
 
-class V4AquariumVersionGateTests(unittest.TestCase):
+class V5AquariumVersionGateTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.db = self.root / "v4.sqlite3"
+        self.db = self.root / "v5.sqlite3"
 
-    def aquarium(self, path=None, mode=V4_MODE):
+    def aquarium(self, path=None, mode=V5_MODE):
         return Aquarium(path or self.db, SEED, GRAPH, motor_mode=mode)
 
-    def test_v4_journal_replays_identically_and_is_identifiable(self):
+    def test_v5_journal_replays_identically_and_is_identifiable(self):
         with self.aquarium() as rover:
             for _ in range(60):
                 rover.step()
             expected = rover.checkpoint()
         self.assertEqual(expected["developmental_state"]["schema"], SCHEMA)
-        self.assertEqual(
-            inspect_journal(self.db)["format"], "local_cell_v4",
-        )
+        self.assertEqual(inspect_journal(self.db)["format"], "local_cell_v5")
         with self.aquarium() as resumed:
             self.assertEqual(resumed.checkpoint(), expected)
             self.assertLessEqual(
@@ -335,21 +353,25 @@ class V4AquariumVersionGateTests(unittest.TestCase):
                 receipts.append(rover.checkpoint())
         self.assertEqual(receipts[0], receipts[1])
 
-    def test_v4_journal_cannot_be_opened_by_v3_or_legacy_v2b(self):
+    def test_wrong_policy_journals_are_refused_before_append(self):
         with self.aquarium() as rover:
             for _ in range(10):
                 rover.step()
-        for wrong in (V3_MODE, "local_cell_v2b"):
+        before = self.db.read_bytes()
+        for wrong in (V4_MODE, V3_MODE, "local_cell_v2b"):
             with self.subTest(mode=wrong):
                 with self.assertRaisesRegex(AquariumError, "mismatch"):
                     self.aquarium(mode=wrong)
+        self.assertEqual(self.db.read_bytes(), before)
 
-    def test_existing_v3_journal_cannot_be_relabelled_as_v4(self):
-        with self.aquarium(mode=V3_MODE) as rover:
+    def test_existing_v4_journal_cannot_be_relabelled_as_v5(self):
+        with self.aquarium(mode=V4_MODE) as rover:
             for _ in range(10):
                 rover.step()
+        before = self.db.read_bytes()
         with self.assertRaisesRegex(AquariumError, "mismatch"):
             self.aquarium()
+        self.assertEqual(self.db.read_bytes(), before)
 
 
 if __name__ == "__main__":
