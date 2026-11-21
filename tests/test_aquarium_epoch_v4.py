@@ -134,6 +134,36 @@ class EpochJournalTests(unittest.TestCase):
         self.assertEqual(v4.returncode, 0, v4.stderr)
         self.assertEqual(json.loads(v4.stdout)["tick"], 1001)
 
+    def test_rejected_external_movement_at_epoch_boundary_is_side_effect_free(self):
+        """Bad caller arguments must not commit an epoch or change the CAS head."""
+        with (patch("mojum.aquarium.EPOCH_TICKS", 2),
+              patch("mojum.aquarium_wire.EPOCH_TICKS", 2),
+              patch("mojum.epoch_sense_v2.EPOCH_TICKS", 2),
+              patch("mojum.cell_policy_v4.EPOCH_TICKS", 2)):
+            with self.open() as aquarium:
+                aquarium.step()
+                aquarium.step()
+                self.assertEqual((aquarium.tick, aquarium.epoch_index), (2, 0))
+                checkpoint_before = aquarium.checkpoint()
+                head_before = aquarium.store.head()
+                count_before = aquarium.stored_events
+                for kwargs in ({"dx": 0.04}, {"dy": 0.0}):
+                    with self.subTest(kwargs=kwargs):
+                        with self.assertRaisesRegex(
+                                AquariumError, "rejects external dx/dy"):
+                            aquarium.step(**kwargs)
+                        self.assertEqual(aquarium.checkpoint(), checkpoint_before)
+                        self.assertEqual(aquarium.store.head(), head_before)
+                        self.assertEqual(aquarium.stored_events, count_before)
+                        self.assertEqual((aquarium.tick, aquarium.epoch_index), (2, 0))
+                aquarium.step()
+                after = aquarium.checkpoint()
+                self.assertEqual((aquarium.tick, aquarium.epoch_index), (3, 1))
+                self.assertEqual(aquarium.stored_events, count_before + 2)
+            with self.open() as resumed:
+                self.assertEqual(resumed.checkpoint(), after)
+                self.assertEqual(resumed.store.head(), after["journal_head"])
+
     def test_real_sqlite_boundary_marker_replays_after_interrupted_frame(self):
         with self.open() as aquarium:
             for _ in range(EPOCH_TICKS):
