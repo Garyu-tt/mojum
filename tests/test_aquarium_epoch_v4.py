@@ -7,6 +7,7 @@ an authenticated snapshot.
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -33,6 +34,7 @@ from mojum.noosphere import NoosphereError
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
 GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
+EPOCH_STRESS_ENABLED = os.environ.get("MOJUM_EPOCH_V4_STRESS") == "1"
 
 
 class EpochSenseV4Tests(unittest.TestCase):
@@ -197,6 +199,10 @@ class EpochJournalV4Tests(unittest.TestCase):
             with self.assertRaisesRegex(NoosphereError, "epoch marker"):
                 inspect_journal(self.db)
 
+    @unittest.skipUnless(
+        EPOCH_STRESS_ENABLED,
+        "10k-frame epoch replay runs in the untraced full-suite step",
+    )
     def test_real_sqlite_crosses_epoch_and_replays_after_durable_marker(self):
         with self.open() as aquarium:
             for _ in range(EPOCH_TICKS):
