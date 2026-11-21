@@ -134,6 +134,15 @@ def summarize(manifest, frames):
         if frame["tick"] != expected_tick:
             raise MobilityAuditError("frame tick discontinuity")
         kind, blocked, position = _action_fields(frame, policy["motor_policy_schema"])
+        # These are *measured* outcomes, not policy intentions: a rest or
+        # blocked motor attempt must not move the point-room body, and a
+        # reported successful move must actually change its position.
+        if previous is not None:
+            moved = position != previous
+            if (kind == REST_KIND or blocked) and moved:
+                raise MobilityAuditError("rest or blocked action changed measured position")
+            if kind != REST_KIND and not blocked and not moved:
+                raise MobilityAuditError("successful move did not change measured position")
         if kind == REST_KIND:
             rest_actions += 1
             streak += 1
