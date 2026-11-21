@@ -34,6 +34,12 @@ from .noosphere import (
 )
 from .sensory_bridge import ToyContactBridge, SCHEMA as TOY_CONTACT_SCHEMA, OCCLUSION_SCHEMA
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
+from .sensory_associations_v2 import ContactAssociationsV2, SCHEMA as MODEL_V2_SCHEMA
+from .sensory_bridge_v2 import (
+    REPROBE_PERIOD_TICKS as REPROBE_PERIOD_V2,
+    SCHEMA as TOY_CONTACT_V2_SCHEMA,
+    ToyContactBridgeV2,
+)
 from .sim import Simulation, canonical, digest
 from .temporal_outcomes import (
     ACTIONS, GUIDANCE_SCHEMA, SCHEMA as RANGE_SCHEMA, RangeCue, RangeOutcomeMemory,
@@ -150,18 +156,19 @@ class Aquarium:
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
             raise AquariumError("explicit pulse summation requires shadow mode")
-        if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
-            raise AquariumError("sensory_mode must be none or toy_probe")
-        if sensory_mode == "toy_probe" and motor_mode != "developmental_fixture":
-            raise AquariumError("toy_probe requires developmental_fixture motor mode")
+        if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe", "toy_probe_v2"):
+            raise AquariumError("sensory_mode must be none, toy_probe, or toy_probe_v2")
+        if sensory_mode in ("toy_probe", "toy_probe_v2") and motor_mode != "developmental_fixture":
+            raise AquariumError(f"{sensory_mode} requires developmental_fixture motor mode")
         if sensory_mode == "none" and sensory_scene is not None:
-            raise AquariumError("sensory_scene requires toy_probe mode")
+            raise AquariumError("sensory_scene requires toy_probe or toy_probe_v2 mode")
         if type(temporal_mode) is not str or temporal_mode not in ("none", "range_guided"):
             raise AquariumError("temporal_mode must be none or range_guided")
         if temporal_mode == "range_guided" and sensory_mode != "toy_probe":
             raise AquariumError("range_guided requires toy_probe sensory mode")
         self.temporal_mode = temporal_mode
         self.motor_mode = motor_mode
+        self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
         self.brain_mode = brain_mode
         self.dt_ns = dt_ns
@@ -193,6 +200,9 @@ class Aquarium:
         if sensory_mode == "toy_probe":
             scene = ToyScene() if sensory_scene is None else sensory_scene
             self.sensory_bridge = ToyContactBridge(scene, motor_room=self.room)
+        elif sensory_mode == "toy_probe_v2":
+            scene = ToyScene() if sensory_scene is None else sensory_scene
+            self.sensory_bridge = ToyContactBridgeV2(scene, motor_room=self.room)
         self._reset_replay_state(NATIVE_PULSE_SUM if pulse_sum == "auto" else pulse_sum)
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
@@ -223,14 +233,17 @@ class Aquarium:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
         if self.sensory_bridge is not None:
+            versioned = self.sensory_mode == "toy_probe_v2"
             self.manifest.update({
                 "sensory_mode": sensory_mode,
                 "sensory_schema": SENSE_SCHEMA,
-                "sensory_model_schema": MODEL_SCHEMA,
+                "sensory_model_schema": MODEL_V2_SCHEMA if versioned else MODEL_SCHEMA,
                 "sensory_scene": self.sensory_bridge.scene.manifest(),
-                "contact_bridge_schema": TOY_CONTACT_SCHEMA,
+                "contact_bridge_schema": TOY_CONTACT_V2_SCHEMA if versioned else TOY_CONTACT_SCHEMA,
                 "occlusion_schema": OCCLUSION_SCHEMA,
             })
+            if versioned:
+                self.manifest["sensory_reprobe_period_ticks"] = REPROBE_PERIOD_V2
         if self.range_model is not None:
             self.manifest.update({
                 "temporal_mode": temporal_mode,
@@ -284,7 +297,12 @@ class Aquarium:
         elif self._local_cell:
             self.motor = CellExplorer()
         self.brain = DevelopmentalBrain() if self.brain_mode == "developmental_controller" else None
-        self.contact_model = ContactAssociations() if self.sensory_bridge is not None else None
+        if self.sensory_bridge is None:
+            self.contact_model = None
+        elif self.sensory_mode == "toy_probe_v2":
+            self.contact_model = ContactAssociationsV2()
+        else:
+            self.contact_model = ContactAssociations()
         self.range_model = RangeOutcomeMemory() if self.temporal_mode == "range_guided" else None
         self.genome = GenomeLedger(self.seed)
         try:
@@ -758,7 +776,7 @@ def main():
                         default="placeholder", help="opt-in synthetic controller, not a neural brain")
     parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
-    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"), default="none",
+    parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"), default="none",
                         help="opt-in synthetic contact learning with developmental motor play")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none",
                         help="guide virtual movement from measured range transitions")
@@ -781,8 +799,8 @@ def main():
         parser.error("--brain-mode developmental_controller requires --motor-mode developmental_fixture")
     if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
         parser.error("developmental motor play does not accept --dx/--dy")
-    if args.sensory_mode == "toy_probe" and args.motor_mode != "developmental_fixture":
-        parser.error("--sensory-mode toy_probe requires --motor-mode developmental_fixture")
+    if args.sensory_mode in ("toy_probe", "toy_probe_v2") and args.motor_mode != "developmental_fixture":
+        parser.error(f"--sensory-mode {args.sensory_mode} requires --motor-mode developmental_fixture")
     if args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
     if not 0 <= args.ticks <= 1000:
