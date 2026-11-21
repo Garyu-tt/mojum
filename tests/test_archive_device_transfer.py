@@ -4,7 +4,11 @@ All PRIVATE content is synthetic in disposable owner-only folders.
 Python unit tests mock VFS device IDs to simulate a separate mount for
 copy-path testing. This is NOT a real two-device hardware validation.
 """
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -188,6 +192,53 @@ class OfflinePhysicalArchiveTransferQA(unittest.TestCase):
                     include_nonpublic=True,
                 )
         self.assertEqual(list(self.target.iterdir()), [])
+
+    def test_real_distinct_tmpfs_mount_and_private_cli_if_present(self):
+        # On a Linux CI host /dev/shm normally has a different VFS st_dev
+        # from /tmp. This is a REAL mount ID test, but NOT proof of two
+        # independent hardware disks, failure domains, power or hosts.
+        mount = Path("/dev/shm")
+        if (os.name != "posix" or not mount.is_dir()
+                or not os.path.ismount(mount)
+                or self.source.stat().st_dev == mount.stat().st_dev):
+            self.skipTest("independent VFS mount unavailable")
+        self.prepare()
+        with tempfile.TemporaryDirectory(
+            prefix="mojum-r020-fixture-", dir=mount,
+        ) as outer:
+            dest = Path(outer)/"private-destination"
+            dest.mkdir(mode=0o700)
+            script_root = Path(__file__).resolve().parents[1]
+            env = dict(os.environ, PYTHONPATH=str(script_root/"src"))
+            args = [
+                sys.executable, "-m", "mojum.segment_archive_cli",
+                "copy-device",
+                "--source-archive", str(self.source),
+                "--destination-archive", str(dest),
+                "--receipt-file", str(self.receipt),
+                "--key-file", str(self.key),
+                "--expected-receipt-sha", self.digest,
+            ]
+            denied = subprocess.run(
+                args, cwd=script_root, env=env, text=True,
+                capture_output=True, timeout=20,
+            )
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertEqual(list(dest.iterdir()), [])
+            allowed = subprocess.run(
+                args+["--include-private"],
+                cwd=script_root, env=env, text=True,
+                capture_output=True, timeout=20,
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            report = json.loads(allowed.stdout)
+            self.assertTrue(report["distinct_vfs_device_ids"])
+            self.assertEqual(report["files_copied"], 6)
+            self.assertEqual(report["source_head"], self.head)
+            self.assertNotIn("PRIVATE_SYNTHETIC", allowed.stdout)
+            self.assertNotIn(str(self.source), allowed.stdout)
+            self.assertNotIn(str(self.key), allowed.stdout)
+            self.assertEqual(len(list(dest.iterdir())), 6)
 
     def test_genesis_only_tail_copies_two_files(self):
         self.prepare(count=7)
