@@ -61,6 +61,8 @@ def create_pair(left_db, right_db, left_id, right_id, template, graph):
     right_seed = _seed_for(template, right_id)
     if left_id == right_id:
         raise AquariumError("twins need different human-selected IDs")
+    if left_id == template["genome_id"] or right_id == template["genome_id"]:
+        raise AquariumError("new twins must not reuse the source organism ID")
     _check_graph(graph)
     left_db, right_db = _new_path(left_db), _new_path(right_db)
     if left_db.resolve(strict=False) == right_db.resolve(strict=False):
@@ -79,6 +81,8 @@ def create_pair(left_db, right_db, left_id, right_id, template, graph):
 def mentor_steps(db, agent_id, template, graph, *, ticks, dx, dy):
     """Advance exactly one existing twin with externally chosen movements."""
     template = validate_seed(template)
+    if agent_id == template["genome_id"]:
+        raise AquariumError("twin mentor must not target the source organism")
     seed = _seed_for(template, agent_id)
     _check_graph(graph)
     if type(ticks) is not int or not 0 <= ticks <= 1000:
