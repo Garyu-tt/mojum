@@ -12,6 +12,7 @@ from mojum.motor_play_v2 import (
     ACTION_NAMES,
     EXPLORATION_QUOTA,
     MAX_CONSECUTIVE_REST,
+    MAX_OBSERVATIONS,
     MOVES,
     PROFILE,
     SCHEMA,
@@ -193,11 +194,22 @@ class EvaluationHarnessTests(unittest.TestCase):
         first, second = _drive(120), _drive(120)
         self.assertEqual(first, second)
 
+    def test_last_supported_tick_and_fail_early_next_tick(self):
+        room, start = ROOMS["canonical"]
+        self.assertEqual(run_profile(room, start, MAX_OBSERVATIONS)["ticks"],
+                         MAX_OBSERVATIONS)
+        class UntouchedPolicy:
+            def choose(self, tick):
+                raise AssertionError("evaluation must reject before choosing")
+        with self.assertRaisesRegex(EvalError, "ticks must be"):
+            run_profile(room, start, MAX_OBSERVATIONS + 1,
+                        policy=UntouchedPolicy())
+
     def test_invalid_requests_rejected(self):
         room, start = ROOMS["canonical"]
         with self.assertRaises(EvalError):
             run_profile("not a room", start, 1)
-        for ticks in (-1, 1.0, True, 10_001):
+        for ticks in (-1, 1.0, True, MAX_OBSERVATIONS + 1, 10_001):
             with self.assertRaises(EvalError):
                 run_profile(room, start, ticks)
         with self.assertRaises(EvalError):
