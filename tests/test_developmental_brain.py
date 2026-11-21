@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.developmental_brain import (
@@ -87,6 +88,34 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             with self.assertRaises(AquariumError):
                 aquarium.step(dx=0.0)
             self.assertEqual(aquarium.checkpoint(), before)
+
+    def test_privileged_graph_brain_rejected_even_with_controller_enabled(self):
+        """The synthetic adapter must never hide a privileged graph output."""
+        from mojum.sim import Simulation
+
+        with self.aquarium() as aquarium:
+            checkpoint = aquarium.checkpoint()
+            row_count = aquarium.store.count()
+            real_step = Simulation.step
+
+            for field, value in (
+                ("status", "ACTIVE"),
+                ("action", {"kind": "unsafe_external_override"}),
+            ):
+                with self.subTest(field=field):
+                    def forged_output(sim):
+                        output = real_step(sim)
+                        output[aquarium.kind_ids["brain.placeholder"]]["observation"][field] = value
+                        return output
+
+                    with patch.object(Simulation, "step", forged_output):
+                        with self.assertRaisesRegex(
+                            AquariumError, "unexpected privileged brain behavior"
+                        ):
+                            aquarium.step()
+
+                    self.assertEqual(aquarium.checkpoint(), checkpoint)
+                    self.assertEqual(aquarium.store.count(), row_count)
 
     def test_replay_rejects_bool_as_integer_after_rehashed_local_journal(self):
         """A forged numeric zero is not an acceptable false safety flag."""
