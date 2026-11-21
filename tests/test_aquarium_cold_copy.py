@@ -1,5 +1,6 @@
 """Cold-copy real synthetic Aquarium journals, including WAL and GENESIS replay."""
 
+from contextlib import closing
 import copy
 import json
 import os
@@ -119,7 +120,7 @@ class ColdAquariumCopyTests(unittest.TestCase):
     def test_existing_empty_sqlite_source_refused_without_bootstrap(self):
         # Export must never turn an unrelated existing SQLite into an
         # Aquarium journal merely by opening it for a backup.
-        with sqlite3.connect(self.source) as db:
+        with closing(sqlite3.connect(self.source)) as db:
             db.execute("CREATE TABLE unrelated_data (value TEXT)")
             db.execute("INSERT INTO unrelated_data VALUES ('keep-me')")
             db.commit()
