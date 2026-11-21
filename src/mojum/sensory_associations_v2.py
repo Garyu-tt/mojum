@@ -25,6 +25,15 @@ class SensoryV2Error(CuriosityError):
     """Invalid empirical contact, retention or serialized state."""
 
 
+def _valid_deflection(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value) and 0 <= value <= 1
+    except (OverflowError, ValueError, TypeError):
+        return False
+
+
 class ContactAssociationsV2(ContactAssociations):
     """Only successful measured contacts advance learned evidence.
 
@@ -82,9 +91,7 @@ class ContactAssociationsV2(ContactAssociations):
                     or set(entry) != {"count", "mean_deflection"}
                     or type(entry["count"]) is not int
                     or not 1 <= entry["count"] <= MAX_UPDATES
-                    or type(entry["mean_deflection"]) not in (int, float)
-                    or not math.isfinite(entry["mean_deflection"])
-                    or not 0 <= entry["mean_deflection"] <= 1):
+                    or not _valid_deflection(entry["mean_deflection"])):
                 raise SensoryV2Error("invalid retained numeric association")
             stamp = data["last_seen_at"][key]
             if (type(stamp) is not int
@@ -110,6 +117,10 @@ class ContactAssociationsV2(ContactAssociations):
         if prediction != self.predict(sensor):
             raise SensoryV2Error("stale measured-cue prediction")
         if (type(measurement) is not dict
+                or set(measurement) != {
+                    "contact", "measured_deflection",
+                    "instrument", "source_tick",
+                }
                 or type(measurement.get("contact")) is not bool
                 or measurement.get("instrument") !=
                     "synthetic_probe_not_material_classifier"
@@ -136,8 +147,7 @@ class ContactAssociationsV2(ContactAssociations):
         value = measurement.get("measured_deflection")
         key = prediction["cue"]
         tick = sensor["tick"]
-        if (type(value) not in (int, float)
-                or not math.isfinite(value) or not 0 <= value <= 1
+        if (not _valid_deflection(value)
                 or key is None
                 or tick <= self.last_contact_tick
                 or self.updates >= MAX_UPDATES):
