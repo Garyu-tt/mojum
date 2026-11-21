@@ -97,6 +97,21 @@ class DecisionLadderTests(unittest.TestCase):
         self.assertEqual(policy.snapshot(), before)
         policy.observe(tick=12, kind="rest", blocked=False)
 
+    def test_blocked_rest_cannot_poison_measured_history(self):
+        raw = MotorPlayV2().snapshot()
+        raw["pending"] = "rest"
+        policy = MotorPlayV2.from_snapshot(raw)
+        before = policy.snapshot()
+        with self.assertRaisesRegex(MotorPlayV2Error, "rest cannot be blocked"):
+            policy.observe(tick=0, kind="rest", blocked=True)
+        self.assertEqual(policy.snapshot(), before)
+        policy.observe(tick=0, kind="rest", blocked=False)
+        self.assertEqual(policy.rest_streak, 1)
+        tampered = policy.snapshot()
+        tampered["samples"]["rest"]["blocked"] = 1
+        with self.assertRaisesRegex(MotorPlayV2Error, "rest cannot have blocked"):
+            MotorPlayV2.from_snapshot(tampered)
+
     def test_stale_or_invalid_decision_rejected(self):
         policy = MotorPlayV2()
         for bad in (-1, 1, True, 0.0, "0"):
