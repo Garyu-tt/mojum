@@ -41,6 +41,30 @@ not per-tick traces, private logs, users, devices or learned state.
 
 ## Release interpretation
 
+### Verified first-run observations
+
+At exact branch head `e34ebddf5ffea62d7afdb1a8142f9834dcce7282`
+GitHub Actions [neutral-probe stress run 44851031828](https://github.com/Garyu-tt/mojum/actions/runs/44851031828)
+passed on Python 3.11/3.12/3.13. **14 tests** passed on Python 3.13.
+The predeclared stress suite fingerprint is
+`fc415f03ca89348aad2fadf3605c512af0df5790a6cf40e5aaf5f89a522848bf`.
+
+All **12/12** frozen-control scenes had observed collision, across
+2,144 logical ticks *per arm*:
+
+| Arm | Blocked | Rest | Successful movements | Stalled scenarios |
+| --- | ---: | ---: | ---: | ---: |
+| Canonical coarse-zone | 48 | 1976 | 120 | 12 |
+| Frozen no-learning | 243 | 413 | 1488 | 0 |
+| Experimental local-cell | 107 | 455 | 1582 | 0 |
+
+Local-cell had fewer contacts than frozen in **8/12** cases and tied in
+four, with **no worse-contact cases**; successful movement was higher in
+eight and equal in four, with none lower. This is the observed fixture,
+not a theorem of all possible rooms. The coarse-zone policy exhibited
+rest-collapse in every stress case. Its low collision count is therefore
+a misleading metric of learning.
+
 High contact exposure improves **test sensitivity** but is intentionally
 manufactured after seeing previous results. Even passing all stress tests
 cannot establish general-purpose navigation, sentience/absence of suffering,
