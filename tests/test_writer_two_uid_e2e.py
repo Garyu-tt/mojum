@@ -26,7 +26,11 @@ RUN = (sys.platform.startswith("linux")
        and hasattr(socket, "SO_PEERCRED")
        and getattr(os, "geteuid", lambda: -1)() == 0
        and os.environ.get("MOJUM_TWO_UID_E2E") == "1")
-ROOT = Path(__file__).resolve().parent.parent
+# CI clone may be below a runner-only home directory. The subprocesses
+# import the same commit's staged public src/examples from accessible /tmp.
+ROOT = Path(os.environ.get(
+    "MOJUM_TWO_UID_SOURCE", str(Path(__file__).resolve().parent.parent),
+)).resolve()
 SEED = ROOT / "examples/genesis_seed.json"
 GRAPH = ROOT / "examples/first_loop.json"
 PYTHON = sys.executable
