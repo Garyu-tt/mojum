@@ -111,6 +111,30 @@ class SyntheticTailArchiveQA(unittest.TestCase):
         with SegmentedNoosphere(self.restored, OWNER, segment_size=64) as q:
             self.assertEqual(q.verify_chain(external_expected_head=head)["count"], 7)
 
+    def test_public_tail_does_not_hide_private_sealed_history(self):
+        with SegmentedNoosphere(self.db, OWNER, segment_size=64) as q:
+            tip = ZERO
+            for i in range(65):
+                tip = q.append(
+                    record(i, visibility="PUBLIC" if i == 64 else "PRIVATE"),
+                    expected_head=tip,
+                )
+            export_sealed_segments(
+                q, self.folder, include_nonpublic=True,
+                external_expected_head=tip,
+            )
+            captured = capture_live_tail(
+                q, self.folder, include_nonpublic=True,
+                external_expected_source_head=tip,
+            )
+        self.assertEqual(captured["tail_events"], 1)
+        self.assertTrue(captured["contains_private"])
+        checked = verify_point_in_time(
+            self.folder, source_events=65,
+            external_expected_source_head=tip,
+        )
+        self.assertTrue(checked["contains_private"])
+
     def test_source_can_advance_but_old_point_in_time_remains_explicit(self):
         original = self.make(65)
         self.backup(original)
