@@ -129,6 +129,39 @@ class AquariumWireTests(unittest.TestCase):
             "forged-learning-extra.sqlite3",
         )
 
+    def test_inspector_replays_the_complete_sensory_state_transition(self):
+        def state_digest(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            contact["association_state_sha256"] = "0" * 64
+
+        def prediction_cue(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            contact["prediction_before"]["cue"] = "0:0:0"
+
+        def learning_status(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["learning"])
+            contact["learning"]["status"] = "forged_status"
+
+        def impossible_deflection(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["measured_contact"])
+            contact["measured_contact"]["measured_deflection"] = 2.0
+
+        cases = (
+            (state_digest, "association state digest disagrees with replay",
+             "forged-association-state.sqlite3"),
+            (prediction_cue, "prediction disagrees with the frame",
+             "forged-prediction-cue.sqlite3"),
+            (learning_status, "learning evidence is not replayable",
+             "forged-learning-status.sqlite3"),
+            (impossible_deflection, "measurement is not replayable",
+             "forged-measured-deflection.sqlite3"),
+        )
+        for mutate, pattern, name in cases:
+            with self.subTest(case=name):
+                self.assert_forged_frame_rejected(mutate, pattern, name)
+
     def test_genuine_versioned_sensory_journal_still_inspects(self):
         events = self.committed_sensory_events()
         path, head = self.rewrite_journal(events, "genuine-sensory.sqlite3")

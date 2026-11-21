@@ -22,11 +22,14 @@ from .policy_identity import (
     MOTOR_SELECTOR_KEYS, POLICIES, SCHEMA as IDENTITY_SCHEMA,
     PolicyIdentityError, as_public_record, by_selector,
 )
-from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2, LEARNING_SCHEMA as SENSORY_LEARNING_V2
+from .sensory_associations_v2 import ContactAssociationsV2
+from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2
 from .sensory_bridge import OCCLUSION_SCHEMA, PROBE_CAPABILITY
 from .sensory_bridge import SCHEMA as SENSORY_BRIDGE_V1
+from .sensory_bridge_v2 import REPROBE_PERIOD_TICKS as SENSORY_REPROBE_PERIOD
 from .sensory_bridge_v2 import SCHEMA as SENSORY_BRIDGE_V2
-from .sensory_play import SENSE_SCHEMA
+from .sensory_play import CuriosityError, SENSE_SCHEMA
+from .sim import canonical, digest
 
 
 _GUIDANCE = "mojum.developmental.range-guidance/1"
@@ -82,8 +85,16 @@ def _hex64(value):
     return type(value) is str and _HEAD.fullmatch(value) is not None
 
 
-def _check_sensory_v2_frame(contact, tick, previous_updates):
-    """Validate one versioned sensory frame and return its update counter."""
+def _same_wire(left, right):
+    """Compare JSON values without Python's bool/int equality alias."""
+    try:
+        return canonical(left) == canonical(right)
+    except (TypeError, ValueError):
+        return False
+
+
+def _check_sensory_v2_frame(contact, tick, model):
+    """Replay one versioned sensory transition and return its next model."""
     if (type(contact) is not dict or set(contact) != _SENSORY_KEYS
             or contact["schema"] != SENSORY_BRIDGE_V2
             or contact["interpretation"] != _SENSORY_INTERPRETATION
@@ -112,11 +123,15 @@ def _check_sensory_v2_frame(contact, tick, previous_updates):
             or intent["source_revision"] != observation["world_revision"]):
         raise NoosphereError("sensory probe intent disagrees with the frame")
 
+    if model is None:
+        model = ContactAssociationsV2()
     prediction = contact["prediction_before"]
-    expected_updates = 0 if previous_updates is None else previous_updates
+    try:
+        expected_prediction = model.predict(observation)
+    except CuriosityError:
+        raise NoosphereError("sensory observation is not replayable") from None
     if (type(prediction) is not dict or set(prediction) != _PREDICTION_KEYS
-            or type(prediction["model_updates"]) is not int
-            or prediction["model_updates"] != expected_updates):
+            or not _same_wire(prediction, expected_prediction)):
         raise NoosphereError("sensory prediction disagrees with the frame")
 
     measurement = contact["measured_contact"]
@@ -125,26 +140,42 @@ def _check_sensory_v2_frame(contact, tick, previous_updates):
         raise NoosphereError("sensory measurement and learning evidence disagree")
     if (measurement is None) != (not intent["requested"]):
         raise NoosphereError("sensory probe request and measurement disagree")
+    near = observation["visible"] and observation["range_bucket_10cm"] <= 2
+    first = expected_prediction["observations"] == 0
+    periodic = tick % SENSORY_REPROBE_PERIOD == 0
+    expected_requested = bool(near and (first or periodic))
+    expected_reason = (
+        "first_unmeasured_near_field_cue"
+        if expected_requested and first
+        else "periodic_empirical_resample"
+        if expected_requested
+        else "no_probe_needed"
+    )
+    if (intent["requested"] != expected_requested
+            or intent["reason"] != expected_reason):
+        raise NoosphereError("sensory probe intent is not replayable")
     if measurement is None:
-        return previous_updates
-
-    if (type(measurement) is not dict or set(measurement) != _CONTACT_KEYS
-            or type(measurement["contact"]) is not bool
-            or measurement["instrument"] != _PROBE_INSTRUMENT
-            or type(measurement["source_tick"]) is not int
-            or measurement["source_tick"] != tick):
-        raise NoosphereError("sensory measurement disagrees with the frame tick")
-    if (type(learning) is not dict
-            or learning.get("schema") != SENSORY_LEARNING_V2
-            or type(learning.get("learned")) is not bool
-            or type(learning.get("updates")) is not int):
-        raise NoosphereError("sensory learning evidence disagrees with its schema")
-    if learning["learned"] != measurement["contact"]:
-        raise NoosphereError("sensory learning evidence disagrees with measurement")
-    if expected_updates + 1 != learning["updates"] and not (
-            learning["updates"] == expected_updates and not learning["learned"]):
-        raise NoosphereError("sensory update counter is not monotonic")
-    return learning["updates"]
+        candidate = model
+        expected_learning = None
+    else:
+        if (type(measurement) is not dict or set(measurement) != _CONTACT_KEYS
+                or type(measurement["contact"]) is not bool
+                or measurement["instrument"] != _PROBE_INSTRUMENT
+                or type(measurement["source_tick"]) is not int
+                or measurement["source_tick"] != tick):
+            raise NoosphereError("sensory measurement disagrees with the frame tick")
+        candidate = ContactAssociationsV2.from_snapshot(model.snapshot())
+        try:
+            expected_learning = candidate.learn(
+                observation, measurement, expected_prediction,
+            )
+        except CuriosityError:
+            raise NoosphereError("sensory measurement is not replayable") from None
+    if not _same_wire(learning, expected_learning):
+        raise NoosphereError("sensory learning evidence is not replayable")
+    if contact["association_state_sha256"] != digest(candidate.snapshot()):
+        raise NoosphereError("sensory association state digest disagrees with replay")
+    return candidate
 
 
 def _stored_policy(manifest):
@@ -200,7 +231,7 @@ def _object_field(event, name):
 
 def _check_policy_frame(
         frame, contract, temporal_schema, sensory_mode=None,
-        previous_sensory_updates=None):
+        sensory_model=None):
     if frame.get("schema") != FRAME_SCHEMA:
         raise NoosphereError("unknown Aquarium frame schema")
     if contract is None:
@@ -245,13 +276,13 @@ def _check_policy_frame(
         raise NoosphereError("unexpected temporal guidance frame")
     if sensory_mode == "toy_probe_v2":
         contact = _object_field(frame, "toy_contact")
-        previous_sensory_updates = _check_sensory_v2_frame(
-            contact, frame["tick"], previous_sensory_updates)
+        sensory_model = _check_sensory_v2_frame(
+            contact, frame["tick"], sensory_model)
     elif sensory_mode == "toy_probe":
         contact = _object_field(frame, "toy_contact")
         if contact.get("schema") != SENSORY_BRIDGE_V1:
             raise NoosphereError("frame disagrees with its pinned sensory schema")
-    return previous_sensory_updates
+    return sensory_model
 
 
 def inspect_journal(path, *, external_expected_head=None):
@@ -268,11 +299,11 @@ def inspect_journal(path, *, external_expected_head=None):
     epoch_index = 0
     dt_ns = None
     frames = 0
-    sensory_updates = None
+    sensory_model = None
 
     def inspect_event(seq, event):
         nonlocal policy, contract, temporal, sensory_mode, frames, epoch_index, dt_ns
-        nonlocal sensory_updates
+        nonlocal sensory_model
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -309,8 +340,8 @@ def inspect_journal(path, *, external_expected_head=None):
                 # tick the runtime can never write.
                 if frames >= MAX_ABSOLUTE_TICKS:
                     raise NoosphereError("v4 frame exceeds the pinned absolute-tick cap")
-            sensory_updates = _check_policy_frame(
-                frame, contract, temporal, sensory_mode, sensory_updates)
+            sensory_model = _check_policy_frame(
+                frame, contract, temporal, sensory_mode, sensory_model)
             frames += 1
         elif topic == "aquarium.epoch":
             if policy not in ("local_cell_v4", "local_cell_v4+toy_probe_v2"):
