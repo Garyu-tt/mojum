@@ -4,6 +4,7 @@ One matrix job only: SQLite FULL WAL and ~400 durable batch commits, then
 streaming chain verification. This is an actual disk journal workload,
 not invented numerical capacity metadata; no real user records.
 """
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,6 +14,10 @@ from mojum.segmented_noosphere import SegmentedNoosphere, MAX_BATCH
 from test_segmented_noosphere import OWNER, ZERO, record
 
 
+@unittest.skipUnless(
+    os.environ.get("MOJUM_SEGMENTED_100K_STRESS") == "1",
+    "100k-event SQLite stress runs only in the dedicated CI job",
+)
 class Beyond100KActualSQLiteTest(unittest.TestCase):
     def test_100001_durable_frames_across_25_explicit_linked_segments(self):
         count = 100_001
