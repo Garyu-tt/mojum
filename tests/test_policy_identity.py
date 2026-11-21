@@ -30,7 +30,7 @@ _B = "mojum.developmental.local-cell/2"
 
 class RegistryShapeTests(unittest.TestCase):
     def test_every_inspection_identity_is_unique(self):
-        self.assertEqual(len(POLICIES), 8)
+        self.assertEqual(len(POLICIES), 9)
         for field in (
             "inspection_id", "configuration", "state_schema",
             "learning_schema", "intent_source",

@@ -41,6 +41,10 @@ from .cell_policy_v4 import (
     LEARNING_SCHEMA as V4_LEARNING_SCHEMA,
     SCHEMA as V4_SCHEMA,
 )
+from .cell_policy_v5 import (
+    LEARNING_SCHEMA as V5_LEARNING_SCHEMA,
+    SCHEMA as V5_SCHEMA,
+)
 from .developmental import SCHEMA as MOTOR_PLAY_SCHEMA
 from .epoch_sense_v2 import (
     EPOCH_TICKS,
@@ -234,6 +238,21 @@ POLICIES = validate_identities((
         state_schema=V4_SCHEMA, learning_schema=V4_LEARNING_SCHEMA,
         intent_source="bounded_goal_free_local_cell_motor_play_v4",
         configuration="developmental_policy=local_cell_v4",
+    ),
+    PolicyIdentity(
+        inspection_id="local_cell_v5",
+        selectors=(
+            ("exploration_mode", "goal_free"),
+            ("developmental_schema", V5_SCHEMA),
+            ("developmental_policy", "local_cell_v5"),
+            ("epoch_transition_schema", EPOCH_EVENT_SCHEMA),
+            ("epoch_ticks", EPOCH_TICKS),
+            ("proprioception_schema", EPOCH_SENSE_SCHEMA),
+            ("max_absolute_ticks", MAX_ABSOLUTE_TICKS),
+        ),
+        state_schema=V5_SCHEMA, learning_schema=V5_LEARNING_SCHEMA,
+        intent_source="bounded_goal_free_local_cell_motor_play_v5",
+        configuration="developmental_policy=local_cell_v5",
     ),
 ))
 
