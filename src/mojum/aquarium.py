@@ -20,6 +20,7 @@ from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMEN
 from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import ToyContactBridge, validate_scene, SCHEMA as TOY_CONTACT_SCHEMA
 from .temporal_outcomes import RangeOutcomeMemory, SCHEMA as TEMPORAL_SCHEMA
+from .empirical_advisor import advisory, SCHEMA as ACTION_ADVICE_SCHEMA
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -72,7 +73,7 @@ class Aquarium:
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
         exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
-        temporal_mode="none",
+        temporal_mode="none", action_advice_mode="none",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -93,6 +94,12 @@ class Aquarium:
         if temporal_mode == "range_outcome" and (
                 exploration_mode != "goal_free" or sensory_mode != "toy_probe"):
             raise AquariumError("temporal range model requires goal_free toy_probe")
+        if type(action_advice_mode) is not str or action_advice_mode not in (
+                "none", "observe", "learned"):
+            raise AquariumError("invalid action_advice_mode")
+        if action_advice_mode != "none" and temporal_mode != "range_outcome":
+            raise AquariumError("motor advice requires temporal range_outcome mode")
+        self.action_advice_mode = action_advice_mode
         self.temporal_mode = temporal_mode
         self.exploration_mode = exploration_mode
         self.sensory_mode = sensory_mode
@@ -146,6 +153,9 @@ class Aquarium:
             self.manifest["temporal_mode"] = "range_outcome"
             self.manifest["temporal_schema"] = TEMPORAL_SCHEMA
             self.manifest["temporal_scope"] = "numeric_range_and_virtual_blocked_only"
+        if self.action_advice_mode != "none":
+            self.manifest["action_advice_mode"] = self.action_advice_mode
+            self.manifest["action_advice_schema"] = ACTION_ADVICE_SCHEMA
         self.store = LocalNoosphere(db_path, agent_id)
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
@@ -184,6 +194,13 @@ class Aquarium:
                     else self._committed_head)
         return self.store.append(event, expected_head=expected)
 
+    def _action_advice(self):
+        if self.action_advice_mode == "none":
+            return None, ()
+        cue = self.sensory_bridge.scene.sense(self.world)
+        current = advisory(self.temporal_model, cue, self.action_advice_mode)
+        return current, tuple(current["applied_hints"])
+
     def _calculate(self, dx, dy):
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
@@ -200,6 +217,7 @@ class Aquarium:
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         next_explorer = None
         intent = signal = None
+        action_advice, avoidance = self._action_advice()
         if self.explorer is not None:
             if dx is not None or dy is not None:
                 raise AquariumError("goal-free mode rejects externally scripted movement")
@@ -210,7 +228,7 @@ class Aquarium:
                 sensory["heartbeat"]["pulse"],
             )
             next_explorer = Explorer.from_snapshot(self.explorer.snapshot())
-            intent = next_explorer.decide(signal)
+            intent = next_explorer.decide(signal, avoid_actions=avoidance)
             dx, dy = intent["dx"], intent["dy"]
         else:
             # Scripted mode must reject explicit None as before R0.13.
@@ -238,7 +256,9 @@ class Aquarium:
             "physical_model": "NONE_FIXTURE_ONLY",
         }
         if next_explorer is not None:
-            measured = next_explorer.observe(signal, intent, world_obs["blocked"])
+            measured = next_explorer.observe(
+                signal, intent, world_obs["blocked"], avoid_actions=avoidance,
+            )
             payload["developmental"] = {
                 "schema": DEVELOPMENT_SCHEMA,
                 "observation": signal.public(),
@@ -247,6 +267,8 @@ class Aquarium:
                 "policy_sha256": digest(next_explorer.snapshot()),
                 "motor_capability": "SYNTHETIC_POINT_ROOM_ONLY",
             }
+            if action_advice is not None:
+                payload["action_advice"] = action_advice
         if self.sensory_bridge is not None:
             sensory_frame, _ = self.sensory_bridge.evaluate(self.world)
             payload["toy_contact"] = sensory_frame
@@ -282,11 +304,18 @@ class Aquarium:
         )
         clone = Explorer.from_snapshot(self.explorer.snapshot())
         claimed = payload["developmental"]
+        expected_advice, avoidance = self._action_advice()
+        if self.action_advice_mode != "none" and (
+                payload.get("action_advice") != expected_advice):
+            raise AquariumError("non-causal action advice replay mismatch")
         if (claimed["observation"] != cue.public()
-                or claimed["intent"] != clone.decide(cue)
+                or claimed["intent"] != clone.decide(cue, avoid_actions=avoidance)
                 or claimed["motor_capability"] != "SYNTHETIC_POINT_ROOM_ONLY"):
             raise AquariumError("developmental observation/intent mismatch")
-        measured = clone.observe(cue, claimed["intent"], payload["world"]["blocked"])
+        measured = clone.observe(
+            cue, claimed["intent"], payload["world"]["blocked"],
+            avoid_actions=avoidance,
+        )
         if (measured != claimed["learning"]
                 or digest(clone.snapshot()) != claimed["policy_sha256"]):
             raise AquariumError("developmental experience replay mismatch")
@@ -338,9 +367,11 @@ class Aquarium:
         payload, next_world, next_learner = self._calculate(*arguments)
         committed = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                                         self.tick * self.dt_ns, self.genome.revision)
-        self._adopt_temporal(payload, next_world)
+        # The actor must recompute advice from PRE-action acquired evidence,
+        # before adopting the newly measured temporal outcome.
         self._adopt_sensory(payload)
         self._adopt_developmental(payload)
+        self._adopt_temporal(payload, next_world)
         self.world = next_world
         self.learner = next_learner
         self.tick += 1
@@ -418,9 +449,9 @@ class Aquarium:
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
-                self._adopt_temporal(payload, next_world)
                 self._adopt_sensory(payload)
                 self._adopt_developmental(payload)
+                self._adopt_temporal(payload, next_world)
                 self.world = next_world
                 self.learner = next_learner
                 self.tick += 1
@@ -456,6 +487,8 @@ class Aquarium:
             result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
         if self.temporal_model is not None:
             result["temporal_range_state"] = self.temporal_model.snapshot()
+        if self.action_advice_mode != "none":
+            result["action_advice_mode"] = self.action_advice_mode
         if self.store.head() != self._committed_head:
             raise AquariumError("journal advanced during checkpoint; reopen")
         return result
@@ -479,6 +512,8 @@ def main():
                         default="none")
     parser.add_argument("--temporal-mode", choices=("none", "range_outcome"),
                         default="none")
+    parser.add_argument("--action-advice-mode",
+                        choices=("none", "observe", "learned"), default="none")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
@@ -493,6 +528,8 @@ def main():
             args.exploration_mode != "goal_free"
             or args.sensory_mode != "toy_probe"):
         parser.error("--temporal-mode range_outcome requires goal_free and toy_probe")
+    if args.action_advice_mode != "none" and args.temporal_mode != "range_outcome":
+        parser.error("--action-advice-mode requires --temporal-mode range_outcome")
     if args.exploration_mode == "scripted":
         # Invalid scripted motion is a CLI error, not an organism birth.
         # Reject NaN, infinite and out-of-budget displacement before SQLite
@@ -507,6 +544,7 @@ def main():
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
         sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
+        action_advice_mode=args.action_advice_mode,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
