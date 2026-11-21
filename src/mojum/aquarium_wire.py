@@ -85,6 +85,11 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
+    # V4 cannot be paired with a sensory bridge. Besides rejecting an
+    # impossible runtime manifest, this preserves the exact v4 policy ID
+    # used for strict epoch-marker and frame-topic inspection below.
+    if policy_id == "local_cell_v4" and sensory_mode is not None:
+        raise NoosphereError("local_cell_v4 journals require sensory_mode none")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,
