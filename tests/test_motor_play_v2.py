@@ -85,6 +85,18 @@ class DecisionLadderTests(unittest.TestCase):
         outcome = policy.observe(tick=MAX_CONSECUTIVE_REST, kind=intent["kind"], blocked=False)
         self.assertEqual(outcome["rest_streak"], 0)
 
+    def test_rest_outcome_cannot_claim_a_collision(self):
+        policy = MotorPlayV2()
+        for tick in range(12):
+            intent = policy.choose(tick)
+            policy.observe(tick=tick, kind=intent["kind"], blocked=False)
+        self.assertEqual(policy.choose(12)["kind"], "rest")
+        before = policy.snapshot()
+        with self.assertRaisesRegex(MotorPlayV2Error, "rest cannot be blocked"):
+            policy.observe(tick=12, kind="rest", blocked=True)
+        self.assertEqual(policy.snapshot(), before)
+        policy.observe(tick=12, kind="rest", blocked=False)
+
     def test_stale_or_invalid_decision_rejected(self):
         policy = MotorPlayV2()
         for bad in (-1, 1, True, 0.0, "0"):
@@ -149,6 +161,10 @@ class SnapshotContractTests(unittest.TestCase):
         unknown_pending = json.loads(json.dumps(base))
         unknown_pending["pending"] = "northeast"
         mutations.append(unknown_pending)
+        forged_rest = json.loads(json.dumps(base))
+        forged_rest["samples"]["rest"] = {"trials": 1, "blocked": 1}
+        forged_rest["observations"] += 1
+        mutations.append(forged_rest)
         for index, broken in enumerate(mutations):
             with self.subTest(index=index):
                 with self.assertRaises(MotorPlayV2Error):
