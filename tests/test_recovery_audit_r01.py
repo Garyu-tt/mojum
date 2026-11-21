@@ -156,9 +156,17 @@ class RecoveryAuditTests(unittest.TestCase):
         with LocalAuthority(self.registry) as state:
             self.assertEqual(state.state(ID)["head"], later.head)
 
-    def test_corrupt_but_existing_sqlite_journal_fails_closed(self):
+    def _corrupt_fixture_only(self):
+        # LocalNoosphere deliberately has an append-only UPDATE trigger.
+        # Explicitly dropping it here models a *compromised owner* who has
+        # SQLite DDL privileges on a sacrificial test database, not a normal
+        # Aquarium write or a proposed repair procedure.
         with sqlite3.connect(self.db) as sql:
+            sql.execute("DROP TRIGGER noosphere_no_update")
             sql.execute("UPDATE events SET wire_json=? WHERE seq=2", ("{}",))
+
+    def test_corrupt_but_existing_sqlite_journal_fails_closed(self):
+        self._corrupt_fixture_only()
         report = self.inspect()
         self.assertEqual(report["classification"], "JOURNAL_INVALID_STOP")
         self.assertIsNone(report["journal"]["head"])
@@ -245,8 +253,7 @@ class RecoveryAuditTests(unittest.TestCase):
     def test_no_archive_or_scratch_after_success_and_failure(self):
         self.inspect()
         self.assertFalse(any(x.name.startswith(".mojum-audit-") for x in self.root.iterdir()))
-        with sqlite3.connect(self.db) as sql:
-            sql.execute("UPDATE events SET wire_json=? WHERE seq=2", ("{}",))
+        self._corrupt_fixture_only()
         self.inspect()
         self.assertFalse(any(x.name.startswith(".mojum-audit-") for x in self.root.iterdir()))
 
