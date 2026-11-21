@@ -43,7 +43,9 @@ failed `gh` call) is also a `reject` and never a `ready`.
   counts must be positive and must be updated after intentionally changing
   the workflow matrix; a count alone cannot establish job identities if a
   different set of jobs coincidentally has the same size.
-- `--expected-head-sha` is mandatory. Without it the verdict is `reject`
+- `--expected-head-sha` is mandatory and must be a complete 40- or 64-digit
+  hexadecimal SHA without whitespace or padding. Abbreviated SHAs are not
+  acceptable for an exact-head acceptance decision; missing values reject
   (`EXPECTED_HEAD_REQUIRED`).
 - No requirements at all is `reject` (`NO_REQUIRED_CHECKS`): a gate that
   requires nothing proves nothing.
