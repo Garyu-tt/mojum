@@ -122,6 +122,37 @@ class AquariumWireTests(unittest.TestCase):
             inspect_journal(foreign, external_expected_head=head)
         self.assertEqual(foreign.read_bytes(), before)
 
+    def test_inspector_refuses_unpinned_contact_with_valid_hash_chain(self):
+        # The independent inspector must not certify sensory observations
+        # that the committed bootstrap never selected, even when the chain
+        # has been recomputed correctly. Only a new synthetic copy is used.
+        with self.aquarium() as aquarium:
+            aquarium.step()
+            events = [
+                item["event"] for item in aquarium.store.dataset(
+                    include_nonpublic=True
+                )["projection"]["items"]
+            ]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(inspect_journal(self.db)["frames"], 1)
+        bootstrap, frame = json.loads(json.dumps(events))
+        self.assertNotIn("sensory_mode", bootstrap["payload"])
+        frame["payload"]["toy_contact"] = {
+            "schema": "mojum.sensory.toy-contact/2",
+        }
+        foreign = self.db.with_name("unselected-contact.sqlite3")
+        with LocalNoosphere(foreign, bootstrap["agent_id"]) as store:
+            head = store.head()
+            for event in (bootstrap, frame):
+                head = store.append(event, expected_head=head)
+            self.assertEqual(store.verify_chain()["head"], head)
+        before = foreign.read_bytes()
+        with self.assertRaisesRegex(
+            NoosphereError, "unexpected sensory frame"
+        ):
+            inspect_journal(foreign, external_expected_head=head)
+        self.assertEqual(foreign.read_bytes(), before)
+
     def test_missing_file_and_empty_store(self):
         with self.assertRaises(NoosphereError):
             inspect_journal(self.db)
