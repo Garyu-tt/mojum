@@ -87,6 +87,16 @@ class EpochSenseV4Tests(unittest.TestCase):
                 with self.assertRaises(CellV4Error):
                     CellExplorerV4.from_snapshot(bad)
 
+    def test_blocked_rest_is_rejected_before_policy_mutation(self):
+        model = CellExplorerV4()
+        cue = self.sense(0)
+        intent = model.decide(cue)
+        self.assertEqual(intent["action"], "rest")
+        before = model.snapshot()
+        with self.assertRaisesRegex(CellV4Error, "blocked rest"):
+            model.observe(cue, intent, True)
+        self.assertEqual(model.snapshot(), before)
+
 
 class EpochJournalV4Tests(unittest.TestCase):
     def setUp(self):
