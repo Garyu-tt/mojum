@@ -20,6 +20,7 @@ from mojum.world_room import _revision
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/room_exact_mixed.json"
+SIMPLE = ROOT / "examples/room_simple_mixed.json"
 
 
 def invoke(database, *args):
@@ -70,6 +71,86 @@ class NewTypedRoomCliTests(unittest.TestCase):
         self.assertEqual(type(start[0]), float)
         self.assertEqual(_revision(room, 0, *start),
                          _revision(room, 0, 1.25, 2.5))
+
+    def test_beginner_decimal_json_matches_exact_persisted_abi(self):
+        expected_room, expected_start = read_new_room_contract(EXAMPLE)
+        draft_room, draft_start = read_new_room_contract(SIMPLE)
+        self.assertEqual(expected_start, draft_start)
+        self.assertEqual(type(expected_room.width), type(draft_room.width))
+        self.assertEqual(type(expected_room.height), type(draft_room.height))
+        self.assertEqual(
+            [type(x) for x in expected_room.obstacles[0]],
+            [type(x) for x in draft_room.obstacles[0]],
+        )
+        self.assertEqual(
+            _revision(expected_room, 0, *expected_start),
+            _revision(draft_room, 0, *draft_start),
+        )
+        # Both distinct authoring formats MUST produce one identical binary
+        # persistence contract, even through the real Aquarium subprocess.
+        original = invoke(self.db, *new_args(EXAMPLE, ticks=24))
+        other_db = self.root / "beginner.sqlite3"
+        beginner = invoke(other_db, *new_args(SIMPLE, ticks=24))
+        self.assertEqual(original.returncode, 0, original.stderr[-900:])
+        self.assertEqual(beginner.returncode, 0, beginner.stderr[-900:])
+        self.assertEqual(_stored(self.db), _stored(other_db))
+        self.assertEqual(json.loads(original.stdout), json.loads(beginner.stdout))
+        self.assertEqual(
+            json.loads(_stored(other_db)[0][1])["payload"]["room_exact"]["schema"],
+            "mojum.world.room-exact-scalars/1",
+        )
+        self.assertNotIn(
+            "point-room-draft",
+            _stored(other_db)[0][1],
+        )
+        # Recovery from either journal does not require the original JSON.
+        head = json.loads(beginner.stdout)["journal_head"]
+        restore = invoke(
+            other_db, "--room-numeric-contract", "typed_v1",
+            "--resume-typed-room", "--expected-journal-head", head,
+            "--developmental-policy", "local_cell_v2",
+            "--exploration-mode", "goal_free")
+        self.assertEqual(restore.returncode, 0, restore.stderr[-900:])
+        self.assertEqual(json.loads(restore.stdout)["journal_head"], head)
+
+    def test_beginner_numeric_type_changes_affect_world_revision(self):
+        raw = json.loads(SIMPLE.read_text(encoding="utf-8"))
+        first_room, start = read_new_room_contract(SIMPLE)
+        changed = dict(raw, height=4.0)
+        changed_path = self.root / "float-height.json"
+        changed_path.write_text(json.dumps(changed), encoding="utf-8")
+        second_room, new_start = read_new_room_contract(changed_path)
+        self.assertEqual(first_room.height, second_room.height)
+        self.assertIs(type(first_room.height), int)
+        self.assertIs(type(second_room.height), float)
+        self.assertNotEqual(_revision(first_room, 0, *start),
+                            _revision(second_room, 0, *new_start))
+
+    def test_reject_invalid_beginner_json_without_reserved_target(self):
+        base = json.loads(SIMPLE.read_text(encoding="utf-8"))
+        cases = {
+            "extra_key": dict(base, unexplained="reject"),
+            "nonpositive": dict(base, width=0),
+            "huge_dimension": dict(base, width=1001),
+            "bool_dimension": dict(base, width=True),
+            "bool_start": dict(base, start=[True, 2.5]),
+            "overflow_integer": dict(base, width=2**64),
+            "string": dict(base, width="4.5"),
+            "tuple_shape": dict(base, obstacles=[[2, 1, 0.125]]),
+            "blocked_start": dict(base, start=[2.01, 2.5]),
+            "outside_start": dict(base, start=[4.6, 2.5]),
+            "overquota": dict(base, obstacles=[[2.0, 1, 0.125, 2.0]] * 4097),
+            "nonfinite": dict(base, width=float("inf")),
+            "wrong_version": dict(base, schema="mojum.world.point-room-draft/999"),
+        }
+        for label, value in cases.items():
+            with self.subTest(case=label):
+                path = self.root / (label + "-draft.json")
+                target = self.root / (label + "-private.sqlite3")
+                path.write_text(json.dumps(value), encoding="utf-8")
+                result = invoke(target, *new_args(path, ticks=1))
+                self.assertNotEqual(result.returncode, 0, (label, result.stdout))
+                self.assertFalse(target.exists())
 
     def test_actual_fresh_room_resume_zero_append_then_explicit_continue(self):
         first = invoke(self.db, *new_args(EXAMPLE, ticks=25))
