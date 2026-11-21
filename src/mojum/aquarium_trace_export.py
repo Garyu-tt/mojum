@@ -150,6 +150,13 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
         "tick": snapshot["tick"],
         "journal_head": snapshot["journal_head"],
         "stored_events": count,
+        # Public-format metadata ONLY: exact policy schema, no learned state,
+        # genome, private events, or hidden geometry in the footer.
+        "policy_schema": (
+            snapshot["developmental_state"]["schema"]
+            if snapshot.get("developmental_state") is not None
+            else "scripted"
+        ),
         "trace_integrity": trace_integrity,
         "trace_range": {"start_tick": range_begin, "next_tick": next_tick,
                         "has_more": has_more, "source_total_ticks": total_frames},
