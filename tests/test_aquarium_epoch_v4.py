@@ -25,6 +25,7 @@ from mojum.epoch_sense_v2 import (
     SCHEMA as EPOCH_SCHEMA,
 )
 from mojum.local_cell_sense import Proprioception
+from mojum.noosphere import NoosphereError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,6 +159,39 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual(wire["events"], 10_052)
             self.assertEqual(wire["epoch_schema"], EPOCH_SCHEMA)
             self.assertEqual(wire["epoch_ticks"], EPOCH_TICKS)
+
+    def test_wire_inspector_rejects_marker_free_boundary_frame(self):
+        # Use a reduced inspector threshold against a real valid SQLite/hash
+        # chain containing three consecutive v4 frames and no marker.
+        with self.open() as aquarium:
+            for _ in range(3):
+                aquarium.step()
+        with patch("mojum.aquarium_wire.EPOCH_TICKS", 2):
+            with self.assertRaisesRegex(NoosphereError, "missing durable v4 epoch marker"):
+                inspect_journal(self.db)
+
+    def test_wire_inspector_rejects_early_epoch_marker(self):
+        # An independent writer can append a syntactically valid event and
+        # preserve the full event hash chain. The wire ABI must reject it.
+        with self.open() as aquarium:
+            aquarium.step()
+            event = aquarium._record(
+                "aquarium.epoch", "epoch-00000001",
+                {
+                    "schema": "mojum.aquarium.epoch-transition/1",
+                    "absolute_tick": 1,
+                    "epoch_index": 1,
+                    "previous_epoch_index": 0,
+                    "epoch_tick": 0,
+                    "source": "explicit_bounded_epoch_rollover_without_reset",
+                },
+                aquarium.dt_ns, aquarium.genome.revision,
+            )
+            aquarium.store.append(
+                event, expected_head=aquarium.checkpoint()["journal_head"]
+            )
+        with self.assertRaisesRegex(NoosphereError, "epoch"):
+            inspect_journal(self.db)
 
     def test_v4_journal_is_not_reinterpreted_as_v3(self):
         with self.open() as aquarium:
