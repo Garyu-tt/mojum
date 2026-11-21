@@ -60,6 +60,36 @@ class ColdAquariumCopyTests(unittest.TestCase):
             source.step(dx=0.0)
             self.assertEqual(source.tick, 10)
 
+    def test_epoch_sensory_copy_requires_matching_profile_and_resumes(self):
+        profile = dict(motor_mode="local_cell_v4", sensory_mode="toy_probe_v2")
+        with Aquarium(self.source, SEED, GRAPH, **profile) as source:
+            for _ in range(8):
+                source.step()
+            baseline = source.checkpoint()
+            source_files = [self.source, Path(str(self.source) + "-wal")]
+            original = [path.read_bytes() for path in source_files]
+            with self.assertRaisesRegex(AquariumError, "mode mismatch"):
+                self._export()
+            self.assertFalse(self.exported.exists())
+            metadata = export_cold_copy(self.source, self.exported, SEED, GRAPH,
+                                        **profile)
+            self.assertEqual(metadata["journal_head"], baseline["journal_head"])
+            self.assertEqual(metadata["event_count"], 9)
+            self.assertEqual([path.read_bytes() for path in source_files], original)
+
+            backup_bytes = self.exported.read_bytes()
+            with self.assertRaisesRegex(AquariumError, "mode mismatch"):
+                self._verify(metadata, motor_mode="local_cell_v4")
+            self.assertEqual(self._verify(metadata, **profile)["tick"], 8)
+            self.assertEqual(self.exported.read_bytes(), backup_bytes)
+
+            with Aquarium(self.exported, SEED, GRAPH, **profile,
+                          external_expected_head=metadata["journal_head"]) as resumed:
+                self.assertEqual(resumed.checkpoint(), baseline)
+                resumed.step()
+                source.step()
+                self.assertEqual(resumed.checkpoint(), source.checkpoint())
+
     def test_export_never_opens_source_as_writable_aquarium(self):
         # The backup must not initialize or replay through a writable
         # Aquarium on the original source, even when the journal is valid.

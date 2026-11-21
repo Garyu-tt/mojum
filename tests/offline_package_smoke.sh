@@ -77,6 +77,23 @@ assert trace_meta["frames"] == 1 and trace_meta["journal_head"] == guided_resume
 frame, footer = map(json.loads, Path("guided.private.jsonl").read_text(encoding="utf-8").splitlines())
 assert frame["developmental_controller"]["intent"]["kind"] == "north"
 assert footer["trace_integrity"]["frame_count"] == 1
+epoch = ("--motor-mode", "local_cell_v4", "--sensory-mode", "toy_probe_v2")
+epoch_state = run("mojum-aquarium", "--db", "epoch.sqlite3", "--ticks", "8", *epoch)
+cold_copy = (sys.executable, "-I", "-m", "mojum.aquarium_cold_copy")
+backup = json.loads(subprocess.check_output([
+    *cold_copy, "export", "--db", "epoch.sqlite3", "--output", "backup.sqlite3", *epoch,
+], text=True))
+assert (backup["tick"], backup["event_count"], backup["journal_head"]) == (
+    8, 9, epoch_state["journal_head"],
+)
+verified = json.loads(subprocess.check_output([
+    *cold_copy, "verify", "--db", "backup.sqlite3", "--expected-head", backup["journal_head"],
+    "--expected-sha256", backup["db_sha256"], "--expected-tick", "8", *epoch,
+], text=True))
+assert verified["journal_head"] == backup["journal_head"]
+resumed_backup = run("mojum-aquarium", "--db", "backup.sqlite3", "--ticks", "1",
+                     "--expected-head", verified["journal_head"], *epoch)
+assert resumed_backup == run("mojum-aquarium", "--db", "epoch.sqlite3", "--ticks", "1", *epoch)
 disabled = run("mojum-aquarium", "--db", "disabled.sqlite3", "--ticks", "2", "--neural-mode", "disabled")
 assert (disabled["neural_mode"], disabled["neural_state"], disabled["stored_events"]) == ("disabled", None, 3)
 

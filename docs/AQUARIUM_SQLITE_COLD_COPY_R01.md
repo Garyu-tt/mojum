@@ -7,7 +7,7 @@ world, shadow pulse-learner and event history reconstruct exactly.
 
 This does **not** implement an independent neural brain, physical body,
 MuJoCo, durable replicated Noosphere, identity authentication, encryption,
-automatic failover, snapshot of a running motor controller, or live migration.
+automatic failover, or live migration.
 The journal is PRIVATE plaintext. The source and destination folders must be
 trusted local storage. Do not upload these files to public GitHub/CI.
 
@@ -42,11 +42,14 @@ PYTHONPATH=src python -m mojum.aquarium_cold_copy verify \
   --expected-tick 30
 ```
 
-Both devices must have **the same trusted GENESIS seed, graph, room definition,
-clock and neural mode**. By default this uses `examples/genesis_seed.json`
-and `examples/first_loop.json`. Use `--genome`, `--graph` and
-`--neural-mode` if your fixture differs. Only the default room configuration
-is exposed by this CLI; custom rooms are supported by the Python API.
+Both local replays require **the same trusted GENESIS seed, graph, room,
+clock and profile**. The CLI uses the bundled seed and graph by default,
+including when installed from a wheel. Use `--genome` and `--graph` for your
+own fixture. Pass the source's `--neural-mode`, `--motor-mode`, `--sensory-mode`,
+`--temporal-mode` and `--brain-mode` to both `export` and `verify` when they
+differ from the defaults. For example, include `--motor-mode local_cell_v4
+--sensory-mode toy_probe_v2` on both commands to replay that combined profile.
+Custom rooms and toy scenes can be passed through the Python API.
 
 A verified copy can be reopened as an **independent forked local simulation**
 using `mojum.aquarium --db ...` with matching settings. That is *not*
