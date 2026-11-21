@@ -11,6 +11,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import stat
 import tempfile
@@ -89,17 +90,29 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
         raise ValueError("expected tick must be a nonnegative integer")
     if type(expected_agent_id) is not str or not expected_agent_id.strip():
         raise ValueError("expected organism ID required")
+    # Verification must not open an untrusted input through writable Aquarium:
+    # an empty SQLite database would otherwise receive a bootstrap event.
+    # A cold-copy artifact is self-contained; never silently ignore WAL pages.
+    if any(os.path.lexists(str(source) + suffix) for suffix in ("-wal", "-shm")):
+        raise ValueError("cold-copy verification requires a self-contained SQLite file")
     checksum = _sha256(source)
     if expected_sha256 is not None and checksum != expected_sha256:
         raise ValueError("cold-copy file checksum mismatch")
-    with Aquarium(source, seed, graph, external_expected_head=expected_journal_head,
-                  **_options(expected_agent_id, neural_mode, room, start, dt_ns)) as child:
-        snapshot = child.checkpoint()
-        if snapshot["journal_head"] != expected_journal_head:
-            raise AquariumError("unexpected journal head after replay")
-        if expected_tick is not None and snapshot["tick"] != expected_tick:
-            raise AquariumError("unexpected cold-copy virtual tick")
-        count = child.store.count()
+    with tempfile.TemporaryDirectory(prefix="mojum-cold-verify-") as scratch:
+        staged = Path(scratch) / "candidate.sqlite3"
+        shutil.copyfile(source, staged)
+        if _sha256(staged) != checksum:
+            raise ValueError("cold-copy source changed during verification")
+        # SQLite setup/replay may write: isolate all such effects in this
+        # private temporary copy, never the caller's original artifact.
+        with Aquarium(staged, seed, graph, external_expected_head=expected_journal_head,
+                      **_options(expected_agent_id, neural_mode, room, start, dt_ns)) as child:
+            snapshot = child.checkpoint()
+            if snapshot["journal_head"] != expected_journal_head:
+                raise AquariumError("unexpected journal head after replay")
+            if expected_tick is not None and snapshot["tick"] != expected_tick:
+                raise AquariumError("unexpected cold-copy virtual tick")
+            count = child.store.count()
     return {"schema": "mojum.aquarium.cold-copy/1",
             "agent_id": expected_agent_id, "tick": snapshot["tick"],
             "journal_head": expected_journal_head,
