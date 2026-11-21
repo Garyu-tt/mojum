@@ -48,7 +48,7 @@ def new_args(file, *, ticks=12):
     return [
         "--room-numeric-contract", "typed_v1",
         "--new-room-contract", str(file),
-        "--developmental-policy", "local_cell_v2",
+        "--developmental-policy", "local_cell_v2b",
         "--exploration-mode", "goal_free",
         "--ticks", str(ticks),
     ]
