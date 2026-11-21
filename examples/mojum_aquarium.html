@@ -60,11 +60,11 @@ class Aquarium{
  else if(best&&this.treatInterest>24){this.mode="snack";this.action="Исследует угощение";targetX=best.x;targetY=best.y;speed=.23+(this.treatInterest/100)*.05;}
  else{this.mode="explore";this.action="Исследует";if(this.ticks%55===0)this.exploreAngle+=(this.rng()-.5)*1.9;const wallX=this.x<.10?1:this.x>.90?-1:0;const wallY=this.y<.12?1:this.y>.88?-1:0;const dx=Math.cos(this.exploreAngle)+wallX*2.5;const dy=Math.sin(this.exploreAngle)+wallY*2.5;targetX=clamp(this.x+dx*.2,.04,.96);targetY=clamp(this.y+dy*.2,.05,.95);speed=.115;}
  if(speed>0){const dx=(targetX-this.x)*1.7,dy=targetY-this.y,dist=Math.hypot(dx,dy);const maxStep=speed*dt;if(dist>.0001){const step=Math.min(maxStep,dist);this.vx=(dx/dist)*step/1.7;this.vy=(dy/dist)*step;this.x=clamp(this.x+this.vx,.04,.96);this.y=clamp(this.y+this.vy,.07,.93);this.heading=Math.atan2(this.vy,this.vx*1.7);this.energy=clamp(this.energy-(this.mode==="snack"?1.65:.9)*dt,0,100);this.curiosity=clamp(this.curiosity-.42*dt,0,100);}}
- for(let i=this.food.length-1;i>=0;i--){if(Math.hypot((this.food[i].x-this.x)*1.7,this.food[i].y-this.y)<.047){this.food.splice(i,1);this.foodEaten++;this.treatInterest=clamp(this.treatInterest-30,0,60);this.curiosity=clamp(this.curiosity+5,0,100);this.note("Попробовал угощение ради интереса");}}
+ for(let i=this.food.length-1;i>=0;i--){if(this.mode==="snack"&&Math.hypot((this.food[i].x-this.x)*1.7,this.food[i].y-this.y)<.047){this.food.splice(i,1);this.foodEaten++;this.treatInterest=clamp(this.treatInterest-30,0,60);this.curiosity=clamp(this.curiosity+5,0,100);this.note("Попробовал угощение ради интереса");}}
  if(this.food.length<2&&this.ticks%95===0)this.addFood(.07+this.rng()*.86,.11+this.rng()*.78);
  this.heart=Math.round(72+(this.mode==="snack"?4:this.mode==="rest"?-8:0)+Math.sin(this.time*6.7)*4);
  }
- mood(){if(this.energy<24)return "Уставший";if(this.mode==="forage")return "Сосредоточенный";if(this.curiosity>57)return "Любопытный";return "Спокойный";}
+ mood(){if(this.energy<24)return "Уставший";if(this.mode==="snack")return "Сосредоточенный";if(this.curiosity>57)return "Любопытный";return "Спокойный";}
 }
 const sim=new Aquarium();const canvas=$("habitat"),ctx=canvas.getContext("2d");const heartCanvas=$("heartline"),hc=heartCanvas.getContext("2d");let paused=false,speed=1,last=0,acc=0,uiClock=0;
 function resize(){const r=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2);const w=Math.max(200,Math.round(r.width*dpr)),h=Math.max(120,Math.round(r.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;} }
