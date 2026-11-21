@@ -4,12 +4,65 @@ import copy
 import json
 import unittest
 
+from mojum.developmental import MotorPlay
 from mojum.developmental_escape import (
     FORCED_EXPLORATION_PERIOD, MAX_CONSECUTIVE_RESTS, MAX_OBSERVATIONS,
     MAX_ZONES, MOVE_NAMES, SCHEMA, EscapePolicyError, ZonedEscapePlay,
 )
 
 POSITION = (0.1, 0.1)
+START = (0.125, 0.125)
+OBSTACLE = (0.375, 0.375, 0.625, 0.625)  # x0, y0, x1, y1
+
+
+def room_outcome(position, dx, dy):
+    """Deterministic bounded room: perimeter plus one central obstacle box."""
+    x, y = position[0] + dx, position[1] + dy
+    inside = OBSTACLE[0] < x < OBSTACLE[2] and OBSTACLE[1] < y < OBSTACLE[3]
+    blocked = not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0) or inside
+    return blocked, (position if blocked else (x, y))
+
+
+def summarize(kinds, outcomes, positions):
+    successful = sum(1 for kind, blocked in outcomes
+                     if kind in MOVE_NAMES and not blocked)
+    return {
+        "moves": sum(1 for kind in kinds if kind in MOVE_NAMES),
+        "rests": kinds.count("rest"),
+        "blocked": sum(1 for _, blocked in outcomes if blocked),
+        "successful": successful,
+        "distinct_positions": len(set(positions)),
+        "longest_rest_streak": longest_run(kinds, "rest"),
+        "idle_fraction": kinds.count("rest") / len(kinds),
+    }
+
+
+DELTAS = {"east": (0.125, 0.0), "north": (0.0, 0.125),
+          "west": (-0.125, 0.0), "south": (0.0, -0.125),
+          "rest": (0.0, 0.0)}
+
+
+def drive(policy, ticks, *, start=START):
+    """Run one policy against the same deterministic room for ``ticks`` steps."""
+    kinds, outcomes, positions = [], [], []
+    position = start
+    for tick in range(ticks):
+        if isinstance(policy, ZonedEscapePlay):
+            intent = policy.choose(tick, position)
+            kind, dx, dy = intent["kind"], intent["dx"], intent["dy"]
+            blocked, nxt = room_outcome(position, dx, dy)
+            policy.observe(tick=tick, position=position, kind=kind, blocked=blocked)
+        else:
+            kind = policy.choose(tick)["kind"]
+            dx, dy = DELTAS[kind]
+            blocked, nxt = room_outcome(position, dx, dy)
+            policy.observe(tick=tick, kind=kind, blocked=blocked)
+        kinds.append(kind)
+        outcomes.append((kind, blocked))
+        positions.append(nxt)
+        position = nxt
+    return summarize(kinds, outcomes, positions)
+
 
 
 def simulate(policy, ticks, *, position=POSITION, blocked=True):
@@ -210,6 +263,25 @@ class ZonedEscapeStateTests(unittest.TestCase):
         for forbidden in ("room", "target", "goal", "reward", "future"):
             self.assertNotIn(forbidden, state)
         self.assertNotIn("obstacle", json.dumps(state))
+
+
+class ZonedEscapeHeldOutRoomComparisonTests(unittest.TestCase):
+    """Compare the isolated profile with canonical motor play in one held-out room.
+
+    Same start, obstacle and virtual time; the policies only see their own
+    measured blocked/success outcomes, never room geometry.
+    """
+
+    def test_zoned_profile_keeps_attempting_without_rest_collapse(self):
+        ticks = 400
+        canonical = drive(MotorPlay(), ticks)
+        zoned = drive(ZonedEscapePlay(), ticks)
+        self.assertGreater(canonical["successful"], 0)
+        self.assertGreater(zoned["successful"], 0)
+        self.assertGreaterEqual(zoned["distinct_positions"], 10)
+        self.assertLessEqual(zoned["longest_rest_streak"], MAX_CONSECUTIVE_RESTS)
+        self.assertLess(zoned["idle_fraction"], 0.5)
+        self.assertEqual(zoned["moves"] + zoned["rests"], ticks)
 
 
 if __name__ == "__main__":
