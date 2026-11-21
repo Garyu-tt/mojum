@@ -41,6 +41,12 @@ jobs:
         env:
           PYTHONPATH: src
           PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
           MOJUM_ARCHIVE112_SOURCE: sources/policy112
         run: |
-          python -m unittest discover -s tests -p test_v2a_archive_readonly.py -v
+          set -o pipefail
+          python -m unittest discover -s tests -p test_v2a_archive_readonly.py -v 2>&1 | tee archive-qa.log
+          if grep -q 'ResourceWarning: unclosed database' archive-qa.log; then
+            echo "FAIL: SQLite leak detected in exact-source archive QA" >&2
+            exit 1
+          fi
