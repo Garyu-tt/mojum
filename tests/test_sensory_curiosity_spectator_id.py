@@ -10,10 +10,6 @@ from mojum.sensory_curiosity_lab import CuriosityError, Toy, ToyScene
 from mojum.world_room import Room, initial_state
 
 
-ROOT = Path(__file__).resolve().parent.parent
-SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
-GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
-
 
 def labeled_scene(swap_names=False, reverse_order=False):
     # Both centers are *exactly* 0.25m away from (2,2), using binary-exact
