@@ -1,0 +1,55 @@
+name: Mojum explicit v2A-to-v2B fresh-journal transfer QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/v2a-v2b-transfer.yml"
+      - "src/mojum/migration_v2a_v2b.py"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/noosphere.py"
+      - "src/mojum/archived_policy_v2a.py"
+      - "src/mojum/cell_policy_v2.py"
+      - "tests/test_v2a_v2b_migration.py"
+      - "docs/R014_V2A_TO_V2B_NEW_JOURNAL.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  immutable-source-transfer:
+    name: fresh SQLite migration and fail-closed tests (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout candidate new-journal converter
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact original #112 v2A writer
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 8d2eaf234c09177ae0b92dfef4bb41950529c912
+          path: sources/policy112
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Verify converted experience / never overwrite a source DB
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+          MOJUM_ARCHIVE112_SOURCE: sources/policy112
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p test_v2a_v2b_migration.py -v 2>&1 | tee transfer-qa.log
+          if grep -q 'ResourceWarning: unclosed database' transfer-qa.log; then
+            echo "FAIL: migration leaked SQLite connection" >&2
+            exit 1
+          fi
