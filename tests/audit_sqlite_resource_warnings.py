@@ -18,8 +18,10 @@ import warnings
 def _leak_diagnostic(warning: warnings.WarningMessage) -> str:
     """Report allocation origin when the interpreter retained warning.source."""
     diagnostic = f"{warning.filename}:{warning.lineno} {warning.message}"
+    if not tracemalloc.is_tracing():
+        return f"{diagnostic}\n  SQLite connection allocation unavailable; rerun with PYTHONTRACEMALLOC=1"
     source = getattr(warning, "source", None)
-    if source is not None and tracemalloc.is_tracing():
+    if source is not None:
         allocation = tracemalloc.get_object_traceback(source)
         if allocation is not None:
             frames = "\n".join(
@@ -27,7 +29,7 @@ def _leak_diagnostic(warning: warnings.WarningMessage) -> str:
                 for frame in allocation
             )
             return f"{diagnostic}\n  SQLite connection allocation (oldest first):\n{frames}"
-    return f"{diagnostic}\n  SQLite connection allocation unavailable; rerun with PYTHONTRACEMALLOC=1"
+    return f"{diagnostic}\n  SQLite connection allocation traceback unavailable in this interpreter"
 
 
 def main() -> int:
