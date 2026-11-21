@@ -1,0 +1,52 @@
+name: Mojum v2A archive immutable SQLite cross-source replay
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/v2a-archive-readonly.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/noosphere.py"
+      - "src/mojum/archived_policy_v2a.py"
+      - "tests/test_v2a_archive_readonly.py"
+      - "docs/R014_V2A_READONLY_ARCHIVE.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-v2a-archive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout candidate #125-based archive host
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable original #112 v2A writer
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 8d2eaf234c09177ae0b92dfef4bb41950529c912
+          path: sources/policy112
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Actual #112 SQLite journal to archive-only #125 host, no writes
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+          MOJUM_ARCHIVE112_SOURCE: sources/policy112
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p test_v2a_archive_readonly.py -v 2>&1 | tee archive-qa.log
+          if grep -q 'ResourceWarning: unclosed database' archive-qa.log; then
+            echo "FAIL: SQLite leak detected in exact-source archive QA" >&2
+            exit 1
+          fi
