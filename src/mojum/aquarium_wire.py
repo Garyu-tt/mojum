@@ -32,6 +32,10 @@ from .sensory_play import SENSE_SCHEMA
 _GUIDANCE = "mojum.developmental.range-guidance/1"
 _HEAD = re.compile(r"[0-9a-f]{64}\Z")
 _EPOCH_POLICIES = ("local_cell_v4", "local_cell_v4+toy_probe_v2", "local_cell_v5")
+_SENSORY_KEYS = frozenset({
+    "sensory_mode", "sensory_schema", "sensory_model_schema", "sensory_scene",
+    "contact_bridge_schema", "occlusion_schema", "sensory_reprobe_period_ticks",
+})
 
 
 def _epoch_tag(policy):
@@ -65,7 +69,7 @@ def _stored_policy(manifest):
     # The legacy /1 contact table is capped at 4,000 updates and is not a
     # valid continuation of the v4 long-run contract.  The explicit /2
     # sensory selector is versioned and may be combined with v4 below.
-    if policy_id == "local_cell_v5" and sensory_mode is not None:
+    if policy_id == "local_cell_v5" and _SENSORY_KEYS & manifest.keys():
         raise NoosphereError("local_cell_v5 journals require sensory_mode none")
     if policy_id == "local_cell_v4" and sensory_mode == "toy_probe":
         raise NoosphereError("local_cell_v4 journals require sensory_mode none or toy_probe_v2")
@@ -123,6 +127,8 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                     or _object_field(motor, "learning").get("schema") != learning_schema):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
             if state_schema in (V4_SCHEMA, V5_SCHEMA):
+                if state_schema == V5_SCHEMA and "toy_contact" in frame:
+                    raise NoosphereError("unexpected sensory frame in local_cell_v5 journal")
                 observation = _object_field(motor, "observation")
                 intent = _object_field(motor, "intent")
                 learning = _object_field(motor, "learning")

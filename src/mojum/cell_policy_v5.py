@@ -115,7 +115,12 @@ class CellExplorerV5:
                 or type(state["forced_probes"]) is not int
                 or not 0 <= state["forced_probes"] <= state["updates"]):
             raise CellV5Error("invalid v5 retention envelope")
-        observed_live = 0
+        # The first probe needs all four directions blocked. Each probe also
+        # needs its own preceding run of consecutive rests.
+        probe_ticks = max(0, state["updates"] - len(_MOVE_ACTIONS))
+        if state["forced_probes"] > probe_ticks // (MAX_REST_STREAK + 1):
+            raise CellV5Error("more forced probes than elapsed ticks allow")
+        observations_by_tick = []
         for key, actions in state["records"].items():
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
@@ -136,11 +141,14 @@ class CellExplorerV5:
                 if action == "rest" and counts[1]:
                     raise CellV5Error("impossible blocked rest history")
                 cell_observations += counts[0]
-            # A cell can be observed at most once per absolute tick. Its
-            # retained measurements cannot predate its last observed tick.
-            if cell_observations > last_seen + 1:
-                raise CellV5Error("more v5 cell observations than elapsed ticks")
+            observations_by_tick.append((last_seen, cell_observations))
+        observed_live = 0
+        # By each cell's last-seen tick, all observations for that cell and
+        # every earlier cell must fit into the shared one-observation clock.
+        for last_seen, cell_observations in sorted(observations_by_tick):
             observed_live += cell_observations
+            if observed_live > last_seen + 1:
+                raise CellV5Error("more v5 cell observations than elapsed ticks")
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV5Error("v5 lost or double-counted learned observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:

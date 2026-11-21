@@ -17,7 +17,7 @@ import unittest
 from contextlib import closing
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE
+from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE, V5_MODE
 from mojum.aquarium_wire import inspect_journal
 from mojum.cell_policy_v4 import CellExplorerV4, CellV4Error, SCHEMA as V4_SCHEMA
 from mojum.epoch_sense_v2 import (
@@ -159,10 +159,10 @@ class EpochJournalV4Tests(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.db = Path(scratch.name) / "v4-private.sqlite3"
 
-    def open(self):
+    def open(self, motor_mode=V4_MODE):
         return Aquarium(
             self.db, SEED, GRAPH,
-            motor_mode=V4_MODE,
+            motor_mode=motor_mode,
             neural_mode="disabled",
         )
 
@@ -284,7 +284,17 @@ class EpochJournalV4Tests(unittest.TestCase):
         "10k-frame epoch replay runs in the untraced full-suite step",
     )
     def test_real_sqlite_crosses_epoch_and_replays_after_durable_marker(self):
-        with self.open() as aquarium:
+        self.assert_sqlite_epoch_continuation(V4_MODE)
+
+    @unittest.skipUnless(
+        EPOCH_STRESS_ENABLED,
+        "10k-frame epoch replay runs in the untraced full-suite step",
+    )
+    def test_v5_real_sqlite_crosses_epoch_and_replays_after_durable_marker(self):
+        self.assert_sqlite_epoch_continuation(V5_MODE)
+
+    def assert_sqlite_epoch_continuation(self, motor_mode):
+        with self.open(motor_mode) as aquarium:
             for _ in range(EPOCH_TICKS):
                 aquarium.step()
             self.assertEqual((aquarium.tick, aquarium.epoch_index), (EPOCH_TICKS, 0))
@@ -316,8 +326,9 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual(marker["observed_at_ns"], EPOCH_TICKS * aquarium.dt_ns)
             after_marker = aquarium.checkpoint()
             self.assertNotEqual(before["journal_head"], after_marker["journal_head"])
+            self.assertEqual(before["developmental_state"], after_marker["developmental_state"])
 
-        with self.open() as resumed:
+        with self.open(motor_mode) as resumed:
             self.assertEqual(resumed.checkpoint(), after_marker)
             first = resumed.step()
             self.assertEqual(first["tick"], EPOCH_TICKS)
@@ -332,12 +343,13 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual((resumed.tick, resumed.epoch_index), (10_050, 1))
             self.assertEqual(resumed.store.count(), 10_052)
             self.assertEqual(expected["epoch_tick"], 51)
+            self.assertEqual(expected["developmental_state"]["updates"], 10_050)
 
-        with self.open() as cold:
+        with self.open(motor_mode) as cold:
             self.assertEqual(cold.checkpoint(), expected)
             self.assertEqual(cold.store.verify_chain()["head"], expected["journal_head"])
             wire = inspect_journal(self.db, external_expected_head=expected["journal_head"])
-            self.assertEqual(wire["format"], V4_MODE)
+            self.assertEqual(wire["format"], motor_mode)
             self.assertEqual(wire["frames"], 10_050)
             self.assertEqual(wire["events"], 10_052)
             self.assertEqual(wire["epoch_schema"], EPOCH_SCHEMA)

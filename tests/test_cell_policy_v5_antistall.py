@@ -290,6 +290,16 @@ class RetentionTests(unittest.TestCase):
                 "last_seen_at": {"0:0": 0, "2500:0": 99},
                 "evictions": 0, "forgotten_observations": 0,
             },
+            "overlapping_cell_observation_histories": {
+                **common, "last_tick": 5, "updates": 6,
+                "records": {
+                    "0:0": {"x+": [2, 0]},
+                    "1:0": {"x+": [3, 0]},
+                    "2:0": {"x+": [1, 0]},
+                },
+                "last_seen_at": {"0:0": 1, "1:0": 2, "2:0": 5},
+                "evictions": 0, "forgotten_observations": 0,
+            },
             "two_cells_on_one_tick": {
                 **common, "last_tick": 1, "updates": 2,
                 "records": {
@@ -334,6 +344,19 @@ class RetentionTests(unittest.TestCase):
             CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
             model.snapshot(),
         )
+
+    def test_snapshot_rejects_forced_probes_before_their_prerequisites(self):
+        model = CellExplorerV5()
+        for tick in range(12):
+            sense = cue(tick)
+            intent = model.decide(sense)
+            model.observe(sense, intent, intent["action"] != "rest")
+            snapshot = model.snapshot()
+            with self.subTest(tick=tick):
+                self.assertEqual(CellExplorerV5.from_snapshot(snapshot).snapshot(), snapshot)
+                snapshot["forced_probes"] += 1
+                with self.assertRaises(CellV5Error):
+                    CellExplorerV5.from_snapshot(snapshot)
 
     def test_restore_detaches_from_original_snapshot(self):
         model = CellExplorerV5()
@@ -477,6 +500,21 @@ class V5AquariumVersionGateTests(unittest.TestCase):
         forged["developmental"]["observation"]["epoch_tick"] += 1
         with self.assertRaisesRegex(NoosphereError, "epoch"):
             _check_policy_frame(forged, contract, temporal, sensory)
+
+    def test_v5_wire_rejects_sensory_selectors_and_frames(self):
+        with self.aquarium() as rover:
+            for key in ("sensory_mode", "sensory_schema", "sensory_model_schema",
+                        "sensory_scene", "contact_bridge_schema", "occlusion_schema",
+                        "sensory_reprobe_period_ticks"):
+                with self.subTest(key=key), self.assertRaisesRegex(NoosphereError, "sensory"):
+                    _stored_policy(dict(rover.manifest, **{key: None}))
+            frame = rover._calculate_frame(None, None)[0]
+            frame["toy_contact"] = {"schema": "unexpected"}
+            rover._append_record("aquarium.frame", "frame-000000000000", frame,
+                                 0, rover.genome.revision)
+            self.assertEqual(rover.store.verify_chain()["count"], 2)
+        with self.assertRaisesRegex(NoosphereError, "sensory"):
+            inspect_journal(self.db)
 
     def test_existing_v4_journal_cannot_be_relabelled_as_v5(self):
         with self.aquarium(mode=V4_MODE) as rover:
