@@ -32,6 +32,16 @@
     button.danger { border-color:#795260; color:#ffc5ce; }
     button.small { padding:5px 9px; font-size:12px; }
     .instructions { padding:0 17px 14px; }
+    .walkbar { margin:0 16px 16px; border-top:1px solid #334450; padding-top:12px; }
+    .walkrow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .walkpad { display:grid; grid-template-columns:repeat(3,42px); grid-template-rows:repeat(3,33px); gap:4px; align-items:stretch; margin:10px 0; }
+    .walkpad button { padding:3px; font-size:15px; }
+    .walkpad #walk-up { grid-column:2;grid-row:1; }
+    .walkpad #walk-left { grid-column:1;grid-row:2; }
+    .walkpad #walk-right { grid-column:3;grid-row:2; }
+    .walkpad #walk-down { grid-column:2;grid-row:3; }
+    .walkpad [hidden] {display:none;}
+    #walk-status {font-variant-numeric:tabular-nums; white-space:normal;}
     .edit-section { padding:16px 18px; border-top:1px solid #2b3945; }
     .edit-section:first-of-type { border-top:0; }
     .section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
@@ -77,6 +87,7 @@
             <g id="grid" pointer-events="none"></g>
             <g id="obstacles"></g>
             <g id="start"></g>
+            <g id="walk-trail" pointer-events="none"></g>
           </svg>
         </div>
         <div class="toolbar">
@@ -89,6 +100,20 @@
         <p class="sub instructions">Перетаскивайте зелёную точку старта и прямоугольники.
           Точные координаты можно ввести справа. Ось Y направлена вниз на схеме.</p>
         <p id="status" class="status" role="status" aria-live="polite">Комната корректна.</p>
+        <section class="walkbar" aria-label="Тест движения по комнате">
+          <div class="walkrow">
+            <button id="walk-toggle" type="button" aria-pressed="false">▶ Тест прогулки</button>
+            <button id="walk-reset" type="button" disabled>С начала</button>
+            <span class="sub">Проверка столкновений · без обучения и SQLite</span>
+          </div>
+          <div class="walkpad" role="group" aria-label="Двигать тестовую точку на 25 см">
+            <button id="walk-up" aria-label="Тест: вверх" disabled>↑</button>
+            <button id="walk-left" aria-label="Тест: влево" disabled>←</button>
+            <button id="walk-right" aria-label="Тест: вправо" disabled>→</button>
+            <button id="walk-down" aria-label="Тест: вниз" disabled>↓</button>
+          </div>
+          <p id="walk-status" class="sub" role="status" aria-live="polite">Тест не запущен.</p>
+        </section>
       </section>
 
       <section class="panel" aria-label="Параметры комнаты">
@@ -146,16 +171,19 @@
   </main>
   <script src="./room_designer_core.js"></script>
   <script src="./room_designer_history.js"></script>
+  <script src="./room_walk_preview.js"></script>
   <script>
     (() => {
       "use strict";
       const C = window.MojumRoomDesignerCore;
       const H = window.MojumRoomHistory;
+      const W = window.MojumWalkPreview;
       const $ = id => document.getElementById(id);
       const NS = "http://www.w3.org/2000/svg";
       const svg = $("scene"), floor = $("floor");
       let state = C.clone(C.DEFAULT), selected = 0, lastValid = null;
       let history = H.create(state), pointer = null;
+      let walkState = null, walkSource = null;
 
       function message(text, isError = false) {
         $("status").textContent = text;
@@ -315,8 +343,72 @@
           if(track) history=H.record(history,state);
           sceneDraw(valid);
         }
+        updateWalk(Boolean(valid),valid);
         updateHistoryButtons(Boolean(valid));
       }
+      function updateWalk(ok,valid){
+        if(walkState && ok){
+          const source=C.draftJSON(state);
+          if(source!==walkSource){
+            walkState=W.begin(valid);
+            walkSource=source;
+          }
+        }
+        const active=Boolean(walkState);
+        const canMove=active && ok && walkState.tick<W.MAX_PREVIEW_STEPS;
+        $("walk-toggle").setAttribute("aria-pressed",String(active));
+        $("walk-toggle").textContent=active?"■ Завершить тест":"▶ Тест прогулки";
+        $("walk-toggle").disabled=!ok;
+        $("walk-reset").disabled=!canMove && !(active && ok);
+        for(const key of ["up","down","left","right"]) $("walk-"+key).disabled=!canMove;
+        const group=$("walk-trail");
+        group.replaceChildren();
+        if(active && ok){
+          const path=walkState.trail.map(p=>p.x+","+p.y).join(" ");
+          const radius=Math.max(.025,Math.min(valid.width,valid.height)*.03);
+          svgElement("polyline",{points:path,fill:"none",stroke:"#85baff",
+            "stroke-width":Math.max(.014,radius*.4),"stroke-linejoin":"round"},group);
+          svgElement("circle",{cx:walkState.x,cy:walkState.y,r:radius,
+            fill:"#93bdff",stroke:"#e7f3ff","stroke-width":Math.max(.008,radius*.15)},group);
+          $("walk-status").textContent="Шаги: "+walkState.tick+"/"+W.MAX_PREVIEW_STEPS+
+            " · блокировок: "+walkState.blocked+
+            " · позиция: "+walkState.x.toFixed(3)+", "+walkState.y.toFixed(3)+" м";
+        }else{
+          $("walk-status").textContent=active
+            ?"Исправьте параметры комнаты для продолжения теста"
+            :"Тест не запущен.";
+        }
+      }
+      function walkStep(dx,dy) {
+        if(!walkState || !lastValid) return;
+        try {
+          walkState=W.step(C.validate(state),walkState,dx,dy);
+          render(false);
+          if(walkState.last.blocked) message("Тест: движение блокировано препятствием или стеной.");
+        } catch (err) {
+          message("Тест: "+err.message,true);
+        }
+      }
+      $("walk-toggle").addEventListener("click",()=>{
+        if(walkState){
+          walkState=null;
+          walkSource=null;
+        }else if(lastValid){
+          walkState=W.begin(C.validate(state));
+          walkSource=lastValid;
+        }
+        render(false);
+      });
+      $("walk-reset").addEventListener("click",()=>{
+        if(!walkState || !lastValid) return;
+        walkState=W.begin(C.validate(state));
+        walkSource=lastValid;
+        render(false);
+      });
+      const testMoves={up:[0,-.25],down:[0,.25],left:[-.25,0],right:[.25,0]};
+      Object.entries(testMoves).forEach(([key,[dx,dy]])=>{
+        $("walk-"+key).addEventListener("click",()=>walkStep(dx,dy));
+      });
       function useHistory(direction) {
         if(pointer) return;
         if(direction==="redo" && !lastValid) return;
