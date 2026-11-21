@@ -1,7 +1,7 @@
 """Run with PYTHONPATH=src python examples/lifecycle_demo.py (stdlib only)."""
 import json
 
-from mojum.lifecycle import Lifecycle, PROFILE_SCHEMA
+from mojum.lifecycle_ledger import Lifecycle, PROFILE_SCHEMA
 
 
 def region(initial):
