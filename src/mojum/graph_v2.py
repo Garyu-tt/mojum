@@ -151,8 +151,9 @@ def downgrade_v2(graph):
     """Return the canonical executable v1 wire recorded in v2 provenance.
 
     This is the explicit reverse migration for audit and offline interop:
-    ``upgrade_v1`` -> ``downgrade_v2`` is byte-for-byte lossless for any v2
-    graph that ``validate_v2`` accepts. The v2 metadata is dropped only after
+    ``upgrade_v1`` -> ``downgrade_v2`` preserves canonical v1 JSON content
+    and its recorded SHA-256 for any v2 graph that ``validate_v2`` accepts.
+    It does not preserve arbitrary original file whitespace or key ordering. The v2 metadata is dropped only after
     the full v2 checks pass, so a tampered configuration, a forged information-
     flow label or a non-additive field fails closed instead of being silently
     discarded.
