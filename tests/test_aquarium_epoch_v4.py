@@ -93,6 +93,28 @@ class EpochJournalTests(unittest.TestCase):
             neural_mode="disabled", motor_mode=V4_MODE,
         )
 
+    def test_v4_readonly_inspector_refuses_foreign_topic_even_with_valid_hash(self):
+        """v4 wire inspection and deterministic replay must enforce the same topic set."""
+        with self.open() as aquarium:
+            # Append a valid, rehashed PRIVATE event directly to the SQLite
+            # journal, bypassing Aquarium's normal v4-only topic guard.
+            event = aquarium._record(
+                "development.advance", "development-000-001",
+                {
+                    "schema": "mojum.agent.development-event/1",
+                    "from_months": 0,
+                    "to_months": 1,
+                    "reason": "synthetic wire compatibility control",
+                },
+                aquarium.tick * aquarium.dt_ns, aquarium.genome.revision,
+            )
+            aquarium.store.append(event, expected_head=aquarium.store.head())
+            self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+        with self.assertRaisesRegex(NoosphereError, "unsupported local-cell v4 journal topic"):
+            inspect_journal(self.db)
+        with self.assertRaisesRegex(AquariumError, "contain only frames"):
+            self.open()
+
     def test_readonly_inspector_refuses_missing_marker_on_valid_hash_chain(self):
         """A coherent SQLite event hash chain is not an epoch-transition proof."""
         # Shrink the epoch solely in this disposable test fixture: runtime,
