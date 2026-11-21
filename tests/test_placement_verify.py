@@ -1,5 +1,6 @@
 """Adversarial safety checks for externally proposed stateless placements."""
 import unittest
+import random
 
 from mojum.placement import (
     Assignment, NodeBudget, PlacementError, PlacementPlan, StatelessJob, plan,
@@ -98,6 +99,32 @@ class PlacementVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(PlacementError, "invalid planner input"):
             plan(self.jobs, [self.local, self.remote], local_node_id="phone",
                  trusted_remote_ids=trusted)
+
+    def test_maximum_admitted_63_remotes_is_still_supported(self):
+        local = NodeBudget("phone", 0, 0, ("cpu",))
+        remotes = [NodeBudget("peer-" + str(i), 1, 1, ("cpu",))
+                   for i in range(63)]
+        trust = frozenset(node.node_id for node in remotes)
+        jobs = [StatelessJob("one", 1, 1, ("cpu",))]
+        nodes = [local] + remotes
+        proposed = plan(jobs, nodes, local_node_id="phone", trusted_remote_ids=trust)
+        self.assertTrue(verify_placement(proposed, jobs, nodes,
+                                         local_node_id="phone", trusted_remote_ids=trust))
+        self.assertEqual(len(proposed.assignments), 1)
+
+    def test_seeded_planner_outputs_are_accepted_across_resource_limits(self):
+        rnd = random.Random(713)
+        for _ in range(30):
+            local = NodeBudget("phone", rnd.randrange(5), rnd.randrange(120), ("cpu",))
+            remotes = [NodeBudget("peer-" + str(i), rnd.randrange(5),
+                                  rnd.randrange(120), ("cpu",)) for i in range(3)]
+            jobs = [StatelessJob("job-" + str(i), rnd.randint(1, 4),
+                                 rnd.randint(1, 60), ("cpu",)) for i in range(20)]
+            nodes = [local] + remotes
+            trust = frozenset(n.node_id for n in remotes)
+            proposed = plan(jobs, nodes, local_node_id="phone", trusted_remote_ids=trust)
+            self.assertTrue(verify_placement(proposed, jobs, nodes,
+                                             local_node_id="phone", trusted_remote_ids=trust))
 
     def test_zero_job_plan_is_allowed_but_never_grants_trust(self):
         self.assertTrue(self.verify(PlacementPlan((), ()), jobs=[]))
