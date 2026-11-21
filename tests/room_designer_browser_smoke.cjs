@@ -182,6 +182,15 @@ async function main() {
       "document.querySelector('#output').value"),canonicalExport);
     assert.equal(await evaluate(cdp,
       "document.querySelector('#obstacles').children.length"),2);
+    // Local-file import is one recoverable edit; preserve 4.0 and both rects.
+    await evaluate(cdp,"document.querySelector('#undo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#obstacles').children.length"),1);
+    assert.match(await evaluate(cdp,
+      "document.querySelector('#output').value"), /"height": 4,/);
+    await evaluate(cdp,"document.querySelector('#redo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#output').value"),canonicalExport);
     await evaluate(cdp,"document.querySelector('#reset-room').click()");
 
     // Keyboard arrow moves the accessible SVG start marker by 5cm.
