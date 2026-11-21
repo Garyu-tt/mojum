@@ -164,9 +164,34 @@ def evaluate():
             row["arms"]["frozen"]["successful_moves"] for row in scenes
         ),
     }
+    contact_scene_ids = [
+        scene["id"] for scene in scenes
+        if scene["arms"]["frozen"]["blocked"] > 0
+    ]
+    divergence_scene_ids = [
+        scene["id"] for scene in scenes
+        if any(scene["arms"][arm]["trace_sha256"] !=
+               scene["arms"]["frozen"]["trace_sha256"]
+               for arm in ("adaptive", "local_cell"))
+    ]
+    # Descriptive sample-coverage warning, not a hypothesis-test p-value.
+    # Most empty-contact scenes cannot distinguish "learning" from a
+    # hardcoded, equally successful innate policy.
+    low_exposure = len(contact_scene_ids) * 2 < len(scenes)
     return {
         "schema": SCHEMA,
         "classification": "PUBLIC_SYNTHETIC_PREDECLARED_CASES_NOT_BLINDED",
+        "evidence_quality": {
+            "status": ("LOW_CONTACT_EXPOSURE" if low_exposure
+                       else "DESCRIPTIVE_CONTACT_EXPOSURE_ONLY"),
+            "minimum_exposure_fraction_heuristic": 0.5,
+            "frozen_contact_scene_count": len(contact_scene_ids),
+            "frozen_contact_scene_ids": contact_scene_ids,
+            "behavior_divergence_scene_count": len(divergence_scene_ids),
+            "behavior_divergence_scene_ids": divergence_scene_ids,
+            "no_contact_frozen_scene_count": len(scenes) - len(contact_scene_ids),
+            "no_generalization_claim": True,
+        },
         "suite_sha256": _sha(SCENARIOS),
         "scene_count": len(scenes),
         "total_ticks_each_arm": sum(row["ticks"] for row in scenes),
