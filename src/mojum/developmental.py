@@ -11,6 +11,7 @@ import json
 
 SCHEMA = "mojum.developmental.motor-play/1"
 STEP = 0.125
+MAX_OBSERVATIONS = 9_999
 MOVES = (
     ("east", STEP, 0.0),
     ("north", 0.0, STEP),
@@ -49,13 +50,15 @@ class MotorPlay:
         instance = cls()
         if (not isinstance(raw, dict) or set(raw) != {"schema", "observations", "samples"}
                 or raw["schema"] != SCHEMA or type(raw["observations"]) is not int
-                or raw["observations"] < 0 or not isinstance(raw["samples"], dict)
+                or not 0 <= raw["observations"] <= MAX_OBSERVATIONS
+                or not isinstance(raw["samples"], dict)
                 or set(raw["samples"]) != set(instance.samples)):
             raise DevelopmentalError("invalid motor-play snapshot")
         for name, row in raw["samples"].items():
             if (not isinstance(row, dict) or set(row) != {"trials", "blocked"}
                     or type(row["trials"]) is not int or type(row["blocked"]) is not int
-                    or not 0 <= row["blocked"] <= row["trials"]):
+                    or not 0 <= row["blocked"] <= row["trials"]
+                    or row["trials"] > MAX_OBSERVATIONS):
                 raise DevelopmentalError("invalid measured action counts")
         if sum(row["trials"] for row in raw["samples"].values()) != raw["observations"]:
             raise DevelopmentalError("motor observations do not match action history")
@@ -65,7 +68,8 @@ class MotorPlay:
 
     def choose(self, tick, *, avoid=(), prefer=()):
         """Use optional empirical range guidance during regular motion selection."""
-        if type(tick) is not int or tick != self.observations:
+        if (type(tick) is not int or not 0 <= tick < MAX_OBSERVATIONS
+                or tick != self.observations):
             raise DevelopmentalError("stale motor decision tick")
         if tick < len(MOVES):
             chosen = MOVES[tick]
@@ -95,7 +99,8 @@ class MotorPlay:
         """Update only after the world returned the measured outcome."""
         if (type(tick) is not int or tick != self.observations
                 or type(kind) is not str or kind not in self.samples
-                or type(blocked) is not bool):
+                or type(blocked) is not bool
+                or self.observations >= MAX_OBSERVATIONS):
             raise DevelopmentalError("invalid or stale measured motor outcome")
         self.samples[kind]["trials"] += 1
         self.samples[kind]["blocked"] += int(blocked)
