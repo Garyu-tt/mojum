@@ -96,6 +96,13 @@ def expire(db: sqlite3.Connection, now: int) -> None:
         "updated_at=? WHERE state='running' AND lease_until<=? AND attempts>=?",
         (now, now, MAX_ATTEMPTS),
     )
+    # Reject exhausted queued rows as well: explicit requeues and old ledgers
+    # must not bypass the same absolute attempt ceiling as lease expiry.
+    db.execute(
+        "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
+        "updated_at=? WHERE state='queued' AND attempts>=?",
+        (now, MAX_ATTEMPTS),
+    )
     db.execute(
         "UPDATE tasks SET state='queued', worker_id=NULL, lease_until=NULL, "
         "updated_at=? WHERE state='running' AND lease_until<=?",
@@ -167,10 +174,12 @@ def finish(db: sqlite3.Connection, worker_id: int, task_id: str, result: str,
     db.execute("BEGIN IMMEDIATE")
     try:
         changed = db.execute(
-            "UPDATE tasks SET state=?, worker_id=NULL, lease_until=NULL, "
+            "UPDATE tasks SET state=CASE "
+            "WHEN ?='queued' AND attempts>=? THEN 'blocked' ELSE ? END, "
+            "worker_id=NULL, lease_until=NULL, "
             "artifact=?, updated_at=? WHERE id=? AND worker_id=? "
             "AND state='running' AND lease_until>?",
-            (result, artifact or None, now, task_id, worker_id, now),
+            (result, MAX_ATTEMPTS, result, artifact or None, now, task_id, worker_id, now),
         ).rowcount
         db.execute("COMMIT")
         return changed == 1
