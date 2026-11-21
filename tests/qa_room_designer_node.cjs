@@ -41,7 +41,8 @@ test("exact JSON numeric type tokens are not collapsed by JS JSON.stringify", ()
   assert.equal(dimension("4.0").lexical, "4.0");
   assert.equal(dimension("4").lexical, "4");
   assert.equal(startCoordinate("0.0"), 0);
-  assert.equal(startCoordinate("-0.0"), 0);
+  assert.ok(Object.is(startCoordinate("-0.0"), -0), "signed zero must be retained");
+  assert.match(buildDraft({...room, start: [-0, 1]}), /"start": \[-0\.0, 1\.0\]/);
   assert.throws(() => startCoordinate(""), /Координата/);
   assert.throws(() => startCoordinate("  "), /Координата/);
   assert.throws(() => startCoordinate("1e3"), /Координата/);
