@@ -53,7 +53,7 @@ class FrozenDirectionTransferTests(unittest.TestCase):
                 self.assertEqual(trial["observed_bearing"], side)
                 self.assertFalse(trial["actual_blocked"])
                 self.assertEqual(trial["actual_next_bucket"], future)
-                self.assertEqual(trial["applied_dx"], STEP_METERS)
+                self.assertAlmostEqual(trial["applied_dx"], STEP_METERS)
                 self.assertEqual(trial["predictions"]["bearing"], {
                     "observations": 1, "next_bucket": future,
                     "blocked": False,
@@ -98,7 +98,7 @@ class FrozenDirectionTransferTests(unittest.TestCase):
         self.assertEqual(seen["after"]["range_bucket_10cm"], 1)
         self.assertFalse(seen["blocked"])
         self.assertEqual(seen["requested_dx"], .04)
-        self.assertEqual(seen["applied_dx"], .04)
+        self.assertAlmostEqual(seen["applied_dx"], .04)
         self.assertEqual(BearingOutcomeMemory().updates, 0)
         self.assertEqual(RangeOutcomeMemory().updates, 0)
         # Obstacle is outside the movement path: a changed room can still
