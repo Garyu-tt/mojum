@@ -148,6 +148,26 @@ class ShapeErrorTests(unittest.TestCase):
         raw = b'{"width":NaN,"height":4,"obstacles":[],"start":[1,1]}'
         self.assertIn("non-finite JSON number", errors_of(raw)[0])
 
+    def test_out_of_runtime_range_exponents_fail_closed(self):
+        # Both extremes are legal JSON/finite Decimal values, but one turns
+        # into infinity and the other silently underflows to zero at runtime.
+        fixtures = (
+            (b'{"width":1e999999,"height":4,"obstacles":[],"start":[1,1]}',
+             "width"),
+            (b'{"width":4,"height":4,"obstacles":[[0,0,1e-999999,1]],'
+             b'"start":[2,2]}', "obstacles[0][2]"),
+            (b'{"width":4,"height":4,"obstacles":[],"start":[1e999999,2]}',
+             "start[0]"),
+        )
+        for raw, name in fixtures:
+            with self.subTest(name=name):
+                report = validate_room_bytes(raw)
+                self.assertFalse(report.valid)
+                self.assertIn(
+                    name + " is outside finite runtime number range",
+                    report.errors,
+                )
+
     def test_invalid_json_is_rejected(self):
         self.assertIn("not valid JSON", errors_of(b"{")[0])
 
