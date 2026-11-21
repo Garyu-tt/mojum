@@ -7,7 +7,7 @@ import copy
 import json
 import unittest
 
-from mojum.lifecycle import (
+from mojum.lifecycle_ledger import (
     Lifecycle, LifecycleError, MAX_TICKS, MAX_UNITS, PROFILE_SCHEMA,
 )
 
