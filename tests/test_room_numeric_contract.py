@@ -153,6 +153,7 @@ class ExactRoomSQLiteTests(unittest.TestCase):
         room = Room(4, 4.0, ((2, 1.0, 0.1, 2),))
         with self.open(room, "typed_v1") as writer:
             self.assertEqual(writer.manifest["room_exact"]["schema"], SCHEMA)
+            self.assertEqual(writer.manifest["schema"], "mojum.aquarium.bootstrap/2")
             for _ in range(35):
                 writer.step()
             expected = writer.checkpoint()
@@ -199,6 +200,7 @@ class ExactRoomSQLiteTests(unittest.TestCase):
             before = previous.checkpoint()
             manifest = previous.manifest
             self.assertNotIn("room_exact", manifest)
+            self.assertEqual(manifest["schema"], "mojum.aquarium.bootstrap/1")
         self.assertNotIn("room_exact", stored_bootstrap(self.db))
         with self.open(room, "legacy") as reread:
             self.assertEqual(reread.checkpoint(), before)
@@ -234,6 +236,8 @@ class ExactRoomSQLiteTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr[-1000:])
         original_head = json.loads(run.stdout)["journal_head"]
         self.assertIn("room_exact", stored_bootstrap(self.db))
+        self.assertEqual(stored_bootstrap(self.db)["schema"],
+                         "mojum.aquarium.bootstrap/2")
         absent_flag = subprocess.run(
             command[:7] + ["--ticks", "0", "--exploration-mode", "goal_free",
                            "--developmental-policy", "local_cell_v2"],
