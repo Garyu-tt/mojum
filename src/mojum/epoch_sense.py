@@ -14,8 +14,10 @@ from .local_cell_sense import DevelopmentError, MAX_EPISODE_TICKS, _finite
 
 EPOCH_SENSE_SCHEMA = "mojum.developmental.proprioception/4"
 EPOCH_LENGTH = MAX_EPISODE_TICKS      # fixed by the schema; never configurable
-MAX_ABSOLUTE_TICK = 2**53 - 1         # keeps JSON/float round-trips exact
 TICK_PERIOD_NS = 1_000_000
+# Both the tick and its exported nanosecond clock must remain exact JSON integers.
+# A 2**53-1 tick would produce a ~9e21 ns value, unsafe for JS number readers.
+MAX_ABSOLUTE_TICK = (2**53 - 1) // TICK_PERIOD_NS
 _REVISION = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 
 
