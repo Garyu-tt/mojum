@@ -7,7 +7,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from mojum import school_verify
 from mojum.school import SchoolContractError, load_catalog, run_scripted_activity, write_fixture
 from mojum.school_verify import MAX_MANIFEST_BYTES, verify_scripted_fixture
 
@@ -99,6 +101,66 @@ class SchoolColdVerifyTests(unittest.TestCase):
             path.write_text('{"schema":"wrong","events":[]}', encoding="utf-8")
             with self.assertRaises(SchoolContractError):
                 verify_scripted_fixture(target, self.catalog)
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "POSIX directory descriptors required",
+    )
+    def test_renamed_directory_does_not_redirect_a_pinned_verification(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp, section="music")
+            alternate = Path(temp) / "alternate"
+            write_fixture(
+                run_scripted_activity(self.catalog, "visual_arts", start_tick=55),
+                alternate,
+            )
+            displaced = Path(temp) / "displaced"
+            original_read = school_verify._read_regular_bounded
+            switched = False
+
+            def swap_before_first_read(path, limit, *, directory_fd=None):
+                nonlocal switched
+                self.assertIsNotNone(directory_fd)
+                if not switched:
+                    switched = True
+                    target.rename(displaced)
+                    target.symlink_to(alternate, target_is_directory=True)
+                return original_read(path, limit, directory_fd=directory_fd)
+
+            with patch.object(school_verify, "_read_regular_bounded",
+                              side_effect=swap_before_first_read):
+                result = verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(switched)
+            self.assertEqual(result["section_id"], "music")
+            self.assertEqual(result["start_tick"], 17)
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "POSIX nofollow support required",
+    )
+    def test_symlink_inserted_just_before_open_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            manifest = target / "events.json"
+            outside = Path(temp) / "outside.json"
+            original_bytes = manifest.read_bytes()
+            outside.write_bytes(original_bytes)
+            real_open = os.open
+            switched = False
+
+            def swap_during_open(path, flags, *args, **kwargs):
+                nonlocal switched
+                if path == "events.json" and kwargs.get("dir_fd") is not None and not switched:
+                    switched = True
+                    manifest.unlink()
+                    manifest.symlink_to(outside)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(school_verify.os, "open", side_effect=swap_during_open):
+                with self.assertRaisesRegex(SchoolContractError, "cannot read"):
+                    verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(switched)
+            self.assertEqual(outside.read_bytes(), original_bytes)
 
     def test_cli_reports_only_non_private_summary(self):
         with tempfile.TemporaryDirectory() as temp:
