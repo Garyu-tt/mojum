@@ -11,6 +11,9 @@ from pathlib import Path
 
 from .segment_archive import ArchiveError, export_sealed_segments
 from .segment_archive_verify import verify_sealed_archive, restore_into_new_sqlite
+from .live_tail_capsule import (
+    capture_live_tail, verify_point_in_time, restore_point_in_time,
+)
 from .segmented_noosphere import SegmentedNoosphere
 from .noosphere import NoosphereError
 
@@ -35,6 +38,28 @@ def main(argv=None):
     recover.add_argument("--archive-dir", type=Path, required=True)
     recover.add_argument("--new-db", type=Path, required=True)
     recover.add_argument("--expected-sealed-head", required=True)
+    capture = sub.add_parser(
+        "capture-tail", help="explicitly save exact unsealed PRIVATE journal tail"
+    )
+    capture.add_argument("--db", type=Path, required=True)
+    capture.add_argument("--agent-id", required=True)
+    capture.add_argument("--segment-size", type=int, required=True)
+    capture.add_argument("--archive-dir", type=Path, required=True)
+    capture.add_argument("--expected-source-head", required=True)
+    capture.add_argument("--include-private", action="store_true")
+    point = sub.add_parser(
+        "verify-point", help="verify sealed prefix and selected immutable tail"
+    )
+    point.add_argument("--archive-dir", type=Path, required=True)
+    point.add_argument("--source-events", type=int, required=True)
+    point.add_argument("--expected-source-head", required=True)
+    restore_point = sub.add_parser(
+        "restore-point", help="restore sealed prefix and tail to NEW SQLite"
+    )
+    restore_point.add_argument("--archive-dir", type=Path, required=True)
+    restore_point.add_argument("--source-events", type=int, required=True)
+    restore_point.add_argument("--expected-source-head", required=True)
+    restore_point.add_argument("--new-db", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -53,10 +78,32 @@ def main(argv=None):
                 args.archive_dir,
                 external_expected_head=args.expected_sealed_head,
             )
-        else:
+        elif args.operation == "restore":
             status = restore_into_new_sqlite(
                 args.archive_dir, args.new_db,
                 external_expected_head=args.expected_sealed_head,
+            )
+        elif args.operation == "capture-tail":
+            if not args.include_private:
+                parser.error("PRIVATE live tail requires --include-private")
+            with SegmentedNoosphere(
+                args.db, args.agent_id, segment_size=args.segment_size,
+            ) as source:
+                status = capture_live_tail(
+                    source, args.archive_dir,
+                    include_nonpublic=True,
+                    external_expected_source_head=args.expected_source_head,
+                )
+        elif args.operation == "verify-point":
+            status = verify_point_in_time(
+                args.archive_dir, source_events=args.source_events,
+                external_expected_source_head=args.expected_source_head,
+            )
+        else:
+            status = restore_point_in_time(
+                args.archive_dir, args.new_db,
+                source_events=args.source_events,
+                external_expected_source_head=args.expected_source_head,
             )
     except (ArchiveError, NoosphereError) as exc:
         parser.error(str(exc))
