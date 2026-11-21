@@ -215,6 +215,21 @@ class EvaluationHarnessTests(unittest.TestCase):
         with self.assertRaises(EvalError):
             evaluate_named("missing_fixture", 1)
 
+    def test_tick_budget_boundary_runs_and_rejects_overflow_before_mutation(self):
+        # The evaluator must not accept a run the policy cannot complete.
+        room, start = ROOMS["blocked_all"]
+        report = run_profile(room, start, 9_999)
+        self.assertEqual(report["ticks"], 9_999)
+        self.assertEqual(sum(report["attempts"].values()), 9_999)
+
+        untouched_policy = MotorPlayV2()
+        original_state = untouched_policy.snapshot()
+        with self.assertRaises(EvalError):
+            run_profile(room, start, 10_000, policy=untouched_policy)
+        self.assertEqual(untouched_policy.snapshot(), original_state)
+        with self.assertRaises(EvalError):
+            evaluate_named("canonical", 10_000)
+
     def test_cli_emits_json_for_requested_fixtures(self):
         self.assertEqual(main(["--fixture", "canonical", "--ticks", "13"]), 0)
 
