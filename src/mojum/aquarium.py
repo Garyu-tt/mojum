@@ -21,6 +21,7 @@ from .body_genetics import (compile_body, compile_body_at_month,
                             validate_human_name)
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
+from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
 from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -489,7 +490,8 @@ def main():
     parser = argparse.ArgumentParser(description="Mojum R0.2 CPU-only fixture aquarium")
     packaged = files("mojum").joinpath("data")
     parser.add_argument("--db", type=Path, required=True, help="explicit local SQLite file; not cloud")
-    parser.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
+    parser.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"),
+                        help="genotype JSON providing the organism identity")
     parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--dx", type=float)
@@ -519,9 +521,13 @@ def main():
     else:
         # The internal controller selects each action from committed history.
         dx, dy = None, None
+    seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    try:
+        graph = load_graph(args.graph)
+    except GraphError as exc:
+        parser.error(str(exc))
     with Aquarium(
-        args.db, json.loads(args.genome.read_text(encoding="utf-8")),
-        json.loads(args.graph.read_text(encoding="utf-8")),
+        args.db, seed, graph, agent_id=seed["genome_id"],
         neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
     ) as aquarium:
         # Reject the whole CLI batch before any frame is committed. The

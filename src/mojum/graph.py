@@ -1,6 +1,7 @@
 """Typed graph contract validator: no dynamically executable user code."""
 
 from collections import defaultdict
+import json
 
 SCHEMA = "mechanicus.universal-graph/1"
 
@@ -17,6 +18,23 @@ PORTS = {
 
 class GraphError(ValueError):
     pass
+
+
+def _unique_json_object(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise GraphError(f"Duplicate graph JSON key: {key!r}")
+        obj[key] = value
+    return obj
+
+
+def load_graph(path):
+    """Read UTF-8 graph JSON without collapsing duplicate keys."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GraphError("Malformed graph JSON") from exc
 
 
 def validate(graph):

@@ -46,6 +46,8 @@ The second invocation resumes the same deterministic PRIVATE journal and yields 
 
 `mojum-fixture --ticks 10` runs the bundled graph as a short-lived demonstration. Pass a graph path as the first argument to run your own. The persistent aquarium also accepts explicit `--genome` and `--graph` paths.
 
+The selected genome's `genome_id` is the journal's organism identity. To start a separate fixture with a custom genome, use a separate database path and supply the same genome file on each restart.
+
 To let the 2D fixture choose movements using its prior outcomes, use a separate journal and specify the same motor mode each time you reopen it.
 
 ```sh
