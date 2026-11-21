@@ -12,6 +12,7 @@ import unittest
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.aquarium_wire import inspect_journal
+from mojum.developmental_brain import SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
 from mojum.sensory_associations_v2 import (
     ContactAssociationsV2,
     LEARNING_SCHEMA,
@@ -168,6 +169,43 @@ class AquariumSensoryV2Tests(unittest.TestCase):
 
         with self.aquarium() as restored:
             self.assertEqual(restored.checkpoint(), saved)
+
+    def test_versioned_mode_feeds_explicit_controller_and_replays(self):
+        with self.aquarium(brain_mode="developmental_controller") as aquarium:
+            first = aquarium.step()
+            saved = aquarium.checkpoint()
+
+            self.assertEqual(first["brain"]["schema"], DEVELOPMENTAL_BRAIN_SCHEMA)
+            self.assertEqual(
+                first["brain"]["input"]["near_field"]["schema"],
+                SENSE_SCHEMA,
+            )
+            self.assertNotIn("spectator.synthetic", json.dumps(first["brain"]))
+            self.assertEqual(first["toy_contact"]["schema"], BRIDGE_SCHEMA)
+            self.assertEqual(
+                first["toy_contact"]["learning"]["schema"],
+                LEARNING_SCHEMA,
+            )
+
+        with self.aquarium(brain_mode="developmental_controller") as restored:
+            self.assertEqual(restored.checkpoint(), saved)
+            resumed = restored.step()
+
+        other_db = self.db.with_name("independent-controller.sqlite3")
+        with Aquarium(
+            other_db,
+            SEED,
+            GRAPH,
+            room=self.room,
+            start=(.16, .16),
+            neural_mode="disabled",
+            motor_mode="developmental_fixture",
+            brain_mode="developmental_controller",
+            sensory_mode="toy_probe_v2",
+            sensory_scene=self.scene,
+        ) as independent:
+            self.assertEqual(independent.step(), first)
+            self.assertEqual(independent.step(), resumed)
 
     def test_wire_inspector_identifies_versioned_sensory_policy(self):
         with self.aquarium() as aquarium:
