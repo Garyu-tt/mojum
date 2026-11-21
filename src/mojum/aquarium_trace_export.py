@@ -149,7 +149,7 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     # Viewer recognizes checkpoint schema with stored_events; do not dump
     # internal neural weights or private genotype in the summary footer.
     footer = {
-        "schema": "mojum.aquarium.checkpoint/1",
+        "schema": snapshot["schema"],
         "agent_id": snapshot["agent_id"],
         "tick": snapshot["tick"],
         "journal_head": snapshot["journal_head"],
@@ -160,6 +160,9 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
                         "has_more": has_more, "source_total_ticks": total_frames},
         "export_status": "REPLAY_VERIFIED_SYNTHETIC_PRIVATE_NOT_AUTHENTICATED",
     }
+    if "epoch_index" in snapshot:
+        footer["epoch_index"] = snapshot["epoch_index"]
+        footer["epoch_tick"] = snapshot["epoch_tick"]
     encoded_footer = (json.dumps(footer, sort_keys=True, ensure_ascii=False,
                                  allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8")
     total += len(encoded_footer)

@@ -17,7 +17,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V4_MODE
 from mojum.aquarium_trace_export import export_private_trace, SCHEMA
 from mojum.noosphere import NoosphereError
 from mojum.world_room import Room
@@ -74,6 +74,18 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
         self.assertTrue(all(f["brain"]["status"] == "UNIMPLEMENTED" for f in frames))
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(self.out.stat().st_mode), 0o600)
+
+    def test_v4_export_preserves_epoch_checkpoint_schema(self):
+        with self.aquarium(motor_mode=V4_MODE, neural_mode="disabled") as a:
+            recorded = a.step()
+
+        result = self.exported(motor_mode=V4_MODE, neural_mode="disabled")
+        frames, footer = self.frames_and_summary()
+        self.assertEqual(result["frames"], 1)
+        self.assertEqual(frames, [recorded])
+        self.assertEqual(footer["schema"], "mojum.aquarium.checkpoint/2")
+        self.assertEqual(footer["epoch_index"], 0)
+        self.assertEqual(footer["epoch_tick"], 1)
 
     def test_custom_room_geometry_includes_dimensions_without_obstacles(self):
         room = Room(6, 3, ((2, 1, .1, .5),))
