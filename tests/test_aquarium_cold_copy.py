@@ -159,6 +159,22 @@ class ColdAquariumCopyTests(unittest.TestCase):
                 self.assertFalse(self.exported.exists())
                 self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
 
+    @unittest.skipUnless(os.name == "posix", "POSIX file mode test")
+    def test_export_never_chmods_or_rewrites_valid_source(self):
+        # Before this fix, export reopened the original via writable Aquarium.
+        # LocalNoosphere.__init__ chmod(0600) makes the violation observable.
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            child.step()
+        original = self.source.read_bytes()
+        self.source.chmod(0o400)
+        try:
+            exported = self._export()
+            self.assertEqual(self.source.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(self.source.read_bytes(), original)
+            self.assertEqual(self._verify(exported)["tick"], 1)
+        finally:
+            self.source.chmod(0o600)
+
     def test_missing_source_does_not_create_new_database(self):
         with self.assertRaises(ValueError):
             self._export()
