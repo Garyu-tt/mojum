@@ -15,9 +15,18 @@ verdict for one exact commit and never performs a merge. Pass the snapshot from
 `gh pr view --json ...` with the SHA you intend to merge:
 
 ```sh
+SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+  --require 'aquarium-stdlib (3.11)' --require 'aquarium-stdlib (3.12)' \
+  --require 'aquarium-stdlib (3.13)' --require 'motor-gate-stdlib (3.11)' \
+  --require 'motor-gate-stdlib (3.12)' --require 'motor-gate-stdlib (3.13)' \
+  --require 'mesh-stdlib (3.11)' --require 'mesh-stdlib (3.12)' \
+  --require 'mesh-stdlib (3.13)'
 ```
+
+The expected job list comes from the reviewed CI matrix, **not** the live
+check rollup: missing matrix siblings may not yet be registered. Wildcards
+and workflow-only selectors cannot certify matrix completion.
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
 See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
