@@ -47,19 +47,22 @@ def manifest(schema="mojum.developmental.motor-play/1"):
 class SummarizeTests(unittest.TestCase):
     def test_counts_and_healthy_motion_do_not_trip_gates(self):
         frames = []
+        x = 0.0
         for tick in range(30):
             blocked = tick in (5, 17)
-            frames.append(frame(tick, "east", blocked, (tick * 0.125, 0.0)))
+            if not blocked:
+                x += 0.125
+            frames.append(frame(tick, "east", blocked, (x, 0.0)))
         report = summarize(manifest(), frames)
         self.assertEqual(report["frames"], 30)
         self.assertEqual(report["rest_actions"], 0)
         self.assertEqual(report["move_actions"], 30)
         self.assertEqual(report["blocked_attempts"], 2)
         self.assertEqual(report["successful_moves"], 28)
-        self.assertEqual(report["distinct_positions"], 30)
+        self.assertEqual(report["distinct_positions"], 28)
         self.assertEqual(report["longest_rest_streak"], 0)
-        self.assertEqual(report["path_length_m"], 29 * 0.125)
-        self.assertEqual(report["coverage_span_m"], [29 * 0.125, 0.0])
+        self.assertEqual(report["path_length_m"], 27 * 0.125)
+        self.assertEqual(report["coverage_span_m"], [27 * 0.125, 0.0])
         self.assertEqual(report["gates"], {"rest_collapse": False,
                                            "revisit_concentration": False})
         self.assertEqual(report["verdict"], "MOBILITY_OBSERVED")
@@ -76,7 +79,7 @@ class SummarizeTests(unittest.TestCase):
 
     def test_single_rest_before_the_streak_limit_is_not_collapse(self):
         frames = [frame(tick, "east", False, (tick * 0.125, 0.0)) for tick in range(20)]
-        frames.append(frame(20, "rest", False, (2.5, 0.0)))
+        frames.append(frame(20, "rest", False, (19 * 0.125, 0.0)))
         report = summarize(manifest(), frames)
         self.assertEqual(report["idle_fraction"], 1 / 21)
         self.assertFalse(report["gates"]["rest_collapse"])
@@ -94,6 +97,27 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(report["blocked_attempts"], 0)
         self.assertTrue(report["gates"]["revisit_concentration"])
         self.assertEqual(report["verdict"], "REVISIT_CONCENTRATION_SUSPECTED")
+
+    def test_measured_motion_must_agree_with_reported_outcome(self):
+        start = frame(0, "rest", False, (1.0, 1.0))
+        inconsistent = (
+            frame(1, "rest", False, (1.125, 1.0)),
+            frame(1, "east", True, (1.125, 1.0)),
+            frame(1, "east", False, (1.0, 1.0)),
+        )
+        for bad in inconsistent:
+            with self.subTest(kind=bad["developmental_controller"]["intent"]["kind"],
+                              blocked=bad["world"]["blocked"],
+                              position=bad["world"]["position"]):
+                with self.assertRaisesRegex(MobilityAuditError, "measured position"):
+                    summarize(manifest(), [start, bad])
+
+        consistent = [start, frame(1, "east", True, (1.0, 1.0)),
+                      frame(2, "east", False, (1.125, 1.0))]
+        report = summarize(manifest(), consistent)
+        self.assertEqual(report["blocked_attempts"], 1)
+        self.assertEqual(report["successful_moves"], 1)
+        self.assertEqual(report["path_length_m"], 0.125)
 
     def test_empty_history_is_explicitly_not_averaged(self):
         report = summarize(manifest(), [])
