@@ -246,7 +246,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     // Current exports always carry a trace range as well as the integrity
     // proof. A footer that keeps that modern marker but drops both the proof
     // and export status is a downgraded/corrupted modern trace, not legacy.
-    if (range !== undefined)
+    if (range !== undefined || footer.trace_room !== undefined)
       throw new Error("Современная запись не содержит метаданные SHA-256");
     if (!allowLegacy)
       throw new Error("Непроверенный старый формат отклонён; включите явный режим legacy");
