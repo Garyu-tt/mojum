@@ -187,7 +187,6 @@ class EmpiricalMotorAdvisorTests(unittest.TestCase):
             self.assertEqual(frame["action_advice"]["mode"], "learned")
             self.assertEqual(frame["action_advice"]["applied_hints"], [])
             self.assertEqual(frame["developmental"]["intent"]["action"],
-                             a.explorer.records and
                              frame["developmental"]["learning"]["action"])
             self.assertEqual(a.store.count(), 2)
             self.assertEqual(a.store.dataset()["projection"]["items"], [])
@@ -272,6 +271,40 @@ class EmpiricalMotorAdvisorTests(unittest.TestCase):
                               action_advice_mode=other_mode)
         with self.baby(neural_mode="disabled") as same:
             self.assertEqual(same.tick, 1)
+
+    def test_forged_advice_evidence_is_rejected_before_ram_adoption(self):
+        with self.baby(neural_mode="disabled") as a:
+            payload, _, _ = a._calculate(None, None)
+            baseline = a.checkpoint()
+            forged = copy.deepcopy(payload)
+            forged["action_advice"]["applied_hints"] = ["x+"]
+            with self.assertRaises(AquariumError):
+                a._adopt_developmental(forged)
+            self.assertEqual(a.checkpoint(), baseline)
+            self.assertEqual(a.store.count(), 1)
+
+    def test_120_plus_30_cli_reopens_one_exact_journal(self):
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        command = [
+            sys.executable, "-m", "mojum.aquarium", "--db", str(self.db),
+            "--neural-mode", "disabled", "--exploration-mode", "goal_free",
+            "--sensory-mode", "toy_probe", "--temporal-mode", "range_outcome",
+            "--action-advice-mode", "learned",
+        ]
+        first = json.loads(subprocess.check_output(
+            [*command, "--ticks", "120"], env=env, cwd=ROOT,
+            text=True, timeout=30,
+        ))
+        second = json.loads(subprocess.check_output(
+            [*command, "--ticks", "30"], env=env, cwd=ROOT,
+            text=True, timeout=30,
+        ))
+        self.assertEqual(first["tick"], 120)
+        self.assertEqual(second["tick"], 150)
+        self.assertEqual(second["stored_events"], 151)
+        self.assertEqual(second["developmental_state"]["updates"], 150)
+        self.assertEqual(second["temporal_range_state"]["updates"], 150)
+        self.assertEqual(second["action_advice_mode"], "learned")
 
     def test_cli_validates_mode_before_creating_sqlite_then_resumes(self):
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
