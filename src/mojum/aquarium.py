@@ -26,6 +26,11 @@ from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
 from .cell_policy_v3 import CellExplorerV3, SCHEMA as V3_SCHEMA
+from .cell_policy_v3_escape import (
+    CellExplorerV3Escape,
+    MAX_CONSECUTIVE_RESTS as V3_ESCAPE_MAX_CONSECUTIVE_RESTS,
+    SCHEMA as V3_ESCAPE_SCHEMA,
+)
 from .cell_policy_v4 import CellExplorerV4, SCHEMA as V4_SCHEMA
 from .epoch_sense_v2 import (
     EPOCH_TICKS,
@@ -66,11 +71,12 @@ V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
 V3_MODE = "local_cell_v3"
+V3_ESCAPE_MODE = "local_cell_v3_escape"
 V4_MODE = "local_cell_v4"
 EPOCH_EVENT_SCHEMA = "mojum.aquarium.epoch-transition/1"
 MOTOR_MODES = (
-    "scripted", "developmental_fixture", V2B_MODE, V3_MODE, V4_MODE,
-    V2B_WIRE_MODE, V2A_ARCHIVE_MODE,
+    "scripted", "developmental_fixture", V2B_MODE, V3_MODE, V3_ESCAPE_MODE,
+    V4_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE,
 )
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
@@ -165,7 +171,9 @@ class Aquarium:
         self._archive_v2a = motor_mode == V2A_ARCHIVE_MODE
         self._epoch_v4 = motor_mode == V4_MODE
         self._read_only = self._archive_v2a or read_only
-        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE, V4_MODE)
+        self._local_cell = motor_mode in (
+            V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE, V3_ESCAPE_MODE, V4_MODE,
+        )
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
@@ -255,6 +263,12 @@ class Aquarium:
                     self.manifest["epoch_ticks"] = EPOCH_TICKS
                     self.manifest["proprioception_schema"] = EPOCH_SENSE_SCHEMA
                     self.manifest["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS
+                elif motor_mode == V3_ESCAPE_MODE:
+                    self.manifest["developmental_schema"] = V3_ESCAPE_SCHEMA
+                    self.manifest["developmental_policy"] = V3_ESCAPE_MODE
+                    self.manifest["max_consecutive_rests"] = (
+                        V3_ESCAPE_MAX_CONSECUTIVE_RESTS
+                    )
                 else:
                     self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
                     self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE
@@ -325,6 +339,8 @@ class Aquarium:
             self.motor = CellExplorerV4()
         elif self.motor_mode == V3_MODE:
             self.motor = CellExplorerV3()
+        elif self.motor_mode == V3_ESCAPE_MODE:
+            self.motor = CellExplorerV3Escape()
         elif self._local_cell:
             self.motor = CellExplorer()
         self.brain = DevelopmentalBrain() if self.brain_mode == "developmental_controller" else None

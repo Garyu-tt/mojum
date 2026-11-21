@@ -1,8 +1,10 @@
 # Local Cell/3-escape: bounded rest escape (isolated R0.14 profile)
 
-Status: **opt-in, isolated module.** This profile is *not* wired into the
-Aquarium manifest, SQLite wire format, CLI motor modes or existing journals.
-Local Cell/2 and Local Cell/3 history is never reinterpreted.
+Status: **opt-in Aquarium motor mode `local_cell_v3_escape`.** It is not a
+default and never reinterprets Local Cell/2 or Local Cell/3 history. Fresh
+journals pin the escape schema before the first frame; opening an escape
+journal with any other mode, or a v3 journal with `local_cell_v3_escape`,
+fails closed with a bootstrap mismatch.
 
 ## Defect (issue #106)
 
@@ -59,9 +61,29 @@ intelligence/emotion claims, release evidence or real actuation.
 
 ## Integration boundary
 
-Promoting this rule into the canonical Aquarium requires a versioned
-motor/manifest wire entry plus replay handling in a separate change. This
-module deliberately touches no manifest, SQLite, CLI mode or peer branch, so
-existing private journals and the P0 wire-compatibility gate (#116) are
-unaffected. Regression tests live in
-`tests/test_cell_policy_v3_escape.py`.
+The profile is exposed as the explicit Aquarium motor mode
+`local_cell_v3_escape`. Fresh journals pin this manifest selector set:
+
+| Selector | Value |
+| --- | --- |
+| `exploration_mode` | `goal_free` |
+| `developmental_schema` | `mojum.developmental.local-cell/3-escape` |
+| `developmental_policy` | `local_cell_v3_escape` |
+| `max_consecutive_rests` | `3` |
+
+The same set is declared once in `mojum.policy_identity`, so the read-only
+wire inspector resolves the journal without guessing. Replay recomputes every
+frame through the policy, and the checkpoint exposes `developmental_state`
+with the escape counters. Existing Local Cell/2 and Local Cell/3 journals and
+the canonical `mojum.developmental.motor-play/1` contract are untouched; the
+P0 wire-compatibility gate (#116) therefore sees a new, distinct identity.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./escape_PRIVATE.sqlite3 \
+  --ticks 120 --motor-mode local_cell_v3_escape --neural-mode disabled
+```
+
+Regression tests live in `tests/test_cell_policy_v3_escape.py` (policy rule)
+and `tests/test_aquarium_v3_escape_mode.py` (Aquarium journal, replay,
+version isolation, CLI and the committed rest bound). Passing them does **not**
+close issue #106, #120, #55 or #51 on its own.
