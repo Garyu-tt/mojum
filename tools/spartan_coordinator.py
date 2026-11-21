@@ -68,7 +68,9 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
         if task_id in seen:
             raise ValueError("duplicate id in batch")
         seen.add(task_id)
-        if not isinstance(item.get("priority", 0), int):
+        # bool is a subclass of int, but a boolean is not a task priority.
+        # SQLite converts True to 1, confusing immutable enqueue identity.
+        if type(item.get("priority", 0)) is not int:
             raise ValueError("priority must be an integer")
         if len(json.dumps(item.get("payload", {}))) > 8192:
             raise ValueError("payload is too large")
