@@ -16,6 +16,7 @@ mojum-aquarium-wire = "mojum.aquarium_wire:main"
 mojum-motor-mobility = "mojum.motor_mobility:main"
 mojum-fixture = "mojum.__main__:main"
 mojum-host = "mojum.portable_host:main"
+mojum-room-check = "mojum.room_spec:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
