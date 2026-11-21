@@ -149,7 +149,7 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     # Viewer recognizes checkpoint schema with stored_events; do not dump
     # internal neural weights or private genotype in the summary footer.
     footer = {
-        "schema": "mojum.aquarium.checkpoint/1",
+        "schema": snapshot["schema"],
         "agent_id": snapshot["agent_id"],
         "tick": snapshot["tick"],
         "journal_head": snapshot["journal_head"],

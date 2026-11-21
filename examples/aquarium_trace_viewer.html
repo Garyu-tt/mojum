@@ -173,7 +173,8 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
         throw new Error("Неверная структура строки " + (i+1));
       }
       if (footer !== null) throw new Error("Лишние данные после checkpoint");
-      if (value.schema === "mojum.aquarium.checkpoint/1") {
+      if (value.schema === "mojum.aquarium.checkpoint/1" ||
+          value.schema === "mojum.aquarium.checkpoint/2") {
         if (!Number.isSafeInteger(value.stored_events) ||
             value.stored_events < accepted.length + 1) {
           throw new Error("Некорректный checkpoint");

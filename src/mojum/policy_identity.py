@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .aquarium import EPOCH_EVENT_SCHEMA
 from .archived_policy_v2a import SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import (
     LEARNING_SCHEMA as V2B_LEARNING_SCHEMA,
@@ -31,7 +32,16 @@ from .cell_policy_v3 import (
     LEARNING_SCHEMA as V3_LEARNING_SCHEMA,
     SCHEMA as V3_SCHEMA,
 )
+from .cell_policy_v4 import (
+    LEARNING_SCHEMA as V4_LEARNING_SCHEMA,
+    SCHEMA as V4_SCHEMA,
+)
 from .developmental import SCHEMA as MOTOR_PLAY_SCHEMA
+from .epoch_sense_v2 import (
+    EPOCH_TICKS,
+    MAX_ABSOLUTE_TICKS,
+    SCHEMA as EPOCH_SENSE_SCHEMA,
+)
 
 
 SCHEMA = "mojum.aquarium.policy-identities/1"
@@ -49,6 +59,8 @@ class PolicyIdentity:
 
     ``selectors`` is an ordered tuple of ``(key, value)`` pairs so the
     declaration can be hashed and compared exactly as stored in SQLite.
+    Keys are non-empty strings; values are the JSON scalars a manifest may
+    legitimately pin (string or plain integer), never a container.
     """
 
     inspection_id: str
@@ -79,7 +91,8 @@ def _check_fields(item):
             raise PolicyIdentityError(f"policy identity needs a {name}")
     if type(item.selectors) is not tuple or any(
         type(pair) is not tuple or len(pair) != 2
-        or any(type(part) is not str or not part for part in pair)
+        or type(pair[0]) is not str or not pair[0]
+        or type(pair[1]) not in (str, int)
         for pair in item.selectors
     ):
         raise PolicyIdentityError("policy selectors must be string pairs")
@@ -188,6 +201,21 @@ POLICIES = validate_identities((
         state_schema=V3_SCHEMA, learning_schema=V3_LEARNING_SCHEMA,
         intent_source="bounded_goal_free_local_cell_motor_play_v3",
         configuration="developmental_policy=local_cell_v3",
+    ),
+    PolicyIdentity(
+        inspection_id="local_cell_v4",
+        selectors=(
+            ("exploration_mode", "goal_free"),
+            ("developmental_schema", V4_SCHEMA),
+            ("developmental_policy", "local_cell_v4"),
+            ("epoch_transition_schema", EPOCH_EVENT_SCHEMA),
+            ("epoch_ticks", EPOCH_TICKS),
+            ("proprioception_schema", EPOCH_SENSE_SCHEMA),
+            ("max_absolute_ticks", MAX_ABSOLUTE_TICKS),
+        ),
+        state_schema=V4_SCHEMA, learning_schema=V4_LEARNING_SCHEMA,
+        intent_source="bounded_goal_free_local_cell_motor_play_v4",
+        configuration="developmental_policy=local_cell_v4",
     ),
 ))
 

@@ -7,8 +7,16 @@ import json
 from pathlib import Path
 import re
 
-from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
+from .aquarium import (
+    EPOCH_EVENT_SCHEMA,
+    MANIFEST_SCHEMA,
+    MAX_ABSOLUTE_TICKS,
+    MAX_REPLAY_EVENTS,
+    SCHEMA as FRAME_SCHEMA,
+)
+from .cell_policy_v4 import SCHEMA as V4_SCHEMA
 from .developmental import SCHEMA as MOTOR_PLAY
+from .epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
 from .policy_identity import (
     MOTOR_SELECTOR_KEYS, POLICIES, SCHEMA as IDENTITY_SCHEMA,
@@ -28,7 +36,6 @@ _HEAD = re.compile(r"[0-9a-f]{64}\Z")
 # both facts are declared once in mojum.policy_identity so this reader and
 # the CLI cannot drift apart. Never widen one identity to cover the other.
 _MOTOR_KEYS = MOTOR_SELECTOR_KEYS
-
 _TEMPORAL_FIELDS = {
     "temporal_mode": "range_guided",
     "temporal_schema": "mojum.temporal.motor-play-range/1",
@@ -49,6 +56,11 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
+    # V4 cannot be paired with a sensory bridge. Besides rejecting an
+    # impossible runtime manifest, this preserves the exact v4 policy ID
+    # used for strict epoch-marker and frame-topic inspection below.
+    if policy_id == "local_cell_v4" and sensory_mode is not None:
+        raise NoosphereError("local_cell_v4 journals require sensory_mode none")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,
@@ -102,6 +114,24 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                     or _object_field(motor, "intent").get("source") != action_source
                     or _object_field(motor, "learning").get("schema") != learning_schema):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
+            if state_schema == V4_SCHEMA:
+                observation = _object_field(motor, "observation")
+                intent = _object_field(motor, "intent")
+                learning = _object_field(motor, "learning")
+                tick = frame["tick"]  # Verified as exact int by inspect_event.
+                expected_epoch = {
+                    "epoch_index": tick // EPOCH_TICKS,
+                    "epoch_tick": tick % EPOCH_TICKS,
+                }
+                def wrong_clock(fields, expected):
+                    # Python True == 1, but JSON bool is not a wire integer.
+                    return any(type(fields.get(key)) is not int or
+                               fields[key] != value for key, value in expected.items())
+                if (observation.get("schema") != EPOCH_SENSE_SCHEMA
+                        or wrong_clock(observation, {"absolute_tick": tick, **expected_epoch})
+                        or wrong_clock(intent, {"tick": tick, **expected_epoch})
+                        or wrong_clock(learning, expected_epoch)):
+                    raise NoosphereError("frame disagrees with its pinned epoch schema")
     if temporal_schema is not None:
         if _object_field(frame, "range_guidance").get("schema") != _GUIDANCE:
             raise NoosphereError("frame disagrees with its pinned temporal schema")
@@ -130,10 +160,12 @@ def inspect_journal(path, *, external_expected_head=None):
     ):
         raise NoosphereError("expected head must be a lowercase SHA-256")
     policy = contract = temporal = sensory_mode = None
+    epoch_index = 0
+    dt_ns = None
     frames = 0
 
     def inspect_event(seq, event):
-        nonlocal policy, contract, temporal, sensory_mode, frames
+        nonlocal policy, contract, temporal, sensory_mode, frames, epoch_index, dt_ns
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -144,14 +176,59 @@ def inspect_journal(path, *, external_expected_head=None):
                 raise NoosphereError("first event must bootstrap Aquarium")
             manifest = event["payload"]
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
+            dt_ns = manifest.get("dt_ns")
+            # Runtime creation accepts only this bounded virtual-clock interval.
+            # A read-only wire pass must not certify a bootstrap that cold
+            # Aquarium replay rejects for a forged or missing clock period.
+            if policy == "local_cell_v4" and (
+                    type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
+                raise NoosphereError("invalid v4 bootstrap dt_ns")
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
         elif topic == "aquarium.frame":
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
+            if policy == "local_cell_v4":
+                if (event["event_id"] != f"frame-{frames:012d}"
+                        or type(dt_ns) is not int
+                        or type(event.get("observed_at_ns")) is not int
+                        or event["observed_at_ns"] != frames * dt_ns):
+                    raise NoosphereError("noncanonical v4 frame envelope")
+                if frames // EPOCH_TICKS != epoch_index:
+                    raise NoosphereError("missing durable v4 epoch marker before frame")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
+        elif topic == "aquarium.epoch":
+            if policy != "local_cell_v4":
+                raise NoosphereError("epoch marker is not allowed by stored policy")
+            payload = event["payload"]
+            expected_index = epoch_index + 1
+            if (frames == 0 or frames % EPOCH_TICKS != 0
+                    or expected_index != frames // EPOCH_TICKS
+                    or not isinstance(payload, dict)
+                    or set(payload) != {
+                        "schema", "absolute_tick", "epoch_index",
+                        "previous_epoch_index", "epoch_tick", "source",
+                    }
+                    or payload["schema"] != EPOCH_EVENT_SCHEMA
+                    or any(type(payload.get(field)) is not int for field in (
+                        "absolute_tick", "epoch_index",
+                        "previous_epoch_index", "epoch_tick"))
+                    or payload["absolute_tick"] != frames
+                    or payload["epoch_index"] != expected_index
+                    or payload["previous_epoch_index"] != epoch_index
+                    or payload["epoch_tick"] != 0
+                    or payload["source"] != "explicit_bounded_epoch_rollover_without_reset"
+                    or event["event_id"] != f"epoch-{expected_index:08d}"
+                    or dt_ns is None
+                    or event["observed_at_ns"] != frames * dt_ns):
+                raise NoosphereError("invalid or noncanonical epoch marker")
+            epoch_index = expected_index
+        elif policy == "local_cell_v4":
+            # V4 Aquarium replay accepts only frames and durable epoch markers.
+            # A valid SQLite hash chain is not proof of a valid motor-wire ABI.
+            raise NoosphereError("unsupported local-cell v4 journal topic")
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
@@ -180,6 +257,10 @@ def inspect_journal(path, *, external_expected_head=None):
     }
     if sensory_mode == "toy_probe_v2":
         result["sensory_schema"] = SENSORY_MODEL_V2
+    if policy == "local_cell_v4":
+        result["epoch_schema"] = EPOCH_SENSE_SCHEMA
+        result["epoch_ticks"] = EPOCH_TICKS
+        result["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS
     return result
 
 

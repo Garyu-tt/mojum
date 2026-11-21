@@ -14,7 +14,8 @@ import subprocess
 import sys
 import unittest
 
-from mojum import aquarium, cell_policy_v2, cell_policy_v3, developmental
+from mojum import aquarium, cell_policy_v2, cell_policy_v3, cell_policy_v4, developmental
+from mojum.epoch_sense_v2 import EPOCH_TICKS, MAX_ABSOLUTE_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA
 from mojum.archived_policy_v2a import SCHEMA as V2A_SCHEMA
 from mojum.policy_identity import (
     POLICIES, PolicyIdentity, PolicyIdentityError, by_selector,
@@ -29,7 +30,7 @@ _B = "mojum.developmental.local-cell/2"
 
 class RegistryShapeTests(unittest.TestCase):
     def test_every_inspection_identity_is_unique(self):
-        self.assertEqual(len(POLICIES), 6)
+        self.assertEqual(len(POLICIES), 7)
         for field in (
             "inspection_id", "configuration", "state_schema",
             "learning_schema", "intent_source",
@@ -49,11 +50,23 @@ class RegistryShapeTests(unittest.TestCase):
         self.assertEqual(by_id["local_cell_v3"].state_schema, cell_policy_v3.SCHEMA)
         self.assertEqual(by_id["local_cell_v3"].learning_schema,
                          cell_policy_v3.LEARNING_SCHEMA)
+        self.assertEqual(by_id["local_cell_v4"].state_schema, cell_policy_v4.SCHEMA)
+        self.assertEqual(by_id["local_cell_v4"].learning_schema,
+                         cell_policy_v4.LEARNING_SCHEMA)
+        self.assertEqual(by_id["local_cell_v4"].selector_dict, {
+            "exploration_mode": "goal_free",
+            "developmental_schema": cell_policy_v4.SCHEMA,
+            "developmental_policy": "local_cell_v4",
+            "epoch_transition_schema": aquarium.EPOCH_EVENT_SCHEMA,
+            "epoch_ticks": EPOCH_TICKS,
+            "proprioception_schema": EPOCH_SENSE_SCHEMA,
+            "max_absolute_ticks": MAX_ABSOLUTE_TICKS,
+        })
         self.assertEqual(by_id["motor_play_v1"].state_schema, developmental.SCHEMA)
 
     def test_public_modes_and_archived_constant_cannot_collide(self):
         modes = (aquarium.V2A_ARCHIVE_MODE, aquarium.V2B_MODE,
-                 aquarium.V2B_WIRE_MODE, aquarium.V3_MODE)
+                 aquarium.V2B_WIRE_MODE, aquarium.V3_MODE, aquarium.V4_MODE)
         self.assertEqual(len(set(modes)), len(modes))
         # The archived module used to export the canonical ``local_cell_v2``
         # name; that is exactly the impersonation #116 blocks.

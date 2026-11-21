@@ -314,6 +314,34 @@ async function main() {
     assert.equal(await evaluate(cdp,
       "JSON.parse(document.querySelector('#output').value).start[0]"),moved);
 
+    // Recover from a malformed typed start using the REAL SVG pointer path,
+    // without an Undo or direct model mutation in the browser.
+    await evaluate(cdp,
+      "(function(){const e=document.querySelector('#start-x');e.value='';" +
+      "e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#download').disabled"),true);
+    const grip = JSON.parse(await evaluate(cdp,
+      "JSON.stringify((function(){const r=document.querySelector('#start circle').getBoundingClientRect();" +
+      "return {x:r.x+r.width/2,y:r.y+r.height/2}})())"));
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mouseMoved", x: grip.x, y: grip.y,
+    });
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mousePressed", x: grip.x, y: grip.y, button: "left", clickCount: 1,
+    });
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mouseMoved", x: grip.x + 16, y: grip.y, buttons: 1,
+    });
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mouseReleased", x: grip.x + 16, y: grip.y, button: "left", clickCount: 1,
+    });
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#download').disabled"),false,
+      "SVG drag must repair a malformed previous start");
+    assert.ok(await evaluate(cdp,
+      "Number.isFinite(JSON.parse(document.querySelector('#output').value).start[0])"));
+
     // Capture a non-private visual acceptance artifact at a phone-like
     // viewport. Nothing in this synthetic demo originates from a user DB.
     await cdp.call("Emulation.setDeviceMetricsOverride", {

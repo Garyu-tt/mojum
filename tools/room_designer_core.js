@@ -177,10 +177,17 @@
   }
 
   function dragStart(state, x, y) {
-    const checked = validate(state);
+    // A malformed/out-of-bounds OLD start must not prevent a valid new
+    // position from repairing it. Dimensions still require strict parsing;
+    // validate() below checks the complete NEW room before accepting it.
+    const width = token(state.width, "Ширина");
+    const height = token(state.height, "Высота");
+    if (width <= 0 || height <= 0) {
+      throw new Error("Ширина и высота должны быть больше нуля");
+    }
     const updated = clone(state);
-    updated.start.x = fmt(Math.min(Math.max(0, x), checked.width), state.start.x);
-    updated.start.y = fmt(Math.min(Math.max(0, y), checked.height), state.start.y);
+    updated.start.x = fmt(Math.min(Math.max(0, x), width), state.start.x);
+    updated.start.y = fmt(Math.min(Math.max(0, y), height), state.start.y);
     validate(updated);
     return updated;
   }
