@@ -12,10 +12,13 @@ import copy
 import hashlib
 import json
 import math
+import unicodedata
 from importlib.resources import files
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
+from .body_genetics import (compile_body, compile_body_at_month,
+                            validate_human_name)
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .graph import validate as validate_graph
@@ -41,6 +44,18 @@ class AquariumError(ValueError):
 
 class _FrameMismatch(AquariumError):
     """A recorded frame differs from the result of deterministic replay."""
+
+
+DEVELOPMENT_SCHEMA = "mojum.agent.development-event/1"
+IDENTITY_EVENT_SCHEMA = "mojum.agent.identity-event/1"
+
+
+def _safe_event_text(value, field, limit=256):
+    if not isinstance(value, str) or not value.strip() or len(value) > limit:
+        raise AquariumError(f"{field} must be nonempty text (<= {limit} chars)")
+    if any(unicodedata.category(c) in ("Cc", "Cf") for c in value):
+        raise AquariumError(f"{field} contains control/invisible characters")
+    return value
 
 
 def _start_coordinate(value):
@@ -159,6 +174,8 @@ class Aquarium:
         except ValueError as exc:
             raise AquariumError("invalid room start coordinates") from exc
         self.tick = 0
+        self.development_months = 72  # separate, non-senescent synthetic developmental calendar
+        self.identity = None  # human-declared, never inferred from genes
 
     def __enter__(self):
         return self
@@ -244,6 +261,60 @@ class Aquarium:
             }
         return payload, new_world, next_learner, next_motor
 
+    def body_preview(self, somatic_chromosome, age_years=None):
+        """Project genetic body dimensions without modifying journal or learning.
+
+        Without an age override, use journal-persisted developmental months.
+        Whole-year what-if previews remain available and never change state.
+        """
+        phenotype = self.genome.phenotype(self.tick)
+        if age_years is None:
+            return compile_body_at_month(phenotype, somatic_chromosome,
+                                         self.development_months)
+        return compile_body(phenotype, somatic_chromosome, age_years)
+
+    def advance_development(self, months=1, *, reason="explicit simulation advancement"):
+        """Persist a synthetic age milestone independently of physics frames."""
+        if type(months) is not int or not 1 <= months <= 12:
+            raise AquariumError("development advance must be 1..12 whole months")
+        reason = _safe_event_text(reason, "development reason")
+        target = self.development_months + months
+        if target > 192:
+            raise AquariumError("development maximum age is 16 years")
+        payload = {
+            "schema": DEVELOPMENT_SCHEMA,
+            "from_months": self.development_months,
+            "to_months": target,
+            "reason": reason,
+        }
+        event_id = f"development-{self.development_months:03d}-{target:03d}"
+        head = self._append_record("development.advance", event_id, payload,
+                            self.tick * self.dt_ns, self.genome.revision)
+        self.development_months = target
+        self._committed_head = head
+        return target
+
+    def assign_human_name(self, identity, *, actor_id):
+        """Append one human-*declared* name; actor identity is NOT authenticated.
+
+        The future authenticated front end must verify authorization; caller-
+        supplied actor_id alone does not prove the naming actor is human.
+        """
+        if self.identity is not None:
+            raise AquariumError("agent already named; renaming is not implemented")
+        actor_id = _safe_event_text(actor_id, "human actor id", 128)
+        validated = validate_human_name(identity, self.agent_id)
+        payload = {
+            "schema": IDENTITY_EVENT_SCHEMA,
+            "identity": validated,
+            "actor_id": actor_id,
+        }
+        head = self._append_record("identity.assigned", "identity-assigned", payload,
+                            self.tick * self.dt_ns, self.genome.revision)
+        self.identity = validated
+        self._committed_head = head
+        return copy.deepcopy(self.identity)
+
     def step(self, *, dx=None, dy=None):
         if self.motor is None:
             dx = 0.02 if dx is None else dx
@@ -313,7 +384,38 @@ class Aquarium:
                 raise AquariumError("unexpected journal ownership or visibility")
             if event["observed_at_ns"] != self.tick * self.dt_ns:
                 raise AquariumError("unsynchronized event time")
-            if event["topic"] == "genesis.acquisition":
+            if event["topic"] == "development.advance":
+                payload = event["payload"]
+                if not isinstance(payload, dict) or set(payload) != {
+                    "schema", "from_months", "to_months", "reason"
+                } or payload["schema"] != DEVELOPMENT_SCHEMA:
+                    raise AquariumError("invalid development journal event")
+                previous, target = payload["from_months"], payload["to_months"]
+                if (type(previous) is not int or previous != self.development_months or
+                        type(target) is not int or not 1 <= target - previous <= 12 or
+                        target > 192):
+                    raise AquariumError("development clock continuity broken")
+                _safe_event_text(payload["reason"], "development reason")
+                event_id = f"development-{previous:03d}-{target:03d}"
+                if event != self._record("development.advance", event_id,
+                                         payload, self.tick * self.dt_ns,
+                                         self.genome.revision):
+                    raise AquariumError("noncanonical development event")
+                self.development_months = target
+            elif event["topic"] == "identity.assigned":
+                payload = event["payload"]
+                if (self.identity is not None or not isinstance(payload, dict) or
+                        set(payload) != {"schema", "identity", "actor_id"} or
+                        payload["schema"] != IDENTITY_EVENT_SCHEMA):
+                    raise AquariumError("invalid or duplicate identity journal event")
+                _safe_event_text(payload["actor_id"], "human actor id", 128)
+                validated = validate_human_name(payload["identity"], self.agent_id)
+                if event != self._record("identity.assigned", "identity-assigned",
+                                         payload, self.tick * self.dt_ns,
+                                         self.genome.revision):
+                    raise AquariumError("noncanonical identity event")
+                self.identity = validated
+            elif event["topic"] == "genesis.acquisition":
                 raw = event["payload"].get("acquisition")
                 if not isinstance(raw, dict) or event["event_id"] != "acq-" + str(raw.get("event_id")):
                     raise AquariumError("invalid acquisition envelope")
@@ -367,6 +469,12 @@ class Aquarium:
             "neural_mode": self.neural_mode,
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
             "manifest_sha256": digest(self.manifest),
+            "development_months": self.development_months,
+            "development_years_floor": self.development_months // 12,
+            "display_name": (self.identity["display_name"]
+                             if self.identity is not None else None),
+            "name_provenance": ("human_declared_unverified"
+                                if self.identity is not None else "not_assigned"),
             "trust": "checksum_only_not_authenticated",
         }
         if self.motor is not None:
