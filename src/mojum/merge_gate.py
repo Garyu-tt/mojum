@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
-from fnmatch import fnmatchcase
 import json
 from pathlib import Path
 import re
@@ -231,12 +230,12 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
 
 
 def _matches(pattern: str, check: CheckOutcome) -> bool:
-    targets = [check.name]
-    if check.workflow:
-        # A workflow name matches every job it produced, so all of that
-        # workflow's checks must pass; "workflow / job" targets one job.
-        targets.extend([check.workflow, f"{check.workflow} / {check.name}"])
-    return any(fnmatchcase(target, pattern) for target in targets)
+    # Never certify an incomplete matrix through an aggregate workflow name
+    # or a wildcard. Every expected job must be enumerated by the caller.
+    return pattern == check.name or (
+        check.workflow is not None
+        and pattern == f"{check.workflow} / {check.name}"
+    )
 
 
 def evaluate(
@@ -316,6 +315,16 @@ def evaluate(
         )
 
     for pattern in patterns:
+        # A rollup does not list jobs which have not registered yet. A
+        # wildcard (or workflow-only selector) cannot prove matrix completeness.
+        # Fail closed unless each required *job* is named exactly.
+        if (not isinstance(pattern, str) or not pattern.strip()
+                or any(meta in pattern for meta in "*?[]")):
+            rejects.append(GateReason(
+                "AMBIGUOUS_REQUIRED_PATTERN",
+                f"required job {pattern!r} must be an exact job name or workflow / job label",
+            ))
+            continue
         matches = [check for check in facts.checks if _matches(pattern, check)]
         if not matches:
             defers.append(
@@ -475,8 +484,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="PATTERN",
         help=(
-            "required check name, 'workflow / name', or fnmatch pattern; repeatable. "
-            "All checks matching a pattern must have completed successfully."
+            "one exact required job name or 'workflow / job' label; repeat "
+            "for every expected matrix job (wildcards and workflow-only "
+            "selectors are not allowed)"
         ),
     )
     parser.add_argument(
