@@ -1,10 +1,15 @@
-name: Mojum explicit v2A-to-v2B fresh-journal transfer QA
+name: Mojum explicit local-cell transfer and retention QA
 
 on:
   pull_request:
     paths:
       - ".github/workflows/v2a-v2b-transfer.yml"
       - "src/mojum/migration_v2a_v2b.py"
+      - "src/mojum/migration_v2b_v3.py"
+      - "src/mojum/local_cell_transfer.py"
+      - "src/mojum/cell_policy_v3.py"
+      - "src/mojum/aquarium_wire.py"
+      - "tests/test_aquarium_cell_policy_v3.py"
       - "src/mojum/aquarium.py"
       - "src/mojum/noosphere.py"
       - "src/mojum/archived_policy_v2a.py"
@@ -20,7 +25,7 @@ permissions:
 
 jobs:
   immutable-source-transfer:
-    name: fresh SQLite migration and fail-closed tests (${{ matrix.os }}, ${{ matrix.python-version }})
+    name: local-cell transfer and retention (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     strategy:
@@ -50,10 +55,17 @@ jobs:
           ref: b755da530634c0d6b8866107e7b4e9e325839175
           path: sources/policy115
           persist-credentials: false
+      - name: Checkout exact #122 v3 writer
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 8b7b12a1ca3fc89067671c8a63f82c0f0a752e31
+          path: sources/policy122
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "${{ matrix.python-version }}"
-      - name: Verify converted experience and original v2B resume
+      - name: Verify retention and pinned-runtime continuation
         shell: bash
         env:
           PYTHONPATH: src
@@ -61,9 +73,11 @@ jobs:
           PYTHONWARNINGS: always::ResourceWarning
           MOJUM_ARCHIVE112_SOURCE: sources/policy112
           MOJUM_ARCHIVE115_SOURCE: sources/policy115
+          MOJUM_ARCHIVE122_SOURCE: sources/policy122
         run: |
           set -o pipefail
           python -m unittest discover -s tests -p test_v2a_v2b_migration.py -v 2>&1 | tee transfer-qa.log
+          python -m unittest discover -s tests -p test_aquarium_cell_policy_v3.py -v 2>&1 | tee -a transfer-qa.log
           if grep -q 'ResourceWarning: unclosed database' transfer-qa.log; then
             echo "FAIL: migration leaked SQLite connection" >&2
             exit 1
