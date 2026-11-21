@@ -55,6 +55,18 @@ def _seal_read_only_custody(journal, owner, signed, receipt_sha):
             (CUSTODY_SCHEMA, owner, signed["source_events"],
              signed["source_head"], receipt_sha, "QUARANTINED_READ_ONLY"),
         )
+        # Keep the recorded custody statement immutable under ordinary
+        # application SQL as well as denying the normal journal writer.
+        # A database administrator can still DROP these triggers: this is
+        # accidental-write prevention, not Byzantine writer fencing.
+        db.execute("""CREATE TRIGGER recovery_no_custody_update
+            BEFORE UPDATE ON recovery_custody BEGIN
+                SELECT RAISE(ABORT,'immutable recovered replica custody');
+            END""")
+        db.execute("""CREATE TRIGGER recovery_no_custody_delete
+            BEFORE DELETE ON recovery_custody BEGIN
+                SELECT RAISE(ABORT,'immutable recovered replica custody');
+            END""")
         db.execute("""CREATE TRIGGER recovery_no_event_insert
             BEFORE INSERT ON segmented_events BEGIN
                 SELECT RAISE(ABORT,'quarantined PRIVATE replica cannot accept writes');
