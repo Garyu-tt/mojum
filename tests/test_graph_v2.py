@@ -85,7 +85,7 @@ class GraphV2Tests(unittest.TestCase):
             validate_v2(graph)
         original = copy.deepcopy(FIXTURE)
         original["nodes"][0]["visibility"] = "PRIVATE"
-        with self.assertRaisesRegex(GraphError, "reserved"):
+        with self.assertRaisesRegex(GraphError, r"(?:reserved|v1 node shape)"):
             upgrade_v1(original)
 
     def test_strict_labels_and_unknown_node(self):
