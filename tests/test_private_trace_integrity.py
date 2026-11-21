@@ -115,11 +115,15 @@ function replaceFooter(source,transform){
        delete f.trace_room});
  const legacyDefault=await attempt(legacy);
  const legacyOptIn=await attempt(legacy, true);
+ const blankLine=await attempt(wire.replace("\n", "\n\n"));
+ const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
+ const trailingBlank=await attempt(wire + "\n");
  const encoding=await attempt(Buffer.concat([Buffer.from(wire),Buffer.from([255])]));
  process.stdout.write(JSON.stringify({valid,altered,truncated,mismatch,
                                       brokenProof,missingProof,strippedModern,
                                       strippedRange,missingStatus,missingRange,
-                                      legacyDefault,legacyOptIn,encoding})+"\n");
+                                      legacyDefault,legacyOptIn,
+                                      blankLine,whitespaceLine,trailingBlank,encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
@@ -197,14 +201,17 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("SHA-256", values["brokenProof"]["status"])
         self.assertFalse(values["missingProof"]["enabled"])
         self.assertIn("SHA-256", values["missingProof"]["status"])
+        for name in ("missingStatus", "missingRange"):
+            self.assertFalse(values[name]["enabled"], name)
+            self.assertIn("SHA-256", values[name]["status"], name)
+        for name in ("blankLine", "whitespaceLine", "trailingBlank"):
+            self.assertFalse(values[name]["enabled"], name)
+            self.assertIn("Пустая JSONL-строка", values[name]["status"], name)
         self.assertFalse(values["encoding"]["enabled"])
         self.assertFalse(values["strippedModern"]["enabled"])
         self.assertIn("SHA-256", values["strippedModern"]["status"])
         self.assertFalse(values["strippedRange"]["enabled"])
         self.assertIn("SHA-256", values["strippedRange"]["status"])
-        for name in ("missingStatus", "missingRange"):
-            self.assertFalse(values[name]["enabled"], name)
-            self.assertIn("SHA-256", values[name]["status"], name)
         self.assertFalse(values["legacyDefault"]["enabled"])
         self.assertIn("legacy", values["legacyDefault"]["status"])
         self.assertTrue(values["legacyOptIn"]["enabled"])
