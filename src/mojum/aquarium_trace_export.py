@@ -316,10 +316,17 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     )
     try:
         with os.fdopen(fd, "wb") as stream:
+            # The temp inode is 0600 from mkstemp. Reinforce that promise
+            # on its OWN open descriptor *before* flushing inode metadata;
+            # changing mode after file fsync would leave new permissions
+            # outside that explicit durability boundary.
+            if os.name == "posix":
+                os.fchmod(stream.fileno(), 0o600)
+            else:
+                os.chmod(stage_out, 0o600)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(stage_out, 0o600)
         os.link(stage_out, dest)  # EEXIST rather than overwrite; same FS.
     finally:
         try:
