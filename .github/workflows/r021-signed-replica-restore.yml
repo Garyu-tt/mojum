@@ -1,0 +1,52 @@
+name: Mojum R0.21 owner-verified cold recovery from archive replica
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r021-signed-replica-restore.yml"
+      - "src/mojum/verified_replica_restore.py"
+      - "src/mojum/segment_archive_cli.py"
+      - "tests/test_verified_replica_restore.py"
+      - "tests/test_verified_replica_restore_epoch.py"
+      - "docs/R021_VERIFIED_REPLICA_RESTORE.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authenticated-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Independently HMAC-pinned historical restore and Aquarium full cold replay
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_verified_replica_restore.py -v
+      - name: Owner root/segment physical archive regressions
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p test_archive_root_receipt.py -v
+          python -m unittest discover -s tests -p test_archive_device_transfer.py -v
+
+  signed-sensory-epoch-10050:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Restore 10050 real v4 synthetic frames, epoch and sensory contacts from signed secondary copy, read-only
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_verified_replica_restore_epoch.py -v

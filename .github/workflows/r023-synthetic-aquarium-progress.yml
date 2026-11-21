@@ -1,0 +1,50 @@
+name: Mojum R0.23 immutable Aquarium synthetic progress metrics
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r023-synthetic-aquarium-progress.yml"
+      - "src/mojum/aquarium_progress_observer.py"
+      - "src/mojum/segment_archive_cli.py"
+      - "tests/test_aquarium_progress_observer.py"
+      - "tests/test_aquarium_progress_observer_epoch.py"
+      - "docs/R023_SYNTHETIC_PROGRESS_OBSERVER.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-aggregates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Redacted default and exact 130-frame toy history privacy/consistency tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_aquarium_progress_observer.py -v
+      - name: Historical immutable view and original HMAC-root regression
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_quarantined_observer.py -v
+
+  actual-v4-epoch-10050:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 10050 actual CPU Aquarium motor frames plus >4000 toy contact updates after HMAC-signed restore
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_aquarium_progress_observer_epoch.py -v
