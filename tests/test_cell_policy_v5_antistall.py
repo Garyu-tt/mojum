@@ -16,7 +16,7 @@ from pathlib import Path
 
 from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE, V5_MODE
 from mojum.aquarium_wire import _check_policy_frame, _stored_policy, inspect_journal
-from mojum.noosphere import NoosphereError
+from mojum.noosphere import LocalNoosphere, NoosphereError
 from mojum.cell_policy_v3 import CellExplorerV3
 from mojum.cell_policy_v5 import (
     MAX_CELLS,
@@ -468,6 +468,25 @@ class V5AquariumVersionGateTests(unittest.TestCase):
             Aquarium(path, SEED, GRAPH, motor_mode=V5_MODE,
                      sensory_mode="toy_probe_v2")
         self.assertFalse(path.exists())
+
+    def test_wire_inspector_rejects_v5_frame_with_unpinned_toy_contact(self):
+        with self.aquarium() as rover:
+            rover.step()
+            bootstrap, frame = (
+                row["event"] for row in rover.store.iter_events(include_nonpublic=True)
+            )
+        with Aquarium(self.root / "v4-sensory.sqlite3", SEED, GRAPH,
+                      motor_mode=V4_MODE, sensory_mode="toy_probe_v2") as rover:
+            frame["payload"]["toy_contact"] = rover.step()["toy_contact"]
+        mixed_path = self.root / "mixed-v5.sqlite3"
+        with LocalNoosphere(mixed_path, bootstrap["agent_id"]) as store:
+            head = store.append(bootstrap, expected_head=store.head())
+            head = store.append(frame, expected_head=head)
+            self.assertEqual(store.verify_chain()["head"], head)
+        before = mixed_path.read_bytes()
+        with self.assertRaisesRegex(NoosphereError, "unexpected toy contact"):
+            inspect_journal(mixed_path, external_expected_head=head)
+        self.assertEqual(mixed_path.read_bytes(), before)
 
     def test_v5_epoch_frame_inspection_rejects_forged_clock(self):
         with self.aquarium() as rover:

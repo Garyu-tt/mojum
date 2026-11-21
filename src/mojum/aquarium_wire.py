@@ -123,6 +123,8 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                     or _object_field(motor, "intent").get("source") != action_source
                     or _object_field(motor, "learning").get("schema") != learning_schema):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
+            if state_schema == V5_SCHEMA and "toy_contact" in frame:
+                raise NoosphereError("unexpected toy contact in local_cell_v5 frame")
             if state_schema in (V4_SCHEMA, V5_SCHEMA):
                 observation = _object_field(motor, "observation")
                 intent = _object_field(motor, "intent")
