@@ -149,6 +149,27 @@ class CharacterAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(CharacterAssetError, "symlink"):
                 verify_files(one, root)
 
+    def test_deep_json_fails_with_contract_error(self):
+        nesting = 10000
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / "deep.json"
+            path.write_bytes(b'{"forms":' + b"[" * nesting + b"0" + b"]" * nesting + b"}")
+            with self.assertRaises(CharacterAssetError):
+                load_manifest(path)
+
+            packed = (b'{"asset":{"version":"2.0"},"extras":'
+                      + b"[" * nesting + b"0" + b"]" * nesting + b"}")
+            packed += b" " * (-len(packed) % 4)
+            blob = (struct.pack("<4sII", b"glTF", 2, len(packed) + 20)
+                    + struct.pack("<I4s", len(packed), b"JSON") + packed)
+            data = manifest(blob)
+            data["forms"] = data["forms"][:1]
+            (root / "keyframes").mkdir()
+            (root / data["forms"][0]["glb_path"]).write_bytes(blob)
+            with self.assertRaises(CharacterAssetError):
+                verify_files(data, root)
+
     def test_load_manifest_rejects_duplicate_json_keys_and_oversize(self):
         with tempfile.TemporaryDirectory() as folder:
             p = Path(folder) / "character.json"
