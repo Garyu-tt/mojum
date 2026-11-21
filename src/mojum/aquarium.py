@@ -543,13 +543,15 @@ class Aquarium:
     def _check_bootstrap(self, first):
         expected = self._record("aquarium.bootstrap", "aquarium-bootstrap",
                                 self.manifest, 0, self.graph_sha256)
-        if first != expected or ((self.sensory_bridge is not None or self._local_cell) and
+        if first != expected or ((self.sensory_bridge is not None or self._local_cell
+                                  or self.brain_mode == "developmental_controller") and
                                  canonical(first) != canonical(expected)):
             raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
 
     def _replay(self, external_expected_head, *, detect_sum):
         verified = self.store.verify_chain(
-            external_expected_head=external_expected_head, strict_wire=self._local_cell,
+            external_expected_head=external_expected_head,
+            strict_wire=(self._local_cell or self.brain_mode == "developmental_controller"),
         )
         count = verified["count"]
         if count > MAX_REPLAY_EVENTS:
