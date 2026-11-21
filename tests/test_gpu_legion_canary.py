@@ -9,7 +9,13 @@ import threading
 import time
 import unittest
 
-from tools import gpu_legion_canary as canary
+import importlib.util
+
+# Resource-warning audit runs from tests/ with PYTHONPATH=src, not repository root.
+SOURCE = Path(__file__).resolve().parents[1] / "tools" / "gpu_legion_canary.py"
+spec = importlib.util.spec_from_file_location("gpu_legion_canary", SOURCE)
+canary = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(canary)
 
 
 class Handler(BaseHTTPRequestHandler):
