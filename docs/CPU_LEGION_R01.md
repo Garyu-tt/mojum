@@ -4,6 +4,13 @@
 **Dependency:** PR #477 (`tools/spartan_coordinator.py`).
 **Current state:** tested source package, not yet installed or running on `anakin`.
 
+The executor accepts **only numeric loopback** endpoints
+(`127.0.0.1` or `[::1]`). It disables environment-configured HTTP proxies
+and rejects all HTTP redirects from the model endpoint, including redirects
+to another local path. This prevents a locally configured model service from
+forwarding worker prompts to an external host. Configure the server URL
+directly; do not use DNS names such as `localhost` or redirecting proxies.
+
 This worker uses an existing local-only OpenAI-compatible CPU model server
 (for example llama.cpp with a small quantized coding model). It never calls a
 cloud LLM, handles API keys, executes model-generated commands, runs untrusted
