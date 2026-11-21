@@ -7,6 +7,7 @@ import errno
 import json
 import os
 from pathlib import Path
+from shutil import copy2
 import subprocess
 import sys
 import tempfile
@@ -404,6 +405,32 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
                 self.assertFalse(self.recovered.exists())
                 self.assertEqual(leftover.read_bytes(), b"existing SQLite sidecar")
                 leftover.unlink()
+
+    def test_sidecar_created_during_publication_cannot_change_restored_prefix(self):
+        head = self.build(64)
+        self.export()
+        alternate = self.root / "alternate.sqlite3"
+        copy2(self.source, alternate)
+        with SegmentedNoosphere(alternate, OWNER, segment_size=64) as journal:
+            journal.append_many(
+                [record(i) for i in range(64, 70)], expected_head=head,
+            )
+            stale_wal = alternate.with_name(alternate.name + "-wal").read_bytes()
+
+        native_link = os.link
+        sidecar = self.recovered.with_name(self.recovered.name + "-wal")
+
+        def link_with_stale_wal(source, destination):
+            sidecar.write_bytes(stale_wal)
+            return native_link(source, destination)
+
+        with patch("mojum.segment_archive_verify.os.link", side_effect=link_with_stale_wal):
+            with self.assertRaisesRegex(ArchiveError, "sidecars"):
+                restore_into_new_sqlite(
+                    self.archive, self.recovered, external_expected_head=head,
+                )
+        self.assertFalse(self.recovered.exists())
+        self.assertEqual(sidecar.read_bytes(), stale_wal)
 
     def test_symlink_archive_file_rejected(self):
         self.build(64)

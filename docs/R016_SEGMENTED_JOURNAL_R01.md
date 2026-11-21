@@ -80,8 +80,9 @@ separately from the archive. It can differ from the full source head.
 Verification and restore use that independent anchor without opening the
 source. Restore publishes a new SQLite file after checking the full
 reconstructed chain. Choose a destination without existing SQLite
-sidecars. An interrupted export can leave an orphan member. Preserve it
-for diagnosis and retry into a fresh archive directory.
+sidecars and wait for restore to finish before opening the destination.
+An interrupted export can leave an orphan member. Preserve it for
+diagnosis and retry into a fresh archive directory.
 
 ## Boundary and actual-load QA
 
