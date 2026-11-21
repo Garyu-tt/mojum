@@ -251,9 +251,10 @@ def compare(study, *, tick):
         for item in subject["measurements"]:
             if item["tick"] <= tick:
                 latest[item["domain"]] = item["score_milli"]
+        phenotype = ledger.phenotype(tick)
         profiles.append({"agent_id": subject["agent_id"], "name": subject["name"],
-                         "genes": ledger.phenotype(tick)["parameters"],
-                         "acquired_count": len(ledger.snapshot()["events"]),
+                         "genes": phenotype["parameters"],
+                         "acquired_count": len(phenotype["applied_acquisition_ids"]),
                          "scores_milli": latest})
     left, right = profiles
     domains = sorted(set(left["scores_milli"]) | set(right["scores_milli"]))
