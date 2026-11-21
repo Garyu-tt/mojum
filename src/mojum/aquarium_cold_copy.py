@@ -158,7 +158,11 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
             if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
                 raise AquariumError("unexported SQLite backup WAL sidecar")
             checksum = _sha256(temporary)
-            with open(temporary, "rb") as stream:
+            # Windows rejects fsync on a read-only descriptor (unlike the
+            # POSIX runners that originally exercised this path).  The
+            # temporary file is ours and still writable, so use a descriptor
+            # that can flush the copied SQLite bytes on every supported host.
+            with open(temporary, "r+b") as stream:
                 os.fsync(stream.fileno())
             # Same-filesystem hard link atomically publishes a *new* name.
             # Unlike os.replace, it cannot overwrite a preexisting destination.
