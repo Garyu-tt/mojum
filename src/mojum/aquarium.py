@@ -357,7 +357,15 @@ class Aquarium:
         runtime.tick = self.tick
         output = runtime.step()
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
-        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        graph_brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        # Keep the graph stub's invariant separate from the opt-in controller
+        # record. A controller must never be allowed to mask a privileged graph
+        # output before this fail-closed check runs.
+        if (not isinstance(graph_brain, dict)
+                or graph_brain.get("status") != "UNIMPLEMENTED"
+                or graph_brain.get("action") is not None):
+            raise AquariumError("unexpected privileged brain behavior in fixture")
+        brain = graph_brain
         if self._local_cell:
             sense = Proprioception(self.tick, self.world.revision, self.world.x, self.world.y,
                                    sensory["heartbeat"]["pulse"])
@@ -367,6 +375,7 @@ class Aquarium:
             brain = self.brain.decide(
                 next_motor,
                 tick=self.tick,
+                expected_at_ns=self.tick * self.dt_ns,
                 interoception=sensory,
                 proprioception={
                     "tick": self.world.tick,
@@ -388,10 +397,6 @@ class Aquarium:
         next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot(), summation=self._pulse_sum)
                         if self.learner is not None else None)
         learning = next_learner.observe(sensory) if next_learner is not None else None
-        if (not controller_mode
-                and (brain.get("status") != "UNIMPLEMENTED"
-                     or brain.get("action") is not None)):
-            raise AquariumError("unexpected privileged brain behavior in fixture")
         payload = {
             "schema": SCHEMA, "tick": self.tick, "time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
@@ -542,7 +547,8 @@ class Aquarium:
     def _check_bootstrap(self, first):
         expected = self._record("aquarium.bootstrap", "aquarium-bootstrap",
                                 self.manifest, 0, self.graph_sha256)
-        if first != expected or ((self.sensory_bridge is not None or self._local_cell) and
+        if first != expected or ((self.sensory_bridge is not None or self._local_cell
+                                  or self.brain_mode == "developmental_controller") and
                                  canonical(first) != canonical(expected)):
             raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
 
@@ -645,7 +651,8 @@ class Aquarium:
                 # Compare JSON types for the opt-in wire. Python structural
                 # equality treats bools and numbers as interchangeable.
                 matches = (canonical(event) == canonical(expected)
-                           if self._local_cell or next_contact is not None else event == expected)
+                           if self._local_cell or next_contact is not None
+                           or self.brain_mode == "developmental_controller" else event == expected)
                 if not matches:
                     raise _FrameMismatch("non-deterministic or mismatched committed frame")
                 self.world = next_world

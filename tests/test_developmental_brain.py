@@ -1,15 +1,18 @@
 """Acceptance tests for the explicit synthetic controller boundary."""
 
+import copy
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.developmental_brain import (
     DevelopmentalBrain, DevelopmentalBrainError, SCHEMA, STATUS,
 )
 from mojum.developmental import MotorPlay
+from mojum.sim import Simulation
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -71,6 +74,49 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
                 independent.step()
             self.assertEqual(independent.step(), resumed)
 
+    def test_controller_bootstrap_rejects_bool_for_integer_field(self):
+        # Python considers False == 0, but the persisted opt-in contract must
+        # reject JSON type substitution even when the other event fields match.
+        with self.aquarium() as aquarium:
+            expected = aquarium._record(
+                "aquarium.bootstrap", "aquarium-bootstrap",
+                aquarium.manifest, 0, aquarium.graph_sha256,
+            )
+            forged = copy.deepcopy(expected)
+            forged["observed_at_ns"] = False
+            with self.assertRaises(AquariumError):
+                aquarium._check_bootstrap(forged)
+
+    def test_controller_frame_replay_rejects_bool_for_integer_field(self):
+        with self.aquarium() as aquarium:
+            aquarium.step()
+            items = copy.deepcopy(
+                aquarium.store.dataset(include_nonpublic=True)["projection"]["items"]
+            )
+            items[1]["event"]["payload"]["brain"]["input"]["interoception"][
+                "observed_at_ns"
+            ] = False
+            aquarium._reset_replay_state(aquarium._pulse_sum)
+            with self.assertRaises(AquariumError):
+                aquarium._replay_events(items)
+
+    def test_controller_rejects_privileged_graph_output_before_override(self):
+        with self.aquarium() as aquarium:
+            before = aquarium.checkpoint()
+            original_step = Simulation.step
+
+            def privileged_graph_step(runtime):
+                output = original_step(runtime)
+                observation = output[aquarium.kind_ids["brain.placeholder"]]["observation"]
+                observation["status"] = "PRIVILEGED"
+                observation["action"] = {"kind": "x+"}
+                return output
+
+            with patch("mojum.aquarium.Simulation.step", new=privileged_graph_step):
+                with self.assertRaises(AquariumError):
+                    aquarium.step()
+            self.assertEqual(aquarium.checkpoint(), before)
+
     def test_explicit_controller_mode_is_pinned_and_cannot_be_reinterpreted(self):
         with self.aquarium() as aquarium:
             aquarium.step()
@@ -120,12 +166,22 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
                 bad_cue = dict(cue, **overrides)
                 with self.assertRaises(DevelopmentalBrainError):
                     brain.decide(
-                        motor, tick=0, interoception=heartbeat,
+                        motor, tick=0, expected_at_ns=0,
+                        interoception=heartbeat,
                         proprioception=proprioception, near_field=bad_cue,
                     )
                 self.assertEqual(motor.snapshot(), original)
+        future_heartbeat = dict(heartbeat, observed_at_ns=10_000_000)
+        with self.assertRaises(DevelopmentalBrainError):
+            brain.decide(
+                motor, tick=0, expected_at_ns=0,
+                interoception=future_heartbeat,
+                proprioception=proprioception, near_field=cue,
+            )
+        self.assertEqual(motor.snapshot(), original)
         accepted = brain.decide(
-            motor, tick=0, interoception=heartbeat,
+            motor, tick=0, expected_at_ns=0,
+            interoception=heartbeat,
             proprioception=proprioception, near_field=cue,
         )
         self.assertEqual(accepted["input"]["near_field"], cue)
@@ -155,7 +211,8 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
         }
         with self.assertRaises(DevelopmentalBrainError):
             brain.decide(
-                MotorPlay(), tick=0, interoception=interoception,
+                MotorPlay(), tick=0, expected_at_ns=0,
+                interoception=interoception,
                 proprioception=proprioception, near_field=hidden,
             )
 
