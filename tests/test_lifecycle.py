@@ -95,6 +95,19 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(LifecycleError, "inconsistent"):
             DevelopmentClock.from_snapshot(impossible)
 
+    def test_forged_post_maturity_count_before_maturity_rejected(self):
+        clock = self.new_clock()
+        clock.advance(EVIDENCE)
+        pristine = clock.snapshot()
+        bad = copy.deepcopy(pristine)
+        self.assertLess(bad["regions"]["cortex"]["mature"],
+                        bad["profile"]["cortex"]["target_mature"])
+        bad["regions"]["cortex"]["post_maturity_observations"] = 1
+        bad["sha256"] = _digest({k: v for k, v in bad.items() if k != "sha256"})
+        with self.assertRaisesRegex(LifecycleError, "inconsistent"):
+            DevelopmentClock.from_snapshot(bad)
+        self.assertEqual(clock.snapshot(), pristine)
+
     def test_profile_validation_and_snapshot_isolation(self):
         profile = copy.deepcopy(DEFAULT_PROFILE)
         profile["cortex"]["birth_per_tick"] = 0
