@@ -20,6 +20,19 @@ PYTHONPATH=src python -m mojum.aquarium \
   --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
 ```
 
+The existing bounded foreground host can pace the same profile on one CPU-only
+device. Keep the v4 sensory and temporal selectors explicit:
+
+```sh
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_PRIVATE.sqlite3 --ticks 1000 --interval-ms 1000 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none \
+  --neural-mode disabled
+```
+
+Its stdout is metadata-only; it preflights frame plus epoch-marker admissions
+and leaves the PRIVATE SQLite journal as the only state owner.
+
 Repeat the bounded command to continue the same private journal. The current
 contract allows at most 99,990 frames so the nine epoch markers and bootstrap
 remain within the 100,000-event SQLite budget. `aquarium_wire` identifies the

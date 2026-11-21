@@ -89,6 +89,19 @@ PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_PRIVATE.sqlite3 \
   --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
 ```
 
+For a wall-paced foreground session on the same one-device journal, use the
+bounded host with the v4 selectors explicit:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_PRIVATE.sqlite3 --ticks 1000 --interval-ms 1000 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none \
+  --neural-mode disabled
+```
+
+The host prints metadata only and admits the epoch marker in its event-budget
+preflight; repeat the bounded command to continue after a clean restart.
+
 The v4 path is still bounded by the 100,000-event local journal budget and the
 current checksum-only replay contract. It is not a neural brain, an
 authenticated segment archive, a physical device runtime, or proof of

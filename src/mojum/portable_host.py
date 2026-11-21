@@ -3,8 +3,8 @@
 The host is deliberately small: the Aquarium remains the only owner of the
 organism state and commits each tick to its PRIVATE SQLite journal.  This
 module supplies wall-clock pacing and clean stop handling around the existing
-developmental sensorimotor fixture.  It is not a service manager, a physical
-device adapter, a neural brain, or a 24/7 execution guarantee.
+bounded sensorimotor fixtures.  It is not a service manager, a physical device
+adapter, a neural brain, or a 24/7 execution guarantee.
 """
 
 from __future__ import annotations
@@ -54,8 +54,13 @@ def _require_sensorimotor_fixture(aquarium):
         raise PortableHostError("developmental motor controller is unavailable")
     if motor_mode != V4_MODE and getattr(aquarium, "sensory_bridge", None) is None:
         raise PortableHostError("portable host requires sensory_mode=toy_probe")
-    if motor_mode == V4_MODE and getattr(aquarium, "sensory_bridge", None) is not None:
-        raise PortableHostError("v4 epoch host requires sensory_mode=none")
+    if motor_mode == V4_MODE:
+        if getattr(aquarium, "sensory_mode", None) != "none":
+            raise PortableHostError("local_cell_v4 portable host requires sensory_mode=none")
+        if getattr(aquarium, "sensory_bridge", None) is not None:
+            raise PortableHostError("local_cell_v4 portable host forbids a sensory bridge")
+        if getattr(aquarium, "temporal_mode", None) != "none":
+            raise PortableHostError("local_cell_v4 portable host requires temporal_mode=none")
 
 
 @contextmanager
@@ -188,6 +193,8 @@ def main(argv=None):
         parser.error("local_cell_v4 requires --sensory-mode none")
     if args.motor_mode == V4_MODE and args.temporal_mode != "none":
         parser.error("local_cell_v4 requires --temporal-mode none")
+    if args.motor_mode != V4_MODE and args.sensory_mode != "toy_probe":
+        parser.error("developmental_fixture requires --sensory-mode toy_probe")
 
     stopped = threading.Event()
     started = time.monotonic()
