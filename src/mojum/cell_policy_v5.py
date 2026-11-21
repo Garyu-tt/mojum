@@ -330,6 +330,8 @@ def summarize_transcript(transcript):
     }
     streak = 0
     cells = set()
+    previous_tick = None
+    saw_tick = None
     try:
         rows = iter(transcript)
     except TypeError as exc:
@@ -343,15 +345,43 @@ def summarize_transcript(transcript):
         action = intent.get("action")
         if type(action) is not str or action not in ACTIONS:
             raise CellV5Error("unknown transcript action")
+        # Full policy transcripts carry absolute ticks. Validate their causal
+        # sequence without forbidding lightweight legacy pairs with no ticks.
+        has_tick = "tick" in intent
+        if saw_tick is None:
+            saw_tick = has_tick
+        elif saw_tick != has_tick:
+            raise CellV5Error("mixed clocked and unclocked transcript rows")
+        if has_tick:
+            tick = intent["tick"]
+            if (type(tick) is not int or tick < 0
+                    or (previous_tick is not None and tick != previous_tick + 1)):
+                raise CellV5Error("nonconsecutive transcript tick")
+            previous_tick = tick
+        if "action" in outcome and outcome["action"] != action:
+            raise CellV5Error("transcript outcome disagrees with action")
+        if "schema" in outcome and outcome["schema"] != LEARNING_SCHEMA:
+            raise CellV5Error("unexpected transcript outcome schema")
+        if "total_updates" in outcome and (
+                type(outcome["total_updates"]) is not int
+                or (has_tick and outcome["total_updates"] != tick + 1)):
+            raise CellV5Error("transcript update count disagrees with tick")
         measured = outcome.get("measured_blocked")
         if type(measured) is not bool:
             raise CellV5Error("transcript outcome must carry a measured bool")
         forced = intent.get("forced_probe", False)
         if type(forced) is not bool:
             raise CellV5Error("malformed forced-probe marker")
+        if forced and action == "rest":
+            raise CellV5Error("rest cannot be a forced probe")
+        if "forced_probe" in outcome and (
+                type(outcome["forced_probe"]) is not bool
+                or outcome["forced_probe"] != forced):
+            raise CellV5Error("outcome disagrees with forced-probe marker")
         zone = intent.get("zone")
         if zone is not None:
-            if type(zone) is not str or _ZONE.fullmatch(zone) is None:
+            if (type(zone) is not str or _ZONE.fullmatch(zone) is None
+                    or any(int(part) > 25000 for part in zone.split(":"))):
                 raise CellV5Error("malformed transcript cell key")
             cells.add(zone)
         if action == "rest" and measured:
