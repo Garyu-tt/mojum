@@ -931,8 +931,9 @@ def main():
         parser.error(f"--sensory-mode {args.sensory_mode} requires --motor-mode developmental_fixture")
     if args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
-    if not 0 <= args.ticks <= MAX_REPLAY_EVENTS:
-        parser.error(f"--ticks must be within 0..{MAX_REPLAY_EVENTS}")
+    max_cli_ticks = MAX_REPLAY_EVENTS if args.motor_mode == V4_MODE else 1000
+    if not 0 <= args.ticks <= max_cli_ticks:
+        parser.error(f"--ticks must be within 0..{max_cli_ticks}")
     # Validate command-line movement before Aquarium can create a bootstrap
     # journal. Invalid requests must not leave behind a new organism fixture.
     if args.motor_mode == "scripted":
