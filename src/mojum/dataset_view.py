@@ -41,8 +41,9 @@ def project_episodes(episodes, *, allowed_sources, max_records=1000):
     """Canonical PUBLIC records and SHA256; reject malformed/ambiguous data."""
     if not isinstance(max_records, int) or isinstance(max_records, bool) or not 0 <= max_records <= 100000:
         raise ValueError("invalid max_records")
-    if not isinstance(allowed_sources, (set, frozenset)) or any(not isinstance(s, str) or not s for s in allowed_sources):
+    if not isinstance(allowed_sources, (set, frozenset)) or any(not isinstance(s, str) or not s or len(s) > 256 for s in allowed_sources):
         raise ValueError("invalid allowed_sources")
+    # Validate lengths before canonical JSON materialization (including hidden data).
     for src in allowed_sources:
         _require_utf8(src, "allowed_sources")
     if not isinstance(episodes, (list, tuple)) or len(episodes) > 100000:
@@ -58,7 +59,8 @@ def project_episodes(episodes, *, allowed_sources, max_records=1000):
         if not isinstance(event, Mapping) or set(event) != {"id", "source", "visibility", "tick", "observation"}:
             raise ValueError("invalid episode")
         eid, src, visibility, tick, obs = (event[k] for k in ("id", "source", "visibility", "tick", "observation"))
-        if not isinstance(eid, str) or not eid or not isinstance(src, str) or not src:
+        if (not isinstance(eid, str) or not eid or len(eid) > 256
+                or not isinstance(src, str) or not src or len(src) > 256):
             raise ValueError("invalid identifiers")
         _require_utf8(eid, "episode id")
         _require_utf8(src, "episode source")
