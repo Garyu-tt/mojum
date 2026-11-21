@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/mojum/aquarium.py'
       - 'src/mojum/aquarium_wire.py'
+      - 'src/mojum/policy_identity.py'
       - 'src/mojum/noosphere.py'
       - 'src/mojum/developmental.py'
       - 'tests/test_aquarium_wire.py'
