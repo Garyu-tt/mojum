@@ -8,8 +8,9 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, V4_MODE
+from mojum.aquarium import Aquarium, AquariumError, V4_MODE
 from mojum.portable_host import PortableHostError, run_paced
 
 
@@ -123,6 +124,57 @@ class EpochHostTests(unittest.TestCase):
                 self.assertNotEqual(run.returncode, 0)
                 self.assertEqual(run.stdout, "")
                 self.assertFalse(self.db.exists())
+
+
+    def test_v4_budget_preflight_error_is_wrapped_without_journal_writes(self):
+        """A source-budget exception must stop pacing before any write."""
+        with Aquarium(
+            self.db, SEED, GRAPH, motor_mode=V4_MODE,
+            sensory_mode="none", temporal_mode="none",
+            neural_mode="disabled",
+        ) as aquarium:
+            before = aquarium.checkpoint()
+            with patch.object(
+                aquarium, "required_events_for_steps",
+                side_effect=AquariumError("absolute-tick budget exhausted"),
+            ):
+                with self.assertRaisesRegex(
+                    PortableHostError, "absolute-tick budget exhausted"
+                ):
+                    run_paced(
+                        aquarium, ticks=1, interval_ms=20,
+                        stop_event=threading.Event(),
+                    )
+            self.assertEqual(aquarium.checkpoint(), before)
+            self.assertEqual(aquarium.store.count(), 1)
+
+    def test_v4_extra_marker_reservation_fails_without_journal_writes(self):
+        """A pending epoch marker and frame need two slots, not one."""
+        with Aquarium(
+            self.db, SEED, GRAPH, motor_mode=V4_MODE,
+            sensory_mode="none", temporal_mode="none",
+            neural_mode="disabled",
+        ) as aquarium:
+            before = aquarium.checkpoint()
+            with patch.object(
+                aquarium, "required_events_for_steps", return_value=2
+            ), patch.object(aquarium.store, "count", return_value=99_999):
+                with self.assertRaisesRegex(
+                    PortableHostError, "100000-event"
+                ):
+                    run_paced(
+                        aquarium, ticks=1, interval_ms=20,
+                        stop_event=threading.Event(),
+                    )
+            self.assertEqual(aquarium.checkpoint(), before)
+            self.assertEqual(aquarium.store.count(), 1)
+
+    def test_v4_invalid_brain_profile_cannot_create_private_journal(self):
+        """Fail configuration before touching the persistent source."""
+        run = self.cli("--brain-mode", "developmental_controller")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(run.stdout, "")
+        self.assertFalse(self.db.exists())
 
 
 if __name__ == "__main__":
