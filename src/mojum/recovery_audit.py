@@ -10,6 +10,7 @@ directory. Direct writers that bypass this registry may still race.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -102,7 +103,7 @@ def inspect_recovery(
             if _existing_regular_file(journal, "Aquarium journal")[1] != journal_inode:
                 raise AuthorityError("journal path replaced before audit")
 
-            with sqlite3.connect(read_uri, uri=True, timeout=1.0) as source:
+            with closing(sqlite3.connect(read_uri, uri=True, timeout=1.0)) as source:
                 source.execute("PRAGMA query_only=ON")
                 # Staging is owner-private and automatically removed. Unlike a
                 # raw file copy, sqlite3.backup includes committed WAL changes.
@@ -110,7 +111,7 @@ def inspect_recovery(
                     prefix=".mojum-audit-", dir=journal.parent,
                 ) as scratch:
                     stage = Path(scratch) / "journal.sqlite3"
-                    with sqlite3.connect(stage) as target:
+                    with closing(sqlite3.connect(stage)) as target:
                         source.backup(target, pages=256, sleep=0.01)
                     try:
                         with Aquarium(
