@@ -223,14 +223,10 @@ class RetentionTests(unittest.TestCase):
 
     def test_snapshot_rejects_rest_streak_without_observed_rests(self):
         model = CellExplorerV5()
-        sense = cue(0)
-        intent = model.decide(sense)
-        self.assertNotEqual(intent["action"], "rest")
-        model.observe(sense, intent, False)
-        forged = model.snapshot()
-        forged["rest_streak"] = 1
-        # All generic counters and accounting still add up, but the final
-        # cell has no measured rest history to support this streak.
+        # Four blocked moves satisfy the rest eligibility check. The cell
+        # still has no measured rest history to support a positive streak.
+        drive(model, len(MOVE_ACTIONS))
+        forged = dict(model.snapshot(), rest_streak=1)
         with self.assertRaisesRegex(CellV5Error, "rest streak exceeds"):
             CellExplorerV5.from_snapshot(forged)
         self.assertEqual(model.rest_streak, 0)
