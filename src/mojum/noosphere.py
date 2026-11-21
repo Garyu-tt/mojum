@@ -44,14 +44,36 @@ def _integer(value, field, minimum=0, maximum=2**63 - 1):
     return value
 
 
+_MAX_JSON_DEPTH = 256
+
+
+def _check_json_depth(value):
+    """Bound JSON container nesting without recursion or an extra deep copy."""
+    frames = [(iter((value,)), 0)]
+    while frames:
+        items, parent_depth = frames[-1]
+        try:
+            item = next(items)
+        except StopIteration:
+            frames.pop()
+            continue
+        if isinstance(item, (dict, list, tuple)):
+            depth = parent_depth + 1
+            if depth > _MAX_JSON_DEPTH:
+                raise NoosphereError("event JSON nesting limit exceeded")
+            children = item.values() if isinstance(item, dict) else item
+            frames.append((iter(children), depth))
+
+
 def _canonical(value):
+    _check_json_depth(value)
     try:
         wire = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
         # json.dumps(ensure_ascii=False) can return an unpaired surrogate.
         # Reject it before hashing or touching the durable SQLite journal.
         wire.encode("utf-8")
         return wire
-    except (TypeError, ValueError, OverflowError) as exc:
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise NoosphereError("event must contain canonical UTF-8 JSON") from exc
 
 
