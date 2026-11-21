@@ -35,8 +35,17 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         self.assertEqual(html.count(SCRIPT_TAG), 1)
         result = standalone_html()
         text = result.decode("utf-8")
-        expected = html.replace(
-            SCRIPT_TAG, "<script>\n" + js.rstrip() + "\n</script>", 1)
+        expected = html
+        for name, source in (
+            ("room_designer_core.js", JS),
+            ("room_designer_history.js", HTML.parent / "room_designer_history.js"),
+            ("room_walk_preview.js", HTML.parent / "room_walk_preview.js"),
+        ):
+            tag = f'<script src="./{name}"></script>'
+            if tag in expected:
+                expected = expected.replace(
+                    tag, "<script>\n" + source.read_text(encoding="utf-8").rstrip()
+                    + "\n</script>", 1)
         self.assertEqual(text, expected)
         self.assertNotIn(SCRIPT_TAG, text)
         self.assertIn("MojumRoomDesignerCore", text)
@@ -48,6 +57,40 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         self.assertNotIn("localStorage.", text)
         self.assertNotIn("indexedDB.", text)
         self.assertEqual(standalone_html(), result)
+
+    def test_optional_parent_scripts_are_inlined_or_fail_closed(self):
+        # The parent PR introduced two modules after this stacked child
+        # was created. A portable file must retain their load order.
+        template = HTML.read_text(encoding="utf-8")
+        core = self.tmp / "room_designer_core.js"
+        core.write_text(JS.read_text(encoding="utf-8"), encoding="utf-8")
+        extras = ("room_designer_history.js", "room_walk_preview.js")
+        for name in extras:
+            tag = f'<script src="./{name}"></script>'
+            if tag not in template:
+                template = template.replace(SCRIPT_TAG, SCRIPT_TAG + "\n  " + tag, 1)
+            (self.tmp / name).write_text(
+                f"globalThis.BUNDLE_{name.replace('.js', '').upper()} = true;\n",
+                encoding="utf-8",
+            )
+        source = self.tmp / "template.html"
+        source.write_text(template, encoding="utf-8")
+        packed = standalone_html(html_path=source, js_path=core).decode("utf-8")
+        self.assertNotIn("<script src=", packed)
+        self.assertIn("BUNDLE_ROOM_DESIGNER_HISTORY", packed)
+        self.assertIn("BUNDLE_ROOM_WALK_PREVIEW", packed)
+        self.assertIn("MojumRoomDesignerCore", packed)
+        # A new dependency cannot silently escape into the portable file.
+        unknown = template.replace(
+            SCRIPT_TAG, SCRIPT_TAG + '\n  <script src="./unknown.js"></script>', 1
+        )
+        source.write_text(unknown, encoding="utf-8")
+        with self.assertRaisesRegex(PackagingError, "unexpected"):
+            standalone_html(html_path=source, js_path=core)
+        source.write_text(template, encoding="utf-8")
+        (self.tmp / extras[1]).unlink()
+        with self.assertRaisesRegex(PackagingError, "nonsymlink"):
+            standalone_html(html_path=source, js_path=core)
 
     def test_can_write_exactly_once_with_sha_and_owner_only_permissions(self):
         expected = standalone_html()
