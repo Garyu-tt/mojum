@@ -283,6 +283,7 @@ class SensoryCuriosityTests(unittest.TestCase):
         if node:
             result = subprocess.run(
                 [node, "--check", "-"], input=js, text=True,
+                encoding="utf-8",
                 capture_output=True, timeout=12,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
