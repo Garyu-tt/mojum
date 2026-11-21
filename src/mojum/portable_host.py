@@ -76,19 +76,25 @@ def termination_signals(stop_event):
     def request_stop(_signum, _frame):
         stop_event.set()
 
-    for name in ("SIGINT", "SIGTERM"):
-        signum = getattr(signal, name, None)
-        if signum is None:
-            continue
-        try:
-            previous[signum] = signal.getsignal(signum)
-            signal.signal(signum, request_stop)
-        except ValueError as exc:
-            raise PortableHostError("signal handlers require the main thread") from exc
+    # Registration can fail after a previous signal was installed. Keep the
+    # installation loop inside the cleanup guard so partial changes are always
+    # rolled back before returning an error to the caller.
     try:
+        for name in ("SIGINT", "SIGTERM"):
+            signum = getattr(signal, name, None)
+            if signum is None:
+                continue
+            try:
+                handler = signal.getsignal(signum)
+                signal.signal(signum, request_stop)
+            except ValueError as exc:
+                raise PortableHostError("signal handlers require the main thread") from exc
+            # Only restore signals whose temporary handler was installed.
+            previous[signum] = handler
         yield
     finally:
-        for signum, handler in previous.items():
+        # Reverse installation order, including if the body raises.
+        for signum, handler in reversed(tuple(previous.items())):
             signal.signal(signum, handler)
 
 
