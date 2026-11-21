@@ -127,8 +127,9 @@ class AquariumIntegrationTests(unittest.TestCase):
         with self.aquarium() as q:
             q.step()
         with closing(sqlite3.connect(self.db)) as db:
-            db.execute("DROP TRIGGER noosphere_no_update")
-            db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
+            with db:
+                db.execute("DROP TRIGGER noosphere_no_update")
+                db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
         with self.assertRaises(NoosphereError):
             self.aquarium()
 
