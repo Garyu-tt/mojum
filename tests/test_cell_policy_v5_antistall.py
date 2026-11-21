@@ -281,6 +281,15 @@ class RetentionTests(unittest.TestCase):
             "forced_probes": 0,
         }
         forged = {
+            "cell_measured_more_often_than_elapsed_ticks": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {
+                    "0:0": {"rest": [5, 0]},
+                    "2500:0": {"rest": [95, 0]},
+                },
+                "last_seen_at": {"0:0": 0, "2500:0": 99},
+                "evictions": 0, "forgotten_observations": 0,
+            },
             "two_cells_on_one_tick": {
                 **common, "last_tick": 1, "updates": 2,
                 "records": {
