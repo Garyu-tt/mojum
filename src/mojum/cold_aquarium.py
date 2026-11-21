@@ -59,10 +59,19 @@ def _parse_component(raw, schema, required):
 
 
 def capture_quiescent_aquarium(aquarium):
+    """Atomically freeze this Aquarium + SQLite journal during cold capture."""
+    if not isinstance(aquarium, Aquarium):
+        raise ValueError("expected a running Aquarium")
+    with aquarium.freeze_checkpoint():
+        return _capture_frozen_body(aquarium)
+
+
+def _capture_frozen_body(aquarium):
     """Capture fixture state and the complete PRIVATE event journal.
 
-    The caller must pause all Aquarium writers. Pre/post checks detect simple
-    in-process mutations; they are not a distributed atomic snapshot barrier.
+    The freeze blocks this instance's step/acquire and reserves the local
+    SQLite write transaction against other processes during capture. It is
+    not a multi-node or cross-service distributed atomic snapshot barrier.
     """
     if not isinstance(aquarium, Aquarium):
         raise ValueError("expected a running Aquarium")
