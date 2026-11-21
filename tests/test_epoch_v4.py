@@ -95,6 +95,32 @@ class EpochSenseTests(unittest.TestCase):
             CellExplorerV4.from_snapshot(forged)
 
 
+    def test_v4_rejects_impossible_snapshot_block_counts(self):
+        model = CellExplorerV4()
+        for tick in range(40):
+            sense = self.sense(tick)
+            model.observe(sense, model.decide(sense), False)
+        snapshot = model.snapshot()
+        self.assertEqual(CellExplorerV4.from_snapshot(snapshot).snapshot(), snapshot)
+        zone = next(iter(snapshot["records"]))
+        actions = snapshot["records"][zone]
+        move = next(
+            action for action, counts in actions.items()
+            if action != "rest" and counts[0] >= 2
+        )
+        self.assertIn("rest", actions)
+
+        forged = deepcopy(snapshot)
+        forged["records"][zone][move][1] = 2
+        with self.assertRaisesRegex(CellV4Error, "measured counters"):
+            CellExplorerV4.from_snapshot(forged)
+
+        forged = deepcopy(snapshot)
+        forged["records"][zone]["rest"][1] = 1
+        with self.assertRaisesRegex(CellV4Error, "measured counters"):
+            CellExplorerV4.from_snapshot(forged)
+
+
 class EpochJournalTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
