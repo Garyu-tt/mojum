@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Keep only the latest PR head's CI. Never cancel manual or main runs.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   atomic-segment-cas:
     runs-on: ubuntu-24.04
