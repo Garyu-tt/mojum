@@ -85,7 +85,7 @@ def _proprioception(value, tick):
     }
 
 
-def _near_field(value):
+def _near_field(value, *, tick, world_revision):
     """Copy only the numeric sensor contract; hidden toy metadata is rejected."""
     if value is None:
         return None
@@ -100,6 +100,8 @@ def _near_field(value):
             or type(value["visible"]) is not bool):
         raise DevelopmentalBrainError("invalid numeric near-field input")
     _revision(value["world_revision"], "near-field world_revision")
+    if value["tick"] != tick or value["world_revision"] != world_revision:
+        raise DevelopmentalBrainError("near-field observation is stale, future or from another world revision")
     rgb, bucket = value["reflectance_rgb"], value["range_bucket_10cm"]
     if not value["visible"]:
         if rgb is not None or bucket is not None:
@@ -145,7 +147,9 @@ class DevelopmentalBrain:
             raise DevelopmentalBrainError("invalid controller clock or policy")
         current_interoception = _interoception(interoception)
         current_proprioception = _proprioception(proprioception, tick)
-        current_near_field = _near_field(near_field)
+        current_near_field = _near_field(
+            near_field, tick=tick, world_revision=current_proprioception["world_revision"]
+        )
         avoid = _action_names(avoid, "avoid")
         prefer = _action_names(prefer, "prefer")
         try:
