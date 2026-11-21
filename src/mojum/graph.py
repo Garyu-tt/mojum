@@ -4,6 +4,7 @@ from collections import defaultdict
 import json
 
 SCHEMA = "mechanicus.universal-graph/1"
+MAX_JSON_DEPTH = 256
 
 # Input/output port name -> type. Future plugin definitions require signed registration.
 PORTS = {
@@ -29,11 +30,43 @@ def _unique_json_object(pairs):
     return obj
 
 
+def _check_json_depth(raw):
+    """Reject deeply nested JSON before invoking the recursive decoder.
+
+    ``json.loads`` has no portable public depth limit.  A deeply nested graph
+    can otherwise raise ``RecursionError`` on one Python version and be
+    accepted on another.  Brackets inside JSON strings are ignored; the JSON
+    decoder remains responsible for all other syntax validation.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise GraphError("Graph JSON nesting depth exceeded")
+        elif char in "]}" and depth:
+            depth -= 1
+
+
 def load_graph(path):
     """Read UTF-8 graph JSON without collapsing duplicate keys."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raw = path.read_text(encoding="utf-8")
+        _check_json_depth(raw)
+        return json.loads(raw, object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
 
