@@ -183,7 +183,10 @@ def main():
         assert footer["stored_events"] == 10005
         report = []
         for width, height, device in ((1280, 800, "desktop"), (390, 844, "mobile")):
-            page = instrumented_html(original, dest.read_text("utf-8"))
+            page = instrumented_html(
+                original, dest.read_text("utf-8"),
+                expected_first_tick="9998 · эпоха 0:9998",
+            )
             result = (
                 inspect_actual_mobile_chromedriver(
                     chrome, page, width=width, height=height
