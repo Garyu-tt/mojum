@@ -140,7 +140,7 @@
   const state = {
     widthRaw: "4.5", heightRaw: "4", start: [1.25, 2.5],
     obstacles: [[2, 1, 0.125, 2]], tool: "draw", grid: true,
-    pending: null, latest: "", lastValidSize: [4.5, 4]
+    pending: null, pendingPointerId: null, latest: "", lastValidSize: [4.5, 4]
   };
   const refs = {
     width: doc.getElementById("room-width"),
@@ -170,6 +170,7 @@
   function setTool(tool) {
     state.tool = tool;
     state.pending = null;
+    state.pendingPointerId = null;
     doc.querySelectorAll("[data-tool]").forEach((button) => {
       const active = button.dataset.tool === tool;
       button.setAttribute("aria-pressed", String(active));
@@ -293,6 +294,7 @@
     render();
   }
   svg.addEventListener("pointerdown", (event) => {
+    if (state.pending) return; // Ignore additional fingers during an active drag.
     if (event.button !== 0 && event.pointerType === "mouse") return;
     try {
       const room = currentRoom();
@@ -310,18 +312,19 @@
       } else if (state.tool === "draw") {
         event.preventDefault();
         state.pending = [p, p];
+        state.pendingPointerId = event.pointerId;
         svg.setPointerCapture(event.pointerId);
       }
     } catch (error) { labelMessage(error.message, false); }
   });
   svg.addEventListener("pointermove", (event) => {
-    if (!state.pending) return;
+    if (!state.pending || event.pointerId !== state.pendingPointerId) return;
     const [width, height] = state.lastValidSize;
     state.pending[1] = pointer(event, [width, height]);
     drawScene(width, height);
   });
   function finishDraw(event) {
-    if (!state.pending) return;
+    if (!state.pending || event.pointerId !== state.pendingPointerId) return;
     let rejected = null;
     try {
       const [width, height] = state.lastValidSize;
@@ -342,6 +345,8 @@
         }
       }
     } finally {
+      state.pending = null;
+      state.pendingPointerId = null;
       if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
       render();
       if (rejected) labelMessage(rejected, false);
@@ -349,7 +354,9 @@
   }
   svg.addEventListener("pointerup", finishDraw);
   svg.addEventListener("pointercancel", (event) => {
+    if (!state.pending || event.pointerId !== state.pendingPointerId) return;
     state.pending = null;
+    state.pendingPointerId = null;
     if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
     render();
   });
@@ -376,6 +383,7 @@
   doc.getElementById("clear-obstacles").addEventListener("click", () => {
     state.obstacles = [];
     state.pending = null;
+    state.pendingPointerId = null;
     render();
   });
   doc.getElementById("copy-json").addEventListener("click", async () => {
