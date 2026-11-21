@@ -11,7 +11,7 @@ cryptographic authentication, or continuous Aquarium beyond its tick cap.
 """
 from __future__ import annotations
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 from .noosphere import (
     DATASET_SCHEMA, EVENT_SCHEMA, NoosphereError, EMPTY_HEAD as _ZERO,
-    _canonical, _integer, _sha, _text, _validate_event,
+    _canonical, _integer, _open_readonly, _sha, _text, _validate_event,
 )
 
 STORE_SCHEMA = "mojum.noosphere.segmented-sqlite/1"
@@ -52,11 +52,7 @@ class SegmentedNoosphere:
     """
 
     def __init__(self, db_path, agent_id, *, segment_size=4096):
-        self.agent_id = _text(agent_id, "agent_id")
-        if (type(segment_size) is not int
-                or not MIN_SEGMENT_SIZE <= segment_size <= MAX_SEGMENT_SIZE):
-            raise NoosphereError("segment_size must be integer in 64..8192")
-        self.segment_size = segment_size
+        self._set_identity(agent_id, segment_size)
         path = Path(db_path)
         if (path.is_symlink() or path.is_dir() or not path.name
                 or str(db_path) == ":memory:" or not path.parent.is_dir()):
@@ -84,10 +80,7 @@ class SegmentedNoosphere:
                 raise NoosphereError(
                     "existing journal has no readable segmented manifest"
                 ) from exc
-            if actual != {
-                "schema": STORE_SCHEMA, "owner": self.agent_id,
-                "segment_size": str(segment_size),
-            }:
+            if actual != self._expected_metadata():
                 raise NoosphereError(
                     "wrong owner/schema/segment size; old journal unchanged"
                 )
@@ -139,17 +132,42 @@ class SegmentedNoosphere:
             self._db.close()
             raise
 
+    def _set_identity(self, agent_id, segment_size):
+        self.agent_id = _text(agent_id, "agent_id")
+        if (type(segment_size) is not int
+                or not MIN_SEGMENT_SIZE <= segment_size <= MAX_SEGMENT_SIZE):
+            raise NoosphereError("segment_size must be integer in 64..8192")
+        self.segment_size = segment_size
+
+    def _expected_metadata(self):
+        return {
+            "schema": STORE_SCHEMA,
+            "owner": self.agent_id,
+            "segment_size": str(self.segment_size),
+        }
+
+    @classmethod
+    @contextmanager
+    def open_readonly(cls, db_path, agent_id, *, segment_size=4096):
+        """Read an existing journal without creating or initializing SQLite."""
+        journal = cls.__new__(cls)
+        journal._set_identity(agent_id, segment_size)
+        path = Path(db_path)
+        if os.name == "posix" and path.is_file() and path.stat().st_mode & 0o077:
+            raise NoosphereError("existing segmented PRIVATE database must be owner-only")
+        with _open_readonly(path) as db:
+            if dict(db.execute("SELECT k,v FROM metadata")) != journal._expected_metadata():
+                raise NoosphereError("wrong owner/schema/segment size")
+            journal._db = db
+            yield journal
+
     def _setup(self):
         self._db.execute("BEGIN IMMEDIATE")
         try:
             self._db.execute(
                 "CREATE TABLE IF NOT EXISTS metadata (k TEXT PRIMARY KEY, v TEXT NOT NULL)"
             )
-            expected = {
-                "schema": STORE_SCHEMA,
-                "owner": self.agent_id,
-                "segment_size": str(self.segment_size),
-            }
+            expected = self._expected_metadata()
             saved = dict(self._db.execute("SELECT k,v FROM metadata"))
             if saved and saved != expected:
                 raise NoosphereError("wrong owner/schema/segment size; no automatic migration")
@@ -291,10 +309,7 @@ class SegmentedNoosphere:
     def verify_chain(self, *, external_expected_head=None):
         """Stream all events and all segment anchors; zero event list in RAM."""
         actual_meta = dict(self._db.execute("SELECT k,v FROM metadata"))
-        if actual_meta != {
-            "schema": STORE_SCHEMA, "owner": self.agent_id,
-            "segment_size": str(self.segment_size),
-        }:
+        if actual_meta != self._expected_metadata():
             raise NoosphereError("segmented journal metadata mismatch")
         boundary = self._db.execute(
             "SELECT segment_index,first_seq,prior_segment_head,schema "

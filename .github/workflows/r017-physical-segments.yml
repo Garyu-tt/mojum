@@ -1,0 +1,55 @@
+name: Mojum R0.17 independent physical sealed-segment archive
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r017-physical-segments.yml"
+      - "src/mojum/segment_archive.py"
+      - "src/mojum/segment_archive_verify.py"
+      - "src/mojum/segment_archive_cli.py"
+      - "src/mojum/noosphere.py"
+      - "src/mojum/segmented_noosphere.py"
+      - "tests/test_segmented_noosphere.py"
+      - "tests/test_physical_segment_archive.py"
+      - "tests/test_physical_segment_archive_100k.py"
+      - "docs/R017_PHYSICAL_SEGMENT_ARCHIVE_R01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-archive-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Failure injection, independent restore and PRIVATE isolation
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_physical_segment_archive.py -v
+      - name: Parent logical segment/SQL CAS compatibility
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_segmented_noosphere.py -v
+
+  physical-102400:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Durable 102400 source events archived/restored without SQLite source
+        env:
+          PYTHONPATH: src
+          MOJUM_PHYSICAL_ARCHIVE_100K_STRESS: "1"
+        run: python -m unittest discover -s tests -p test_physical_segment_archive_100k.py -v
