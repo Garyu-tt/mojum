@@ -94,7 +94,22 @@ Tests use only disposable owner-private synthetic fixtures:
 - Actual 130 synthetic Aquarium motor ticks + bootstrap = **131
   source records**; after original synthetic source and first archive
   disappear, reconstruct the second copy and cold replay to exactly
-  the previous Aquarium checkpoint before continuing the next step.
+  the previous Aquarium checkpoint. The restored Aquarium is a
+  **quarantined reader**, and trying to advance another frame must
+  fail without changing its history.
+- Dedicated Python 3.13 stress executes **10,050 actual synthetic
+  v4 motor frames** with `toy_probe_v2`, a durable epoch crossing
+  at tick 9999 and more than 4,000 measured contacts. The resulting
+  journal has **10,052 source records**, exported as **8192 sealed
+  + 1860 live tail**. After original synthetic SQLite and primary
+  archive paths are made unavailable, owner-HMAC signed cold recovery
+  from the second copy must reproduce the exact Aquarium checkpoint,
+  epoch and learning associations while refusing any new frame append.
+- Quarantine custody row has immutable UPDATE/DELETE triggers; a
+  local SQLite admin can deliberately drop these, so they prevent
+  unintentional mutation rather than supply a network fencing lease.
+  Injection of an interruption before final atomic publish verifies
+  that no writable recovered destination becomes visible.
 - Real CPU subprocess using `recover-replica` with a refusal
   without `--include-private`, then successful explicit restore.
 - Wrong independent receipt digest, wrong HMAC key, wrong actor,
