@@ -77,15 +77,24 @@ class MovingToyScene(ToyScene):
         return tuple(result)
 
     def _nearest(self, state):
-        # Called only within the environment's synthetic sensing/probing
-        # functions; the numeric sensor does NOT receive toy.id or .softness.
+        # Hidden spectator IDs and softness cannot select which numeric cue
+        # or measured contact the learner receives at equal distance.
+        # Rank by observable geometry/reflectance only, and reject ties
+        # that remain observationally indistinguishable at this tick.
         items = self.at(state.tick)
-        return min(
-            items,
-            key=lambda toy: (math.hypot(state.x - toy.x, state.y - toy.y),
-                             toy.id),
-            default=None,
-        )
+        if not items:
+            return None
+
+        def public_key(toy):
+            return (
+                math.hypot(state.x - toy.x, state.y - toy.y),
+                toy.x, toy.y, toy.radius_m, toy.rgb,
+            )
+
+        ordered = sorted(items, key=public_key)
+        if len(ordered) > 1 and public_key(ordered[0]) == public_key(ordered[1]):
+            raise CuriosityError("ambiguous observationally identical moving toys")
+        return ordered[0]
 
     def manifest(self):
         """Stable bootstrap configuration, not a mutable moving-world state."""
