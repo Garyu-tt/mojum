@@ -104,6 +104,9 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             self.assertIs(event["payload"]["brain"]["safety"]["real_actuation"], False)
             event["payload"]["brain"]["safety"]["real_actuation"] = 0
             self.assertEqual(event["payload"]["brain"]["safety"]["real_actuation"], False)
+            # This disposable corruption fixture deliberately bypasses the
+            # append-only trigger; production journals retain that protection.
+            db.execute("DROP TRIGGER noosphere_no_update")
             db.execute(
                 "UPDATE events SET wire_json=?,event_hash=? WHERE seq=?",
                 (_canonical(event), _sha({"previous": previous, "event": event}), seq),
