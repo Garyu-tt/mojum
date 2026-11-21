@@ -219,6 +219,10 @@ class ExportCrashAndPublicationQA(unittest.TestCase):
             export_private_trace(self.db, target, SEED, GRAPH, **options)
         self.assertFalse(target.exists())
         self.assertEqual(self.db.read_bytes(), newer_original)
+        # A separate normal cold reopen is NOT part of the rejected export.
+        # SQLite may update its DB header on WAL open/checkpoint even with
+        # identical logical events. Bytewise check belongs immediately above,
+        # BEFORE this independent normal writer-mode reopen.
         with Aquarium(self.db, SEED, GRAPH,
                       neural_mode="disabled", exploration_mode="goal_free",
                       developmental_policy="local_cell_v4",
@@ -226,7 +230,7 @@ class ExportCrashAndPublicationQA(unittest.TestCase):
                       journal_segment_size=64,
                       external_expected_head=current) as check:
             self.assertEqual(check.store.count(), 7)
-        self.assertEqual(self.db.read_bytes(), newer_original)
+            self.assertEqual(check.checkpoint()["journal_head"], current)
 
 
     def test_corrupt_boundary_only_in_staged_backup_never_exports(self):
@@ -284,6 +288,60 @@ class ExportCrashAndPublicationQA(unittest.TestCase):
         ) as still_valid:
             self.assertEqual(still_valid.store.count(), 66)
             self.assertEqual(still_valid.checkpoint()["journal_head"], trusted_head)
+
+
+    def test_segmented_readonly_preflight_closes_probe_even_when_validation_fails(self):
+        # Python 3.13 surfaces a real ResourceWarning because the SQLite
+        # Connection.__exit__ is transaction handling, NOT connection close.
+        from mojum.noosphere import NoosphereError
+
+        original_connect = sqlite3.connect
+        tracked = []
+
+        class TrackedConnection(sqlite3.Connection):
+            close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+                return super().close()
+
+        def tracked_connect(*args, **kwargs):
+            self.assertNotIn("factory", kwargs)
+            connection = original_connect(
+                *args, factory=TrackedConnection, **kwargs
+            )
+            tracked.append(connection)
+            return connection
+
+        opts = dict(
+            neural_mode="disabled", exploration_mode="goal_free",
+            developmental_policy="local_cell_v4", sensory_mode="none",
+            journal_backend="segmented", journal_segment_size=64,
+        )
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=tracked_connect):
+            with Aquarium(self.db, SEED, GRAPH, **opts) as cold:
+                self.assertEqual(cold.store.count(), 6)
+                self.assertEqual(cold.checkpoint()["journal_head"], self.head)
+            # Owner/schema failure is checked before opening a writer; the
+            # preflight probe must close immediately even when it raises.
+            for override in (
+                {"journal_segment_size": 128},
+                {"agent_id": "wrong-fixture-owner"},
+            ):
+                with self.subTest(failure=override):
+                    with self.assertRaises(NoosphereError):
+                        Aquarium(
+                            self.db, SEED, GRAPH, **{**opts, **override}
+                        )
+        self.assertGreaterEqual(len(tracked), 4, tracked)
+        for idx, connection in enumerate(tracked):
+            with self.subTest(connection=idx):
+                self.assertEqual(connection.close_calls, 1)
+                with self.assertRaisesRegex(
+                    sqlite3.ProgrammingError, "closed"
+                ):
+                    connection.execute("SELECT 1")
 
 
 if __name__ == "__main__":
