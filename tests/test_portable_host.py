@@ -104,6 +104,38 @@ class PortableCPUTests(unittest.TestCase):
         self.assertEqual([round(x, 4) for x in slow.starts], [0, .34, .68])
         self.assertEqual([round(x, 4) for x in late.waits], [.1, .1])
 
+    def test_early_wait_return_never_commits_before_deadline(self):
+        # A spurious early return at 25ms cannot shorten a 100ms deadline.
+        fake = Clock()
+        runner = SyntheticRunner(fake)
+        waits = []
+
+        def wake_early(remaining):
+            waits.append(round(remaining, 4))
+            fake.now += .025 if len(waits) == 1 else remaining
+
+        count = run_paced(runner, ticks=2, interval_ms=100,
+                          stop_event=threading.Event(),
+                          monotonic=fake.read, wait=wake_early)
+        self.assertEqual(count, 2)
+        self.assertEqual([round(t, 4) for t in runner.starts], [0, .1])
+        self.assertEqual(waits, [.1, .075])
+
+    def test_stop_signaled_on_early_wake_does_not_append(self):
+        fake = Clock()
+        runner = SyntheticRunner(fake)
+        stop = threading.Event()
+
+        def interrupt_wait(_remaining):
+            fake.now += .025
+            stop.set()
+
+        committed = run_paced(runner, ticks=3, interval_ms=100,
+                              stop_event=stop, monotonic=fake.read,
+                              wait=interrupt_wait)
+        self.assertEqual(committed, 1)
+        self.assertEqual([round(t, 4) for t in runner.starts], [0])
+
     def test_cancel_before_first_tick_does_not_write_frame(self):
         event = threading.Event()
         event.set()

@@ -3,15 +3,21 @@ name: Mojum actual offline viewer Chrome smoke
 on:
   pull_request:
     paths:
+      # Revalidate the real SQLite -> exporter -> Chrome integration whenever
+      # its canonical runtime, validation or replay implementation changes.
+      - "src/mojum/**"
       - "examples/aquarium_trace_viewer.html"
       - "tests/smoke_real_chromium_viewer.py"
-      - "src/mojum/aquarium_trace_export.py"
+      - "tests/test_integrated_r013_trace_viewer.py"
       - ".github/workflows/offline-viewer-chrome.yml"
   push:
     paths:
+      # Revalidate the real SQLite -> exporter -> Chrome integration whenever
+      # its canonical runtime, validation or replay implementation changes.
+      - "src/mojum/**"
       - "examples/aquarium_trace_viewer.html"
       - "tests/smoke_real_chromium_viewer.py"
-      - "src/mojum/aquarium_trace_export.py"
+      - "tests/test_integrated_r013_trace_viewer.py"
       - ".github/workflows/offline-viewer-chrome.yml"
   workflow_dispatch:
 
