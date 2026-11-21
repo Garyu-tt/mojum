@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/r019-archive-root-receipts.yml"
       - "src/mojum/archive_root_receipt.py"
+      - "src/mojum/segment_archive_cli.py"
       - "tests/test_archive_root_receipt.py"
       - "docs/R019_OWNER_ARCHIVE_RECEIPT_R01.md"
   workflow_dispatch:
