@@ -228,6 +228,10 @@ def inspect_journal(path, *, external_expected_head=None):
                     or event["observed_at_ns"] != frames * dt_ns):
                 raise NoosphereError("invalid or noncanonical epoch marker")
             epoch_index = expected_index
+        elif policy == "local_cell_v4":
+            # V4 Aquarium replay accepts only frames and durable epoch markers.
+            # A valid SQLite hash chain is not proof of a valid motor-wire ABI.
+            raise NoosphereError("unsupported local-cell v4 journal topic")
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
