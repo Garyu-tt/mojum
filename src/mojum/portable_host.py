@@ -91,7 +91,12 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     # Every current v1/v2/v3 policy uses the strict episode-tick contract.
     # Refuse the ENTIRE requested run before the first SQLite append instead
     # of failing halfway through on the 9999th proprioceptive observation.
-    if aquarium.tick + ticks > MAX_EPISODE_TICKS:
+    # Test-only paced runners may expose only an event counter, not the
+    # canonical Aquarium.tick property. Production always has tick.
+    current_tick = getattr(aquarium, "tick", None)
+    if current_tick is None:
+        current_tick = aquarium.store.count() - 1
+    if current_tick + ticks > MAX_EPISODE_TICKS:
         raise PortableHostError(
             "requested run exceeds %d goal-free episode ticks; "
             "explicit versioned epoch rollover is not implemented"
