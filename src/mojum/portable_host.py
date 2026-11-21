@@ -18,7 +18,7 @@ import signal
 import threading
 import time
 
-from .aquarium import Aquarium, AquariumError
+from .aquarium import Aquarium, AquariumError, V4_MODE
 from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
@@ -45,13 +45,15 @@ def validate_plan(ticks, interval_ms):
 
 def _require_sensorimotor_fixture(aquarium):
     """Reject accidental use with the scripted or shadow-only Aquarium."""
-    if getattr(aquarium, "motor_mode", None) != "developmental_fixture":
-        raise PortableHostError(
-            "portable host requires motor_mode=developmental_fixture"
-        )
+    mode = getattr(aquarium, "motor_mode", None)
+    if mode not in ("developmental_fixture", V4_MODE):
+        raise PortableHostError("portable host requires a supported internal motor mode")
     if getattr(aquarium, "motor", None) is None:
         raise PortableHostError("developmental motor controller is unavailable")
-    if getattr(aquarium, "sensory_bridge", None) is None:
+    has_bridge = getattr(aquarium, "sensory_bridge", None) is not None
+    if mode == V4_MODE and has_bridge:
+        raise PortableHostError("local_cell_v4 requires sensory_mode=none")
+    if mode == "developmental_fixture" and not has_bridge:
         raise PortableHostError("portable host requires sensory_mode=toy_probe")
 
 
@@ -95,9 +97,18 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     if not callable(getattr(stop_event, "wait", None)):
         raise PortableHostError("stop_event must support wait(timeout)")
     _require_sensorimotor_fixture(aquarium)
-    if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
+    if getattr(aquarium, "motor_mode", None) == V4_MODE:
+        try:
+            needed = aquarium.required_events_for_steps(ticks)
+        except AquariumError as exc:
+            raise PortableHostError(str(exc)) from exc
+        budget = aquarium.journal_event_budget
+    else:
+        needed = ticks
+        budget = MAX_REPLAY_EVENTS
+    if aquarium.store.count() + needed > budget:
         raise PortableHostError(
-            f"requested ticks exceed fixed {MAX_REPLAY_EVENTS}-event replay budget; "
+            f"requested ticks exceed fixed {budget}-event replay budget; "
             "use a smaller bounded run"
         )
 
@@ -149,6 +160,12 @@ def main(argv=None):
                         help="bounded 1..1000-tick foreground session")
     parser.add_argument("--interval-ms", type=int, default=1000,
                         help="wall-clock delay 20..3600000 ms, not virtual dt")
+    parser.add_argument("--motor-mode", choices=("developmental_fixture", V4_MODE),
+                        default="developmental_fixture",
+                        help="internal synthetic motor policy")
+    parser.add_argument("--sensory-mode", choices=("toy_probe", "none"),
+                        default="toy_probe",
+                        help="toy probe for legacy fixture, none for local_cell_v4")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
     parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
@@ -166,6 +183,13 @@ def main(argv=None):
     except PortableHostError as exc:
         parser.error(str(exc))
 
+    if args.motor_mode == V4_MODE and args.sensory_mode != "none":
+        parser.error("local_cell_v4 requires --sensory-mode none")
+    if args.motor_mode == V4_MODE and args.temporal_mode != "none":
+        parser.error("local_cell_v4 requires --temporal-mode none")
+    if args.motor_mode == "developmental_fixture" and args.sensory_mode != "toy_probe":
+        parser.error("developmental_fixture host requires --sensory-mode toy_probe")
+
     stopped = threading.Event()
     started = time.monotonic()
     with termination_signals(stopped):
@@ -173,9 +197,9 @@ def main(argv=None):
             with Aquarium(
                 args.db, seed, graph,
                 neural_mode=args.neural_mode,
-                motor_mode="developmental_fixture",
+                motor_mode=args.motor_mode,
                 brain_mode=args.brain_mode,
-                sensory_mode="toy_probe",
+                sensory_mode=args.sensory_mode,
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
             ) as aquarium:
@@ -202,6 +226,14 @@ def main(argv=None):
                     "classification": "PRIVATE_SYNTHETIC_FOREGROUND_NOT_FULL_BRAIN",
                     "journal_trust": "checksum_only_not_authenticated",
                 }
+                if args.motor_mode == V4_MODE:
+                    # Keep run/2 metadata byte-compatible for legacy consumers.
+                    status.update(
+                        schema="mojum.portable-host.run/3",
+                        motor_mode=V4_MODE,
+                        sensory_mode="none",
+                        epoch_index=aquarium.epoch_index,
+                    )
         except (AquariumError, PortableHostError) as exc:
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
