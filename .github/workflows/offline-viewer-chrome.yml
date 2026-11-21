@@ -42,7 +42,7 @@ jobs:
           PYTHONPATH: src
         run: |
           command -v node
-          python -m unittest -v tests.test_private_trace_integrity
+          python -m unittest discover -s tests -p test_private_trace_integrity.py -v
       - name: Real local SQLite to PRIVATE JSONL to Chrome DOM and canvas
         run: |
           python tests/smoke_real_chromium_viewer.py
