@@ -48,7 +48,7 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
             self.assertNotIn(tag, text)
             self.assertIn(symbol, text)
         self.assertEqual(text, expected)
-        self.assertNotIn('<script src="', text)
+        self.assertNotRegex(text, r"<script\b[^>]*\bsrc\b")
         self.assertIn('id="import-file"', text)
         self.assertIn('id="download"', text)
         self.assertIn('mojum.world.point-room-draft/1', text)
@@ -117,6 +117,25 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         js.write_text("console.log('not room editor')", encoding="utf-8")
         with self.assertRaisesRegex(PackagingError, "wrong room"):
             standalone_html(html_path=source, js_path=js)
+
+    def test_unknown_script_tag_quoting_and_attributes_fail_closed(self):
+        template = HTML.read_text(encoding="utf-8")
+        html = self.tmp / "malformed-template.html"
+        for rogue in (
+            "<script src='./unknown.js'></script>",
+            '<script defer src="./unknown.js"></script>',
+            '<SCRIPT SRC="./unknown.js"></SCRIPT>',
+            '<script type="module" src="./unknown.js"></script>',
+            '<script\nsrc="./unknown.js"></script>',
+        ):
+            with self.subTest(rogue=rogue):
+                html.write_text(
+                    template.replace(SCRIPT_TAG, SCRIPT_TAG + "\n" + rogue, 1),
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(PackagingError, "unexpected"):
+                    standalone_html(html_path=html)
+        self.assertFalse(self.out.exists())
 
     def test_two_subprocesses_have_exactly_one_successful_exclusive_publish(self):
         cmd = [
