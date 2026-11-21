@@ -25,6 +25,8 @@ h1{font-size:clamp(23px,3.1vw,36px);letter-spacing:-.035em;margin:5px 0 8px}
 .importer p{margin:3px 0 0;color:var(--dim);font-size:12px}
 input[type=file]{max-width:100%;color:var(--dim);font-size:13px}
 input[type=file]::file-selector-button{border:1px solid var(--edge);border-radius:10px;background:var(--surface2);padding:9px 12px;color:var(--ink);margin-right:10px}
+.legacy-option{display:flex;align-items:flex-start;gap:7px;color:var(--dim);font-size:12px;max-width:560px}
+.legacy-option input{margin:2px 0 0;accent-color:var(--accent)}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 325px;gap:17px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 17px;border-bottom:1px solid var(--edge)}
 .head strong{font-size:14px}.head small{font-size:11px;color:var(--dim)}
@@ -64,7 +66,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
 <div><strong>Открыть PRIVATE JSONL</strong><p>Файл читается только в памяти браузера. Максимум 24 МиБ, 5000 кадров.</p></div>
 <div>
 <input id="file" type="file" accept=".jsonl,.json,.txt,application/json,text/plain" aria-label="Выбрать приватную JSONL запись">
-<label style="display:block;margin-top:8px;color:var(--dim);font-size:12px"><input id="allow-legacy" type="checkbox"> Разрешить старый формат без SHA-256 (не проверен)</label>
+<label class="legacy-option"><input id="allow-legacy" type="checkbox"> Разрешить действительно старый формат без проверки SHA-256 (только явно, запись будет помечена как непроверенная)</label>
 </div>
 </section>
 <div class="layout">
@@ -241,8 +243,13 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
         throw new Error("SHA-256 кадров не совпадает: файл изменён или повреждён");
       return {frames: accepted, room: bounds, integrity: "SHA-256 кадров совпадает (не подпись)"};
     }
+    // Current exports always carry a trace range as well as the integrity
+    // proof. A footer that keeps that modern marker but drops both the proof
+    // and export status is a downgraded/corrupted modern trace, not legacy.
+    if (range !== undefined)
+      throw new Error("Современная запись не содержит метаданные SHA-256");
     if (!allowLegacy)
-      throw new Error("Отсутствуют метаданные SHA-256; включите явный legacy-режим для старой записи");
+      throw new Error("Непроверенный старый формат отклонён; включите явный режим legacy");
     return {frames: accepted, room: bounds, integrity: "Без SHA-256: старый формат, не проверен"};
   }
   function draw() {
