@@ -44,7 +44,8 @@ PYTHONPATH=src python -m mojum.aquarium_cold_copy verify \
 
 Export and verification use the same trusted GENESIS seed, graph, room,
 clock and modes as the original run. The CLI defaults to the packaged seed
-and graph, the default room and scripted movement. For an opt-in v4 journal
+and graph, the default room and scripted movement. The journal owner defaults
+to the selected seed's `genome_id`. For an opt-in v4 journal
 with numeric toy contact, pass `--motor-mode local_cell_v4 --sensory-mode toy_probe_v2`
 to both commands. The same rule applies to `--brain-mode`, `--temporal-mode`,
 `--neural-mode`, `--genome` and `--graph` when those settings differ. The CLI
@@ -65,9 +66,9 @@ coordinated replication: writing to two forks creates divergent histories.
   then checks its deterministic Aquarium checkpoint against that recorded head.
   Concurrent source commits may be included in the consistent backup; the
   output identifies that exact snapshot by head, tick and SHA-256.
-- Verifies the standalone `.sqlite3` has no required WAL sidecar, computes a
-  SHA-256 of the final file and fsyncs the data file. Publishes via hard link
-  to a **new** filename only, never replacing an existing path.
+- Finalizes the standalone `.sqlite3` in SQLite's rollback journal mode so
+  read-only inspection leaves the file ready for verification. Computes a
+  SHA-256 of the final file, fsyncs it, and publishes via hard link to a new path.
 - Import verification requires an expected journal head and owning organism ID;
   expected byte SHA and virtual tick are recommended additional gates.
 - Source file must exist and be a regular non-symlink file; database pages are
