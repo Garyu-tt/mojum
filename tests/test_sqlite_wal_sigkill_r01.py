@@ -61,10 +61,10 @@ with IntentGuardedAquarium(
         digest = _sha({"previous": previous, "event": event})
         assert digest == expected_head
         db.execute(
-            """INSERT INTO events(event_id,agent_id,recorded_at_ns,
-               observed_at_ns,valid_from_ns,valid_to_ns,topic,visibility,
-               wire_json,prev_hash,event_hash)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            ("INSERT INTO events(event_id,agent_id,recorded_at_ns,"
+             "observed_at_ns,valid_from_ns,valid_to_ns,topic,visibility,"
+             "wire_json,prev_hash,event_hash) "
+             "VALUES(?,?,?,?,?,?,?,?,?,?,?)"),
             (event["event_id"], event["agent_id"], event["recorded_at_ns"],
              event["observed_at_ns"], event["valid_from_ns"],
              event["valid_to_ns"], event["topic"], event["visibility"],
