@@ -100,7 +100,7 @@ def _as_number(value, label, errors):
     # decimal.Overflow when room areas are calculated. Reject magnitudes
     # outside a conservative finite range before any arithmetic, including
     # operands too tiny for a downstream float-based room fixture.
-    if number and not -300 <= number.adjusted() <= 300:
+    if not -300 <= number.adjusted() <= 300:
         errors.append("%s exceeds supported numeric magnitude" % (label,))
         return None
     return number
