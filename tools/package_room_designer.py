@@ -10,7 +10,7 @@ import argparse
 import hashlib
 import json
 import os
-import re
+from html.parser import HTMLParser
 from pathlib import Path
 import tempfile
 
@@ -27,6 +27,28 @@ MAX_SOURCE_BYTES = 1_048_576
 
 class PackagingError(ValueError):
     """Fail closed on stale source, dangerous output or broken script contract."""
+
+
+class _ScriptSrcScanner(HTMLParser):
+    """Parse quoted HTML attributes, including a literal '>' before src."""
+
+    def __init__(self):
+        super().__init__()
+        self.tags = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script" and any(name == "src" for name, _ in attrs):
+            self.tags.append(self.get_starttag_text())
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+
+def _external_script_tags(html):
+    scanner = _ScriptSrcScanner()
+    scanner.feed(html)
+    scanner.close()
+    return scanner.tags
 
 
 def _read_small_source(path: Path) -> str:
@@ -55,8 +77,8 @@ def standalone_html(*, html_path=HTML, js_path=JS,
     # the bundler; external scripts would break file:// offline portability.
     if any(html.count(tag) != 1 for tag, _, _ in scripts):
         raise PackagingError("expected exactly one pinned local script tag")
-    external = re.findall(r"<script\b[^>]*\bsrc\b[^>]*>", html, flags=re.I)
-    if sorted(external) != sorted(tag for tag, _, _ in scripts):
+    external = _external_script_tags(html)
+    if sorted(external) != sorted(tag.split("</script>", 1)[0] for tag, _, _ in scripts):
         raise PackagingError("unexpected external editor script dependency")
     for tag, source, global_name in scripts:
         js = _read_small_source(Path(source))
@@ -67,7 +89,7 @@ def standalone_html(*, html_path=HTML, js_path=JS,
         html = html.replace(
             tag, "<script>\n" + js.rstrip() + "\n</script>", 1
         )
-    if re.search(r"<script\b[^>]*\bsrc\b[^>]*>", html, flags=re.I):
+    if _external_script_tags(html):
         raise PackagingError("portable editor still requires a sibling script")
     if len(html.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
         raise PackagingError("single file exceeds bounded portable HTML budget")

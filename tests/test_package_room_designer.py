@@ -127,6 +127,8 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
             '<SCRIPT SRC="./unknown.js"></SCRIPT>',
             '<script type="module" src="./unknown.js"></script>',
             '<script\nsrc="./unknown.js"></script>',
+            '<script title=">" src="./unknown.js"></script>',
+            '<script data-note="> trusted" SRC=./unknown.js></script>',
         ):
             with self.subTest(rogue=rogue):
                 html.write_text(
