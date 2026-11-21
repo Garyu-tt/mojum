@@ -66,6 +66,22 @@ class LifecycleAdversarialQATests(unittest.TestCase):
         self.assertEqual(clock.region("cerebellum")["learning_progress"], 4)
         self.assertEqual(Lifecycle.from_snapshot(clock.snapshot()).tick, MAX_TICKS)
 
+    def test_region_with_births_disabled_can_mature_initial_cohort(self):
+        configured = profile()
+        configured["regions"]["cerebellum"]["birth_per_evidence"] = 0
+        clock = Lifecycle(configured)
+        clock.experience("cerebellum", development_units=1, expected_revision=clock.revision)
+        self.assertFalse(clock.region("cerebellum")["structurally_mature"])
+
+        clock.experience("cerebellum", development_units=1, expected_revision=clock.revision)
+        baseline = clock.region("cerebellum")
+        self.assertEqual(baseline["immature_neurons"], 0)
+        self.assertEqual(baseline["newborn_created"], 0)
+        self.assertTrue(baseline["structurally_mature"])
+
+        clock.advance(MAX_TICKS, expected_revision=clock.revision)
+        self.assertEqual(Lifecycle.from_snapshot(clock.snapshot()).region("cerebellum"), baseline)
+
     def test_overflow_rejection_keeps_original_revision_and_other_gate(self):
         clock = Lifecycle(profile())
         clock.experience("cortex", learning_units=MAX_UNITS,

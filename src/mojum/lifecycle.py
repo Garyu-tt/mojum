@@ -153,7 +153,8 @@ class Lifecycle:
         counts = self._counters[name]
         development = counts["development"]
         learning = counts["learning"]
-        newborn = min(cfg["newborn_cap"], development * cfg["birth_per_evidence"])
+        newborn_cap = cfg["newborn_cap"] if cfg["birth_per_evidence"] else 0
+        newborn = min(newborn_cap, development * cfg["birth_per_evidence"])
         matured = min(cfg["initial_immature"] + newborn,
                       development * cfg["mature_per_evidence"])
         pruned = min(cfg["prune_cap"], development * cfg["prune_per_evidence"])
@@ -168,7 +169,7 @@ class Lifecycle:
             "synapses": cfg["synapses_initial"] - pruned + synapses_added,
             "development_progress": development,
             "learning_progress": learning,
-            "structurally_mature": (matured == cfg["initial_immature"] + cfg["newborn_cap"]),
+            "structurally_mature": (matured == cfg["initial_immature"] + newborn_cap),
             "source_classification": "synthetic_fixture_not_biological_calibration",
         }
 
