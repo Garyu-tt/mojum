@@ -273,7 +273,22 @@ class LocalNoosphere:
         }
         return {"projection": copy.deepcopy(projection), "sha256": _sha(projection)}
 
-    def iter_events(self, *, include_nonpublic=False, batch_size=128):
+    def verified_prefix_head(self, event_count):
+        """Return the hash at an indexed journal prefix, not an authentication.
+
+        Caller MUST first run verify_chain() over the full current journal.
+        A snapshot must separately match an owner-pinned snapshot digest.
+        """
+        _integer(event_count, "event_count", 1, 2**63 - 1)
+        row = self._db.execute(
+            "SELECT event_hash FROM events WHERE agent_id=? AND seq=?",
+            (self.agent_id, event_count),
+        ).fetchone()
+        if row is None:
+            raise NoosphereError("snapshot prefix event does not exist in journal")
+        return row["event_hash"]
+
+    def iter_events(self, *, include_nonpublic=False, batch_size=128, start_seq=1):
         """Iterate journal rows in bounded memory, PRIVATE only by opt-in.
 
         This is a read-only projection, not a substitute for verify_chain().
@@ -284,10 +299,11 @@ class LocalNoosphere:
         if type(include_nonpublic) is not bool:
             raise NoosphereError("include_nonpublic must be boolean")
         _integer(batch_size, "batch_size", 1, 1024)
+        _integer(start_seq, "start_seq", 1, 2**63 - 1)
         sql = ("SELECT seq,wire_json,event_hash FROM events WHERE agent_id = ?"
                + ("" if include_nonpublic else " AND visibility = 'PUBLIC'")
-               + " ORDER BY seq")
-        cursor = self._db.execute(sql, (self.agent_id,))
+               + " AND seq >= ? ORDER BY seq")
+        cursor = self._db.execute(sql, (self.agent_id, start_seq))
         try:
             while True:
                 batch = cursor.fetchmany(batch_size)
