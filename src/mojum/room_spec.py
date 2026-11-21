@@ -16,6 +16,7 @@ import argparse
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -94,6 +95,17 @@ def _as_number(value, label, errors):
         return None
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
+        return None
+    # The fixture consumes ordinary JSON int/float scalars.  A Decimal may
+    # be finite while its float equivalent is infinite (1e999999) or silently
+    # becomes zero (1e-999999).  Reject those before containment/area math;
+    # otherwise valid JSON can overflow the summary and crash the validator.
+    try:
+        runtime_value = float(number)
+    except (OverflowError, ValueError):
+        runtime_value = math.inf
+    if not math.isfinite(runtime_value) or (number != 0 and runtime_value == 0):
+        errors.append("%s is outside finite runtime number range" % (label,))
         return None
     return number
 
