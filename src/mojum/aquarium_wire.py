@@ -31,7 +31,7 @@ from .sensory_play import SENSE_SCHEMA
 _GUIDANCE = "mojum.developmental.range-guidance/1"
 _HEAD = re.compile(r"[0-9a-f]{64}\Z")
 # Epoch-scoped identities share the explicit marker and frame-envelope ABI.
-_EPOCH_POLICIES = ("local_cell_v4", "local_cell_v5")
+_EPOCH_POLICIES = ("local_cell_v4", "local_cell_v4+toy_probe_v2", "local_cell_v5")
 
 
 def _epoch_tag(policy):
@@ -62,11 +62,12 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
-    # V4 cannot be paired with a sensory bridge. Besides rejecting an
-    # impossible runtime manifest, this preserves the exact v4 policy ID
-    # used for strict epoch-marker and frame-topic inspection below.
-    if policy_id == "local_cell_v4" and sensory_mode is not None:
-        raise NoosphereError("local_cell_v4 journals require sensory_mode none")
+    # Preserve the already-shipped canonical v4 + versioned sensory-v2 ABI.
+    # Legacy toy_probe is incompatible with epoch motors; v5 is sensorless.
+    if policy_id == "local_cell_v4" and sensory_mode == "toy_probe":
+        raise NoosphereError("local_cell_v4 requires sensory_mode none or toy_probe_v2")
+    if policy_id == "local_cell_v5" and sensory_mode is not None:
+        raise NoosphereError("local_cell_v5 journals require sensory_mode none")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,
@@ -120,7 +121,7 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                     or _object_field(motor, "intent").get("source") != action_source
                     or _object_field(motor, "learning").get("schema") != learning_schema):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
-            if state_schema == V4_SCHEMA:
+            if state_schema in (V4_SCHEMA, V5_SCHEMA):
                 observation = _object_field(motor, "observation")
                 intent = _object_field(motor, "intent")
                 learning = _object_field(motor, "learning")
