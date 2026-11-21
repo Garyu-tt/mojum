@@ -27,6 +27,28 @@ confidence estimate. Unknown actions remain available for exploration.
 No RGB/object ID/hidden softness, obstacle coordinates or future measurements
 enter the motor-guidance table.
 
+### Contradictory evidence: abstain rather than invent an answer
+
+The 10cm range/action key is intentionally lossy. At (1m, 2m), toy centers
+at (1.22m, 2m) and (0.78m, 2m) produce the **same numeric bucket 2**.
+A real 4cm `x+` movement gives bucket **1** when the toy is on the right,
+but **2** when the toy is on the left. The prior empirical predictor could
+choose an arbitrary "winner" on equal counts, creating a spurious claim
+of a safe movement or a good range change. The new versioned model
+`mojum.temporal.range-outcome/2` **abstains** on tied most-frequent
+outcomes: `next_bucket=null`, `blocked=null`, with the actual number of
+observations preserved. The guided action falls back to bounded motor play
+for that ambiguous context. A different wall can also convert the same
+numeric cue/action pair into a **blocked** movement, without the model
+having geometry available to predict it. Untied majorities are still
+fallible and do **not** establish statistical confidence.
+
+**Version compatibility:** changing prediction semantics affects exact
+private journal replay. The temporal model schema is bumped from `/1`
+to `/2`; old *experimental R0.14* temporal journals are intentionally
+rejected under this build. Create a separate DB for new trials. Scripted
+R0.13 and other pre-temporal modes remain unchanged.
+
 ## Run — independent private SQLite journals per mode
 
 From the repository root with Python 3.11+:
