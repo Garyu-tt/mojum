@@ -227,6 +227,15 @@ def main(argv=None):
                     "classification": "PRIVATE_SYNTHETIC_FOREGROUND_NOT_FULL_BRAIN",
                     "journal_trust": "checksum_only_not_authenticated",
                 }
+                if args.motor_mode == V4_MODE:
+                    # Keep the legacy run/2 metadata byte-compatible while
+                    # giving the new opt-in policy its own status contract.
+                    status.update(
+                        schema="mojum.portable-host.run/3",
+                        motor_mode=V4_MODE,
+                        sensory_mode="none",
+                        epoch_index=aquarium.epoch_index,
+                    )
         except (AquariumError, PortableHostError) as exc:
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
