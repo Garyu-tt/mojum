@@ -92,6 +92,7 @@ def _check_fields(item):
     if type(item.selectors) is not tuple or any(
         type(pair) is not tuple or len(pair) != 2
         or type(pair[0]) is not str or not pair[0]
+        or (type(pair[1]) is str and not pair[1])
         or type(pair[1]) not in (str, int)
         for pair in item.selectors
     ):
