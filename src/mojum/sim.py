@@ -106,9 +106,6 @@ class Simulation:
                 or not isinstance(episodes, list)
                 or len(episodes) != tick * sinks_per_tick):
             raise GraphError("Inconsistent snapshot state")
-        # Without an episode sink, only the virtual clock is persisted.  There
-        # is no episode evidence to replay or to fabricate, and looping over
-        # untrusted tick counts would be an unbounded CPU cost.
         if sinks_per_tick:
             replay = Simulation(self.graph, dt_ns=self.dt_ns)
             for i in range(tick):
@@ -134,5 +131,9 @@ class Simulation:
                         raise GraphError("Snapshot contains noncanonical episode JSON") from exc
                     if actual != expected:
                         raise GraphError("Snapshot episode differs from deterministic replay")
+        elif tick:
+            # Config checks are independent of the clock. One scratch step
+            # establishes executability without replaying a clock-only history.
+            Simulation(self.graph, dt_ns=self.dt_ns).step()
         self.tick = tick
         self.episodes = copy.deepcopy(episodes)

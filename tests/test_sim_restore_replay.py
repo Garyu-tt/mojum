@@ -3,11 +3,19 @@ import copy
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.graph import GraphError
 from mojum.sim import Simulation, digest
 
 GRAPH = json.loads((Path(__file__).resolve().parent.parent / "examples" / "first_loop.json").read_text(encoding="utf-8"))
+
+
+def _graph_without_episode_sink():
+    graph = copy.deepcopy(GRAPH)
+    graph["nodes"] = [node for node in graph["nodes"] if node["id"] != "episode"]
+    graph["edges"] = [edge for edge in graph["edges"] if edge["to"]["node"] != "episode"]
+    return graph
 
 
 class SimulationRestoreReplayTests(unittest.TestCase):
@@ -66,14 +74,7 @@ class SimulationRestoreReplayTests(unittest.TestCase):
         self.assertEqual(self.sim.episodes, [])
 
     def test_graph_without_episode_sink_restores_its_own_clock(self):
-        room_node = copy.deepcopy(next(n for n in GRAPH["nodes"] if n["id"] == "room"))
-        graph = {
-            "schema": GRAPH["schema"],
-            "id": "mojum.test.room-without-episode",
-            "revision": "1",
-            "nodes": [room_node],
-            "edges": [],
-        }
+        graph = _graph_without_episode_sink()
         original = Simulation(graph)
         for _ in range(7):
             original.step()
@@ -81,9 +82,13 @@ class SimulationRestoreReplayTests(unittest.TestCase):
         self.assertEqual(snapshot["state"]["episodes"], [])
 
         restored = Simulation(graph)
-        restored.restore(snapshot)
+        with patch.object(Simulation, "step", autospec=True, side_effect=Simulation.step) as step:
+            restored.restore(snapshot)
+        step.assert_called_once()
         self.assertEqual(restored.snapshot(), snapshot)
-        self.assertEqual(restored.step(), original.step())
+        expected = [original.step() for _ in range(10)]
+        self.assertEqual({frame["heart"]["pulse"]["pulse"] for frame in expected}, {False, True})
+        self.assertEqual([restored.step() for _ in range(10)], expected)
         self.assertEqual(restored.snapshot(), original.snapshot())
 
         # A checksum-rewritten phantom episode still cannot be restored.
@@ -94,6 +99,21 @@ class SimulationRestoreReplayTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "Inconsistent snapshot state"):
             restored.restore(malformed)
         self.assertEqual(restored.snapshot(), unchanged)
+
+    def test_graph_without_episode_sink_rejects_ticks_it_cannot_execute(self):
+        graph = _graph_without_episode_sink()
+        room = next(node for node in graph["nodes"] if node["id"] == "room")
+        room["config"]["light"] = "invalid"
+        restored = Simulation(graph)
+        empty = restored.snapshot()
+        restored.restore(empty)
+
+        forged = copy.deepcopy(empty)
+        forged["state"]["tick"] = 1
+        forged["sha256"] = digest(forged["state"])
+        with self.assertRaisesRegex(GraphError, "Invalid world.room light fixture"):
+            restored.restore(forged)
+        self.assertEqual(restored.snapshot(), empty)
 
     def test_two_episode_sinks_restore_and_replay_each_record(self):
         graph = copy.deepcopy(GRAPH)
@@ -139,8 +159,6 @@ class SimulationRestoreReplayTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "episode sequence"):
             restored.restore(forged)
         self.assertEqual(restored.snapshot(), unchanged)
-
-
 
 if __name__ == "__main__":
     unittest.main()
