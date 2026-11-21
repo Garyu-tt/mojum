@@ -20,6 +20,7 @@ MAX_INPUT_BYTES = 65536
 DEFAULT_MODEL_MIB = 15360
 DEFAULT_RESERVE_MIB = 768
 MAX_GPUS_PER_INSTANCE = 4
+DEFAULT_BASE_PORT = 18180  # ALT is already bound to 18080 during staging
 
 
 class InventoryError(ValueError):
@@ -102,7 +103,7 @@ def probe_nvidia_smi():
 
 
 def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE_MIB,
-         max_gpus=MAX_GPUS_PER_INSTANCE, max_replicas=32, base_port=18080,
+         max_gpus=MAX_GPUS_PER_INSTANCE, max_replicas=32, base_port=DEFAULT_BASE_PORT,
          ctx_size=2048, model_path="/models/gpt-oss-20b-mxfp4.gguf"):
     for field, number, lower, upper in (
         ("model_mib", model_mib, 4096, 262144),
@@ -159,14 +160,16 @@ def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE
     warnings = ["Placement estimate only: no model loaded, no CUDA benchmark performed.",
                 "GGUF file, llama.cpp CUDA build, kernel support and GPU memory peaks are unverified.",
                 "Do not set --parallel above 1 before per-replica memory and throughput tests.",
-                "Do not expose the model service beyond loopback; do not launch via untrusted shell input."]
+                "Do not expose the model service beyond loopback; do not launch via untrusted shell input.",
+                "Local GPU observation is neither cryptographic attestation nor deployment authorization."]
     if any(g["supported"] and tuple(int(x) for x in g["compute_cap"].split(".")) < (7, 5)
            for g in gpus):
         warnings.append("Pascal/older GPUs need a compatible CUDA build; native MXFP4 hardware acceleration is unavailable.")
     return {
         "schema": "mojum.gpu-legion-plan.v1",
         "model": "openai/gpt-oss-20b GGUF (model file operator-supplied)",
-        "source": data["source"], "hardware_verified": data["source"] == "nvidia-smi",
+        "source": data["source"], "hardware_verified": False,
+        "observed_local_inventory": False,
         "model_budget_mib": model_mib, "per_gpu_reserve_mib": reserve_mib,
         "estimated_replicas": len(groups), "live_replicas": 0,
         "deploy_performed": False, "ready_for_merge": False,
@@ -186,16 +189,18 @@ def main(argv=None):
     parser.add_argument("--max-gpus-per-instance", type=int, default=MAX_GPUS_PER_INSTANCE)
     parser.add_argument("--max-replicas", type=int, default=32)
     parser.add_argument("--require-replicas", type=int, default=0)
-    parser.add_argument("--base-port", type=int, default=18080)
+    parser.add_argument("--base-port", type=int, default=DEFAULT_BASE_PORT)
     parser.add_argument("--ctx-size", type=int, default=2048)
     args = parser.parse_args(argv)
     try:
         if type(args.require_replicas) is not int or not 0 <= args.require_replicas <= 32:
             raise InventoryError("require-replicas must be between 0 and 32")
+        probed_live = args.inventory is None
         data, gpus = load_inventory(args.inventory) if args.inventory else probe_nvidia_smi()
         report = plan(data, gpus, model_mib=args.model_mib, reserve_mib=args.reserve_mib,
                       max_gpus=args.max_gpus_per_instance, max_replicas=args.max_replicas,
                       base_port=args.base_port, ctx_size=args.ctx_size, model_path=args.model)
+        report["observed_local_inventory"] = probed_live
         report["shortfall"] = max(0, args.require_replicas - report["estimated_replicas"])
         print(json.dumps(report, sort_keys=True, ensure_ascii=False, indent=2))
         return 2 if report["shortfall"] else 0
