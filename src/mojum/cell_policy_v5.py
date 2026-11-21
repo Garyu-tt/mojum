@@ -375,25 +375,23 @@ def summarize_transcript(transcript):
                     or (previous_tick is not None and tick != previous_tick + 1)):
                 raise CellV5Error("nonconsecutive transcript tick")
             previous_tick = tick
-        if "action" in outcome and outcome["action"] != action:
-            raise CellV5Error("transcript outcome disagrees with action")
         if "schema" in outcome and outcome["schema"] != LEARNING_SCHEMA:
             raise CellV5Error("unexpected transcript outcome schema")
-        if "total_updates" in outcome and (
-                type(outcome["total_updates"]) is not int
-                or (has_tick and outcome["total_updates"] != tick + 1)):
+        updates = outcome.get("total_updates")
+        if (has_tick or "total_updates" in outcome) and (
+                type(updates) is not int or (has_tick and updates != tick + 1)):
             raise CellV5Error("transcript update count disagrees with tick")
         measured = outcome.get("measured_blocked")
         if type(measured) is not bool:
             raise CellV5Error("transcript outcome must carry a measured bool")
-        forced = intent.get("forced_probe", False)
+        forced = intent.get("forced_probe", None if has_tick else False)
         if type(forced) is not bool:
             raise CellV5Error("malformed forced-probe marker")
         if forced and action == "rest":
             raise CellV5Error("rest cannot be a forced probe")
-        if "forced_probe" in outcome and (
-                type(outcome["forced_probe"]) is not bool
-                or outcome["forced_probe"] != forced):
+        if (has_tick or forced or "action" in outcome) and outcome.get("action") != action:
+            raise CellV5Error("transcript outcome disagrees with action")
+        if (has_tick or forced or "forced_probe" in outcome) and outcome.get("forced_probe") is not forced:
             raise CellV5Error("outcome disagrees with forced-probe marker")
         zone = intent.get("zone")
         if zone is not None:

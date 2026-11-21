@@ -562,11 +562,15 @@ class TranscriptSummaryTests(unittest.TestCase):
         reject(1, 0, "tick", 3)  # missing tick
         reject(1, 0, "tick", True)  # bool is not a clock integer
         reject(1, 0, "tick", remove=True)  # ambiguous mixed clock profile
+        reject(1, 0, "forced_probe", remove=True)
         reject(1, 1, "action", "rest")  # mismatched measured outcome
+        reject(1, 1, "action", remove=True)
         reject(1, 1, "schema", "mojum.developmental.local-cell.outcome/4")
         reject(1, 1, "total_updates", True)
         reject(1, 1, "total_updates", 999)
+        reject(1, 1, "total_updates", remove=True)
         reject(1, 1, "forced_probe", True)
+        reject(1, 1, "forced_probe", remove=True)
         reject(1, 0, "zone", "25001:0")
         rest_index = next(i for i, (intent, _) in enumerate(transcript)
                           if intent["action"] == "rest")
