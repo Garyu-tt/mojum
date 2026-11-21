@@ -263,8 +263,12 @@
   function render() {
     let room;
     try {
+      // Resize the SVG even when an old start/obstacle is temporarily invalid.
+      // This keeps hit-testing aligned with the user-visible room during recovery.
+      const width = dimension(refs.width.value);
+      const height = dimension(refs.height.value);
+      state.lastValidSize = [width.value, height.value];
       room = currentRoom();
-      state.lastValidSize = [room.width.value, room.height.value];
       state.latest = buildDraft(state);
       refs.preview.value = state.latest;
       refs.dimensions.textContent = room.width.lexical + " × " + room.height.lexical + " м";
