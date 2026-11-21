@@ -34,6 +34,9 @@ _FIELDS = {
 _HEX = frozenset("0123456789abcdef")
 _DATA_RE = re.compile(r"segment-[0-9]{8}\.events\.jsonl\Z", re.ASCII)
 _META_RE = re.compile(r"segment-[0-9]{8}\.manifest\.json\Z", re.ASCII)
+_MAX_EVENT_LINE_BYTES = 128 * 1024
+# append_many holds both the input and the checked event copies.
+_RESTORE_BATCH_BYTES = 1024 * 1024
 
 
 def _digest(value):
@@ -110,9 +113,10 @@ def read_manifest(root, index):
     return m
 
 
-def iter_segment_events(root, manifest, previous):
+def iter_segment_events(root, manifest, previous, *, include_line_size=False):
     """Yield validated events, finish with full physical SHA/head verification.
 
+    With include_line_size, yield (event, encoded line bytes) pairs.
     Consumer MUST exhaust this iterator or it has NOT verified the member.
     """
     data_name, _ = names(manifest["segment_index"])
@@ -125,10 +129,12 @@ def iter_segment_events(root, manifest, previous):
     head = previous
     with _file(root / data_name, MAX_SEGMENT_BYTES) as source:
         while count < manifest["event_count"]:
-            line = source.readline(131073)
-            if (not line or len(line) > 131072 or not line.endswith(b"\n")):
+            line = source.readline(_MAX_EVENT_LINE_BYTES + 1)
+            line_size = len(line)
+            if (not line or line_size > _MAX_EVENT_LINE_BYTES
+                    or not line.endswith(b"\n")):
                 raise ArchiveError("missing/oversized physical event line")
-            size += len(line)
+            size += line_size
             if size > MAX_SEGMENT_BYTES:
                 raise ArchiveError("physical segment size budget exceeded")
             digest.update(line)
@@ -152,7 +158,7 @@ def iter_segment_events(root, manifest, previous):
             nonpublic |= event["visibility"] != "PUBLIC"
             head = computed
             count += 1
-            yield event
+            yield (event, line_size) if include_line_size else event
         if source.read(1):
             raise ArchiveError("unexpected trailing archive records")
     if (size != manifest["data_bytes"]
@@ -279,16 +285,22 @@ def restore_into_new_sqlite(directory, destination, *, external_expected_head):
             segment_size=verified["segment_size"],
         ) as journal:
             batch = []
+            batch_bytes = 0
             for index in range(verified["sealed_segments"]):
                 manifest = read_manifest(root, index)
                 if (manifest["agent_id"] != verified["agent_id"]
                         or manifest["segment_size"] != verified["segment_size"]):
                     raise ArchiveError("archive identity changed during restore")
-                for event in iter_segment_events(root, manifest, previous):
-                    batch.append(event)
-                    if len(batch) == MAX_BATCH:
+                for event, line_size in iter_segment_events(
+                    root, manifest, previous, include_line_size=True,
+                ):
+                    if (len(batch) == MAX_BATCH
+                            or batch_bytes + line_size > _RESTORE_BATCH_BYTES):
                         journal.append_many(batch, expected_head=journal.head())
                         batch.clear()
+                        batch_bytes = 0
+                    batch.append(event)
+                    batch_bytes += line_size
                 previous = manifest["segment_head"]
             if batch:
                 journal.append_many(batch, expected_head=journal.head())

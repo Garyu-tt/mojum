@@ -114,6 +114,33 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
             self.assertEqual(v["archived_events"], 192)
         # Two directories on one tmp volume are NOT two independent replicas.
 
+    def test_restore_batches_large_events_under_byte_limit(self):
+        with SegmentedNoosphere(self.source, OWNER, segment_size=64) as journal:
+            head = ZERO
+            for tick in range(64):
+                event = record(tick)
+                if tick < 24:
+                    event["payload"]["fixture"] = "x" * 126_000
+                head = journal.append(event, expected_head=head)
+        self.export(external_expected_head=head)
+
+        append_many = SegmentedNoosphere.append_many
+        batches = []
+
+        def record_batch(journal, events, *, expected_head):
+            batches.append(tuple(event["payload"]["sequence"] for event in events))
+            return append_many(journal, events, expected_head=expected_head)
+
+        with patch.object(SegmentedNoosphere, "append_many", record_batch):
+            result = restore_into_new_sqlite(
+                self.archive, self.recovered, external_expected_head=head,
+            )
+
+        self.assertEqual(result["restored_events"], 64)
+        self.assertEqual(result["sealed_head"], head)
+        self.assertEqual([tick for batch in batches for tick in batch], list(range(64)))
+        self.assertTrue(all(sum(tick < 24 for tick in batch) <= 8 for batch in batches))
+
     def test_private_never_exported_by_default(self):
         self.build(64)
         with SegmentedNoosphere(self.source, OWNER, segment_size=64) as q:
