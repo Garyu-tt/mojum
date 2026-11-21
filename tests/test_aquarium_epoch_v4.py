@@ -109,6 +109,39 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual(aquarium.checkpoint(), before)
             self.assertEqual(aquarium.store.count(), 1)
 
+    def test_wire_rejects_foreign_topic_with_valid_hash_chain(self):
+        """Inspector must enforce the same event-topic set as v4 replay."""
+        with self.open() as aquarium:
+            foreign = aquarium._record(
+                "development.advance", "development-000-001",
+                {
+                    "schema": "mojum.agent.development-event/1",
+                    "from_months": 0, "to_months": 1,
+                    "reason": "synthetic foreign-topic acceptance regression",
+                },
+                aquarium.tick * aquarium.dt_ns, aquarium.genome.revision,
+            )
+            aquarium.store.append(foreign, expected_head=aquarium.store.head())
+            self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+        with self.assertRaisesRegex(NoosphereError, "unsupported local-cell v4 journal topic"):
+            inspect_journal(self.db)
+        with self.assertRaisesRegex(AquariumError, "contain only frames"):
+            self.open()
+
+    def test_wire_rejects_v4_sensory_bootstrap_alias(self):
+        # The production runtime forbids sensory bridges for v4. A forged
+        # manifest must not rewrite its inspector policy ID or skip epoch gates.
+        from mojum.aquarium_wire import _stored_policy
+
+        with self.open() as aquarium:
+            manifest = deepcopy(aquarium.manifest)
+        for sensory in ("toy_probe", "toy_probe_v2"):
+            with self.subTest(sensory=sensory):
+                bogus = deepcopy(manifest)
+                bogus["sensory_mode"] = sensory
+                with self.assertRaisesRegex(NoosphereError, "requires sensory_mode none"):
+                    _stored_policy(bogus)
+
     def test_wire_rejects_premature_epoch_marker_with_valid_hash_chain(self):
         """Read-only inspection must enforce the boundary, not just SHA-256."""
         with self.open() as aquarium:
@@ -214,6 +247,61 @@ class EpochJournalV4Tests(unittest.TestCase):
             )
         with self.assertRaisesRegex(NoosphereError, "epoch"):
             inspect_journal(self.db)
+
+    def test_wire_inspector_rejects_boolean_observation_ticks_with_valid_hash_chain(self):
+        # A hash-valid event must not be reported as a v4 frame when bools
+        # impersonate exact integer fields (False == 0 in Python).
+        for field in ("absolute_tick", "epoch_index", "epoch_tick"):
+            with self.subTest(field=field):
+                path = self.db.with_name(f"bool-observation-{field}.sqlite3")
+                with Aquarium(
+                    path, SEED, GRAPH,
+                    motor_mode=V4_MODE, neural_mode="disabled",
+                ) as aquarium:
+                    frame = deepcopy(aquarium._calculate_frame(None, None)[0])
+                    frame["developmental"]["observation"][field] = False
+                    forged = aquarium._record(
+                        "aquarium.frame", "frame-000000000000",
+                        frame, 0, aquarium.genome.revision,
+                    )
+                    aquarium.store.append(
+                        forged, expected_head=aquarium.checkpoint()["journal_head"],
+                    )
+                    self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+                with self.assertRaisesRegex(NoosphereError, "epoch schema"):
+                    inspect_journal(path)
+
+    def test_wire_inspector_rejects_forged_v4_intent_and_outcome_clocks(self):
+        # A valid event hash chain cannot make a forged policy clock canonical.
+        # Test both JSON bool/int aliases and ordinary divergent integers.
+        cases = (
+            ("intent", "tick", False),
+            ("intent", "epoch_index", False),
+            ("intent", "epoch_tick", False),
+            ("learning", "epoch_index", False),
+            ("learning", "epoch_tick", False),
+            ("intent", "tick", 1),
+            ("learning", "epoch_tick", 1),
+        )
+        for index, (section, field, fake) in enumerate(cases):
+            with self.subTest(section=section, field=field, fake=fake):
+                path = self.db.with_name(f"bad-v4-clock-{index}.sqlite3")
+                with Aquarium(
+                    path, SEED, GRAPH,
+                    motor_mode=V4_MODE, neural_mode="disabled",
+                ) as aquarium:
+                    frame = deepcopy(aquarium._calculate_frame(None, None)[0])
+                    frame["developmental"][section][field] = fake
+                    forged = aquarium._record(
+                        "aquarium.frame", "frame-000000000000",
+                        frame, 0, aquarium.genome.revision,
+                    )
+                    aquarium.store.append(
+                        forged, expected_head=aquarium.checkpoint()["journal_head"],
+                    )
+                    self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+                with self.assertRaisesRegex(NoosphereError, "epoch schema"):
+                    inspect_journal(path)
 
     def test_epoch_marker_rejects_bool_int_aliases_on_replay(self):
         # Python True == 1 and False == 0, but the durable schema
