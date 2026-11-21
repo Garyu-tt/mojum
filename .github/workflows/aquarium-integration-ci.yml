@@ -6,7 +6,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Preserve cancellation on new PR commits, but not across retries of the
+  # same SHA: a new rerun must not cancel a still-running Python 3.13 audit.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-attempt-${{ github.run_attempt }}
   cancel-in-progress: true
 jobs:
   aquarium-stdlib:
