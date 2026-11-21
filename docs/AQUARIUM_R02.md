@@ -37,7 +37,7 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 - Recorded timestamps in this fixture are **virtual nanoseconds**, not observed wall-clock times; provenance must be upgraded before mixing with production memories.
 - A local SQLite append is atomic, but there is **no cross-device distributed transaction**, encryption, two independent replicas, credential isolation, tamper-proof provenance or end-to-end multi-component atomic checkpoint.
 - A malicious writer with filesystem permissions can rewrite the database and its hash chain. Independent externally trusted journal head anchors are optional; never mistake SHA-256 for access control.
-- Replay currently validates at most 10,000 events and rebuilds state from scratch, not a scalable memory architecture. GENESIS ledger events cannot rewrite already committed frames.
+- Replay verifies and reconstructs history in bounded SQLite batches (no full-projection load) but still costs CPU time linear in history length and remains capped at 100,000 events. It rebuilds state from scratch, not a scalable memory architecture. GENESIS ledger events cannot rewrite already committed frames. See [streaming replay](STREAMING_REPLAY_R01.md).
 - No production VM, Adamantium-node, JediControl, MAS or hardware actuators were modified.
 - Staging PR needs independent QA/approval, reconciliation of the competing graph contracts in PR #2 and PR #3 and explicit acceptance of its dependency PRs before release.
 

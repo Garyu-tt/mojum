@@ -11,9 +11,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium
 from mojum.aquarium_trace_export import export_private_trace
+from mojum.noosphere import LocalNoosphere
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +48,9 @@ class TraceSegmentExportTests(unittest.TestCase):
         return rows[:-1], rows[-1]
 
     def test_selected_middle_segment_exactly_matches_canonical_payload(self):
-        meta = self.export(start_tick=5, frame_limit=4)
+        with patch.object(LocalNoosphere, "dataset",
+                          side_effect=AssertionError("full dataset load")):
+            meta = self.export(start_tick=5, frame_limit=4)
         selected, footer = self.trace()
         self.assertEqual(selected, self.actual[5:9])
         self.assertEqual([frame["tick"] for frame in selected], [5, 6, 7, 8])

@@ -45,7 +45,9 @@ from .world_room import (
 
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
-MAX_REPLAY_EVENTS = 10_000
+MAX_REPLAY_EVENTS = 100_000
+MAX_MOTOR_REPLAY_EVENTS = 10_000
+REPLAY_BATCH_SIZE = 128
 V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
@@ -246,6 +248,7 @@ class Aquarium:
             raise AquariumError("expected head must be a lowercase SHA-256 digest")
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
+        self._committed_count = 0
         first = _read_first_event(db_path, agent_id)
         if first is not None:
             self._check_bootstrap(first)
@@ -312,10 +315,30 @@ class Aquarium:
             raise AquariumError("Aquarium journal is read-only")
         if self._local_cell and topic not in {"aquarium.bootstrap", "aquarium.frame"}:
             raise AquariumError("local-cell compatibility journals contain only frames")
-        if self.store.count() >= MAX_REPLAY_EVENTS:
-            raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
+        # The committed count is cached after bootstrap/replay/CAS append so a
+        # long history does not pay a global SQLite count scan per frame. A
+        # concurrent writer is still rejected by the append's CAS head check.
+        budget = self.journal_event_budget
+        if self._committed_count >= budget:
+            raise AquariumError(
+                f"journal event budget reached ({budget:,}); "
+                "export verified history and start a new journal")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
-        return self.store.append(event, expected_head=self._committed_head)
+        head = self.store.append(event, expected_head=self._committed_head)
+        self._committed_count += 1
+        return head
+
+    @property
+    def stored_events(self):
+        """Number of events this process has verified or committed."""
+        return self._committed_count
+
+    @property
+    def journal_event_budget(self):
+        """Event ceiling for this journal and its pinned motor wire."""
+        if self.motor is not None:
+            return min(MAX_REPLAY_EVENTS, MAX_MOTOR_REPLAY_EVENTS)
+        return MAX_REPLAY_EVENTS
 
     def _calculate(self, dx, dy):
         """Preserve the existing three-value scripted fixture test contract."""
@@ -558,113 +581,129 @@ class Aquarium:
             strict_wire=(self._local_cell or self.brain_mode == "developmental_controller"),
         )
         count = verified["count"]
-        if count > MAX_REPLAY_EVENTS:
-            raise AquariumError("R0.2 replay exceeds 10,000 journal events; streaming pending")
-        view = self.store.dataset(include_nonpublic=True, limit=MAX_REPLAY_EVENTS)
-        items = view["projection"]["items"]
-        if not items:
-            raise AquariumError("bootstrap event missing")
-        if len(items) != count or items[-1]["event_hash"] != verified["head"]:
-            raise AquariumError("journal changed since verification, reopen the aquarium")
-        self._check_bootstrap(items[0]["event"])
+        budget = self.journal_event_budget
+        if count > budget:
+            raise AquariumError(
+                f"journal exceeds the {budget:,}-event replay ceiling; "
+                "export verified history and start a new journal")
         try:
-            self._replay_events(items)
+            self._replay_stream(count, verified["head"])
         except _FrameMismatch:
             if not detect_sum:
                 raise
             # A single arithmetic rule must reproduce the entire verified history.
             other_sum = "ordered" if self._pulse_sum == "compensated" else "compensated"
             self._reset_replay_state(other_sum)
-            self._replay_events(items)
+            self._replay_stream(count, verified["head"])
         if self.store.head() != verified["head"]:
             raise AquariumError("journal advanced during replay, reopen the aquarium")
+        self._committed_count = count
         self._committed_head = verified["head"]
 
-    def _replay_events(self, items):
-        for entry in items[1:]:
-            event = entry["event"]
-            if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
-                raise AquariumError("unexpected journal ownership or visibility")
-            if event["observed_at_ns"] != self.tick * self.dt_ns:
-                raise AquariumError("unsynchronized event time")
-            if self._local_cell and event["topic"] != "aquarium.frame":
-                raise AquariumError("local-cell compatibility journals contain only frames")
-            if event["topic"] == "development.advance":
-                payload = event["payload"]
-                if not isinstance(payload, dict) or set(payload) != {
-                    "schema", "from_months", "to_months", "reason"
-                } or payload["schema"] != DEVELOPMENT_SCHEMA:
-                    raise AquariumError("invalid development journal event")
-                previous, target = payload["from_months"], payload["to_months"]
-                if (type(previous) is not int or previous != self.development_months or
-                        type(target) is not int or not 1 <= target - previous <= 12 or
-                        target > 192):
-                    raise AquariumError("development clock continuity broken")
-                _safe_event_text(payload["reason"], "development reason")
-                event_id = f"development-{previous:03d}-{target:03d}"
-                if event != self._record("development.advance", event_id,
-                                         payload, self.tick * self.dt_ns,
-                                         self.genome.revision):
-                    raise AquariumError("noncanonical development event")
-                self.development_months = target
-            elif event["topic"] == "identity.assigned":
-                payload = event["payload"]
-                if (self.identity is not None or not isinstance(payload, dict) or
-                        set(payload) != {"schema", "identity", "actor_id"} or
-                        payload["schema"] != IDENTITY_EVENT_SCHEMA):
-                    raise AquariumError("invalid or duplicate identity journal event")
-                _safe_event_text(payload["actor_id"], "human actor id", 128)
-                validated = validate_human_name(payload["identity"], self.agent_id)
-                if event != self._record("identity.assigned", "identity-assigned",
-                                         payload, self.tick * self.dt_ns,
-                                         self.genome.revision):
-                    raise AquariumError("noncanonical identity event")
-                self.identity = validated
-            elif event["topic"] == "genesis.acquisition":
-                raw = event["payload"].get("acquisition")
-                if not isinstance(raw, dict) or event["event_id"] != "acq-" + str(raw.get("event_id")):
-                    raise AquariumError("invalid acquisition envelope")
-                if raw.get("valid_from_tick", -1) < self.tick:
-                    raise AquariumError("retroactive committed acquisition")
-                if raw.get("recorded_at_ns") != event["recorded_at_ns"]:
-                    raise AquariumError("acquisition and journal recorded time differ")
-                next_ledger = GenomeLedger.from_snapshot(self.genome.snapshot())
-                next_ledger.append(raw, next_ledger.revision)
-                if next_ledger.revision != event["source_revision"]:
-                    raise AquariumError("acquired gene revision mismatch")
-                if event != self._record("genesis.acquisition", event["event_id"],
-                                         event["payload"], self.tick * self.dt_ns,
-                                         next_ledger.revision):
-                    raise AquariumError("noncanonical acquired event envelope")
-                self.genome = next_ledger
-            elif event["topic"] == "aquarium.frame":
-                if event["event_id"] != f"frame-{self.tick:012d}":
-                    raise AquariumError("frame identifier discontinuity")
-                move = event["payload"].get("movement_request")
-                if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
-                    raise AquariumError("invalid replayed movement")
-                # Re-derive internal intent from the previously committed evidence.
-                args = (move["dx"], move["dy"]) if self.motor is None else (None, None)
-                frame = self._calculate_frame(*args)
-                payload, next_world, next_learner, next_motor, next_contact, next_range = frame
-                expected = self._record("aquarium.frame", event["event_id"], payload,
-                                        self.tick * self.dt_ns, self.genome.revision)
-                # Compare JSON types for the opt-in wire. Python structural
-                # equality treats bools and numbers as interchangeable.
-                matches = (canonical(event) == canonical(expected)
-                           if (self._local_cell or next_contact is not None
-                               or self.brain_mode == "developmental_controller")
-                           else event == expected)
-                if not matches:
-                    raise _FrameMismatch("non-deterministic or mismatched committed frame")
-                self.world = next_world
-                self.learner = next_learner
-                self.motor = next_motor
-                self.contact_model = next_contact
-                self.range_model = next_range
-                self.tick += 1
-            else:
-                raise AquariumError("unexpected aquarium journal topic")
+    def _replay_stream(self, count, head):
+        """Rebuild state from bounded batches; never materialize the history."""
+        stream = self.store.iter_events(include_nonpublic=True,
+                                        batch_size=REPLAY_BATCH_SIZE)
+        try:
+            first = next(stream, None)
+            if first is None:
+                raise AquariumError("bootstrap event missing")
+            self._check_bootstrap(first["event"])
+            seen = 1
+            last_hash = first["event_hash"]
+            for entry in stream:
+                self._replay_event(entry)
+                seen += 1
+                last_hash = entry["event_hash"]
+        finally:
+            stream.close()
+        if seen != count or last_hash != head:
+            raise AquariumError("journal advanced during replay, reopen the aquarium")
+
+    def _replay_event(self, entry):
+        event = entry["event"]
+        if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
+            raise AquariumError("unexpected journal ownership or visibility")
+        if event["observed_at_ns"] != self.tick * self.dt_ns:
+            raise AquariumError("unsynchronized event time")
+        if self._local_cell and event["topic"] != "aquarium.frame":
+            raise AquariumError("local-cell compatibility journals contain only frames")
+        if event["topic"] == "development.advance":
+            payload = event["payload"]
+            if not isinstance(payload, dict) or set(payload) != {
+                "schema", "from_months", "to_months", "reason"
+            } or payload["schema"] != DEVELOPMENT_SCHEMA:
+                raise AquariumError("invalid development journal event")
+            previous, target = payload["from_months"], payload["to_months"]
+            if (type(previous) is not int or previous != self.development_months or
+                    type(target) is not int or not 1 <= target - previous <= 12 or
+                    target > 192):
+                raise AquariumError("development clock continuity broken")
+            _safe_event_text(payload["reason"], "development reason")
+            event_id = f"development-{previous:03d}-{target:03d}"
+            if event != self._record("development.advance", event_id,
+                                     payload, self.tick * self.dt_ns,
+                                     self.genome.revision):
+                raise AquariumError("noncanonical development event")
+            self.development_months = target
+        elif event["topic"] == "identity.assigned":
+            payload = event["payload"]
+            if (self.identity is not None or not isinstance(payload, dict) or
+                    set(payload) != {"schema", "identity", "actor_id"} or
+                    payload["schema"] != IDENTITY_EVENT_SCHEMA):
+                raise AquariumError("invalid or duplicate identity journal event")
+            _safe_event_text(payload["actor_id"], "human actor id", 128)
+            validated = validate_human_name(payload["identity"], self.agent_id)
+            if event != self._record("identity.assigned", "identity-assigned",
+                                     payload, self.tick * self.dt_ns,
+                                     self.genome.revision):
+                raise AquariumError("noncanonical identity event")
+            self.identity = validated
+        elif event["topic"] == "genesis.acquisition":
+            raw = event["payload"].get("acquisition")
+            if not isinstance(raw, dict) or event["event_id"] != "acq-" + str(raw.get("event_id")):
+                raise AquariumError("invalid acquisition envelope")
+            if raw.get("valid_from_tick", -1) < self.tick:
+                raise AquariumError("retroactive committed acquisition")
+            if raw.get("recorded_at_ns") != event["recorded_at_ns"]:
+                raise AquariumError("acquisition and journal recorded time differ")
+            next_ledger = GenomeLedger.from_snapshot(self.genome.snapshot())
+            next_ledger.append(raw, next_ledger.revision)
+            if next_ledger.revision != event["source_revision"]:
+                raise AquariumError("acquired gene revision mismatch")
+            if event != self._record("genesis.acquisition", event["event_id"],
+                                     event["payload"], self.tick * self.dt_ns,
+                                     next_ledger.revision):
+                raise AquariumError("noncanonical acquired event envelope")
+            self.genome = next_ledger
+        elif event["topic"] == "aquarium.frame":
+            if event["event_id"] != f"frame-{self.tick:012d}":
+                raise AquariumError("frame identifier discontinuity")
+            move = event["payload"].get("movement_request")
+            if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
+                raise AquariumError("invalid replayed movement")
+            # Re-derive internal intent from the previously committed evidence.
+            args = (move["dx"], move["dy"]) if self.motor is None else (None, None)
+            frame = self._calculate_frame(*args)
+            payload, next_world, next_learner, next_motor, next_contact, next_range = frame
+            expected = self._record("aquarium.frame", event["event_id"], payload,
+                                    self.tick * self.dt_ns, self.genome.revision)
+            # Compare JSON types for the opt-in wire. Python structural
+            # equality treats bools and numbers as interchangeable.
+            matches = (canonical(event) == canonical(expected)
+                       if (self._local_cell or next_contact is not None
+                           or self.brain_mode == "developmental_controller")
+                       else event == expected)
+            if not matches:
+                raise _FrameMismatch("non-deterministic or mismatched committed frame")
+            self.world = next_world
+            self.learner = next_learner
+            self.motor = next_motor
+            self.contact_model = next_contact
+            self.range_model = next_range
+            self.tick += 1
+        else:
+            raise AquariumError("unexpected aquarium journal topic")
 
     def checkpoint(self):
         state = {
@@ -782,12 +821,12 @@ def main():
     with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
-        if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:
+        if aquarium.stored_events + args.ticks > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=dx, dy=dy)
         # The checkpoint's final head check also covers the count read here.
-        stored_events = aquarium.store.count()
+        stored_events = aquarium.stored_events
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = stored_events
         checkpoint["status"] = (

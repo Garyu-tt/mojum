@@ -88,43 +88,45 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     # A valid bootstrapped source is mandatory. No synthetic data generation.
     if not 1 <= count <= MAX_REPLAY_EVENTS:
         raise AquariumError("invalid number of committed journal events")
-    dataset = aquarium.store.dataset(include_nonpublic=True, limit=count)
-    rows = dataset["projection"]["items"]
-    if len(rows) != count:
-        raise AquariumError("incomplete private event history")
-
     wire_parts = []
     total = 0
     total_frames = 0
     frames = 0
     range_begin = 0 if start_tick is None else start_tick
     range_end = None if start_tick is None else start_tick + frame_limit
-    for row in rows:
-        event = row["event"]
-        if event["topic"] != "aquarium.frame":
-            continue
-        if event["visibility"] != "PRIVATE":
-            raise AquariumError("non-private committed Aquarium frame")
-        frame = event["payload"]
-        if (frame.get("schema") != FRAME_SCHEMA
-                or type(frame.get("tick")) is not int
-                or frame["tick"] != total_frames):
-            raise AquariumError("inconsistent committed frame sequence")
-        total_frames += 1
-        if frame["tick"] < range_begin or (range_end is not None and frame["tick"] >= range_end):
-            continue
-        frames += 1
-        if frames > MAX_FRAMES:
-            raise ValueError("viewer supports at most 5000 frames; refusing truncation")
-        line = json.dumps(frame, sort_keys=True, ensure_ascii=False,
-                          allow_nan=False, separators=(",", ":"))
-        if len(line) > MAX_JSONL_CHARS:
-            raise ValueError("committed private frame exceeds viewer line budget")
-        encoded = (line + "\n").encode("utf-8")
-        total += len(encoded)
-        if total > MAX_TRACE_BYTES:
-            raise ValueError("private trace exceeds viewer 24 MiB budget")
-        wire_parts.append(encoded)
+    seen = 0
+    last_hash = None
+    with closing(aquarium.store.iter_events(include_nonpublic=True)) as rows:
+        for row in rows:
+            seen += 1
+            last_hash = row["event_hash"]
+            event = row["event"]
+            if event["topic"] != "aquarium.frame":
+                continue
+            if event["visibility"] != "PRIVATE":
+                raise AquariumError("non-private committed Aquarium frame")
+            frame = event["payload"]
+            if (frame.get("schema") != FRAME_SCHEMA
+                    or type(frame.get("tick")) is not int
+                    or frame["tick"] != total_frames):
+                raise AquariumError("inconsistent committed frame sequence")
+            total_frames += 1
+            if frame["tick"] < range_begin or (range_end is not None and frame["tick"] >= range_end):
+                continue
+            frames += 1
+            if frames > MAX_FRAMES:
+                raise ValueError("viewer supports at most 5000 frames; refusing truncation")
+            line = json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                              allow_nan=False, separators=(",", ":"))
+            if len(line) > MAX_JSONL_CHARS:
+                raise ValueError("committed private frame exceeds viewer line budget")
+            encoded = (line + "\n").encode("utf-8")
+            total += len(encoded)
+            if total > MAX_TRACE_BYTES:
+                raise ValueError("private trace exceeds viewer 24 MiB budget")
+            wire_parts.append(encoded)
+    if seen != count or last_hash != snapshot["journal_head"]:
+        raise AquariumError("incomplete private event history")
     if not total_frames or total_frames != snapshot["tick"]:
         raise AquariumError("expected nonempty complete Aquarium frame history")
     if not frames:

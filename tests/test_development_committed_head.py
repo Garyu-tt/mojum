@@ -78,14 +78,14 @@ class DevelopmentCommittedHeadTests(unittest.TestCase):
 
     def test_append_between_verify_and_projection_replay_is_rejected(self):
         with self.aquarium() as writer:
-            original = LocalNoosphere.dataset
+            original = LocalNoosphere.iter_events
 
-            def projection_then_advance(store, **kwargs):
+            def stream_then_advance(store, **kwargs):
                 snapshot = original(store, **kwargs)
                 writer.advance_development(1)
                 return snapshot
 
-            with patch.object(LocalNoosphere, "dataset", projection_then_advance):
+            with patch.object(LocalNoosphere, "iter_events", stream_then_advance):
                 with self.assertRaisesRegex(AquariumError, "journal advanced"):
                     self.aquarium()
         with self.aquarium() as recovered:

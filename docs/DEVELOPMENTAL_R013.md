@@ -75,6 +75,7 @@ No goal, subjective experience, neural motor learning, real proprioception,
 anatomy, 3D contacts, MuJoCo, cryptographic Noosphere replication, or true
 environment understanding is claimed. The implementation is a deterministic
 tabular point-room baseline that demonstrates a **causal measured outcome can
-change a future autonomous action**. Journal replay remains bounded to
-10,000 events. P0 #55 stays open for independently reviewed causal
+change a future autonomous action**. Journal replay is bounded and streams in
+bounded batches up to the 100,000-event ceiling. P0 #55 stays open for
+independently reviewed causal
 sensorimotor/GENESIS integration.

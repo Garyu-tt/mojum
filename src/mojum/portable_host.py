@@ -18,7 +18,8 @@ import signal
 import threading
 import time
 
-from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS
+from .aquarium import Aquarium, AquariumError
+from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
 
@@ -96,7 +97,7 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     _require_sensorimotor_fixture(aquarium)
     if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
         raise PortableHostError(
-            "requested ticks exceed fixed 10000-event replay budget; "
+            f"requested ticks exceed fixed {MAX_REPLAY_EVENTS}-event replay budget; "
             "use a smaller bounded run"
         )
 

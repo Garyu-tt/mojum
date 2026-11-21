@@ -35,16 +35,22 @@ class AquariumCliBudgetTests(unittest.TestCase):
                 self.assertEqual(after, before)
 
     def test_oversized_first_batch_does_not_append_frames(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db = Path(tmp) / "synthetic.sqlite3"
-            argv = ["mojum.aquarium", "--db", str(db), "--ticks", "3"]
-            with patch("mojum.aquarium.MAX_REPLAY_EVENTS", 3), patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit) as error:
-                    main()
-            self.assertEqual(error.exception.code, 2)
-            # The constructor may persist the initial bootstrap, but never a partial frame.
-            with contextlib.closing(sqlite3.connect(db)) as conn:
-                self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
+        for mode, ceiling in (
+            ("scripted", "MAX_REPLAY_EVENTS"),
+            ("developmental_fixture", "MAX_MOTOR_REPLAY_EVENTS"),
+            ("local_cell_v2b", "MAX_MOTOR_REPLAY_EVENTS"),
+        ):
+            with self.subTest(mode=mode):
+                with tempfile.TemporaryDirectory() as tmp:
+                    db = Path(tmp) / "synthetic.sqlite3"
+                    argv = ["mojum.aquarium", "--db", str(db), "--ticks", "3", "--motor-mode", mode]
+                    with patch(f"mojum.aquarium.{ceiling}", 3), patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        with self.assertRaises(SystemExit) as error:
+                            main()
+                    self.assertEqual(error.exception.code, 2)
+                    # The constructor may persist the initial bootstrap, but never a partial frame.
+                    with contextlib.closing(sqlite3.connect(db)) as conn:
+                        self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
 
 
 if __name__ == "__main__":
