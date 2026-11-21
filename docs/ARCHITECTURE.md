@@ -25,7 +25,7 @@ The SQLite journal is authoritative for committed synthetic events. Reopening th
 
 ## Contracts and safety invariants
 
-1. Keep the canonical runnable graph at `mechanicus.universal-graph/1`; unknown node kinds do not execute. A second incompatible wire format cannot reuse that identifier. Visibility metadata, if added, is not itself an access-control boundary (see [issue #25](https://github.com/Garyu-tt/mojum/issues/25)).
+1. Keep the canonical runnable graph at `mechanicus.universal-graph/1`; unknown node kinds do not execute. A second incompatible wire format cannot reuse that identifier. Executable v1 rejects undeclared visibility metadata instead of silently ignoring it; the isolated v2 audit is non-executable and does not grant access control (see [issue #25](https://github.com/Garyu-tt/mojum/issues/25)).
 2. The DAG executor has explicit typed ports and no hidden cyclic scheduler. Graph nodes include machine-readable notes. Any new shape requires a separately versioned contract and replay migration.
 3. Virtual logical ticks and `time_ns` are deterministic **simulation timestamps**, never wall-clock measurements or evidence of a real robot's movements.
 4. Inherited and acquired GENESIS state must retain version, identity, and provenance. Replaying a journal must not apply a mutation twice or silently change the organism ID.
