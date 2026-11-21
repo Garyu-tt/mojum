@@ -335,6 +335,37 @@ class RetentionTests(unittest.TestCase):
             model.snapshot(),
         )
 
+    def test_snapshot_rejects_impossible_forced_probe_history(self):
+        # One forced re-probe requires four measured blocked directions,
+        # then three rests. It cannot occur before tick 7 (8 updates).
+        model = CellExplorerV5()
+        drive(model, 7)
+        self.assertEqual(model.forced_probes, 0)
+        forged = dict(model.snapshot(), forced_probes=1)
+        with self.assertRaisesRegex(CellV5Error, "impossible v5 forced-probe"):
+            CellExplorerV5.from_snapshot(forged)
+
+        # A legitimate first forced probe at tick 7 must remain replayable.
+        drive(model, 1, start=7)
+        self.assertEqual(model.forced_probes, 1)
+        self.assertEqual(
+            CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+        # The same eight observations cannot contain two forced probes:
+        # an intervening three-rest streak is mandatory.
+        forged = dict(model.snapshot(), forced_probes=2)
+        with self.assertRaisesRegex(CellV5Error, "impossible v5 forced-probe"):
+            CellExplorerV5.from_snapshot(forged)
+
+        # Follow-up probes after each bounded rest streak remain legal.
+        drive(model, 4, start=8)
+        self.assertEqual(model.forced_probes, 2)
+        self.assertEqual(
+            CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+
     def test_restore_detaches_from_original_snapshot(self):
         model = CellExplorerV5()
         sense = cue(0)
