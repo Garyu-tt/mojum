@@ -170,6 +170,64 @@ def legacy_cross_test(a, b, scratch):
     return True
 
 
+def _synthetic_motor_fingerprint(db):
+    """Normalize actual stored actions/outcomes; exclude versioned wire tags.
+
+    This characterizes a fixed generated room only. It is not an interchange
+    format, migration procedure, or a claim of behavioral generalization.
+    """
+    with sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute(
+            "SELECT wire_json FROM events "
+            "WHERE topic='aquarium.frame' ORDER BY seq"
+        ).fetchall()
+    actions = []
+    for (wire,) in rows:
+        frame = json.loads(wire)["payload"]
+        motor = frame["developmental"]["intent"]
+        actions.append({
+            "tick": frame["tick"],
+            "action": motor["action"],
+            "dx": motor["dx"],
+            "dy": motor["dy"],
+            "blocked": frame["world"]["blocked"],
+            "position": frame["world"]["position"],
+        })
+    encoded = json.dumps(actions, sort_keys=True, separators=(",", ":"),
+                         allow_nan=False).encode("utf-8")
+    return len(actions), hashlib.sha256(encoded).hexdigest()
+
+
+def compare_pre_eviction_motor_behavior(a, b, v3, scratch):
+    """Run three separate programs under identical fixed point-room input."""
+    signatures = {}
+    for label, source, kind in (
+        ("v2_a", a, "v2-a"),
+        ("v2_b", b, "v2-b"),
+        ("v3_b", v3, "v3-b"),
+    ):
+        database = scratch / (label + ".behavior.sqlite3")
+        checkpoint, error = invoke(source, database, kind=kind, ticks=120)
+        check(checkpoint is not None, label + " failed: " + error[:350])
+        check(checkpoint["tick"] == 120, "unexpected synthetic sample length")
+        # Inspect the *actual* stored source, not an in-RAM simulation clone.
+        verified = inspect_journal(database,
+                                   external_expected_head=checkpoint["journal_head"])
+        check(verified["events"] == 121 and verified["frames"] == 120,
+              label + " missing committed synthetic events")
+        count, fingerprint = _synthetic_motor_fingerprint(database)
+        check(count == 120, "incorrect stored synthetic motor history")
+        signatures[label] = fingerprint
+    check(len(set(signatures.values())) == 1,
+          "the three policies diverge before v3's 512-cell retention cap")
+    return {
+        "120_tick_fixed_synthetic_motor_trace": "IDENTICAL",
+        "v2a_v2b_v3b": "PASS",
+        "no_interchange_or_generalization_claim": True,
+    }
+
+
 def probe_rejects_corrupt_and_ambiguous_wire(reference, scratch):
     # Only disposable copied journals are modified; original data stay sealed.
     import shutil
@@ -234,6 +292,8 @@ def main():
         v3_probed = inspect_journal(v3_db, external_expected_head=v3_state["head"])
         check(v3_probed["format"] == "local_cell_v3_b_unreleased",
               "read-only registry confused v3 format with v2")
+        matched_synthetic_motor = compare_pre_eviction_motor_behavior(
+            a, b, v3, scratch)
         a_contract = public_contract(a_state, a_self)
         b_contract = public_contract(b_state, b_self)
         # Exact stored wire ABI, not the alias "local_cell_v2", is identity.
@@ -275,6 +335,7 @@ def main():
             "v2_self_reopen": {"112": "PASS", "115": "PASS"},
             "separate_v3_self_reopen": ("PASS" if
                 v3_probed["format"] == "local_cell_v3_b_unreleased" else "FAIL"),
+            "pre_eviction_motor_evidence": matched_synthetic_motor,
             "v2_foreign_reopen": {
                 "112_journal_under_115": "PASS" if a_to_b else "REJECTED",
                 "115_journal_under_112": "PASS" if b_to_a else "REJECTED",
