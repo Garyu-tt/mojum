@@ -222,9 +222,13 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
                 "evictions": 0, "forgotten_observations": 0,
             },
             "stale_newest_tick": {
-                **common, "last_tick": 1, "updates": 2,
-                "records": {"0:0": {"x+": [2, 0]}},
-                "last_seen_at": {"0:0": 0},
+                # Other guards pass: per-cell 51 <= 51 and 49 <= 99,
+                # distinct last-seen ticks, no eviction, global 100 updates.
+                # Only the final retained stamp is stale (98 vs tick 99).
+                **common, "last_tick": 99, "updates": 100,
+                "records": {"0:0": {"x+": [51, 0]},
+                            "1:0": {"x+": [49, 0]}},
+                "last_seen_at": {"0:0": 50, "1:0": 98},
                 "evictions": 0, "forgotten_observations": 0,
             },
             "observed_more_times_than_cell_tick": {
@@ -255,6 +259,10 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         for name, snapshot in forged.items():
             with self.subTest(name=name), self.assertRaises(CellV3EscapeError):
                 CellExplorerV3Escape.from_snapshot(snapshot)
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "latest escape cell observation does not match tick"
+        ):
+            CellExplorerV3Escape.from_snapshot(forged["stale_newest_tick"])
         empty = CellExplorerV3Escape().snapshot()
         self.assertEqual(CellExplorerV3Escape.from_snapshot(empty).snapshot(), empty)
 
