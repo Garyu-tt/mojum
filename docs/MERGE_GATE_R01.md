@@ -28,11 +28,12 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - For `main`, the gate always requires successful Aquarium, Motor Gate, and
   Mesh jobs for Python 3.11, 3.12, and 3.13. Those workflows run on every PR.
   The gate identifies each job by its exact `workflow / job` label.
-- Each `--require` adds a concrete job name or an exact `workflow / job`
-  label. Use it for every applicable extra check. For a target other than
-  `main`, supply the entire required inventory via `--require`.
-  Qualify Actions jobs with their workflow name. A bare name can match a
-  check or commit status with that name.
+- Each `--require` adds an exact `workflow / job` label for a GitHub Actions
+  job, or a bare name for a legacy commit status or external check which has
+  no workflow identity. Use it for every applicable extra check. For a target
+  other than `main`, supply the entire required inventory via `--require`.
+  A bare Actions job name is rejected because another workflow can publish
+  the same name.
 - Wildcards (`* ? [ ]`) are rejected with `AMBIGUOUS_REQUIRED_PATTERN`.
   Workflow-only names are not job selectors and cannot certify a partial
   matrix. Missing required jobs defer with `MISSING_REQUIRED_CHECK`.
@@ -44,6 +45,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
   `stale`, `error` or `startup_failure`.
 - A required job that matches nothing yields `defer`
   (`MISSING_REQUIRED_CHECK`), because its workflow may not have registered yet.
+- Multiple rollup entries for one required identity yield `defer`
+  (`AMBIGUOUS_REQUIRED_CHECK`); the caller must not guess which run is current.
 - A check whose recorded `headSha` differs from the snapshot head yields
   `defer` (`STALE_CHECK`).
 - `--expected-head-sha` requires a full 40- or 64-character Git object ID.
