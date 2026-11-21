@@ -19,7 +19,7 @@ import sqlite3
 import stat
 import tempfile
 
-from .aquarium import Aquarium, AquariumError
+from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS
 
 SCHEMA = "mojum.aquarium.trace-export/1"
 MAX_SOURCE_BYTES = 128_000_000
@@ -83,20 +83,22 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     snapshot = aquarium.checkpoint()
     count = aquarium.store.count()
     # A valid bootstrapped source is mandatory. No synthetic data generation.
-    if not 1 <= count <= 10_000:
+    if not 1 <= count <= MAX_REPLAY_EVENTS:
         raise AquariumError("invalid number of committed journal events")
-    dataset = aquarium.store.dataset(include_nonpublic=True, limit=count)
-    rows = dataset["projection"]["items"]
-    if len(rows) != count:
-        raise AquariumError("incomplete private event history")
 
     wire_parts = []
     total = 0
     total_frames = 0
     frames = 0
+    events_seen = 0
+    last_event_hash = None
     range_begin = 0 if start_tick is None else start_tick
     range_end = None if start_tick is None else start_tick + frame_limit
-    for row in rows:
+    for row in aquarium.store.iter_events(include_nonpublic=True):
+        events_seen += 1
+        if row["seq"] != events_seen:
+            raise AquariumError("incomplete committed journal stream")
+        last_event_hash = row["event_hash"]
         event = row["event"]
         if event["topic"] != "aquarium.frame":
             continue
@@ -122,6 +124,8 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
         if total > MAX_TRACE_BYTES:
             raise ValueError("private trace exceeds viewer 24 MiB budget")
         wire_parts.append(encoded)
+    if events_seen != count or last_event_hash != snapshot["journal_head"]:
+        raise AquariumError("incomplete or advanced private event history")
     if not total_frames or total_frames != snapshot["tick"]:
         raise AquariumError("expected nonempty complete Aquarium frame history")
     if not frames:
@@ -188,8 +192,8 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     if (start_tick is None) != (frame_limit is None):
         raise ValueError("start_tick and frame_limit must be supplied together")
     if start_tick is not None:
-        if type(start_tick) is not int or not 0 <= start_tick < 10_000:
-            raise ValueError("start_tick must be an integer in 0..9999")
+        if type(start_tick) is not int or not 0 <= start_tick < MAX_REPLAY_EVENTS:
+            raise ValueError("start_tick must be an integer in 0..99999")
         if type(frame_limit) is not int or not 1 <= frame_limit <= MAX_FRAMES:
             raise ValueError("frame_limit must be an integer in 1..5000")
     source = _source(source_db)
