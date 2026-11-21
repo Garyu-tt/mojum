@@ -259,6 +259,8 @@ def evaluate(
         not isinstance(expected_head_sha, str) or _SHA_RE.fullmatch(expected_head_sha) is None
     ):
         raise ValueError("expected_head_sha must be a full 40- or 64-character hexadecimal Git object ID")
+    if not isinstance(expected_base, str) or not expected_base.strip():
+        raise ValueError("expected_base must name a branch")
 
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
@@ -281,7 +283,7 @@ def evaluate(
             )
         )
 
-    if expected_base and facts.base_ref != expected_base:
+    if facts.base_ref != expected_base:
         rejects.append(
             GateReason(
                 "BASE_MISMATCH",

@@ -44,8 +44,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - A check whose recorded `headSha` differs from the snapshot head yields
   `defer` (`STALE_CHECK`).
 - `--expected-head-sha` requires a full 40- or 64-character Git object ID.
-  Without it the verdict is `reject`
-  (`EXPECTED_HEAD_REQUIRED`).
+  Omitting it returns `EXPECTED_HEAD_REQUIRED`. `--expected-base` names a
+  branch and defaults to `main`.
 - No requirements at all is `reject` (`NO_REQUIRED_CHECKS`): a gate that
   requires nothing proves nothing.
 

@@ -228,6 +228,10 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "BASE_MISMATCH")
 
+    def test_blank_expected_base_is_invalid(self):
+        with self.assertRaisesRegex(ValueError, "expected_base"):
+            evaluate_checks(self.green(), expected_base="")
+
     def test_malformed_expected_head_raises(self):
         for oid in ("zzz", HEAD[:7], HEAD[:39], HEAD + "f", HEAD + "\n", " " + HEAD):
             with self.subTest(oid=oid), self.assertRaises(ValueError):
