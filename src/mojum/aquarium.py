@@ -25,6 +25,13 @@ from .epoch_sense_v2 import (
     EPOCH_TICKS, MAX_ABSOLUTE_TICKS,
 )
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
+from .sensory_associations_v2 import (
+    ContactAssociationsV2, SCHEMA as ASSOCIATION_V2_SCHEMA,
+)
+from .sensory_bridge_v2 import (
+    ToyContactBridgeV2, SCHEMA as TOY_CONTACT_V2_SCHEMA,
+    REPROBE_PERIOD_TICKS as TOY_CONTACT_V2_PERIOD,
+)
 from .sensory_bridge import (ToyContactBridge, validate_scene,
                              SCHEMA as TOY_CONTACT_SCHEMA,
                              OCCLUSION_SCHEMA)
@@ -101,16 +108,18 @@ class Aquarium:
             raise AquariumError("unknown versioned developmental policy")
         if developmental_policy != "legacy" and exploration_mode != "goal_free":
             raise AquariumError("versioned local-cell requires goal_free exploration")
-        if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
-            raise AquariumError("sensory_mode must be none or toy_probe")
-        if sensory_mode == "toy_probe" and exploration_mode != "goal_free":
-            raise AquariumError("toy_probe requires goal_free exploration")
+        if type(sensory_mode) is not str or sensory_mode not in (
+                "none", "toy_probe", "toy_probe_v2"):
+            raise AquariumError("unsupported versioned sensory_mode")
+        if sensory_mode in ("toy_probe", "toy_probe_v2") and exploration_mode != "goal_free":
+            raise AquariumError("toy contact requires goal_free exploration")
+        if sensory_mode == "toy_probe_v2" and developmental_policy != "local_cell_v4":
+            raise AquariumError("toy_probe_v2 requires versioned local_cell_v4")
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("unused synthetic sensory scene")
-        if developmental_policy == "local_cell_v4" and sensory_mode != "none":
-            # Numeric toy association currently caps at 4000 measurements.
-            # Do not silently reinterpret its persisted model to cross epochs.
-            raise AquariumError("v4 epoch experiment requires sensory_mode=none; toy probe epoch schema pending")
+        if developmental_policy == "local_cell_v4" and sensory_mode == "toy_probe":
+            # Old association /1 caps at 4000; old journals cannot be reinterpreted.
+            raise AquariumError("v4 requires sensory_mode=none or toy_probe_v2")
         if (replay_snapshot_file is None) != (replay_snapshot_key_file is None):
             raise AquariumError("replay snapshot file and key file must be supplied together")
         self._snapshot_file = replay_snapshot_file
@@ -164,10 +173,15 @@ class Aquarium:
              else Explorer()) if exploration_mode == "goal_free" else None
         )
         self.sensory_bridge = None
-        if sensory_mode == "toy_probe":
+        if sensory_mode in ("toy_probe", "toy_probe_v2"):
             scene = ToyScene() if sensory_scene is None else sensory_scene
-            self.sensory_bridge = ToyContactBridge(
-                validate_scene(self.room, scene), motor_room=self.room,
+            verified_scene = validate_scene(self.room, scene)
+            bridge_type = (
+                ToyContactBridgeV2 if sensory_mode == "toy_probe_v2"
+                else ToyContactBridge
+            )
+            self.sensory_bridge = bridge_type(
+                verified_scene, motor_room=self.room,
             )
         self.tick = 0
         self.epoch_index = 0  # R0.15 only; original journal/checkpoint fields unchanged.
@@ -187,11 +201,19 @@ class Aquarium:
                 self.manifest["epoch_ticks"] = EPOCH_TICKS
                 self.manifest["proprioception_schema"] = EPOCH_SENSE_SCHEMA
         if self.sensory_bridge is not None:
-            self.manifest["sensory_mode"] = "toy_probe"
+            self.manifest["sensory_mode"] = sensory_mode
             self.manifest["sensory_schema"] = SENSE_SCHEMA
-            self.manifest["sensory_model_schema"] = MODEL_SCHEMA
+            self.manifest["sensory_model_schema"] = (
+                ASSOCIATION_V2_SCHEMA if sensory_mode == "toy_probe_v2"
+                else MODEL_SCHEMA
+            )
             self.manifest["sensory_scene"] = self.sensory_bridge.scene.manifest()
-            self.manifest["contact_bridge_schema"] = TOY_CONTACT_SCHEMA
+            self.manifest["contact_bridge_schema"] = (
+                TOY_CONTACT_V2_SCHEMA if sensory_mode == "toy_probe_v2"
+                else TOY_CONTACT_SCHEMA
+            )
+            if sensory_mode == "toy_probe_v2":
+                self.manifest["sensor_reprobe_period_ticks"] = TOY_CONTACT_V2_PERIOD
             # Pin visibility semantics in the bootstrap. Existing pre-mask
             # private journals must fail closed rather than silently replay
             # historical sensory frames under a different physical model.
@@ -530,7 +552,9 @@ class Aquarium:
                 raise SnapshotError("unexpected sensory model state")
             contact = None
         else:
-            contact = ContactAssociations.from_snapshot(state["toy_contact_state"])
+            contact = type(self.sensory_bridge.model).from_snapshot(
+                state["toy_contact_state"]
+            )
             if contact.updates > tick:
                 raise SnapshotError("sensory model has more measurements than ticks")
 
@@ -712,7 +736,8 @@ def main():
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
                         default="scripted")
-    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
+    parser.add_argument("--sensory-mode",
+                        choices=("none", "toy_probe", "toy_probe_v2"),
                         default="none")
     parser.add_argument("--developmental-policy",
                         choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
