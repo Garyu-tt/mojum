@@ -140,7 +140,8 @@ class NewTypedRoomCliTests(unittest.TestCase):
         source = json.loads(EXAMPLE.read_text(encoding="utf-8"))
         variants = {
             "dup": '{"schema":"evil",' + EXAMPLE.read_text(encoding="utf-8").lstrip()[1:],
-            "nan": EXAMPLE.read_text(encoding="utf-8").replace("4.5", "NaN"),
+            "nan": EXAMPLE.read_text(encoding="utf-8").replace(
+                '"type": "int", "value": 4', '"type": "int", "value": NaN'),
             "bad_version": json.dumps(dict(source, schema="unexpected-v2")),
             "bad_bool": json.dumps(dict(source, height={"type": "int", "value": True})),
             "missing": None,
