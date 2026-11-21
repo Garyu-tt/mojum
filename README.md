@@ -82,11 +82,18 @@ predictions can disagree across positions or rooms. Checkpoints report
 For a separate bounded long-run motor journal, use the new `local_cell_v4`
 policy. It carries an absolute logical tick and commits an explicit epoch
 marker at the 9,999-tick boundary; existing scripted, v2 and v3 journals are
-not reinterpreted. Use `sensory_mode=none` and repeat bounded batches:
+not reinterpreted. The default profile is sensorless; the versioned
+`toy_probe_v2` table can be composed with v4 for numeric near-field evidence.
+The legacy `toy_probe` table remains incompatible with v4. Use explicit
+selectors and repeat bounded batches:
 
 ```bash
 PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_PRIVATE.sqlite3 \
   --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+
+PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_sensory_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --sensory-mode toy_probe_v2 \
+  --neural-mode disabled
 ```
 
 For a wall-paced foreground session on the same one-device journal, use the
@@ -101,6 +108,10 @@ PYTHONPATH=src python -m mojum.portable_host \
 
 The host prints metadata only and admits the epoch marker in its event-budget
 preflight; repeat the bounded command to continue after a clean restart.
+
+For the versioned sensory profile, use `--sensory-mode toy_probe_v2` with the
+same `--temporal-mode none` selector. Its bootstrap pins the v4 and sensory v2
+contracts, and the wire inspector reports `local_cell_v4+toy_probe_v2`.
 
 The v4 path is still bounded by the 100,000-event local journal budget and the
 current checksum-only replay contract. It is not a neural brain, an
@@ -121,6 +132,16 @@ PYTHONPATH=src python -m mojum.portable_host --db ./host_PRIVATE.sqlite3 --ticks
 Repeat with the same path to resume. This is still a synthetic CPU fixture,
 not a neural brain, physical actuator, Android service, or 24/7 guarantee.
 See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
+
+The same host can pace the opt-in `local_cell_v4` policy. The sensorless
+profile uses the versioned epoch marker at tick 9,999 and accounts for those
+markers before writing so the 100,000-event bound is never crossed:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_host_PRIVATE.sqlite3 --ticks 20 --interval-ms 50 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none
+```
 
 For a separately versioned contact-association retention experiment, use a
 fresh journal with `--sensory-mode toy_probe_v2`. It keeps the original
@@ -202,6 +223,12 @@ report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
 formats even though the original CLIs used the same mode name. Keep each
 journal with the matching runtime for deterministic replay.
 
+`python -m mojum.aquarium_wire --list-policies` prints every distinct
+persisted identity (selectors, state schema, learning schema, intent source)
+without opening a journal. The list comes from `mojum.policy_identity`, which
+fails at import time if two identities claim the same selector set, public
+configuration, or schema so no future mode can silently impersonate another.
+
 ## Audit measured motor mobility
 
 A blocked-move count alone cannot show whether a developmental policy actually
@@ -244,6 +271,14 @@ To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
 observation matches, with zero evictions during the transfer.
+
+### Local Cell/3-escape (isolated, library-only)
+
+`mojum.cell_policy_v3_escape` is an opt-in profile that re-probes its own
+blocked evidence after a bounded pause instead of resting forever once every
+move in a cell was blocked (issue #106). It is **not** wired into the
+Aquarium manifest, CLI motor modes, SQLite wire format or existing journals.
+[Escape profile contract](docs/R014_LOCAL_CELL_REST_ESCAPE.md)
 
 ## Architecture and development
 

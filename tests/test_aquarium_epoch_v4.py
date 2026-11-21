@@ -187,18 +187,18 @@ class EpochJournalV4Tests(unittest.TestCase):
         with self.assertRaisesRegex(AquariumError, "contain only frames"):
             self.open()
 
-    def test_wire_rejects_v4_sensory_bootstrap_alias(self):
-        # The production runtime forbids sensory bridges for v4. A forged
-        # manifest must not rewrite its inspector policy ID or skip epoch gates.
+    def test_wire_rejects_v4_legacy_sensory_bootstrap_alias(self):
+        # The legacy /1 association cap is not a valid v4 continuation. The
+        # separately versioned /2 selector is exercised by sensory QA.
         from mojum.aquarium_wire import _stored_policy
 
         with self.open() as aquarium:
             manifest = deepcopy(aquarium.manifest)
-        for sensory in ("toy_probe", "toy_probe_v2"):
+        for sensory in ("toy_probe",):
             with self.subTest(sensory=sensory):
                 bogus = deepcopy(manifest)
                 bogus["sensory_mode"] = sensory
-                with self.assertRaisesRegex(NoosphereError, "require sensory_mode none"):
+                with self.assertRaisesRegex(NoosphereError, "none or toy_probe_v2"):
                     _stored_policy(bogus)
 
     def test_wire_pins_v4_absolute_tick_cap_in_bootstrap(self):

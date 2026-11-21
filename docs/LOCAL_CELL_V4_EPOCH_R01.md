@@ -12,12 +12,19 @@ the next frame replays the same half-step, without resetting the motor model or
 the world clock. The v4 policy keeps the v3-style bounded 512-cell retention
 contract and records eviction accounting under a new `/4` schema.
 
-Run it only with the built-in point room and `sensory_mode=none`:
+Run it with the built-in point room. The default profile is sensorless;
+`toy_probe_v2` is an explicit compatible numeric-sensory extension. The legacy
+`toy_probe` association/1 profile is rejected for v4.
 
 ```sh
 PYTHONPATH=src python -m mojum.aquarium \
   --db ./local_cell_v4_PRIVATE.sqlite3 \
   --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+
+PYTHONPATH=src python -m mojum.aquarium \
+  --db ./local_cell_v4_sensory_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --sensory-mode toy_probe_v2 \
+  --neural-mode disabled
 ```
 
 The existing bounded foreground host can pace the same profile on one CPU-only
@@ -29,6 +36,11 @@ PYTHONPATH=src python -m mojum.portable_host \
   --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none \
   --neural-mode disabled
 ```
+
+The versioned sensory profile uses `--sensory-mode toy_probe_v2` in the host
+command above; `--temporal-mode none` remains mandatory. Its bootstrap pins the
+v4 epoch ABI together with sensory association/2 and toy-contact/2, and the
+read-only wire inspector reports `local_cell_v4+toy_probe_v2`.
 
 Its stdout is metadata-only; it preflights frame plus epoch-marker admissions
 and leaves the PRIVATE SQLite journal as the only state owner.
