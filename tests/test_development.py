@@ -63,6 +63,21 @@ class DevelopmentClockTests(unittest.TestCase):
         self.assertEqual(observed["elapsed_virtual_years_milli"], 2_500)
         self.assertEqual(observed["learning_events"], 3)
 
+    def test_already_mature_at_initial_tick_stays_mature_without_age_decay(self):
+        policy = default_policy()
+        policy.update(start_age_milli=16_000, maturity_age_milli=16_000)
+        before = project(initial_state(), policy)
+        self.assertTrue(before["maturity_reached"])
+        self.assertEqual(before["development_age_milli"], 16_000)
+        self.assertEqual(before["elapsed_virtual_years_milli"], 0)
+        later = advance(initial_state(), elapsed_ticks=100_000, development_ticks=0, learning_events=42)
+        after = project(later, policy)
+        self.assertEqual(after["development_age_milli"], 16_000)
+        self.assertTrue(after["maturity_reached"])
+        self.assertEqual(after["learning_events"], 42)
+        self.assertFalse(after["senescence_enabled"])
+        self.assertFalse(after["age_related_death_enabled"])
+
     def test_learning_counter_does_not_force_growth_or_age(self):
         state = advance(initial_state(), elapsed_ticks=0, development_ticks=0, learning_events=500)
         observed = project(state)
