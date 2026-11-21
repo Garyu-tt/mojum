@@ -183,6 +183,8 @@
       let state = C.clone(C.DEFAULT), selected = 0, lastValid = null;
       let history = H.create(state), pointer = null;
       let walkState = null, walkSource = null;
+      // A delayed file.text() must not overwrite a more recent edit or import.
+      let importGeneration = 0;
 
       function message(text, isError = false) {
         $("status").textContent = text;
@@ -337,6 +339,7 @@
         $("redo").disabled = !valid || !H.canRedo(history);
       }
       function render(track = true) {
+        importGeneration += 1;
         const valid=updateStatus();
         if(valid){
           if(track) history=H.record(history,state);
@@ -482,17 +485,21 @@
       });
       $("import-file").addEventListener("change",async e=>{
         const file=e.target.files && e.target.files[0];
+        // Clear before the async read, allowing the same file to be picked
+        // again without clearing another selection after its read begins.
+        const generation=++importGeneration;
+        e.target.value="";
         if(!file)return;
         try{
           if(file.size>1_048_576) throw new Error("JSON-файл больше 1 МБ");
-          const recovered=C.fromDraftJSON(await file.text());
+          const contents=await file.text();
+          if(generation!==importGeneration)return;
+          const recovered=C.fromDraftJSON(contents);
           state=recovered;
           choose(state.obstacles.length?0:-1);
           message("Комната загружена локально. SQLite не затронут.");
         }catch(err){
-          message("Импорт отклонён: "+err.message,true);
-        }finally{
-          e.target.value="";
+          if(generation===importGeneration)message("Импорт отклонён: "+err.message,true);
         }
       });
       $("copy").addEventListener("click",async()=>{
