@@ -46,6 +46,10 @@ trace or unredacted checkpoint. Use a separate file from the old scripted mode.
 7. Regression for hidden spectator toy names: names may affect provenance in
    the experiment's private bootstrap, **not** near-field sensory values,
    measured contact or acquired evidence.
+8. Canonical motor-room wall obstacles hide toys behind a **2D center-ray**
+   occlusion mask: no hidden object's numeric RGB/range or virtual probe
+   should leak through an impassable wall; the next unoccluded toy can still
+   be observed and the mask's version is pinned in PRIVATE bootstrap metadata.
 
 ## Interpretation and negative controls
 
@@ -58,6 +62,15 @@ different hidden material response, negative transfer can be **worse** than a
 simple numeric prior. `python -m mojum.sensory_benchmark` prints explicit
 frozen and held-out synthetic counterfactuals, including absence of a
 prediction for truly unseen cues.
+
+The occlusion mask is a deliberately simple **line from observer to
+toy center**, not calibrated optics, object silhouette tracing, reflection,
+depth mapping or actual collision/contact. The opt-in toy-probe journal now
+pins `occlusion_schema=mojum.sensor.center-ray-wall-mask/1`. Earlier
+experimental toy-probe SQLite journals without that contract intentionally
+fail to reopen under the revised sensor; use a separate database path rather
+than silently reinterpreting previously committed experience. The historical
+default scripted journal schema is unchanged.
 
 The `brain.placeholder` remains `UNIMPLEMENTED`; no camera perception,
 MuJoCo calibrated physical body, real motor or tactile actuation, emotion,
