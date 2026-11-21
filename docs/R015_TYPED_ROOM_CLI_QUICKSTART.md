@@ -24,7 +24,7 @@ PYTHONPATH=src python -m mojum.aquarium \
 
 The command returns a JSON checkpoint including `journal_head`. Record that expected head **outside** the SQLite file; reading a hash only from a compromised database cannot authenticate its contents.
 
-This new-room operation refuses an existing SQLite destination **before** opening it. It does not silently adopt or alter preexisting Noosphere history, never converts an existing `bootstrap/1` journal, and never infers an old v2A policy from a textual alias. The explicit check is a safety guard, **not** a full multi-process exclusive-create guarantee: do not point it at a live, shared destination or untrusted directory.
+This new-room operation refuses an existing SQLite destination **before** opening it. It also reserves the new filename with `O_CREAT|O_EXCL` (`O_NOFOLLOW` when supported), so two concurrent cooperating creators cannot both create the same journal or truncate an existing file. A crash **after exclusive reservation but before SQLite bootstrap** may leave an empty file: the CLI deliberately refuses to reuse or automatically delete that possibly owned stub. Inspect it explicitly before choosing a different fresh path. This is **not a distributed lock** for subsequent writes; do not point it at a live, shared directory or untrusted filesystem. No historical Noosphere `bootstrap/1` journal is converted or silently adopted.
 
 ## 2. Inspect/reopen the same room with zero new writes
 
@@ -51,6 +51,6 @@ To continue for exactly N steps, supply `--ticks N` **and the current independen
 
 ## Acceptance tests
 
-Dedicated CPython 3.11, 3.12, 3.13 workflow uses separate subprocesses and real disposable PRIVATE SQLite journals. It checks successful exact-geometry new-room creation and original-number-type manifest, journal event counts, cold read-only zero-tick reopen without the file, explicit continuation with a new head, invalid/ambiguous/oversized JSON fail-closed with no destination file, refusal of existing DB/legacy option/conflicting resume, and empty-frame room creation. Full inherited regression workflows stay required.
+Dedicated CPython 3.11, 3.12, 3.13 workflow uses separate subprocesses and real disposable PRIVATE SQLite journals. It checks successful exact-geometry new-room creation and original-number-type manifest, journal event counts, cold read-only zero-tick reopen without the file, explicit continuation with a new head, invalid/ambiguous/oversized JSON fail-closed with no destination file, refusal of existing DB/legacy option/conflicting resume, and empty-frame room creation. It also starts two simultaneous CLI creators of the same target and confirms **exactly one succeeds**, checks final row count, and asserts input/output symlinks never lead to overwriting unrelated private data. Full inherited regression workflows stay required.
 
 All this remains an isolated **Draft**. Independent review and release approval are required; neither this CLI nor green synthetic tests resolve [#116](https://github.com/Garyu-tt/mojum/issues/116) (old v2A/v2B wire ABI collision). Never run real private agent data through an unreviewed experimental PR.
