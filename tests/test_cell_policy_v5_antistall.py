@@ -389,6 +389,8 @@ class TranscriptSummaryTests(unittest.TestCase):
 
     def test_summary_rejects_malformed_rows(self):
         for bad in (
+            123,
+            [123],
             [("x+", {"measured_blocked": False})],
             [({"action": "up"}, {"measured_blocked": False})],
             [({"action": "x+"}, {"measured_blocked": 1})],
