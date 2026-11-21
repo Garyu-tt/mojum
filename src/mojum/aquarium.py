@@ -25,6 +25,7 @@ from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
+from .cell_policy_v3 import CellExplorerV3, SCHEMA as V3_SCHEMA
 from .local_cell_sense import Proprioception
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
@@ -48,7 +49,8 @@ MAX_REPLAY_EVENTS = 10_000
 V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
-MOTOR_MODES = ("scripted", "developmental_fixture", V2B_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE)
+V3_MODE = "local_cell_v3"
+MOTOR_MODES = ("scripted", "developmental_fixture", V2B_MODE, V3_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE)
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
     "world.room", "brain.placeholder", "memory.episode",
@@ -119,7 +121,7 @@ class Aquarium:
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow", motor_mode="scripted", pulse_sum="auto",
-        sensory_mode="none", sensory_scene=None, temporal_mode="none",
+        sensory_mode="none", sensory_scene=None, temporal_mode="none", read_only=False,
         brain_mode="placeholder",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
@@ -137,8 +139,11 @@ class Aquarium:
         legacy_v2b = motor_mode == V2B_WIRE_MODE
         if legacy_v2b:
             motor_mode = V2B_MODE
-        self._read_only_archive = motor_mode == V2A_ARCHIVE_MODE
-        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE)
+        if type(read_only) is not bool:
+            raise AquariumError("read_only must be boolean")
+        self._archive_v2a = motor_mode == V2A_ARCHIVE_MODE
+        self._read_only = self._archive_v2a or read_only
+        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE)
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
@@ -205,12 +210,13 @@ class Aquarium:
         # Do not modify the legacy scripted bootstrap for existing journals.
         if self._local_cell:
             self.manifest["exploration_mode"] = "goal_free"
-            self.manifest["developmental_schema"] = V2A_SCHEMA if self._read_only_archive else V2B_SCHEMA
-            if self._read_only_archive:
+            if self._archive_v2a:
+                self.manifest["developmental_schema"] = V2A_SCHEMA
                 self.manifest["motor_policy"] = "local_cell_v2"
                 self.manifest["motor_policy_schema"] = V2A_SCHEMA
             else:
-                self.manifest["developmental_policy"] = V2B_WIRE_MODE
+                self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
+                self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE
         elif self.motor is not None:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
@@ -246,12 +252,12 @@ class Aquarium:
         elif external_expected_head is not None:
             raise AquariumError(
                 "expected head requires an existing journal; refusing to create a new one")
-        elif self._read_only_archive or legacy_v2b:
+        elif self._read_only or legacy_v2b:
             raise AquariumError("this motor selector requires an existing journal")
-        self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only_archive)
+        self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only)
         try:
             if self.store.count() == 0:
-                if self._read_only_archive or legacy_v2b:
+                if self._read_only or legacy_v2b:
                     raise AquariumError("this motor selector requires an existing journal")
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head, detect_sum=pulse_sum == "auto" and self.learner is not None)
@@ -268,8 +274,10 @@ class Aquarium:
         self.motor = None
         if self.motor_mode == "developmental_fixture":
             self.motor = MotorPlay()
-        elif self._read_only_archive:
+        elif self._archive_v2a:
             self.motor = ArchivedV2AExplorer()
+        elif self.motor_mode == V3_MODE:
+            self.motor = CellExplorerV3()
         elif self._local_cell:
             self.motor = CellExplorer()
         self.brain = DevelopmentalBrain() if self.brain_mode == "developmental_controller" else None
@@ -300,8 +308,8 @@ class Aquarium:
         }
 
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
-        if self._read_only_archive:
-            raise AquariumError("v2A archive is read-only")
+        if self._read_only:
+            raise AquariumError("Aquarium journal is read-only")
         if self._local_cell and topic not in {"aquarium.bootstrap", "aquarium.frame"}:
             raise AquariumError("local-cell compatibility journals contain only frames")
         if self.store.count() >= MAX_REPLAY_EVENTS:
@@ -498,8 +506,8 @@ class Aquarium:
         return copy.deepcopy(self.identity)
 
     def step(self, *, dx=None, dy=None):
-        if self._read_only_archive:
-            raise AquariumError("v2A archive is read-only")
+        if self._read_only:
+            raise AquariumError("Aquarium journal is read-only")
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
