@@ -111,6 +111,12 @@ mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 
 Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. The `mojum-aquarium` entry point also accepts `--motor-mode developmental_fixture`. [Offline install instructions](docs/LOCAL_INSTALL_R01.md)
 
+Modern offline traces require the complete replay/export status and SHA-256
+metadata. The viewer rejects stripped modern metadata and blank inserted
+JSONL lines. A genuinely historical trace with no modern footer markers
+requires an explicit unchecked-by-default legacy checkbox and is clearly
+labelled unverified; its contents are not authenticated.
+
 ## Identify a journal's stored policy
 
 ```bash
