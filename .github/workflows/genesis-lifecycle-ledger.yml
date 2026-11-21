@@ -1,0 +1,48 @@
+name: GENESIS opt-in lifecycle ledger + canonical API compatibility
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/genesis-lifecycle-ledger.yml"
+      - "src/mojum/lifecycle_ledger.py"
+      - "tests/test_lifecycle_ledger.py"
+      - "tests/test_lifecycle_adversarial_qa.py"
+      - "tests/test_lifecycle_independent_qa.py"
+      - "src/mojum/lifecycle.py"
+      - "tests/test_lifecycle.py"
+      - "src/mojum/development.py"
+      - "tests/test_development.py"
+      - "docs/GENESIS_LIFECYCLE_R01.md"
+      - "examples/lifecycle_demo.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-and-main-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Main API must coexist with isolated opt-in ledger
+        run: |
+          set -euo pipefail
+          test -f src/mojum/lifecycle.py
+          test -f src/mojum/development.py
+          test -f src/mojum/lifecycle_ledger.py
+          test -f tests/test_lifecycle.py
+          test -f tests/test_lifecycle_ledger.py
+          export PYTHONPATH=src
+          python -m unittest discover -s tests -p 'test_lifecycle*.py' -v
+          python -m unittest discover -s tests -p 'test_development.py' -v
+          python examples/lifecycle_demo.py
