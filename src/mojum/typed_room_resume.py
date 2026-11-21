@@ -7,6 +7,7 @@ Aquarium restore must reverify the same independent head to avoid TOCTOU.
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 from .noosphere import LocalNoosphere, NoosphereError
 from .room_contract import RoomContractError, decode_room_exact
@@ -63,7 +64,7 @@ def load_verified_typed_room(
                     or database.head() != expected_journal_head):
                 raise TypedRoomResumeError(
                     "journal advanced after read-only typed-room audit")
-    except NoosphereError as exc:
+    except (NoosphereError, sqlite3.Error, OSError) as exc:
         raise TypedRoomResumeError(
             "typed-room source owner/hash-chain verification failed") from exc
     except RoomContractError as exc:
