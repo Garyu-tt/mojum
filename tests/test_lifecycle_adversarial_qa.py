@@ -66,6 +66,22 @@ class LifecycleAdversarialQATests(unittest.TestCase):
         self.assertEqual(clock.region("cerebellum")["learning_progress"], 4)
         self.assertEqual(Lifecycle.from_snapshot(clock.snapshot()).tick, MAX_TICKS)
 
+    def test_region_with_births_disabled_can_mature_initial_cohort(self):
+        configured = profile()
+        configured["regions"]["cerebellum"]["birth_per_evidence"] = 0
+        clock = Lifecycle(configured)
+        clock.experience("cerebellum", development_units=1, expected_revision=clock.revision)
+        self.assertFalse(clock.region("cerebellum")["structurally_mature"])
+
+        clock.experience("cerebellum", development_units=1, expected_revision=clock.revision)
+        baseline = clock.region("cerebellum")
+        self.assertEqual(baseline["immature_neurons"], 0)
+        self.assertEqual(baseline["newborn_created"], 0)
+        self.assertTrue(baseline["structurally_mature"])
+
+        clock.advance(MAX_TICKS, expected_revision=clock.revision)
+        self.assertEqual(Lifecycle.from_snapshot(clock.snapshot()).region("cerebellum"), baseline)
+
     def test_overflow_rejection_keeps_original_revision_and_other_gate(self):
         clock = Lifecycle(profile())
         clock.experience("cortex", learning_units=MAX_UNITS,
@@ -89,6 +105,22 @@ class LifecycleAdversarialQATests(unittest.TestCase):
         snapshot["revision"] = _hash({"profile": snapshot["profile"], "events": snapshot["events"]})
         with self.assertRaises(LifecycleError):
             Lifecycle.from_snapshot(snapshot)
+
+    def test_original_checksum_cannot_hide_non_integer_tick_metadata(self):
+        for tick, invalid_values in ((0, (False, 0.0)), (1, (True, 1.0))):
+            clock = Lifecycle(profile())
+            if tick:
+                clock.advance(tick, expected_revision=clock.revision)
+            clock.experience("cortex", learning_units=1, expected_revision=clock.revision)
+            original = clock.snapshot()
+            self.assertEqual(Lifecycle.from_snapshot(original).snapshot(), original)
+
+            for invalid in invalid_values:
+                snapshot = copy.deepcopy(original)
+                snapshot["events"][-1]["at_tick"] = invalid
+                with self.subTest(tick=tick, invalid=invalid):
+                    with self.assertRaisesRegex(LifecycleError, "experience tick"):
+                        Lifecycle.from_snapshot(snapshot)
 
     def test_replay_with_interleaved_regions_preserves_exact_state(self):
         clock = Lifecycle(profile())
