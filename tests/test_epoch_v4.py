@@ -135,6 +135,37 @@ class EpochJournalTests(unittest.TestCase):
         self.assertEqual(report["frames"], 1)
         self.assertEqual(report["epoch_markers"], 0)
 
+    def test_wire_inspector_rejects_frame_after_epoch_without_marker(self):
+        """Even a rehashed wire stream must not omit the durable boundary."""
+        from mojum.noosphere import NoosphereError
+
+        with self.open() as q:
+            owner, manifest = q.agent_id, deepcopy(q.manifest)
+
+        def fake_verify(_db, _owner, *, inspect_event, **_kwargs):
+            envelope = {
+                "source": "mojum.aquarium.fixture",
+                "visibility": "PRIVATE",
+                "agent_id": owner,
+            }
+            inspect_event(1, dict(
+                envelope, topic="aquarium.bootstrap",
+                event_id="aquarium-bootstrap", payload=manifest,
+            ))
+            for tick in range(EPOCH_TICKS + 1):
+                inspect_event(tick + 2, dict(
+                    envelope, topic="aquarium.frame",
+                    event_id=f"frame-{tick:012d}", payload={"tick": tick},
+                ))
+            return {"count": EPOCH_TICKS + 2, "head": "0" * 64}
+
+        # Isolate the marker state machine; actual frame payload and SHA-chain
+        # integrity are tested by the separate real-SQLite cold-replay case.
+        with patch("mojum.aquarium_wire._verify_chain", side_effect=fake_verify), \
+             patch("mojum.aquarium_wire._check_policy_frame"):
+            with self.assertRaisesRegex(NoosphereError, "missing durable epoch"):
+                inspect_journal(self.db)
+
     def test_paced_host_accepts_v4_without_toy_sensor(self):
         now = [0.0]
 
