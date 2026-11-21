@@ -142,7 +142,13 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     Object.freeze(["mojum.developmental.local-cell/3",
                    "mojum.developmental.local-cell.outcome/3",
                    "local_cell_v3B · ограниченная память"]),
+    Object.freeze(["mojum.developmental.local-cell/4",
+                   "mojum.developmental.local-cell.outcome/4",
+                   "local_cell_v4 · эпохи 9999"]),
   ]);
+  const EPOCH_TICKS = 9999, MAX_ABSOLUTE_TICKS = 99999;
+  const V4 = "mojum.developmental.local-cell/4";
+  const EPOCH_EVENT_SCHEMA = "mojum.aquarium.epoch-transition/1";
   function policySchema(frame) {
     if (frame.developmental === undefined) return "scripted";
     const dev = frame.developmental;
@@ -154,6 +160,23 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     if (!dev.learning || typeof dev.learning !== "object" ||
         Array.isArray(dev.learning) || dev.learning.schema !== contract[1])
       throw new Error("Схема обучения не совпадает с моторной политикой");
+    if (dev.schema === V4) {
+      const observation = dev.observation, intent = dev.intent, learned = dev.learning;
+      const t = frame.tick, index = Math.floor(t / EPOCH_TICKS);
+      const offset = t % EPOCH_TICKS;
+      if (!Number.isSafeInteger(t) || t < 0 || t >= MAX_ABSOLUTE_TICKS ||
+          !observation || typeof observation !== "object" || Array.isArray(observation) ||
+          observation.schema !== "mojum.developmental.proprioception/2" ||
+          observation.absolute_tick !== t || observation.epoch_index !== index ||
+          observation.epoch_tick !== offset ||
+          observation.heartbeat_pulse !== frame.interoception.heartbeat.pulse ||
+          !intent || typeof intent !== "object" || Array.isArray(intent) ||
+          intent.tick !== t || intent.epoch_index !== index ||
+          intent.epoch_tick !== offset ||
+          learned.epoch_index !== index || learned.epoch_tick !== offset ||
+          learned.total_updates !== t + 1)
+        throw new Error("Неверный абсолютный такт или эпоха v4");
+    }
     return dev.schema;
   }
   function policyLabel(frame) {
@@ -195,7 +218,8 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
         throw new Error("Неверная структура строки " + (i+1));
       }
       if (footer !== null) throw new Error("Лишние данные после checkpoint");
-      if (value.schema === "mojum.aquarium.checkpoint/1") {
+      if (value.schema === "mojum.aquarium.checkpoint/1" ||
+          value.schema === "mojum.aquarium.checkpoint/2") {
         if (!Number.isSafeInteger(value.stored_events) ||
             value.stored_events < accepted.length + 1) {
           throw new Error("Некорректный checkpoint");
@@ -236,6 +260,37 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
         footer.policy_schema !== recordingPolicy)
       throw new Error("Политика checkpoint не совпадает с кадрами");
     const first = accepted[0].tick, next = accepted[accepted.length-1].tick + 1;
+    if (recordingPolicy === V4) {
+      // The epoch marker is a separate durable SQLite event, not a frame.
+      // The QA serializer must attest its verified presence in this segment's
+      // footer metadata. In-file SHA is still not independent authentication.
+      if (footer.schema !== "mojum.aquarium.checkpoint/2" ||
+          footer.policy_schema !== V4 ||
+          !Array.isArray(footer.epoch_boundaries) ||
+          !Number.isSafeInteger(footer.tick) ||
+          footer.tick < next || footer.tick > MAX_ABSOLUTE_TICKS ||
+          !Number.isSafeInteger(footer.epoch_index) ||
+          !Number.isSafeInteger(footer.epoch_tick) ||
+          !footer.trace_range || !footer.trace_integrity ||
+          footer.epoch_index !== Math.floor(footer.tick / EPOCH_TICKS) ||
+          footer.epoch_tick !== footer.tick % EPOCH_TICKS ||
+          footer.trace_range.source_total_ticks !== footer.tick)
+        throw new Error("Нет проверенного checkpoint/2 и сведений эпохи v4");
+      const boundaries = [];
+      for (let t = first; t < next; t++) {
+        if (t > 0 && t % EPOCH_TICKS === 0) boundaries.push(t);
+      }
+      if (footer.epoch_boundaries.length !== boundaries.length ||
+          footer.epoch_boundaries.some((marker, i) =>
+            !marker || typeof marker !== "object" || Array.isArray(marker) ||
+            Object.keys(marker).length !== 3 ||
+            marker.schema !== EPOCH_EVENT_SCHEMA ||
+            marker.absolute_tick !== boundaries[i] ||
+            marker.epoch_index !== Math.floor(boundaries[i] / EPOCH_TICKS)))
+        throw new Error("Отсутствует маркер перехода эпохи");
+    } else if (footer.schema !== "mojum.aquarium.checkpoint/1") {
+      throw new Error("Неверная версия завершающего checkpoint");
+    }
     const range = footer.trace_range;
     if (range !== undefined) {
       if (!range || !Number.isSafeInteger(range.start_tick) ||
@@ -329,7 +384,11 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     const learning=dev.learning || f.learning_observer || {};
     $("seek").value = String(current);
     setField("counter",String(current+1)+" / "+frames.length);
-    setField("tick",String(f.tick));
+    const epochObs=devObs.schema==="mojum.developmental.proprioception/2"
+      ?devObs:null;
+    setField("tick",epochObs
+      ?String(f.tick)+" · эпоха "+epochObs.epoch_index+":"+epochObs.epoch_tick
+      :String(f.tick));
     setField("position",f.world.position.map(fmt).join(" · "));
     setField("pulse",heart.pulse?"Импульс ●":"Между ударами");
     const action=(dev.intent && dev.intent.action) ||
