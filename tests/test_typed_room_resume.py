@@ -14,7 +14,8 @@ import sys
 import tempfile
 import unittest
 
-from mojum.aquarium import Aquarium
+from mojum.aquarium import Aquarium, AquariumError
+from mojum.noosphere import NoosphereError
 from mojum.typed_room_resume import (
     TypedRoomResumeError, load_verified_typed_room,
 )
@@ -82,6 +83,26 @@ class AnchoredTypedRoomResumeTests(unittest.TestCase):
                 room_numeric_contract="typed_v1") as reopened:
             self.assertEqual(reopened.checkpoint(), checkpoint)
             self.assertEqual(reopened.store.count(), count)
+        with Aquarium(
+                self.db, SEED, GRAPH, room=room, start=start,
+                external_expected_head=head,
+                exploration_mode="goal_free", developmental_policy="local_cell_v2",
+                room_numeric_contract="typed_v1",
+                read_only_existing=True) as inspect_only:
+            self.assertEqual(inspect_only.checkpoint(), checkpoint)
+            self.assertEqual(
+                inspect_only.store._db.execute("PRAGMA query_only").fetchone()[0], 1)
+            with self.assertRaisesRegex(AquariumError, "strictly read-only"):
+                inspect_only.step()
+            with self.assertRaisesRegex(AquariumError, "strictly read-only"):
+                inspect_only.acquire({"event_id": "malicious"})
+            with self.assertRaisesRegex(AquariumError, "cannot create a replay"):
+                inspect_only.save_replay_snapshot()
+            with self.assertRaisesRegex(NoosphereError, "read-only"):
+                inspect_only.store.append({}, expected_head=head)
+        self.assertEqual(
+            load_verified_typed_room(
+                self.db, agent_id=OWNER, expected_journal_head=head)[1], start)
 
     def test_cli_resumes_nondefault_geometry_without_appending_by_default(self):
         head, count, original = self.create_original()
@@ -127,6 +148,33 @@ class AnchoredTypedRoomResumeTests(unittest.TestCase):
                 db.execute("SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()[0],
                 head,
             )
+
+    def test_read_only_existing_requires_head_and_does_not_birth(self):
+        missing = self.root / "new.sqlite3"
+        with self.assertRaisesRegex(AquariumError, "must already exist"):
+            Aquarium(
+                missing, SEED, GRAPH, exploration_mode="goal_free",
+                developmental_policy="local_cell_v2",
+                room_numeric_contract="typed_v1",
+                external_expected_head="f" * 64,
+                read_only_existing=True)
+        self.assertFalse(missing.exists())
+        head, _, _ = self.create_original()
+        with self.assertRaisesRegex(AquariumError, "independently supplied"):
+            Aquarium(
+                self.db, SEED, GRAPH, room=ROOM, start=START,
+                exploration_mode="goal_free",
+                developmental_policy="local_cell_v2",
+                room_numeric_contract="typed_v1",
+                read_only_existing=True)
+        with self.assertRaisesRegex(AquariumError, "exact typed_v1"):
+            Aquarium(
+                self.db, SEED, GRAPH, room=ROOM, start=START,
+                exploration_mode="goal_free",
+                developmental_policy="local_cell_v2",
+                room_numeric_contract="legacy",
+                external_expected_head=head,
+                read_only_existing=True)
 
     def test_nonexistent_database_and_legacy_bootstrap_reject(self):
         nonexistent = self.root / "absent.sqlite3"
