@@ -89,7 +89,7 @@ same mode flags as the recording. Add `--expected-head SHA256` when verifying
 against a separately recorded journal head. For longer histories, add
 `--start-tick` and `--frame-limit` together to export a particular segment.
 Use a new output filename in a directory with private access. The JSONL is
-plaintext and its checksum detects accidental corruption.
+plaintext and its checksum detects accidental corruption. The viewer rejects traces\nwithout verifiable SHA-256 metadata by default. For genuinely old exports,\nexplicitly enable the unverified legacy checkbox; stripped modern exports\nremain rejected even with this opt-in.
 
 Run regression tests (Python 3.11–3.13 are the CI target):
 
