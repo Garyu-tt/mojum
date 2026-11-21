@@ -1,0 +1,67 @@
+name: Mojum R0.16 native PRIVATE v4 epoch export and Chrome QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r016-native-epoch-export.yml"
+      - "src/mojum/aquarium_trace_export.py"
+      - "tests/test_r016_private_trace_export.py"
+      - "tests/qa_r016_epoch_export_browser.py"
+  push:
+    paths:
+      - ".github/workflows/r016-native-epoch-export.yml"
+      - "src/mojum/aquarium_trace_export.py"
+      - "tests/test_r016_private_trace_export.py"
+      - "tests/qa_r016_epoch_export_browser.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-native-export:
+    name: native-export (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: PRIVATE SQLite export, strict head and no-clobber regression
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_r016_private_trace_export.py -v
+
+  original-v4-epoch-sensory-to-chrome:
+    name: native-v4-sensory2-real-chrome
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout new segmented native exporter
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable review-only v4 viewer
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 7752f510327f2a909d9bceb8caaa661358e0622e
+          path: viewer-qa
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Require real Google Chrome, never JS mock
+        run: command -v google-chrome-stable
+      - name: Real 10k PRIVATE segmented v4 and sensory v2 + native replay export + Chrome
+        env:
+          PYTHONPATH: src
+          PYTHONTRACEMALLOC: 1
+        run: python tests/qa_r016_epoch_export_browser.py viewer-qa
