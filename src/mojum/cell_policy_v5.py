@@ -309,6 +309,14 @@ def summarize_transcript(transcript):
         forced = intent.get("forced_probe", False)
         if type(forced) is not bool:
             raise CellV5Error("malformed forced-probe marker")
+        # A transcript records what the policy actually observed, not merely
+        # what an intent claims happened. Never count mismatched evidence.
+        if (outcome.get("action") != action
+                or type(outcome.get("forced_probe")) is not bool
+                or outcome["forced_probe"] is not forced):
+            raise CellV5Error("transcript intent/outcome provenance mismatch")
+        if forced and action == "rest":
+            raise CellV5Error("rest cannot be a forced movement probe")
         zone = intent.get("zone")
         if zone is not None:
             if type(zone) is not str or _ZONE.fullmatch(zone) is None:
