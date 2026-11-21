@@ -335,6 +335,28 @@ class RetentionTests(unittest.TestCase):
             model.snapshot(),
         )
 
+    def test_snapshot_rest_streak_requires_four_measured_blocks(self):
+        # A forged first-tick rest was previously accepted because it had a
+        # matching rest counter, despite no blocked movement observations.
+        forged = CellExplorerV5().snapshot()
+        forged.update({
+            "last_tick": 0, "updates": 1, "rest_streak": 1,
+            "records": {"0:0": {"rest": [1, 0]}},
+            "last_seen_at": {"0:0": 0},
+        })
+        with self.assertRaisesRegex(CellV5Error, "rest streak without four blocked"):
+            CellExplorerV5.from_snapshot(forged)
+
+        # The real three-rest prefix after four measured blocked directions
+        # still restores byte-identically.
+        model = CellExplorerV5()
+        drive(model, 7)
+        self.assertEqual(model.rest_streak, MAX_REST_STREAK)
+        self.assertEqual(
+            CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+
     def test_snapshot_rejects_impossible_forced_probe_history(self):
         # One forced re-probe requires four measured blocked directions,
         # then three rests. It cannot occur before tick 7 (8 updates).
