@@ -143,6 +143,18 @@ class CellExplorerV5:
             raise CellV5Error("unobserved stored cells")
         if state["rest_streak"] and state["updates"] == 0:
             raise CellV5Error("rest streak without observations")
+        if state["updates"] and not state["records"]:
+            raise CellV5Error("learned observations without a retained cell")
+        # Exactly one cell is measured on each absolute tick. Retained
+        # last-seen stamps must be distinct, and the latest is the current tick.
+        stamps = list(state["last_seen_at"].values())
+        if len(set(stamps)) != len(stamps):
+            raise CellV5Error("multiple v5 cells observed on one tick")
+        if state["updates"] and max(stamps) != state["last_tick"]:
+            raise CellV5Error("latest v5 cell observation does not match tick")
+        # Each eviction requires 512 prior retained distinct cells.
+        if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
+            raise CellV5Error("impossible v5 eviction history")
 
         model = cls()
         model.last_tick = state["last_tick"]
