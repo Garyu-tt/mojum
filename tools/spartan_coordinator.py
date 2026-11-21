@@ -68,16 +68,16 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
         if task_id in seen:
             raise ValueError("duplicate id in batch")
         seen.add(task_id)
-        if not isinstance(item.get("priority", 0), int):
+        if type(item.get("priority", 0)) is not int:
             raise ValueError("priority must be an integer")
-        if len(json.dumps(item.get("payload", {}))) > 8192:
+        if len(json.dumps(item.get("payload", {}), allow_nan=False)) > 8192:
             raise ValueError("payload is too large")
     db.execute("BEGIN IMMEDIATE")
     try:
         before = db.total_changes
         for item in items:
             priority = item.get("priority", 0)
-            payload = json.dumps(item.get("payload", {}), sort_keys=True)
+            payload = json.dumps(item.get("payload", {}), sort_keys=True, allow_nan=False)
             inserted = db.execute(
                 "INSERT OR IGNORE INTO tasks(id, scope, priority, payload, updated_at) "
                 "VALUES(?, ?, ?, ?, ?)",
