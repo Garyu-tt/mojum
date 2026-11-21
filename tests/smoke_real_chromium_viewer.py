@@ -9,6 +9,7 @@ requests, remote secrets, production databases, or external service calls.
 from __future__ import annotations
 
 from html.parser import HTMLParser
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -51,10 +52,11 @@ def chrome_binary():
     raise RuntimeError("Google Chrome/Chromium not installed; cannot claim browser smoke")
 
 
-def instrumented_html(original_html, source_text):
+def instrumented_html(original_html, source_text, *, expected_rejection=None):
     # Only a *test-owned, synthetic* local SQLite history is placed here.
     # Escaping '<' prevents any accidental closing of the inline script.
     literal = json.dumps(source_text, ensure_ascii=True).replace("<", "\\u003c")
+    rejection = json.dumps(expected_rejection, ensure_ascii=True).replace("<", "\\u003c")
     boot = r"""
 <script>
 window.addEventListener("load", async () => {
@@ -67,6 +69,22 @@ window.addEventListener("load", async () => {
       configurable: true, value: [file]
     });
     picker.dispatchEvent(new Event("change", {bubbles:true}));
+    const rejection = __REJECTION__;
+    if (rejection !== null) {
+      for (let retry=0;retry<100;retry++) {
+        if (el("status").textContent.includes(rejection)) {
+          document.documentElement.dataset.realChromeSmoke = JSON.stringify({
+            rejected: true,
+            reason: el("status").textContent,
+            controls_disabled: ["prev","play","next"].every(id => el(id).disabled),
+            displayed_policy: el("policy").textContent
+          });
+          return;
+        }
+        await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      throw Error("mixed-policy trace was not explicitly rejected");
+    }
     let loaded = false;
     for (let retry=0;retry<100;retry++) {
       if (el("tick").textContent === "0") {loaded=true;break;}
@@ -79,7 +97,8 @@ window.addEventListener("load", async () => {
       probe: el("probe").textContent,
       measured: el("deflection").textContent,
       prediction: el("prediction").textContent,
-      brain: el("brain").textContent
+      brain: el("brain").textContent,
+      policy: el("policy").textContent
     };
     const canvas=el("room").getBoundingClientRect();
     const viewport={
@@ -106,7 +125,7 @@ window.addEventListener("load", async () => {
   }
 });
 </script>
-""".replace("__TRACE__", literal)
+""".replace("__TRACE__", literal).replace("__REJECTION__", rejection)
     if original_html.count("</body>") != 1:
         raise AssertionError("viewer page missing unique body end")
     return original_html.replace("</body>", boot + "\n</body>")
@@ -258,73 +277,113 @@ def inspect_actual_mobile_chromedriver(chrome, html, *, width, height):
 
 def main():
     chrome = chrome_binary()  # No silent skip/fallback to JS VM.
+    reports = []
+    source_by_policy = {}
     with tempfile.TemporaryDirectory(prefix="mojum-private-chrome-fixture-") as tmp:
         private = Path(tmp)
-        db = private / "one-organism.sqlite3"
-        trace = private / "recorded.private.jsonl"
-        with Aquarium(db, SEED, GRAPH, exploration_mode="goal_free",
-                      sensory_mode="toy_probe") as aquarium:
-            frame0 = aquarium.step()
-            frame1 = aquarium.step()
-        export_private_trace(
-            db, trace, SEED, GRAPH, allow_private_export=True,
-            exploration_mode="goal_free", sensory_mode="toy_probe",
-        )
-        data = trace.read_text(encoding="utf-8")
         original = VIEWER.read_text(encoding="utf-8")
-        injected = instrumented_html(original, data)
-        reports = []
-        for width,height,mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
-            report = (inspect_actual_mobile_chromedriver(
-                chrome, injected, width=width, height=height
-            ) if mode == "mobile" else inspect_actual_browser(
-                chrome, injected, width=width, height=height
-            ))
-            first, second, viewport = (
-                report["first"], report["second"], report["viewport"]
+        # One source organism for each persisted motor policy, not a JS toy.
+        # Old v1 traces and v2 traces must both survive cold verified export
+        # and real desktop/mobile browser playback.
+        for policy in ("coarse_v1", "local_cell_v2"):
+            db = private / (policy + ".sqlite3")
+            trace = private / (policy + ".private.jsonl")
+            with Aquarium(db, SEED, GRAPH, exploration_mode="goal_free",
+                          sensory_mode="toy_probe", motor_policy=policy) as aquarium:
+                frame0 = aquarium.step()
+                frame1 = aquarium.step()
+            export_private_trace(
+                db, trace, SEED, GRAPH, allow_private_export=True,
+                exploration_mode="goal_free", sensory_mode="toy_probe",
+                motor_policy=policy,
             )
-            assert first["tick"] == "0", (mode,"first tick")
-            assert first["action"] == frame0["developmental"]["intent"]["action"]
-            assert first["probe"] == "Запрошена", (mode,"probe")
-            assert first["measured"] == "0.75", (mode,"measured touch")
-            assert first["prediction"] == "—", (mode,"blank at birth")
-            assert first["brain"] == "UNIMPLEMENTED", (mode,"not a fake brain")
-            assert second["tick"] == "1", (mode,"next tick")
-            assert second["prediction"] == "0.75", (mode,"learned prediction")
-            assert second["counter"] == "2 / 2", (mode,"counter")
-            assert "verified.synthetic.private.jsonl" in second["source"]
-            assert "SHA-256 кадров совпадает" in second["source"], (
-                mode, "WebCrypto digest was not visibly verified", second["source"]
-            )
-            assert viewport["width"] > 0
-            if mode == "mobile":
-                assert viewport["width"] == 390, (
-                    "Chrome must render actual 390 CSS-px mobile viewport", viewport
+            data = trace.read_text(encoding="utf-8")
+            source_by_policy[policy] = data
+            injected = instrumented_html(original, data)
+            for width, height, mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
+                report = (inspect_actual_mobile_chromedriver(
+                    chrome, injected, width=width, height=height
+                ) if mode == "mobile" else inspect_actual_browser(
+                    chrome, injected, width=width, height=height
+                ))
+                first, second, viewport = (
+                    report["first"], report["second"], report["viewport"]
                 )
-            assert viewport["canvasWidth"] >= 100
-            assert viewport["canvasHeight"] >= 60
-            assert viewport["controlsWidth"] > 0
-            assert viewport["scrollWidth"] <= viewport["width"] + 2, (
-                mode, "horizontal overflow", viewport
-            )
-            assert frame1["toy_contact"]["prediction_before"]["predicted_deflection"] == .75
-            reports.append({
-                "viewport":mode,
-                "source":"real replay-verified local SQLite + PRIVATE JSONL",
-                "actual_browser":True,
-                "first_tick":first["tick"],
-                "second_tick":second["tick"],
-                "measured_contact":first["measured"],
-                "next_prediction":second["prediction"],
-                "css_viewport_width_px":viewport["width"],
-                "canvas_width_px":round(viewport["canvasWidth"]),
-                "horizontal_overflow":False,
-            })
+                assert first["tick"] == "0", (policy, mode, "first tick")
+                assert first["action"] == frame0["developmental"]["intent"]["action"]
+                assert first["probe"] == "Запрошена", (policy, mode, "probe")
+                assert first["measured"] == "0.75", (policy, mode, "measured touch")
+                assert first["prediction"] == "—", (policy, mode, "blank at birth")
+                assert first["brain"] == "UNIMPLEMENTED", (policy, mode, "not a brain")
+                expected_policy = (
+                    "coarse_v1 · зоны 0,5 м" if policy == "coarse_v1"
+                    else "local_cell_v2 · ячейки 4 см"
+                )
+                assert first["policy"] == expected_policy, (
+                    policy, mode, "actual displayed motor policy", first["policy"]
+                )
+                assert second["tick"] == "1", (policy, mode, "next tick")
+                assert second["prediction"] == "0.75", (policy, mode, "learned prediction")
+                assert second["counter"] == "2 / 2", (policy, mode, "counter")
+                assert "verified.synthetic.private.jsonl" in second["source"]
+                assert "SHA-256 кадров совпадает" in second["source"], (
+                    policy, mode, "WebCrypto digest was not visibly verified",
+                    second["source"]
+                )
+                assert viewport["width"] > 0
+                if mode == "mobile":
+                    assert viewport["width"] == 390, (
+                        "Chrome must render exact 390 CSS-px viewport", viewport
+                    )
+                assert viewport["canvasWidth"] >= 100
+                assert viewport["canvasHeight"] >= 60
+                assert viewport["controlsWidth"] > 0
+                assert viewport["scrollWidth"] <= viewport["width"] + 2, (
+                    policy, mode, "horizontal overflow", viewport
+                )
+                assert frame1["toy_contact"]["prediction_before"]["predicted_deflection"] == .75
+                reports.append({
+                    "motor_policy": policy,
+                    "displayed_policy": first["policy"],
+                    "viewport": mode,
+                    "source": "real replay-verified local SQLite + PRIVATE JSONL",
+                    "actual_browser": True,
+                    "first_tick": first["tick"],
+                    "second_tick": second["tick"],
+                    "measured_contact": first["measured"],
+                    "next_prediction": second["prediction"],
+                    "css_viewport_width_px": viewport["width"],
+                    "canvas_width_px": round(viewport["canvasWidth"]),
+                    "horizontal_overflow": False,
+                })
+        # Adversarial file only: splice real committed first v1 frame and real
+        # committed second v2 frame, then recompute exact byte SHA-256.
+        # Viewer must fail closed because provenance is mixed even though
+        # the replacement footer has an internally consistent frame digest.
+        old_lines = source_by_policy["coarse_v1"].splitlines()
+        new_lines = source_by_policy["local_cell_v2"].splitlines()
+        wire = (old_lines[0] + "\n" + new_lines[1] + "\n").encode("utf-8")
+        footer = json.loads(old_lines[-1])
+        footer["trace_integrity"]["sha256"] = hashlib.sha256(wire).hexdigest()
+        footer["trace_integrity"]["byte_length"] = len(wire)
+        mixed = wire.decode("utf-8") + json.dumps(
+            footer, sort_keys=True, ensure_ascii=False,
+            allow_nan=False, separators=(",", ":")
+        ) + "\n"
+        result = inspect_actual_browser(
+            chrome, instrumented_html(
+                original, mixed, expected_rejection="Смешаны разные версии моторной политики"
+            ), width=1280, height=800
+        )
+        assert result["rejected"] is True
+        assert result["controls_disabled"] is True
+        assert result["displayed_policy"] == "—"
+    assert len(reports) == 4, "both persisted policy versions need both browsers"
     print(json.dumps({
-        "status":"PASS_ACTUAL_HEADLESS_CHROME",
-        "browser_binary":Path(chrome).name,
-        "reports":reports,
-        "privacy":"synthetic local only; no screenshots or private frames uploaded",
+        "status": "PASS_ACTUAL_HEADLESS_CHROME",
+        "browser_binary": Path(chrome).name,
+        "reports": reports,
+        "privacy": "synthetic local only; no screenshots or private frames uploaded",
     }, sort_keys=True, ensure_ascii=False))
 
 
