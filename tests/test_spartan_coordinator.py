@@ -60,23 +60,23 @@ class SpartanTests(unittest.TestCase):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         claim(self.db, 1, 110)
         with self.assertRaises(ValueError):
-            finish(self.db, 1, "a", "review", 115)
+            finish(self.db, 1, "a", "review", 115, attempt=1)
         with self.assertRaises(ValueError):
-            finish(self.db, 1, "a", "done", 115, "PR#1")
-        self.assertTrue(finish(self.db, 1, "a", "review", 115, "PR#1"))
-        self.assertFalse(finish(self.db, 1, "a", "blocked", 116))
+            finish(self.db, 1, "a", "done", 115, "PR#1", attempt=1)
+        self.assertTrue(finish(self.db, 1, "a", "review", 115, "PR#1", attempt=1))
+        self.assertFalse(finish(self.db, 1, "a", "blocked", 116, attempt=1))
         self.assertEqual(status(self.db)["states"]["review"], 1)
 
     def test_heartbeat_cannot_reanimate_expired_lease(self):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         claim(self.db, 1, 110, 30)
-        self.assertFalse(heartbeat(self.db, 1, "a", 141))
-        self.assertTrue(heartbeat(self.db, 1, "a", 120, 30))
+        self.assertFalse(heartbeat(self.db, 1, "a", 141, attempt=1))
+        self.assertTrue(heartbeat(self.db, 1, "a", 120, 30, attempt=1))
 
     def test_cross_worker_cannot_complete(self):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         claim(self.db, 1, 110)
-        self.assertFalse(finish(self.db, 2, "a", "review", 120, "PR#1"))
+        self.assertFalse(finish(self.db, 2, "a", "review", 120, "PR#1", attempt=1))
 
     def test_concurrent_claims_unique(self):
         enqueue(self.db, [{"id": "job-%03d" % i, "scope": "scope-%03d" % i}
@@ -95,6 +95,61 @@ class SpartanTests(unittest.TestCase):
         self.assertEqual(len(claimed), 300)
         self.assertEqual(len({j["id"] for j in claimed}), 300)
         self.assertEqual(status(self.db)["states"]["running"], 300)
+
+    def test_duplicate_id_conflicting_payload_fails_atomically(self):
+        original = [{"id": "same", "scope": "room", "priority": 7,
+                     "payload": {"issue": 1}}]
+        self.assertEqual(enqueue(self.db, original, 101)["added"], 1)
+        self.assertEqual(enqueue(self.db, original, 102)["existing"], 1)
+        for changed in (
+            {"id": "same", "scope": "other", "priority": 7, "payload": {"issue": 1}},
+            {"id": "same", "scope": "room", "priority": 8, "payload": {"issue": 1}},
+            {"id": "same", "scope": "room", "priority": 7, "payload": {"issue": 2}},
+        ):
+            with self.assertRaisesRegex(ValueError, "task id reused"):
+                enqueue(self.db, [{"id": "new", "scope": "extra"}, changed], 103)
+            self.assertIsNone(
+                self.db.execute("SELECT 1 FROM tasks WHERE id='new'").fetchone()
+            )
+        task = claim(self.db, 1, 110)
+        self.assertEqual(task["scope"], "room")
+        self.assertEqual(task["attempts"], 1)
+
+    def test_stale_attempt_cannot_mutate_reclaimed_task(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        first = claim(self.db, 1, 110, 30)
+        self.assertEqual(first["attempts"], 1)
+        second = claim(self.db, 2, 141, 30)
+        self.assertEqual(second["attempts"], 2)
+        self.assertFalse(heartbeat(self.db, 1, "a", 142, attempt=1))
+        self.assertFalse(finish(self.db, 1, "a", "review", 142,
+                                "PR#old", attempt=1))
+        # The same numeric worker slot can later be recycled (ABA case).
+        third = claim(self.db, 1, 172, 30)
+        self.assertEqual(third["attempts"], 3)
+        self.assertFalse(heartbeat(self.db, 1, "a", 175, attempt=1))
+        self.assertFalse(finish(self.db, 1, "a", "review", 175,
+                                "PR#stale", attempt=1))
+        self.assertTrue(heartbeat(self.db, 1, "a", 180, 30, attempt=3))
+        self.assertTrue(finish(self.db, 1, "a", "review", 185,
+                               "PR#current", attempt=3))
+        self.assertEqual(status(self.db)["states"]["review"], 1)
+
+    def test_retry_budget_blocks_fourth_manual_requeue(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        for attempt in (1, 2):
+            task = claim(self.db, attempt, 110 + attempt)
+            self.assertEqual(task["attempts"], attempt)
+            self.assertTrue(finish(self.db, attempt, "a", "queued",
+                                   115 + attempt, attempt=attempt))
+        third = claim(self.db, 3, 130)
+        self.assertEqual(third["attempts"], 3)
+        with self.assertRaisesRegex(ValueError, "retry budget exhausted"):
+            finish(self.db, 3, "a", "queued", 131, attempt=3)
+        self.assertTrue(finish(self.db, 3, "a", "blocked",
+                               132, attempt=3))
+        self.assertIsNone(claim(self.db, 4, 133))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
