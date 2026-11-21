@@ -85,6 +85,50 @@ disposable temporary local directory and bounded runtime:
 crash tests and new adversarial checks. This is *not* GitHub Actions
 evidence; new exact-head CI must separately run Python 3.11–3.13.
 
+## Python 3.13 whole-suite SQLite lifetime audit
+
+On the original PR #164 combined code before the LocalNoosphere fix,
+the *whole* Python 3.13 `unittest discover` run passed 380 tests but
+reported `ResourceWarning: unclosed database`. An independent
+`sqlite3.connect/handle` auditing hook with per-test forced GC
+pinpointed three real constructor failures:
+
+- `test_noosphere.NoosphereTests.test_different_agent_rejected`
+- `test_segmented_aquarium.ExplicitSegmentedAquariumQA.test_old_journal_schema_and_wrong_size_refuse_without_rewrite`
+- `test_segmented_noosphere.AtomicSegmentQA.test_old_local_noosphere_and_segmented_db_refuse_migration`
+
+They all exercise `LocalNoosphere.__init__` rejecting wrong persisted
+owner/schema while holding the newly constructed SQLite connection.
+The upstream independent [Draft #124](https://github.com/Garyu-tt/mojum/pull/124)
+already contains the correct fix and strong-reference regression tests.
+Its precise exception-safe constructor close block and
+`tests/test_noosphere_init_close.py` were **reused**, not re-invented,
+on this downstream experimental integration branch. In addition,
+the two disposable SQLite corruption-fixture contexts in
+`tests/test_segmented_noosphere.py` now combine `contextlib.closing`
+with the original transaction context manager, preserving COMMIT and
+closing each handle before leaving the fixture.
+
+After both fixes, an exact-head disposable checkout was run as uid
+65534 (`nobody`), CPython 3.13.5, from `mirbi-linux`:
+
+- **366/366 fast tests**, one process, forced `gc.collect()` after
+  each test and `ResourceWarning` interception: zero errors, zero
+  unclosed SQLite warning events (three test skips within this count).
+- **384/384 whole-suite tests** including the real 100,001-event
+  segmented SQLite stress, v4 10,050-tick epoch replay, >4,000
+  observed contacts and prior v4 PRIVATE exporter process/dirfd races:
+  **zero failures, zero errors, zero `ResourceWarning`** with
+  `PYTHONWARNINGS=always::ResourceWarning`; three tests skipped.
+  One-run wall time was 176.429 seconds on the CPU-first owner node.
+
+`tests/audit_sqlite_resource_warnings.py` is the source-identical
+upstream #124 whole-suite regression harness. The linked CI workflow
+runs this on Python 3.13, in addition to the focused Python
+3.11–3.13 matrix, and fails if any unclosed database is detected
+after final GC. GitHub Actions **must independently confirm** this
+on the final exact commit; local success alone is not release approval.
+
 ## Remaining limits (do not claim full security)
 
 - We do not control a malicious actor who can rename the parent
