@@ -6,6 +6,8 @@ on:
       - ".github/workflows/neutral-probe-control.yml"
       - "src/mojum/neutral_probe_trial.py"
       - "src/mojum/neutral_probe_eval.py"
+      - "src/mojum/neutral_probe_contact_stress.py"
+      - "tests/test_neutral_probe_contact_stress.py"
       - "tests/test_neutral_probe_eval.py"
       - "tests/test_neutral_probe_trial.py"
       - "src/mojum/developmental_policy.py"
@@ -40,3 +42,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m mojum.neutral_probe_eval
+      - name: Run deliberate contact-rich development stress
+        env:
+          PYTHONPATH: src
+        run: python -m mojum.neutral_probe_contact_stress
