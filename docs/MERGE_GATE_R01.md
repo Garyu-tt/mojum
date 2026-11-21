@@ -1,9 +1,8 @@
 # Exact-head CI merge gate (R0.1)
 
-`mojum.merge_gate` is an offline, deterministic guard for PR acceptance
-(issue #415). It answers one question: **may this exact commit be merged right
-now, given the CI evidence for that commit?** It never merges, never pushes,
-never calls a write endpoint, and needs no third-party packages.
+`mojum.merge_gate` is an offline preflight for a PR status rollup (issue #415).
+It checks the listed jobs, recorded head, target branch, and merge state.
+It needs no third-party packages and only reads GitHub when asked.
 
 The merge API is not proof that PR-triggered workflows finished. The gate reads
 a snapshot, checks the recorded head SHA against the SHA the caller intends to
@@ -13,7 +12,7 @@ merge, and returns `ready`, `defer` or `reject` with machine-readable reasons.
 
 | Verdict | Exit | Meaning |
 | --- | --- | --- |
-| `ready` | 0 | Every required check completed successfully for the exact head, the base matches, and GitHub reports a clean merge state. |
+| `ready` | 0 | The listed checks pass in the supplied rollup, the recorded head and target branch match, and the merge state is clean. |
 | `defer` | 2 | Evidence is incomplete: a check is queued/running/missing, the PR is a draft, or mergeability is still unknown. Re-query later. |
 | `reject` | 1 | Evidence is bad: head/base mismatch, conflicts, or a required check failed, was cancelled, timed out, or was skipped without a waiver. |
 
@@ -25,7 +24,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
 
 - A requirement names one exact job, for example `aquarium-stdlib (3.12)`.
   Use `workflow / job` to match the workflow and the job fields together.
-  Repeat `--require` for every expected job in every required matrix.
+  Repeat `--require` for every expected job in every required matrix. Multiple
+  matches defer with `AMBIGUOUS_REQUIRED_CHECK`; a matching failure still rejects.
 - The gate compares selectors literally. Supply no globs or standalone workflow
   names. Obtain the expected jobs from reviewed workflow definitions or branch
   protection. A live rollup can omit jobs that have yet to register.
@@ -54,15 +54,15 @@ gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeabl
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
   --expected-head-sha "$(git rev-parse HEAD)" \
-  --require 'aquarium-stdlib (3.11)' \
-  --require 'aquarium-stdlib (3.12)' \
-  --require 'aquarium-stdlib (3.13)' \
-  --require 'motor-gate-stdlib (3.11)' \
-  --require 'motor-gate-stdlib (3.12)' \
-  --require 'motor-gate-stdlib (3.13)' \
-  --require 'mesh-stdlib (3.11)' \
-  --require 'mesh-stdlib (3.12)' \
-  --require 'mesh-stdlib (3.13)'
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)'
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -81,39 +81,19 @@ and `StatusContext` entries) and a snake_case fixture form (`head_sha`,
 `base_ref`, `checks`) are accepted. This keeps tests hermetic while the CLI can
 be pointed at real PR data. Input is capped at 4 MiB.
 
-## Recommended merge sequence
+## Acceptance after preflight
 
-```sh
-SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
-PYTHONPATH=src python3 -m mojum.merge_gate \
-  --pr "$PR" --expected-head-sha "$SHA" \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)' || exit $?
-gh pr merge "$PR" --squash --match-head-commit "$SHA"
-```
+Follow the [merge acceptance policy](MERGE_ACCEPTANCE_POLICY.md) after a
+`ready` verdict. The `gh pr view` rollup omits each check's tested head and
+base SHA. Query the current base ref with
+`gh api repos/OWNER/REPO/git/ref/heads/main --jq .object.sha`. Verify check
+run provenance and successful conclusions for the pinned head and base with
+`gh api repos/OWNER/REPO/commits/SHA/check-runs --paginate`. For PR runs on
+a synthetic merge commit, verify its two parents against the pinned SHAs.
+A rollup may remain green after the base advances. Defer if provenance
+is missing or the tested base has changed.
 
-`--match-head-commit` makes GitHub refuse the merge if the head moved between
-the verdict and the merge call. The gate's exit code is the decision: `0`
-proceeds, anything else stops the shell chain. This is a client-side guard; it
-does not replace repository rulesets, which remain authoritative.
-
-## Limitations
-
-- Reconcile the job lists with current workflow definitions before reuse. The
-  gate verifies the supplied jobs and relies on the caller for that inventory.
-- The snapshot is a point-in-time read. The gate cannot prove that no later
-  push occurred; pair it with `--match-head-commit` and re-run immediately
-  before merging.
-- `gh pr view` reports the rollup GitHub considers current. A rollup entry with
-  an explicit `headSha` different from the PR head is treated as stale, but
-  entries without `headSha` are trusted to belong to the rollup's head.
-- Skipped-check waivers are caller-supplied and are only as honest as the
-  caller. They are echoed in the output for audit.
-- The module performs no merge and has no write path.
+Ensure every required check concludes `success` under repository policy.
+The preflight's `neutral` handling and skip waivers apply only to its rollup
+verdict. Re-read the PR head and base immediately before a separately
+approved merge and use `gh pr merge --squash --match-head-commit "$SHA"`.

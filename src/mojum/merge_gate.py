@@ -1,21 +1,19 @@
-"""Offline exact-head CI gate for PR acceptance (issue #415).
+"""Offline CI rollup preflight for PR acceptance (issue #415).
 
 The merge endpoint is not proof that the PR-triggered workflows finished, and
 parallel automation can poll a stale rollup. This module turns a *snapshot* of
 a pull request plus the SHA the caller intends to merge into a deterministic
 verdict:
 
-* ``ready``  -- every required check completed successfully for that exact
-  head SHA, the base matches, and GitHub reports a clean merge state;
+* ``ready``  -- the listed checks pass in the supplied rollup, the recorded
+  head SHA and base branch match, and the merge state is clean;
 * ``defer``  -- checks are queued/running/missing, the PR is a draft, or the
   merge state is not fresh enough to decide (re-query later);
 * ``reject`` -- a required check failed/was cancelled/timed out/was skipped
   without a waiver, or the head/base/conflict state makes the merge unsafe.
 
-The module never calls a merge endpoint and never mutates a repository. A
-caller is expected to run it immediately before merging and to pass the same
-SHA to ``gh pr merge --match-head-commit`` so a last-second push cannot slip
-past the verdict.
+Callers must verify the tested head and base independently before merging.
+The module never calls a merge endpoint and never mutates a repository.
 
 Inputs are the JSON produced by ``gh pr view --json ...`` (camelCase) and a
 small snake_case fixture schema used by the tests. No third-party packages and
@@ -251,9 +249,11 @@ def evaluate(
     required: Sequence[str] = (),
     waivers: Mapping[str, str] | None = None,
 ) -> GateResult:
-    """Return the gate verdict for an already-parsed snapshot."""
+    """Evaluate a rollup against the caller's exact job inventory."""
 
-    if expected_head_sha is not None and _SHA_RE.fullmatch(expected_head_sha) is None:
+    if expected_head_sha is not None and (
+        not isinstance(expected_head_sha, str) or _SHA_RE.fullmatch(expected_head_sha) is None
+    ):
         raise ValueError("expected_head_sha must be 40 or 64 hexadecimal characters")
 
     waivers = dict(waivers or {})
@@ -397,6 +397,11 @@ def evaluate(
                     f"{check.label} has an unrecognized conclusion {check.conclusion!r}",
                 )
             )
+        if len(matches) > 1:
+            defers.append(GateReason(
+                "AMBIGUOUS_REQUIRED_CHECK",
+                f"required job {selector!r} matches {len(matches)} entries",
+            ))
 
     reasons = tuple(rejects + defers)
     if rejects:

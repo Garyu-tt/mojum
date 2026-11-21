@@ -10,27 +10,11 @@ Release acceptance and the remaining work on the integrated sensorimotor loop ar
 
 ## Exact-head CI merge gate (acceptance tooling)
 
-`mojum.merge_gate` turns a PR snapshot into a `ready` / `defer` / `reject`
-verdict for one exact commit and never performs a merge. Pass the snapshot from
-`gh pr view --json ...` with the SHA you intend to merge:
-
-```sh
-SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
-PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require 'aquarium-stdlib (3.11)' --require 'aquarium-stdlib (3.12)' \
-  --require 'aquarium-stdlib (3.13)' --require 'motor-gate-stdlib (3.11)' \
-  --require 'motor-gate-stdlib (3.12)' --require 'motor-gate-stdlib (3.13)' \
-  --require 'mesh-stdlib (3.11)' --require 'mesh-stdlib (3.12)' \
-  --require 'mesh-stdlib (3.13)'
-```
-
-List every required job from the reviewed workflow definitions. A GitHub rollup
-can omit matrix jobs that have yet to register.
-
-Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
-See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
-the recommended `gh pr merge --match-head-commit` sequence. The gate is a
-client-side guard; repository rulesets remain authoritative.
+`mojum.merge_gate` checks a PR status rollup against a pinned head and exact
+CI job names. The [merge gate guide](docs/MERGE_GATE_R01.md) lists the nine
+Aquarium, Motor Gate, and Mesh matrix jobs and shows how to run the offline
+preflight. The [merge acceptance policy](docs/MERGE_ACCEPTANCE_POLICY.md)
+requires verification of the tested head and base before merging.
 
 ## Offline room designer (experimental)
 

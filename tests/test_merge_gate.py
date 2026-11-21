@@ -398,7 +398,7 @@ class GateVerdictTests(unittest.TestCase):
                 checks = [run(name=f"aquarium-stdlib ({version})") for version in versions]
                 result = evaluate_checks(checks, required=required)
                 self.assertEqual(result.verdict, "defer")
-                self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+                self.assertIn("MISSING_REQUIRED_CHECK", {reason.code for reason in result.reasons})
         complete = evaluate_checks([run(name=name) for name in required], required=required)
         self.assertEqual(complete.verdict, "ready")
 
@@ -411,6 +411,14 @@ class GateVerdictTests(unittest.TestCase):
         ]
         self.assertNotEqual(evaluate_checks(unrelated, required=required).verdict, "ready")
         self.assertEqual(evaluate_checks([exact], required=required).verdict, "ready")
+
+    def test_duplicate_green_labels_defer_and_failure_still_rejects(self):
+        checks = self.green() + [run(name="mesh", workflow="Mesh contract")]
+        result = evaluate_checks(checks)
+        self.assertEqual((result.verdict, result.code), ("defer", "AMBIGUOUS_REQUIRED_CHECK"))
+        checks[-1] = run(name="mesh", workflow="Mesh contract", conclusion="FAILURE")
+        result = evaluate_checks(checks)
+        self.assertEqual((result.verdict, result.code), ("reject", "CHECK_FAILED"))
 
 
 class CliTests(unittest.TestCase):
