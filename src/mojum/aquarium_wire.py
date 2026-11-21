@@ -194,6 +194,14 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
+            if policy == V4_MODE:
+                # A hash-valid journal can still omit a required epoch marker.
+                # Enforce durable marker admission before the first frame of
+                # each epoch, not merely the correctness of markers if present.
+                if frames // EPOCH_TICKS != epochs:
+                    raise NoosphereError("missing durable v4 epoch marker before frame")
+                if event["event_id"] != f"frame-{frames:012d}":
+                    raise NoosphereError("noncanonical v4 frame event ID")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
