@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 
 from .graph import validate as validate_graph
-from .noosphere import EVENT_SCHEMA, LocalNoosphere
+from .noosphere import EVENT_SCHEMA, LocalNoosphere, _read_first_event
 from .sim import Simulation, digest
 from .world_room import Room, advance, initial_state
 
@@ -300,6 +300,16 @@ class SensoryPlay:
             "scope": "synthetic_near_field_motor_and_contact_only",
             "goal": None, "imported_object_knowledge": None,
         }
+        # Existing files are history, not an invitation to create or repair
+        # SQLite metadata. Inspect before the first writable connection.
+        existing = Path(db_path)
+        first = _read_first_event(db_path, self.agent_id)
+        if existing.exists() or existing.is_symlink():
+            if first is None:
+                raise CuriosityError("existing sensory journal lacks bootstrap")
+            expected = self._event("sensory.bootstrap", "sensory-bootstrap", self.manifest, 0)
+            if first != expected:
+                raise CuriosityError("incompatible sensory play bootstrap")
         self.store = LocalNoosphere(db_path, self.agent_id)
         try:
             if self.store.count() == 0:
