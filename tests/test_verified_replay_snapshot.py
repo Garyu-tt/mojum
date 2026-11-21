@@ -20,6 +20,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
+from mojum.genesis import ACQUISITION_SCHEMA
 from mojum.noosphere import NoosphereError
 from mojum.verified_snapshot import (
     SnapshotError, create_key_file, load_snapshot, save_snapshot,
@@ -102,6 +103,39 @@ class SignedReplayCacheQA(unittest.TestCase):
             self.assertEqual(full_replay.checkpoint(), final)
         with self.aquarium(signed=True) as again:
             self.assertEqual(again.checkpoint(), final)
+
+    def test_acquired_genome_checkpoint_keeps_causal_future_effect(self):
+        with self.aquarium() as q:
+            q.step()
+            q.step()
+            change = {
+                "schema": ACQUISITION_SCHEMA,
+                "event_id": "signed-acquisition",
+                "genome_id": SEED["genome_id"],
+                "gene": "heartbeat_bpm",
+                "delta": 15,
+                "valid_from_tick": 2,
+                "observed_at_ns": 0,
+                "recorded_at_ns": 2 * q.dt_ns,
+                "source": "synthetic-replay-unit-test",
+                "evidence": "private synthetic event not human acquisition",
+            }
+            q.acquire(change)
+            pinned = q.checkpoint()
+            q.save_replay_snapshot()
+            next_frame = q.step()
+            finished = q.checkpoint()
+            self.assertEqual(next_frame["phenotype"]["parameters"]["heartbeat_bpm"],
+                             SEED["inherited"]["heartbeat_bpm"] + 15)
+        with self.aquarium() as resumed:
+            self.assertEqual(resumed.checkpoint(), finished)
+            self.assertEqual(resumed.genome.snapshot()["revision"],
+                             finished["genome_revision"])
+            self.assertEqual(resumed.store.count(), 5)
+        with self.aquarium(signed=False) as full:
+            self.assertEqual(full.checkpoint(), finished)
+        self.assertNotEqual(pinned["genome_revision"],
+                            "not-a-real-revision")
 
     def test_bad_hmac_refused_before_changing_source_sqlite(self):
         self.make_snapshot()
