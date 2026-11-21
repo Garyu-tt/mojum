@@ -140,7 +140,8 @@ class Aquarium:
             )
         self.tick = 0
         if self.explorer is not None:
-            self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
+            self.manifest["developmental_schema"] = (LOCAL_CELL_SCHEMA if motor_policy == LOCAL_CELL_MODE
+                                                      else DEVELOPMENT_SCHEMA)
             self.manifest["exploration_mode"] = "goal_free"
             # Do not change a single legacy coarse_v1 manifest/event byte:
             # its pre-v2 journals remain replayable without a migration.
