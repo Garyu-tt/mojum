@@ -11,12 +11,14 @@ Release acceptance and the remaining work on the integrated sensorimotor loop ar
 ## Exact-head CI merge gate (acceptance tooling)
 
 `mojum.merge_gate` turns a PR snapshot into a `ready` / `defer` / `reject`
-verdict for one exact commit and never performs a merge. Pass the snapshot from
-`gh pr view --json ...` with the SHA you intend to merge:
+verdict for one exact head and base commit and never performs a merge. Pass the
+head you intend to merge and the current accepted `main` commit:
 
 ```sh
 SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
-PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA"
+BASE=$(gh api 'repos/{owner}/{repo}/git/ref/heads/main' --jq .object.sha)
+PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 \
+  --expected-head-sha "$SHA" --expected-base-sha "$BASE"
 ```
 
 For `main`, the gate always requires the nine Aquarium, Motor Gate, and Mesh

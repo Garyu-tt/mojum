@@ -1,19 +1,21 @@
 # Exact-head CI merge gate (R0.1)
 
 `mojum.merge_gate` is an offline, deterministic guard for PR acceptance
-(issue #415). It answers one question: **may this exact commit be merged right
-now, given the CI evidence for that commit?** It never merges, never pushes,
-never calls a write endpoint, and needs no third-party packages.
+(issue #415). It answers one question: **may this exact head be merged onto
+this exact current base, given the CI evidence for that head?** It never
+merges, never pushes, never calls a write endpoint, and needs no third-party
+packages.
 
 The merge API is not proof that PR-triggered workflows finished. The gate reads
-a snapshot, checks the recorded head SHA against the SHA the caller intends to
-merge, and returns `ready`, `defer` or `reject` with machine-readable reasons.
+a snapshot, checks the recorded head and base SHAs against the commits the
+caller accepted, and returns `ready`, `defer` or `reject` with
+machine-readable reasons.
 
 ## Verdicts
 
 | Verdict | Exit | Meaning |
 | --- | --- | --- |
-| `ready` | 0 | Every required check passed in the supplied head rollup, the target branch matches, and GitHub reports a clean merge state. |
+| `ready` | 0 | Every required check passed in the supplied head rollup, the current target branch name and SHA match, and GitHub reports a clean merge state. |
 | `defer` | 2 | Evidence is incomplete: a check is queued/running/missing, the PR is a draft, or mergeability is still unknown. Re-query later. |
 | `reject` | 1 | Evidence is bad: head/base mismatch, conflicts, or a required check failed, was cancelled, timed out, or was skipped without a waiver. |
 
@@ -47,16 +49,22 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - `--expected-head-sha` requires a full 40- or 64-character Git object ID.
   Omitting it returns `EXPECTED_HEAD_REQUIRED`. `--expected-base` names a
   branch and defaults to `main`.
+- `--expected-base-sha` requires the full base commit accepted by the caller.
+  A missing snapshot base yields `BASE_SHA_MISSING`; a base branch that moved
+  yields `BASE_SHA_MISMATCH`. Live `--pr` mode reads the current base ref after
+  reading the rollup and rejects head/base-name movement between queries.
 - For non-`main` targets, an empty inventory returns `NO_REQUIRED_CHECKS`.
 
 ## Offline usage
 
-Snapshot a PR to JSON, then evaluate it without network access:
+Supply a snapshot containing both `headRefOid` and `baseRefOid`, then evaluate
+it without network access:
 
 ```sh
-gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup > pr.json
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --input pr.json --expected-head-sha "$(git rev-parse HEAD)"
+  --input pr.json \
+  --expected-head-sha "$(git rev-parse HEAD)" \
+  --expected-base-sha "$(git rev-parse origin/main)"
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -64,14 +72,14 @@ PYTHONPATH=src python3 -m mojum.merge_gate \
 
 ```json
 {"schema":"mojum.merge-gate.v1","verdict":"defer","code":"CHECK_PENDING",
- "exit_code":2,"head_sha":"...","expected_head_sha":"...","reasons":[...],
+ "exit_code":2,"head_sha":"...","base_sha":"...","reasons":[...],
  "merge_performed":false}
 ```
 
 ### Accepted input shapes
 
-Both `gh pr view --json` output (camelCase, `statusCheckRollup`, `CheckRun`
-and `StatusContext` entries) and a snake_case fixture form (`head_sha`,
+Both camelCase (`headRefOid`, `baseRefOid`, `statusCheckRollup`, `CheckRun` and
+`StatusContext` entries) and a snake_case fixture form (`head_sha`, `base_sha`,
 `base_ref`, `checks`) are accepted. This keeps tests hermetic while the CLI can
 be pointed at real PR data. Input is capped at 4 MiB.
 
@@ -81,15 +89,16 @@ Include additional applicable jobs with `--require`.
 
 ```sh
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+BASE=$(gh api 'repos/{owner}/{repo}/git/ref/heads/main' --jq .object.sha)
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --pr "$PR" --expected-head-sha "$SHA"
+  --pr "$PR" --expected-head-sha "$SHA" --expected-base-sha "$BASE"
 ```
 
 Treat a `ready` result as a prerequisite for the
-[merge acceptance policy](MERGE_ACCEPTANCE_POLICY.md). Verify the current base
-commit and required check-run provenance against that policy before submitting
-a merge guarded by `--match-head-commit`. The policy also calls for a GitHub
-repository ruleset to enforce the requirements at merge time.
+[merge acceptance policy](MERGE_ACCEPTANCE_POLICY.md). Verify required
+check-run provenance against that policy before submitting a merge guarded by
+`--match-head-commit`. The policy also calls for a GitHub repository ruleset to
+enforce the requirements at merge time.
 
 ## Limitations
 
@@ -97,10 +106,11 @@ repository ruleset to enforce the requirements at merge time.
   names, job names, or matrices change. Supply path-filtered requirements for
   each PR based on the applicable workflow definitions.
 - GitHub branch rulesets enforce repository-level policy independently of the
-  local gate. Use an up-to-date base rule to protect against base movement.
-- The gate checks the base ref name and records a point-in-time head verdict.
-  Verify the base commit separately and re-run immediately before merging
-  with `--match-head-commit`.
+  local gate. Live mode reads the current base tip, but only a strict server
+  rule closes movement after the verdict and before the merge request.
+- Offline mode trusts the supplied `baseRefOid`; generate it from a read-only
+  current-ref query and re-run immediately before merging with
+  `--match-head-commit`.
 - `gh pr view` reports the rollup GitHub considers current. A rollup entry with
   an explicit `headSha` different from the PR head is treated as stale, but
   entries without `headSha` are trusted to belong to the rollup's head.
