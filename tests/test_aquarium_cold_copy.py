@@ -148,7 +148,7 @@ class ColdAquariumCopyTests(unittest.TestCase):
             db.execute("INSERT INTO unrelated_data VALUES ('keep-me')")
             db.commit()
         original = self.source.read_bytes()
-        with self.assertRaisesRegex(ValueError, "existing nonempty Aquarium journal"):
+        with self.assertRaisesRegex(ValueError, "export requires"):
             self._export()
         self.assertEqual(self.source.read_bytes(), original)
         self.assertFalse(self.exported.exists())
