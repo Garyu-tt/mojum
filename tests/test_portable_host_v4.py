@@ -72,7 +72,8 @@ class V4PortableHostAcceptanceTests(unittest.TestCase):
     def test_invalid_mode_combinations_do_not_birth_sqlite_journal(self):
         for options in (
             ("--motor-mode", V4_MODE),
-            ("--motor-mode", V4_MODE, "--sensory-mode", "none"),
+            ("--motor-mode", V4_MODE, "--sensory-mode", "none",
+             "--temporal-mode", "range_guided"),
             (*self.v4_options(), "--brain-mode", "developmental_controller"),
             ("--sensory-mode", "none"),
         ):
@@ -80,6 +81,15 @@ class V4PortableHostAcceptanceTests(unittest.TestCase):
                 run = self.invoke(*options)
                 self.assertNotEqual(run.returncode, 0, run.stdout)
                 self.assertFalse(self.db.exists(), run.stderr)
+
+    def test_v4_default_shadow_neural_mode_is_valid(self):
+        # The v4 host constrains sensory/temporal/brain modes, not the
+        # independently versioned optional neural shadow computation.
+        run = self.invoke("--motor-mode", V4_MODE, "--sensory-mode", "none")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        status = json.loads(run.stdout)
+        self.assertEqual(status["schema"], SCHEMA_V4)
+        self.assertEqual((status["start_tick"], status["end_tick"]), (0, 2))
 
     def test_v4_host_checks_budget_before_any_frame_or_epoch_marker(self):
         with Aquarium(
