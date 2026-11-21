@@ -33,6 +33,14 @@ event-budget overflow. The original `Aquarium` remains the storage authority.
 input and resulting position divergence does not prove learned development.
 No sensory meeting events, transfer of knowledge, encrypted backup, observer
 UI, consent protocol or true cross-database transaction exists yet.
+`pair` now reserves both new SQLite names using exclusive `O_CREAT|O_EXCL`
+creation before opening Aquarium, so a second creator cannot silently replace
+an existing path after the initial check. If the second reservation fails, the
+first empty reservation is removed when its identity still matches. This
+requires a trusted, private parent directory; it does not lock out malicious
+same-UID processes, provide durable two-file commits, or prevent hostile
+filesystem replacement after reservation.
+
 A crash between the two births can leave only one journal: inspect both files,
 never retry `pair` over existing paths. The SQLite files are PRIVATE and
 must not be published. Their hash chains are not signatures.
