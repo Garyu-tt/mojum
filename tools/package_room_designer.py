@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 
@@ -54,7 +55,8 @@ def standalone_html(*, html_path=HTML, js_path=JS,
     # the bundler; external scripts would break file:// offline portability.
     if any(html.count(tag) != 1 for tag, _, _ in scripts):
         raise PackagingError("expected exactly one pinned local script tag")
-    if html.count('<script src="') != len(scripts):
+    external = re.findall(r"<script\b[^>]*\bsrc\b[^>]*>", html, flags=re.I)
+    if sorted(external) != sorted(tag for tag, _, _ in scripts):
         raise PackagingError("unexpected external editor script dependency")
     for tag, source, global_name in scripts:
         js = _read_small_source(Path(source))
@@ -65,7 +67,7 @@ def standalone_html(*, html_path=HTML, js_path=JS,
         html = html.replace(
             tag, "<script>\n" + js.rstrip() + "\n</script>", 1
         )
-    if '<script src="' in html:
+    if re.search(r"<script\b[^>]*\bsrc\b[^>]*>", html, flags=re.I):
         raise PackagingError("portable editor still requires a sibling script")
     if len(html.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
         raise PackagingError("single file exceeds bounded portable HTML budget")
