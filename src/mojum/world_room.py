@@ -4,6 +4,13 @@ import hashlib
 import json
 import math
 
+MAX_DISPLACEMENT_M = 1000.0
+
+
+def displacement_within_budget(dx: float, dy: float) -> bool:
+    """Whether the requested step fits the room's Euclidean distance limit."""
+    return math.hypot(dx, dy) <= MAX_DISPLACEMENT_M
+
 @dataclass(frozen=True)
 class Room:
     width: float
@@ -75,7 +82,7 @@ def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
         raise ValueError("invalid tick or displacement")
     # Sampling in 1 cm increments can miss any thinner obstacle. Test the
     # whole movement segment against closed rectangle boundaries instead.
-    if math.hypot(dx, dy) > 1000.0:
+    if not displacement_within_budget(dx, dy):
         raise ValueError("displacement exceeds fixture budget")
     if not _valid(room, state.x, state.y):
         raise ValueError("invalid starting state")

@@ -19,7 +19,9 @@ from .neural import PulsePredictor
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
-from .world_room import Room, advance, initial_state
+from .world_room import (
+    MAX_DISPLACEMENT_M, Room, advance, displacement_within_budget, initial_state,
+)
 
 
 SCHEMA = "mojum.aquarium.frame/1"
@@ -39,8 +41,8 @@ def _movement(value):
     if type(value) not in (int, float):
         raise AquariumError("movement must be a numeric scalar, not bool or string")
     try:
-        if not math.isfinite(value) or abs(value) > 1000:
-            raise AquariumError("movement is nonfinite or outside 1000m budget")
+        if not math.isfinite(value) or abs(value) > MAX_DISPLACEMENT_M:
+            raise AquariumError(f"movement is nonfinite or outside {MAX_DISPLACEMENT_M:g}m budget")
         return float(value)
     except OverflowError as exc:
         raise AquariumError("movement exceeds numeric range") from exc
@@ -286,10 +288,8 @@ def main():
         parser.error("--ticks must be within 0..1000")
     # Validate command-line movement before Aquarium can create a bootstrap
     # journal. Invalid requests must not leave behind a new organism fixture.
-    try:
-        dx, dy = _movement(args.dx), _movement(args.dy)
-    except AquariumError as exc:
-        parser.error(str(exc))
+    if not displacement_within_budget(args.dx, args.dy):
+        parser.error(f"movement length must be finite and at most {MAX_DISPLACEMENT_M:g} m")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
@@ -300,7 +300,7 @@ def main():
         if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
-            aquarium.step(dx=dx, dy=dy)
+            aquarium.step(dx=args.dx, dy=args.dy)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (
