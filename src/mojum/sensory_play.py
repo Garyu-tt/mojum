@@ -184,7 +184,12 @@ class ContactAssociations:
             raise CuriosityError("invalid developmental model snapshot")
         total = 0
         for key, entry in snapshot["table"].items():
-            parts = key.split(":") if isinstance(key, str) else []
+            # RGB cue keys are at most "255:255:255" (11 characters).
+            # Bound untrusted strings before splitting or converting to int:
+            # otherwise oversized decimal segments can raise raw ValueError.
+            if not isinstance(key, str) or len(key) > 11:
+                raise CuriosityError("invalid numeric cue")
+            parts = key.split(":")
             if (len(parts) != 3 or any(not v.isdecimal() or str(int(v)) != v
                                         or not 0 <= int(v) <= 255 for v in parts)):
                 raise CuriosityError("invalid numeric cue")
