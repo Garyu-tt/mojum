@@ -106,6 +106,10 @@ function replaceFooter(source,transform){
    f=>{delete f.trace_integrity;delete f.export_status}), true);
  const strippedRange=await attempt(replaceFooter(wire,
    f=>{delete f.trace_integrity;delete f.export_status;delete f.trace_range}), true);
+ const missingStatus=await attempt(replaceFooter(wire,
+   f=>{delete f.export_status}), true);
+ const missingRange=await attempt(replaceFooter(wire,
+   f=>{delete f.trace_range}), true);
  const legacy=replaceFooter(wire,
    f=>{delete f.trace_integrity;delete f.export_status;delete f.trace_range;
        delete f.trace_room});
@@ -117,7 +121,8 @@ function replaceFooter(source,transform){
  const encoding=await attempt(Buffer.concat([Buffer.from(wire),Buffer.from([255])]));
  process.stdout.write(JSON.stringify({valid,altered,truncated,mismatch,
                                       brokenProof,missingProof,strippedModern,
-                                      strippedRange,legacyDefault,legacyOptIn,
+                                      strippedRange,missingStatus,missingRange,
+                                      legacyDefault,legacyOptIn,
                                       blankLine,whitespaceLine,trailingBlank,encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
@@ -196,6 +201,9 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("SHA-256", values["brokenProof"]["status"])
         self.assertFalse(values["missingProof"]["enabled"])
         self.assertIn("SHA-256", values["missingProof"]["status"])
+        for name in ("missingStatus", "missingRange"):
+            self.assertFalse(values[name]["enabled"], name)
+            self.assertIn("SHA-256", values[name]["status"], name)
         for name in ("blankLine", "whitespaceLine", "trailingBlank"):
             self.assertFalse(values[name]["enabled"], name)
             self.assertIn("Пустая JSONL-строка", values[name]["status"], name)
