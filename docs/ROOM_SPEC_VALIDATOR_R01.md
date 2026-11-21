@@ -37,6 +37,14 @@ Exactly these four keys, no more and no fewer:
   not on or inside any obstacle. Obstacle boundaries are **closed** because the
   runtime's point-room also blocks a point that touches a wall.
 
+After exact-decimal shape validation, the checker also verifies that the same
+native JSON integers/floats and Aquarium's float start position are accepted
+by the actual point-room fixture. This catches apparent decimal gaps that
+vanish under float rounding and rectangles like `0.1 + 0.2` that exceed a
+runtime wall at `0.3`. Such documents fail closed rather than receiving a
+misleading valid preflight. This check does **not** rewrite or normalize the
+original number spellings, launch the Aquarium or touch SQLite.
+
 Rejected without partial acceptance: non-object roots, missing/unexpected keys,
 duplicate JSON keys at any depth, `NaN`/`Infinity`, invalid UTF-8, invalid JSON,
 documents larger than 256 KiB, booleans/strings/null used as geometry.
