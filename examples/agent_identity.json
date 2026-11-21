@@ -1,0 +1,6 @@
+{
+  "schema": "mojum.agent.identity/1",
+  "agent_id": "dante-fixture-001",
+  "display_name": "Данте",
+  "assigned_by": "human"
+}

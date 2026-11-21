@@ -8,6 +8,7 @@ is trusted independently; a local attacker with filesystem access can rewrite it
 from __future__ import annotations
 
 import copy
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -18,7 +19,7 @@ EVENT_SCHEMA = "mojum.noosphere.event/1"
 STORE_SCHEMA = "mojum.noosphere.sqlite/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
 _ALLOWED_VISIBILITY = frozenset(("PUBLIC", "PRIVATE", "RESTRICTED"))
-_ZERO = "0" * 64
+EMPTY_HEAD = "0" * 64
 _MAX_PAYLOAD_BYTES = 128_000
 
 
@@ -29,6 +30,12 @@ class NoosphereError(ValueError):
 def _text(value, field, max_length=256):
     if not isinstance(value, str) or not value.strip() or len(value) > max_length:
         raise NoosphereError(f"{field} requires a nonempty string of <= {max_length} characters")
+    # Python str permits isolated UTF-16 surrogate code points, but our
+    # persisted JSON / SQLite contract requires canonical UTF-8 throughout.
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise NoosphereError(f"{field} must be valid UTF-8") from exc
     return value
 
 
@@ -38,11 +45,37 @@ def _integer(value, field, minimum=0, maximum=2**63 - 1):
     return value
 
 
+_MAX_JSON_DEPTH = 256
+
+
+def _check_json_depth(value):
+    """Bound JSON container nesting without recursion or an extra deep copy."""
+    frames = [(iter((value,)), 0)]
+    while frames:
+        items, parent_depth = frames[-1]
+        try:
+            item = next(items)
+        except StopIteration:
+            frames.pop()
+            continue
+        if isinstance(item, (dict, list, tuple)):
+            depth = parent_depth + 1
+            if depth > _MAX_JSON_DEPTH:
+                raise NoosphereError("event JSON nesting limit exceeded")
+            children = item.values() if isinstance(item, dict) else item
+            frames.append((iter(children), depth))
+
+
 def _canonical(value):
+    _check_json_depth(value)
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise NoosphereError("event must contain canonical JSON") from exc
+        wire = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        # json.dumps(ensure_ascii=False) can return an unpaired surrogate.
+        # Reject it before hashing or touching the durable SQLite journal.
+        wire.encode("utf-8")
+        return wire
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise NoosphereError("event must contain canonical UTF-8 JSON") from exc
 
 
 def _sha(value):
@@ -85,6 +118,90 @@ def _validate_event(event, owner):
     return json.loads(wire)
 
 
+@contextmanager
+def _open_readonly(path):
+    path = Path(path)
+    if str(path) == ":memory:" or path.is_symlink() or not path.is_file():
+        raise NoosphereError("expected an existing regular SQLite file")
+    try:
+        with closing(sqlite3.connect(path.absolute().as_uri() + "?mode=ro",
+                                     uri=True, timeout=5.0)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("PRAGMA query_only=ON")
+            yield db
+    except sqlite3.Error as exc:
+        raise NoosphereError("cannot read SQLite event journal") from exc
+
+
+def _read_first_event(path, agent_id):
+    """Inspect existing bootstrap before any writable SQLite initialization."""
+    path = Path(path)
+    if path.is_symlink():
+        raise NoosphereError("database path cannot be a symbolic link")
+    if not path.is_file():
+        return None
+    with _open_readonly(path) as db:
+        db.execute("BEGIN")
+        tables = {row["name"] for row in db.execute(
+            "SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('metadata','events')",
+        )}
+        if "metadata" in tables:
+            saved = dict(db.execute("SELECT k,v FROM metadata"))
+            if saved and saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
+                raise NoosphereError("database schema or agent owner does not match")
+        if "events" not in tables:
+            return None
+        first = db.execute("SELECT wire_json FROM events ORDER BY seq LIMIT 1").fetchone()
+        if first is None:
+            return None
+        try:
+            event = json.loads(first["wire_json"])
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise NoosphereError("invalid bootstrap JSON") from exc
+        if type(event) is not dict:
+            raise NoosphereError("expected an object for the first event")
+        return event
+
+
+def _verify_chain(db, agent_id, *, external_expected_head=None, strict_wire=False, inspect_event=None):
+    prev = EMPTY_HEAD
+    last_recorded = -1
+    expected_seq = 1
+    sql = ("SELECT seq,event_id,agent_id,topic,visibility,observed_at_ns,"
+           "recorded_at_ns,valid_from_ns,valid_to_ns,wire_json,prev_hash,event_hash "
+           "FROM events ORDER BY seq")
+    for row in db.execute(sql):
+        seq = row["seq"]
+        raw, prior, stored = row["wire_json"], row["prev_hash"], row["event_hash"]
+        recorded = row["recorded_at_ns"]
+        try:
+            event = _validate_event(json.loads(raw), agent_id)
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise NoosphereError(f"invalid event at row {seq}") from exc
+        if strict_wire and (type(raw) is not str or _canonical(event) != raw):
+            raise NoosphereError(f"noncanonical event at row {seq}")
+        if seq != expected_seq:
+            raise NoosphereError(f"noncontiguous sequence at row {seq}")
+        for name in ("event_id", "agent_id", "topic", "visibility", "observed_at_ns",
+                     "recorded_at_ns", "valid_from_ns", "valid_to_ns"):
+            if event[name] != row[name]:
+                raise NoosphereError(f"indexed column {name} mismatches event at row {seq}")
+        if prior != prev or _sha({"previous": prev, "event": event}) != stored:
+            raise NoosphereError(f"hash chain mismatch at row {seq}")
+        if recorded < last_recorded:
+            raise NoosphereError(f"timestamp mismatch at row {seq}")
+        if inspect_event is not None:
+            inspect_event(seq, event)
+        prev = stored
+        last_recorded = recorded
+        expected_seq += 1
+    if external_expected_head is not None and prev != external_expected_head:
+        raise NoosphereError("hash head differs from independent external anchor")
+    return {"schema": STORE_SCHEMA, "agent_id": agent_id, "count": expected_seq - 1, "head": prev, "integrity": "chain-verified-not-authenticated"}
+
+
+
 class LocalNoosphere:
     """Per-agent local SQLite event log; SQL writes are always atomic.
 
@@ -105,18 +222,25 @@ class LocalNoosphere:
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.execute("PRAGMA trusted_schema=OFF")
-        self._db.execute("PRAGMA synchronous=FULL")
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA foreign_keys=ON")
-        if os.name == "posix":
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass  # Caller must enforce host filesystem policy.
-        self._setup()
+        # An exception inside __init__ never reaches __exit__/close() of a
+        # context manager. In particular a wrong owner/schema must not leave
+        # an unreachable live sqlite3.Connection for Python 3.13 GC to warn on.
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("PRAGMA trusted_schema=OFF")
+            self._db.execute("PRAGMA synchronous=FULL")
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA foreign_keys=ON")
+            if os.name == "posix":
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass  # Caller must enforce host filesystem policy.
+            self._setup()
+        except BaseException:
+            self._db.close()
+            raise
 
     def close(self):
         self._db.close()
@@ -168,7 +292,7 @@ class LocalNoosphere:
         self._db.execute("BEGIN IMMEDIATE")
         try:
             row = self._db.execute("SELECT seq,event_hash,recorded_at_ns FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-            previous = row["event_hash"] if row else _ZERO
+            previous = row["event_hash"] if row else EMPTY_HEAD
             if expected_head != previous:
                 raise NoosphereError("stale event head: CAS failed")
             if row and checked["recorded_at_ns"] < row["recorded_at_ns"]:
@@ -193,43 +317,14 @@ class LocalNoosphere:
 
     def head(self):
         row = self._db.execute("SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-        return row["event_hash"] if row else _ZERO
+        return row["event_hash"] if row else EMPTY_HEAD
 
     def count(self):
         return self._db.execute("SELECT count(*) FROM events").fetchone()[0]
 
     def verify_chain(self, *, external_expected_head=None):
         """Detect accidental DB corruption. Without an independent anchor this is NOT tamper-proof."""
-        prev = _ZERO
-        last_recorded = -1
-        expected_seq = 1
-        sql = ("SELECT seq,event_id,agent_id,topic,visibility,observed_at_ns,"
-               "recorded_at_ns,valid_from_ns,valid_to_ns,wire_json,prev_hash,event_hash "
-               "FROM events ORDER BY seq")
-        for row in self._db.execute(sql):
-            seq = row["seq"]
-            raw, prior, stored = row["wire_json"], row["prev_hash"], row["event_hash"]
-            recorded = row["recorded_at_ns"]
-            try:
-                event = _validate_event(json.loads(raw), self.agent_id)
-            except (ValueError, TypeError) as exc:
-                raise NoosphereError(f"invalid event at row {seq}") from exc
-            if seq != expected_seq:
-                raise NoosphereError(f"noncontiguous sequence at row {seq}")
-            for name in ("event_id", "agent_id", "topic", "visibility", "observed_at_ns",
-                         "recorded_at_ns", "valid_from_ns", "valid_to_ns"):
-                if event[name] != row[name]:
-                    raise NoosphereError(f"indexed column {name} mismatches event at row {seq}")
-            if prior != prev or _sha({"previous": prev, "event": event}) != stored:
-                raise NoosphereError(f"hash chain mismatch at row {seq}")
-            if recorded < last_recorded:
-                raise NoosphereError(f"timestamp mismatch at row {seq}")
-            prev = stored
-            last_recorded = recorded
-            expected_seq += 1
-        if external_expected_head is not None and prev != external_expected_head:
-            raise NoosphereError("hash head differs from independent external anchor")
-        return {"schema": STORE_SCHEMA, "agent_id": self.agent_id, "count": expected_seq - 1, "head": prev, "integrity": "chain-verified-not-authenticated"}
+        return _verify_chain(self._db, self.agent_id, external_expected_head=external_expected_head)
 
     def dataset(self, *, topic=None, source=None, as_of_recorded_ns=None, valid_at_ns=None, include_nonpublic=False, limit=1000):
         """Read-only reproducible dataset projection; PRIVATE never exported by default."""

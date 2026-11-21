@@ -24,13 +24,13 @@ class AquariumCliBudgetTests(unittest.TestCase):
 
             with patch("mojum.aquarium.MAX_REPLAY_EVENTS", 3):
                 invoke(2)  # one bootstrap + two frames fills budget
-                with sqlite3.connect(db) as conn:
+                with contextlib.closing(sqlite3.connect(db)) as conn:
                     before = conn.execute("SELECT seq, event_id, event_hash FROM events ORDER BY seq").fetchall()
                 self.assertEqual(len(before), 3)
                 with self.assertRaises(SystemExit) as error:
                     invoke(1)
                 self.assertEqual(error.exception.code, 2)
-                with sqlite3.connect(db) as conn:
+                with contextlib.closing(sqlite3.connect(db)) as conn:
                     after = conn.execute("SELECT seq, event_id, event_hash FROM events ORDER BY seq").fetchall()
                 self.assertEqual(after, before)
 
@@ -43,7 +43,7 @@ class AquariumCliBudgetTests(unittest.TestCase):
                     main()
             self.assertEqual(error.exception.code, 2)
             # The constructor may persist the initial bootstrap, but never a partial frame.
-            with sqlite3.connect(db) as conn:
+            with contextlib.closing(sqlite3.connect(db)) as conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
 
 

@@ -34,6 +34,12 @@ def _int(value, path, low=0, high=2**63 - 1):
 def _str(value, path, limit=128):
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise GenesisError(f"{path} must be a nonempty string (<= {limit})")
+    # JSON can spell lone Unicode surrogates, but they are not encodable as
+    # UTF-8 for stable revision hashes. Reject at the contract boundary.
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise GenesisError(f"{path} must be valid UTF-8") from exc
     return value
 
 
@@ -45,9 +51,20 @@ def _keys(value, required, path):
 def canonical(value):
     """Stable serialization; rejects NaN, infinity, unknown object types."""
     try:
-        return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise GenesisError("Genome is not canonical JSON") from exc
+        serialized = json.dumps(
+            value, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False,
+        )
+        # ensure_ascii=False preserves Unicode; an unpaired surrogate would
+        # otherwise escape validation until sha256() calls .encode().
+        serialized.encode("utf-8")
+        # JSON silently coerces integer object keys to strings and tuples to
+        # arrays. Those changes must not receive the original object's hash.
+        if json.loads(serialized) != value:
+            raise GenesisError("Genome is not lossless canonical JSON")
+        return serialized
+    except (TypeError, ValueError, OverflowError, UnicodeError) as exc:
+        raise GenesisError("Genome is not canonical UTF-8 JSON") from exc
 
 
 def sha256(value):
