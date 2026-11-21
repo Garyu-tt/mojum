@@ -37,6 +37,11 @@ from .sensory_bridge import (ToyContactBridge, validate_scene,
                              OCCLUSION_SCHEMA)
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
+from .segmented_noosphere import (
+    SegmentedNoosphere, STORE_SCHEMA as SEGMENTED_STORE_SCHEMA,
+    MAX_JOURNAL_EVENTS as SEGMENTED_JOURNAL_LIMIT,
+    MIN_SEGMENT_SIZE, MAX_SEGMENT_SIZE,
+)
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .verified_snapshot import (
@@ -94,6 +99,7 @@ class Aquarium:
         exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
         replay_snapshot_file=None, replay_snapshot_key_file=None,
         developmental_policy="legacy",
+        journal_backend="legacy", journal_segment_size=4096,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -108,6 +114,14 @@ class Aquarium:
             raise AquariumError("unknown versioned developmental policy")
         if developmental_policy != "legacy" and exploration_mode != "goal_free":
             raise AquariumError("versioned local-cell requires goal_free exploration")
+        if type(journal_backend) is not str or journal_backend not in (
+                "legacy", "segmented"):
+            raise AquariumError("unknown journal backend")
+        if type(journal_segment_size) is not int or not (
+                MIN_SEGMENT_SIZE <= journal_segment_size <= MAX_SEGMENT_SIZE):
+            raise AquariumError("journal_segment_size must be integer in 64..8192")
+        if journal_backend == "segmented" and developmental_policy != "local_cell_v4":
+            raise AquariumError("segmented journal requires explicit local_cell_v4")
         if type(sensory_mode) is not str or sensory_mode not in (
                 "none", "toy_probe", "toy_probe_v2"):
             raise AquariumError("unsupported versioned sensory_mode")
@@ -136,6 +150,12 @@ class Aquarium:
                 raise AquariumError("signed replay snapshot exists but SQLite source is missing")
         self.exploration_mode = exploration_mode
         self.developmental_policy = developmental_policy
+        self.journal_backend = journal_backend
+        self.journal_segment_size = journal_segment_size
+        self.journal_limit = (
+            SEGMENTED_JOURNAL_LIMIT
+            if journal_backend == "segmented" else MAX_REPLAY_EVENTS
+        )
         self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
@@ -218,7 +238,17 @@ class Aquarium:
             # private journals must fail closed rather than silently replay
             # historical sensory frames under a different physical model.
             self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
-        self.store = LocalNoosphere(db_path, agent_id)
+        if journal_backend == "segmented":
+            # Only an explicit NEW PRIVATE SQLite journal; old/legacy paths
+            # fail read-only schema preflight and are never reinterpreted.
+            self.manifest["journal_backend"] = "segmented"
+            self.manifest["journal_schema"] = SEGMENTED_STORE_SCHEMA
+            self.manifest["journal_segment_size"] = journal_segment_size
+            self.store = SegmentedNoosphere(
+                db_path, agent_id, segment_size=journal_segment_size,
+            )
+        else:
+            self.store = LocalNoosphere(db_path, agent_id)
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
         self._committed_head = None
@@ -249,8 +279,16 @@ class Aquarium:
             "payload": payload,
         }
 
+    def _selected_journal_limit(self):
+        # The original legacy resource guard has always been dynamically
+        # enforced by test/resource policies. Do not capture its value only
+        # once at Aquarium construction. Segmented opt-in has its OWN
+        # independently versioned capacity and must not inherit the legacy cap.
+        return (SEGMENTED_JOURNAL_LIMIT if self.journal_backend == "segmented"
+                else MAX_REPLAY_EVENTS)
+
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
-        if self._committed_event_count >= MAX_REPLAY_EVENTS:
+        if self._committed_event_count >= self._selected_journal_limit():
             raise AquariumError("journal event budget reached; verified snapshot/compaction pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
         expected = (self.store.head() if self._committed_head is None
@@ -414,7 +452,7 @@ class Aquarium:
                          0.0 if dy is _OMITTED_MOVEMENT else dy)
         if (self.developmental_policy == "local_cell_v4"
                 and self._committed_event_count +
-                    self.required_events_for_steps(1) > MAX_REPLAY_EVENTS):
+                    self.required_events_for_steps(1) > self._selected_journal_limit()):
             raise AquariumError("v4 session journal budget exhausted before boundary")
         self._commit_pending_epoch()
         payload, next_world, next_learner = self._calculate(*arguments)
@@ -618,8 +656,8 @@ class Aquarium:
         # Only deterministic SIMULATION of the authenticated prefix is
         # skipped when an explicit HMAC-protected sidecar is available.
         count = self.store.count()
-        if count > MAX_REPLAY_EVENTS:
-            raise AquariumError("journal exceeds bounded 100000-event replay budget")
+        if count > self._selected_journal_limit():
+            raise AquariumError("journal exceeds selected bounded source event budget")
         verified = self.store.verify_chain(external_expected_head=external_expected_head)
         if verified["count"] != count:
             raise AquariumError("journal changed during integrity verification")
@@ -742,6 +780,11 @@ def main():
     parser.add_argument("--developmental-policy",
                         choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
                         default="legacy", help="new explicit policy-pinned SQLite journal")
+    parser.add_argument("--journal-backend",
+                        choices=("legacy", "segmented"), default="legacy",
+                        help="EXPERIMENTAL opt-in entirely new SQLite journal format")
+    parser.add_argument("--journal-segment-size", type=int, default=4096,
+                        help="segmented-only events per immutable logical section")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
@@ -754,6 +797,10 @@ def main():
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
     if args.developmental_policy != "legacy" and args.exploration_mode != "goal_free":
         parser.error("versioned local-cell requires --exploration-mode goal_free")
+    if args.journal_backend == "segmented" and args.developmental_policy != "local_cell_v4":
+        parser.error("segmented journal requires explicit local_cell_v4")
+    if not MIN_SEGMENT_SIZE <= args.journal_segment_size <= MAX_SEGMENT_SIZE:
+        parser.error("--journal-segment-size must be in 64..8192")
     if args.exploration_mode == "scripted":
         # Invalid scripted motion is a CLI error, not an organism birth.
         # Reject NaN, infinite and out-of-budget displacement before SQLite
@@ -769,6 +816,8 @@ def main():
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
         sensory_mode=args.sensory_mode,
         developmental_policy=args.developmental_policy,
+        journal_backend=args.journal_backend,
+        journal_segment_size=args.journal_segment_size,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
