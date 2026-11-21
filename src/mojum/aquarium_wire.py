@@ -196,6 +196,8 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
+            if policy == "local_cell_v4" and frames // EPOCH_TICKS != epoch_index:
+                raise NoosphereError("missing durable v4 epoch marker before frame")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
@@ -203,7 +205,9 @@ def inspect_journal(path, *, external_expected_head=None):
                 raise NoosphereError("epoch marker is not allowed by stored policy")
             payload = event["payload"]
             expected_index = epoch_index + 1
-            if (not isinstance(payload, dict)
+            if (frames == 0 or frames % EPOCH_TICKS != 0
+                    or expected_index != frames // EPOCH_TICKS
+                    or not isinstance(payload, dict)
                     or set(payload) != {
                         "schema", "absolute_tick", "epoch_index",
                         "previous_epoch_index", "epoch_tick", "source",
