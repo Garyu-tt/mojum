@@ -16,6 +16,7 @@ import argparse
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -94,6 +95,17 @@ def _as_number(value, label, errors):
         return None
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
+        return None
+    # Runtime geometry is represented using Python float. Decimal can parse
+    # JSON tokens such as 1e1000000, but the runtime cannot represent them;
+    # arithmetic on those values can also raise decimal.Overflow. Reject
+    # such documents instead of crashing or certifying unusable geometry.
+    try:
+        runtime_value = float(value)
+    except (OverflowError, ValueError):
+        runtime_value = float("inf")
+    if not math.isfinite(runtime_value) or (number != 0 and runtime_value == 0.0):
+        errors.append("%s is outside the finite runtime number range" % (label,))
         return None
     return number
 
