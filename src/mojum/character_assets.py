@@ -20,6 +20,7 @@ CREDIT_URL = "https://bassycharactercreator.itch.io/bassy-character-creator"
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_GLB_BYTES = 64 * 1024 * 1024
 MAX_JSON_CHUNK_BYTES = 2 * 1024 * 1024
+MAX_JSON_DEPTH = 256
 MAX_FORMS = 16
 _HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
@@ -110,6 +111,38 @@ def _reject_constant(value):
     raise CharacterAssetError(f"nonfinite JSON value: {value}")
 
 
+def _check_json_depth(raw):
+    """Reject structurally deep JSON before invoking the recursive decoder.
+
+    CPython versions do not expose a portable maximum nesting setting for
+    ``json.loads``.  A deeply nested glTF JSON chunk may be accepted by one
+    interpreter and raise ``RecursionError`` on another.  This bounded scan
+    keeps the asset boundary deterministic and avoids making the decoder do
+    unbounded work.  Brackets inside JSON strings are ignored; the decoder
+    remains responsible for all other JSON syntax.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # quote
+                in_string = False
+            continue
+        if byte == 0x22:  # quote
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { or [
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise CharacterAssetError("JSON nesting depth exceeded")
+        elif byte in (0x7D, 0x5D) and depth:
+            depth -= 1
+
+
 def load_manifest(path):
     """Read at most 64 KiB, reject JSON ambiguity, validate offline manifest."""
     path = Path(path)
@@ -120,6 +153,7 @@ def load_manifest(path):
     if len(raw) > MAX_MANIFEST_BYTES:
         raise CharacterAssetError("character manifest size exceeded")
     try:
+        _check_json_depth(raw)
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
     except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CharacterAssetError("invalid character manifest JSON") from exc
@@ -170,6 +204,7 @@ def _verify_glb(stream, size):
                 raise CharacterAssetError("invalid GLB JSON chunk")
             raw_json = stream.read(chunk_size)
             try:
+                _check_json_depth(raw_json)
                 scene = json.loads(raw_json.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
             except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise CharacterAssetError("invalid GLB JSON") from exc

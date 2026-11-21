@@ -12,6 +12,8 @@ dependencies = []
 
 [project.scripts]
 mojum-aquarium = "mojum.aquarium:main"
+mojum-aquarium-wire = "mojum.aquarium_wire:main"
+mojum-motor-mobility = "mojum.motor_mobility:main"
 mojum-fixture = "mojum.__main__:main"
 
 [tool.setuptools]

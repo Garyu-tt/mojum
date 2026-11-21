@@ -41,6 +41,34 @@ provided `--dx`/`--dy` or `Aquarium.step(dx=..., dy=...)`.
 Every recorded developmental action is only a virtual 2D point-room
 displacement: the physical actuator/torque interface is never invoked.
 
+## Read-only mobility audit (blocked-count blindness)
+
+Collision counts alone cannot distinguish useful exploration from a policy
+that has stopped moving or keeps re-entering the same two positions. The
+audit re-reads a committed PRIVATE journal through a read-only SQLite handle,
+verifies the event chain, and reports measured mobility:
+
+```sh
+PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
+```
+
+The report includes frame/action/blocked/successful counts, idle fraction,
+longest rest streak, distinct visited positions, coverage span, path length
+and a versioned gate result (`rest_collapse`, `revisit_concentration`). It
+also accepts `--expected-head` for an independently recorded chain head.
+
+Thresholds are conservative heuristics, not a navigation score: a rest streak
+of at least `max(10, frames // 10)` combined with an idle fraction of at least
+0.5 marks `REST_COLLAPSE_SUSPECTED`; at least 20 moves with at least four
+successful moves per distinct position marks
+`REVISIT_CONCENTRATION_SUSPECTED`. Histories with no measurable displacement
+report `NO_MEASURED_DISPLACEMENT` instead of the misleading `MOBILITY_OBSERVED`,
+even when attempts occurred; one frame cannot establish movement on its own.
+Both gates read only committed frames; the
+tool never imports the runtime, never writes to the journal, and does not
+reinterpret existing policy semantics. A scripted journal, a non-developmental
+bootstrap or a noncanonical frame is rejected instead of being averaged.
+
 ## Limitations and acceptance boundary
 
 No goal, subjective experience, neural motor learning, real proprioception,
