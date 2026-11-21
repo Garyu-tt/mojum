@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
+from .body_genetics import compile_body
 from .neural import PulsePredictor
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
@@ -173,6 +174,15 @@ class Aquarium:
             "physical_model": "NONE_FIXTURE_ONLY",
         }
         return payload, new_world, next_learner
+
+    def body_preview(self, somatic_chromosome, age_years):
+        """Read-only genetic body projection at the current simulation tick.
+
+        No anatomy/GLB rendering occurs here, and this does not alter the
+        journal, GENESIS ledger, learning, or agent identity.
+        """
+        return compile_body(self.genome.phenotype(self.tick),
+                            somatic_chromosome, age_years)
 
     def step(self, *, dx=0.02, dy=0.0):
         payload, next_world, next_learner = self._calculate(dx, dy)
