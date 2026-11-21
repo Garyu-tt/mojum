@@ -91,7 +91,8 @@ class AnchoredTypedRoomResumeTests(unittest.TestCase):
         self.assertEqual(reported["tick"], original["tick"])
         self.assertEqual(reported["journal_head"], head)
         self.assertEqual(reported["stored_events"], count)
-        self.assertEqual(reported["world"], original["world"])
+        self.assertEqual(reported["world_revision"], original["world_revision"])
+        self.assertEqual(reported["manifest_sha256"], original["manifest_sha256"])
         with closing(sqlite3.connect(self.db.resolve().as_uri() + "?mode=ro",
                                      uri=True)) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM events").fetchone()[0], count)
