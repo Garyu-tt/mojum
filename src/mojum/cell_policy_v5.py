@@ -126,6 +126,7 @@ class CellExplorerV5:
             if (type(last_seen) is not int
                     or not 0 <= last_seen <= state["last_tick"]):
                 raise CellV5Error("invalid last observed cell tick")
+            cell_observations = 0
             for action, counts in actions.items():
                 if (type(counts) is not list or len(counts) != 2
                         or any(type(v) is not int for v in counts)
@@ -134,7 +135,12 @@ class CellExplorerV5:
                     raise CellV5Error("invalid v5 measured counters")
                 if action == "rest" and counts[1]:
                     raise CellV5Error("impossible blocked rest history")
-                observed_live += counts[0]
+                cell_observations += counts[0]
+            # Each tick observes at most one cell. A cell last observed at
+            # absolute tick t cannot have accumulated more than t + 1 samples.
+            if cell_observations > last_seen + 1:
+                raise CellV5Error("more v5 cell observations than elapsed ticks")
+            observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV5Error("v5 lost or double-counted learned observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:
