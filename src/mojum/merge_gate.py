@@ -245,6 +245,7 @@ def evaluate(
     expected_head_sha: str | None,
     expected_base: str = "main",
     required: Sequence[str] = (),
+    expected_counts: Mapping[str, int] | None = None,
     waivers: Mapping[str, str] | None = None,
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
@@ -253,9 +254,14 @@ def evaluate(
         raise ValueError("expected_head_sha must be 7-64 hexadecimal characters")
 
     waivers = dict(waivers or {})
+    counts = dict(expected_counts or {})
+    if any(type(n) is not int or n < 1 for n in counts.values()):
+        raise ValueError("expected_counts must be positive integers")
     rejects: list[GateReason] = []
     defers: list[GateReason] = []
     patterns = tuple(required)
+    if set(counts) - set(patterns):
+        raise ValueError("expected_counts contains a non-required pattern")
     matched_labels: list[str] = []
 
     if not expected_head_sha:
@@ -325,6 +331,25 @@ def evaluate(
                 )
             )
             continue
+
+        # A wildcard or workflow name does not prove that all jobs in a
+        # matrix registered in the rollup. Require a pinned inventory size.
+        inventory_needed = (any(char in pattern for char in "*?[")
+                            or any(check.workflow and fnmatchcase(check.workflow, pattern)
+                                   for check in matches))
+        if inventory_needed and pattern not in counts:
+            defers.append(GateReason(
+                "CHECK_INVENTORY_UNSPECIFIED",
+                f"required pattern {pattern!r} may match unseen jobs; "
+                "supply --require-count PATTERN=N or name each job exactly",
+            ))
+        expected = counts.get(pattern, 1)
+        actual = len({check.label for check in matches})
+        if actual < expected:
+            defers.append(GateReason(
+                "REQUIRED_CHECK_COUNT_MISSING",
+                f"{pattern!r} has {actual} distinct jobs, expected at least {expected}",
+            ))
 
         for check in matches:
             matched_labels.append(check.label)
@@ -452,6 +477,17 @@ def _parse_waivers(values: Iterable[str]) -> dict[str, str]:
     return waivers
 
 
+def _parse_require_counts(values: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        pattern, sep, raw_count = value.partition("=")
+        if (not sep or not pattern.strip() or not raw_count.isdecimal()
+                or int(raw_count) < 1 or pattern.strip() in counts):
+            raise ValueError(f"--require-count expects unique PATTERN=N (N >= 1), got {value!r}")
+        counts[pattern.strip()] = int(raw_count)
+    return counts
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="mojum-merge-gate",
@@ -480,6 +516,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--require-count",
+        action="append",
+        default=[],
+        metavar="PATTERN=N",
+        help="expected distinct jobs in a workflow or wildcard requirement",
+    )
+    parser.add_argument(
         "--waive",
         action="append",
         default=[],
@@ -505,6 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         waivers = _parse_waivers(args.waive)
+        counts = _parse_require_counts(args.require_count)
         if args.pr is not None:
             snapshot = fetch_snapshot(args.pr, gh=args.gh)
         else:
@@ -515,6 +559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_head_sha=args.expected_head_sha,
             expected_base=args.expected_base,
             required=args.require,
+            expected_counts=counts,
             waivers=waivers,
         )
     except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError) as error:
@@ -542,6 +587,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "base_ref": facts.base_ref,
             "expected_base": args.expected_base,
             "required": list(result.required),
+            "required_counts": counts,
             "matched": list(result.matched),
             "waivers": waivers,
             "reasons": [reason.as_dict() for reason in result.reasons],
