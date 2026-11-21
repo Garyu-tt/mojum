@@ -210,6 +210,22 @@ to 512 active cells and evicts the least recently observed cell when a
 new one arrives at capacity. The journal records evictions and forgotten
 observations. The SQLite journal still has a 10,000-event budget.
 
+For a separately versioned continuation beyond the v3 9,999-tick motor
+ceiling, use `--motor-mode local_cell_v4` on a **new** journal. It records a
+durable epoch marker at absolute tick 9,999 and keeps the absolute tick,
+epoch-local tick, bounded cell state and cold replay aligned across the
+boundary. It accepts only `--sensory-mode none`; it does not reinterpret v1,
+v2, or v3 history and does not claim indefinite operation. Repeat bounded
+foreground commands with the same mode to continue the same local journal:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./epoch_v4_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+```
+
+See [the current-main epoch contract](docs/R015_EXPLICIT_EPOCH_V4_CURRENT_MAIN.md)
+for the marker and replay rules.
+
 To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained

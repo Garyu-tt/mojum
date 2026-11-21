@@ -8,6 +8,10 @@ from pathlib import Path
 import re
 
 from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
+from .cell_policy_v4 import LEARNING_SCHEMA as V4_OUTCOME, SCHEMA as V4_SCHEMA
+from .epoch_sense_v2 import (
+    EPOCH_TICKS, MAX_ABSOLUTE_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
+)
 from .developmental import SCHEMA as MOTOR_PLAY
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
 from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2, LEARNING_SCHEMA as SENSORY_LEARNING_V2
@@ -28,6 +32,7 @@ _HEAD = re.compile(r"[0-9a-f]{64}\Z")
 _MOTOR_KEYS = {
     "exploration_mode", "developmental_schema", "developmental_policy",
     "motor_policy", "motor_mode", "motor_policy_schema",
+    "epoch_schema", "epoch_ticks",
 }
 _POLICY_SELECTORS = (
     ({}, "scripted_v1", None),
@@ -47,6 +52,10 @@ _POLICY_SELECTORS = (
       "developmental_policy": "local_cell_v3"}, "local_cell_v3",
      ("mojum.developmental.local-cell/3", "mojum.developmental.local-cell.outcome/3",
       "bounded_goal_free_local_cell_motor_play_v3")),
+    ({"exploration_mode": "goal_free", "developmental_schema": V4_SCHEMA,
+      "developmental_policy": "local_cell_v4", "epoch_schema": EPOCH_SENSE_SCHEMA,
+      "epoch_ticks": EPOCH_TICKS}, "local_cell_v4",
+     (V4_SCHEMA, V4_OUTCOME, "bounded_goal_free_local_cell_motor_play_v4")),
 )
 _TEMPORAL_FIELDS = {
     "temporal_mode": "range_guided",
@@ -169,8 +178,31 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
+            if policy == "local_cell_v4" and frames >= MAX_ABSOLUTE_TICKS:
+                raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
+        elif topic == "aquarium.epoch":
+            if policy != "local_cell_v4":
+                raise NoosphereError("unknown Aquarium epoch event")
+            payload = event.get("payload")
+            epoch_index = frames // EPOCH_TICKS
+            if (frames == 0 or frames % EPOCH_TICKS != 0
+                    or type(payload) is not dict
+                    or set(payload) != {"schema", "absolute_tick", "from_epoch",
+                                         "to_epoch", "epoch_tick", "source"}
+                    or payload["schema"] != "mojum.aquarium.epoch/1"
+                    or type(payload["absolute_tick"]) is not int
+                    or type(payload["from_epoch"]) is not int
+                    or type(payload["to_epoch"]) is not int
+                    or type(payload["epoch_tick"]) is not int
+                    or payload["absolute_tick"] != frames
+                    or payload["from_epoch"] != epoch_index - 1
+                    or payload["to_epoch"] != epoch_index
+                    or payload["epoch_tick"] != 0
+                    or payload["source"] != "explicit_monotonic_synthetic_epoch_boundary"
+                    or event["event_id"] != f"epoch-{epoch_index:08d}"):
+                raise NoosphereError("invalid Aquarium epoch boundary")
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
