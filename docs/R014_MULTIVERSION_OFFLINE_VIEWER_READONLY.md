@@ -55,6 +55,14 @@ Existing real Chrome smoke must also pass for legacy v1 and #112 v2A
 and deliberately reject wrong/missing learning schema and unknown
 future schemas, even when the in-file frame hash is recomputed.
 
+The real-peer Chrome gate also assembles an adversarial run using an actual
+v2B first frame, actual v3B second frame and v2B third frame, with a
+fresh SHA-256 on those bytes: it must reject the mixed ABI before playback.
+It likewise rejects a real v2B frame with the wrong outcome/3 learning
+schema and a real v3B trace mislabeled as v2B by its footer, after exact
+digest recomputation. The file cannot be treated as authenticated because
+those hashes and labels remain attacker-writable.
+
 ## Trust and release
 
 SHA-256 of the bytes inside one user-supplied JSONL is not a digital
