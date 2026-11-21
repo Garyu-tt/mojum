@@ -127,6 +127,20 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
                 )
             self.assertFalse(list(exposed.iterdir()))
 
+    def test_private_restore_into_public_directory_is_denied(self):
+        self.build(64)
+        receipt = self.export()
+        public = self.root / "world-readable-restore"
+        public.mkdir(mode=0o755)
+        target = public / "PRIVATE-synthetic-recovered.sqlite3"
+        with self.assertRaisesRegex(ArchiveError, "group/other"):
+            restore_into_new_sqlite(
+                self.archive, target,
+                external_expected_head=receipt["sealed_head"],
+            )
+        self.assertFalse(target.exists())
+        self.assertEqual(list(public.iterdir()), [])
+
     def test_data_corruption_and_missing_manifest_are_rejected(self):
         self.build(128)
         receipt = self.export()
