@@ -155,14 +155,18 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
     conclusion_raw = _text(raw, "conclusion")
     state_raw = _text(raw, "state")
 
-    if state_raw is not None and status_raw is None:
+    if state_raw is not None:
         # StatusContext: EXPECTED/PENDING are non-terminal; SUCCESS/FAILURE/
         # ERROR are terminal legacy commit statuses.
         state = state_raw.upper()
-        if state in {"SUCCESS", "FAILURE", "ERROR"}:
-            status_raw, conclusion_raw = "COMPLETED", state
-        else:
-            status_raw = state
+        if state in {"FAILURE", "ERROR"}:
+            conclusion_raw = state
+        if status_raw is None:
+            if state in {"SUCCESS", "FAILURE", "ERROR"}:
+                status_raw = "COMPLETED"
+                conclusion_raw = conclusion_raw or state
+            else:
+                status_raw = state
 
     if status_raw is None:
         if conclusion_raw is not None:

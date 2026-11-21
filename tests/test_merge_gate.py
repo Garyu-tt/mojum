@@ -280,6 +280,17 @@ class GateVerdictTests(unittest.TestCase):
                 self.assertEqual(result.verdict, "reject")
                 self.assertEqual(result.code, "CHECK_FAILED")
 
+    def test_negative_legacy_state_or_conclusion_rejects(self):
+        for fields in (
+            {"state": "SUCCESS", "conclusion": "FAILURE"},
+            {"state": "ERROR", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        ):
+            with self.subTest(fields=fields):
+                checks = [{"context": "legacy/gate", **fields}]
+                result = evaluate_checks(checks, required=("legacy/gate",))
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_FAILED")
+
     def test_skipped_check_requires_a_waiver(self):
         checks = self.green()[:2] + [
             run(name="mesh", conclusion="SKIPPED", workflow="Mesh contract")

@@ -85,7 +85,7 @@ and `StatusContext` entries) and a snake_case fixture form (`head_sha`,
 `base_ref`, `checks`) are accepted. This keeps tests hermetic while the CLI can
 be pointed at real PR data. Input is capped at 4 MiB.
 
-## Recommended merge sequence
+## Check a live PR rollup
 
 ```sh
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
@@ -99,14 +99,14 @@ PYTHONPATH=src python3 -m mojum.merge_gate \
   --require 'motor-gate-stdlib (3.13)' \
   --require 'mesh-stdlib (3.11)' \
   --require 'mesh-stdlib (3.12)' \
-  --require 'mesh-stdlib (3.13)' || exit $?
-gh pr merge "$PR" --squash --match-head-commit "$SHA"
+  --require 'mesh-stdlib (3.13)'
 ```
 
-`--match-head-commit` makes GitHub refuse the merge if the head moved between
-the verdict and the merge call. The gate's exit code is the decision: `0`
-proceeds, anything else stops the shell chain. This is a client-side guard; it
-does not replace repository rulesets, which remain authoritative.
+Treat a `ready` result as a prerequisite for the
+[merge acceptance policy](MERGE_ACCEPTANCE_POLICY.md). Verify the current base
+commit and required check-run provenance against that policy before submitting
+a merge guarded by `--match-head-commit`. The policy also calls for a GitHub
+repository ruleset to enforce the requirements at merge time.
 
 ## Limitations
 
