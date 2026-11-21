@@ -524,6 +524,7 @@ def main():
     seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
     try:
         graph = load_graph(args.graph)
+        validate_graph(graph)  # Fail before opening a new SQLite journal.
     except GraphError as exc:
         parser.error(str(exc))
     with Aquarium(
