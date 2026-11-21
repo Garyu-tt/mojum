@@ -25,8 +25,12 @@ failed `gh` call) is also a `reject` and never a `ready`.
 
 - A requirement is a check name, a `workflow / job` label, a workflow name, or
   an `fnmatch` pattern (`Aquarium*`). Repeat `--require` for each gate.
-- Every check matching a requirement must pass. Requiring a workflow name
-  therefore requires all of that workflow's jobs.
+- Every visible check matching a requirement must pass, but a rollup may
+  omit matrix siblings that have not registered yet. A wildcard or workflow-name
+  requirement therefore also needs `--require-count 'PATTERN=N'` for the
+  **audited number of distinct expected jobs**. Missing count rejects;
+  fewer or duplicate jobs defer. Alternatively list each exact job label
+  separately with repeated `--require`.
 - `success` and `neutral` are passing. `skipped` is rejected unless the same
   pattern appears in `--waive PATTERN=REASON`.
 - A waiver never masks `failure`, `cancelled`, `timed_out`, `action_required`,
@@ -35,6 +39,10 @@ failed `gh` call) is also a `reject` and never a `ready`.
   (`MISSING_REQUIRED_CHECK`), because the workflow may not have registered yet.
 - A check whose recorded `headSha` differs from the snapshot head yields
   `defer` (`STALE_CHECK`).
+- `--require-count` must exactly match a `--require` argument. Inventory
+  counts must be positive and must be updated after intentionally changing
+  the workflow matrix; a count alone cannot establish job identities if a
+  different set of jobs coincidentally has the same size.
 - `--expected-head-sha` is mandatory. Without it the verdict is `reject`
   (`EXPECTED_HEAD_REQUIRED`).
 - No requirements at all is `reject` (`NO_REQUIRED_CHECKS`): a gate that
@@ -49,7 +57,15 @@ gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeabl
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
   --expected-head-sha "$(git rev-parse HEAD)" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+  --require 'aquarium-stdlib (3.11)' \
+  --require 'aquarium-stdlib (3.12)' \
+  --require 'aquarium-stdlib (3.13)' \
+  --require 'motor-gate-stdlib (3.11)' \
+  --require 'motor-gate-stdlib (3.12)' \
+  --require 'motor-gate-stdlib (3.13)' \
+  --require 'mesh-stdlib (3.11)' \
+  --require 'mesh-stdlib (3.12)' \
+  --require 'mesh-stdlib (3.13)'
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -73,8 +89,13 @@ be pointed at real PR data. Input is capped at 4 MiB.
 ```sh
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --pr "$PR" --expected-head-sha "$SHA" --require '*aquarium*' \
-  --require '*motor-gate*' --require '*mesh*' || exit $?
+  --pr "$PR" --expected-head-sha "$SHA" \
+  --require 'Mojum R0.3 online-learning aquarium regression' \
+  --require-count 'Mojum R0.3 online-learning aquarium regression=3' \
+  --require 'Mojum motor-gate independent QA' \
+  --require-count 'Mojum motor-gate independent QA=3' \
+  --require 'Mojum mesh contract independent QA' \
+  --require-count 'Mojum mesh contract independent QA=3' || exit $?
 gh pr merge "$PR" --squash --match-head-commit "$SHA"
 ```
 
@@ -85,6 +106,7 @@ does not replace repository rulesets, which remain authoritative.
 
 ## Limitations
 
+- Job counts shown in examples are the observed 3.11/3.12/3.13 matrices; verify them against the current workflow definitions before reuse.
 - The snapshot is a point-in-time read. The gate cannot prove that no later
   push occurred; pair it with `--match-head-commit` and re-run immediately
   before merging.
