@@ -118,7 +118,7 @@ Run regression tests (Python 3.11–3.13 are the CI target):
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or MuJoCo. The SQLite checkpoint is a **checksum-only**, non-authenticated local record, not a portable security credential or complete atomic multi-component snapshot. Journal replay is currently capped at 10,000 events; do not run unattended past this budget.
+The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or MuJoCo. The SQLite checkpoint is a **checksum-only**, non-authenticated local record, not a portable security credential or complete atomic multi-component snapshot. Reopening streams verified history in bounded batches, so replay no longer materializes the whole projection, but the journal remains capped at 100,000 events with CPU time and disk use growing linearly; do not run unattended past this budget. See [streaming replay contract](docs/STREAMING_REPLAY_R01.md).
 
 ## Run from an installed wheel
 
@@ -190,6 +190,16 @@ an independently recorded `--expected-source-head`, and the explicit
 learned state, with a limit of 1,000 frames. It refuses an existing
 destination and preserves the source file. Both modes can also produce
 replay-verified PRIVATE JSONL via the offline exporter.
+
+Use `--motor-mode local_cell_v3` for the distinct v3 policy. It retains up
+to 512 active cells and evicts the least recently observed cell when a
+new one arrives at capacity. The journal records evictions and forgotten
+observations. The SQLite journal still has a 10,000-event budget.
+
+To continue earlier v2B experience as v3, use the same transfer flags
+with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
+and publishes a new v3 file only if every historical frame and retained
+observation matches, with zero evictions during the transfer.
 
 ## Architecture and development
 

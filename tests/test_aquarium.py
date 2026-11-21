@@ -242,7 +242,7 @@ class AquariumIntegrationTests(unittest.TestCase):
             self.assertEqual(resumed.step()["phenotype"]["parameters"]["heartbeat_bpm"], 90)
 
     def test_anchored_reopen_rejects_write_during_replay(self):
-        for stage in ("verify_chain", "dataset"):
+        for stage in ("verify_chain", "iter_events"):
             with self.subTest(stage=stage), self.aquarium() as writer:
                 anchor = writer.checkpoint()["journal_head"]
                 read = getattr(LocalNoosphere, stage)

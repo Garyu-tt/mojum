@@ -18,7 +18,8 @@ import signal
 import threading
 import time
 
-from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS
+from .aquarium import Aquarium, AquariumError
+from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
 
@@ -96,7 +97,7 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     _require_sensorimotor_fixture(aquarium)
     if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
         raise PortableHostError(
-            "requested ticks exceed fixed 10000-event replay budget; "
+            f"requested ticks exceed fixed {MAX_REPLAY_EVENTS}-event replay budget; "
             "use a smaller bounded run"
         )
 
@@ -150,6 +151,9 @@ def main(argv=None):
                         help="wall-clock delay 20..3600000 ms, not virtual dt")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
+    parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
+                        default="placeholder",
+                        help="opt-in synthetic controller; placeholder is the legacy default")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
@@ -170,6 +174,7 @@ def main(argv=None):
                 args.db, seed, graph,
                 neural_mode=args.neural_mode,
                 motor_mode="developmental_fixture",
+                brain_mode=args.brain_mode,
                 sensory_mode="toy_probe",
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
@@ -190,6 +195,7 @@ def main(argv=None):
                     "journal_events": aquarium.store.count(),
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
+                    "brain_mode": args.brain_mode,
                     "temporal_mode": args.temporal_mode,
                     "wall_elapsed_seconds": round(time.monotonic() - started, 3),
                     "stop_reason": "signal" if stopped.is_set() else "completed",

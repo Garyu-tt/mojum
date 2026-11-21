@@ -46,7 +46,7 @@ Noosphere export excludes it by default.
 No cross-host distributed transactions, durable model snapshots separate
 from the journal, verified encryption, signed identity, protected private
 memories or trained inference model exist yet. Replay of the source journal
-remains limited by R0.2's 10,000-event cap.
+streams in bounded batches but remains capped by R0.2's 100,000-event ceiling.
 
 ## Run from repository checkout
 

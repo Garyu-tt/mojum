@@ -350,6 +350,62 @@ class LocalNoosphere:
         return _verify_chain(self._db, self.agent_id, external_expected_head=external_expected_head,
                              strict_wire=strict_wire or self.read_only)
 
+    def iter_events(self, *, topic=None, source=None, as_of_recorded_ns=None,
+                    valid_at_ns=None, include_nonpublic=False, batch_size=128):
+        """Yield journal rows in sequence order using bounded SQLite fetches.
+
+        Streaming companion to :meth:`dataset`: callers can re-derive state
+        without materializing the whole projection in memory. The filter and
+        visibility semantics match ``dataset``. This helper does not verify the
+        hash chain by itself; callers that need integrity run
+        :meth:`verify_chain` independently, as Aquarium replay does.
+        """
+        if topic is not None:
+            _text(topic, "topic")
+        if source is not None:
+            _text(source, "source")
+        if as_of_recorded_ns is not None:
+            _integer(as_of_recorded_ns, "as_of_recorded_ns")
+        if valid_at_ns is not None:
+            _integer(valid_at_ns, "valid_at_ns")
+        if type(include_nonpublic) is not bool:
+            raise NoosphereError("include_nonpublic must be boolean")
+        if type(batch_size) is not int or not 1 <= batch_size <= 10_000:
+            raise NoosphereError("batch_size must be integer between 1 and 10000")
+        where = ["agent_id = ?"]
+        args = [self.agent_id]
+        if not include_nonpublic:
+            where.append("visibility = 'PUBLIC'")
+        if topic is not None:
+            where.append("topic = ?")
+            args.append(topic)
+        if source is not None:
+            where.append("json_extract(wire_json, '$.source') = ?")
+            args.append(source)
+        if as_of_recorded_ns is not None:
+            where.append("recorded_at_ns <= ?")
+            args.append(as_of_recorded_ns)
+        if valid_at_ns is not None:
+            where.append("valid_from_ns <= ? AND (valid_to_ns IS NULL OR valid_to_ns > ?)")
+            args.extend((valid_at_ns, valid_at_ns))
+        sql = ("SELECT seq,wire_json,event_hash FROM events WHERE "
+               + " AND ".join(where) + " ORDER BY seq")
+        cursor = self._db.execute(sql, args)
+        try:
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if not rows:
+                    return
+                for row in rows:
+                    try:
+                        event = json.loads(row["wire_json"])
+                    except (TypeError, ValueError, RecursionError) as exc:
+                        raise NoosphereError("invalid journal JSON") from exc
+                    yield {"seq": row["seq"], "event": event,
+                           "event_hash": row["event_hash"]}
+        finally:
+            cursor.close()
+
     def dataset(self, *, topic=None, source=None, as_of_recorded_ns=None, valid_at_ns=None, include_nonpublic=False, limit=1000):
         """Read-only reproducible dataset projection; PRIVATE never exported by default."""
         if topic is not None:

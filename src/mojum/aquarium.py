@@ -25,6 +25,7 @@ from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
+from .cell_policy_v3 import CellExplorerV3, SCHEMA as V3_SCHEMA
 from .local_cell_sense import Proprioception
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
@@ -44,11 +45,14 @@ from .world_room import (
 
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
-MAX_REPLAY_EVENTS = 10_000
+MAX_REPLAY_EVENTS = 100_000
+MAX_MOTOR_REPLAY_EVENTS = 10_000
+REPLAY_BATCH_SIZE = 128
 V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
-MOTOR_MODES = ("scripted", "developmental_fixture", V2B_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE)
+V3_MODE = "local_cell_v3"
+MOTOR_MODES = ("scripted", "developmental_fixture", V2B_MODE, V3_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE)
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
     "world.room", "brain.placeholder", "memory.episode",
@@ -119,7 +123,7 @@ class Aquarium:
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow", motor_mode="scripted", pulse_sum="auto",
-        sensory_mode="none", sensory_scene=None, temporal_mode="none",
+        sensory_mode="none", sensory_scene=None, temporal_mode="none", read_only=False,
         brain_mode="placeholder",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
@@ -130,15 +134,18 @@ class Aquarium:
             raise AquariumError("neural_mode must be shadow or disabled")
         if type(motor_mode) is not str or motor_mode not in MOTOR_MODES:
             raise AquariumError("unknown Aquarium motor mode")
-        legacy_v2b = motor_mode == V2B_WIRE_MODE
-        if legacy_v2b:
-            motor_mode = V2B_MODE
-        self._read_only_archive = motor_mode == V2A_ARCHIVE_MODE
-        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE)
         if brain_mode not in ("placeholder", "developmental_controller"):
             raise AquariumError("brain_mode must be placeholder or developmental_controller")
         if brain_mode == "developmental_controller" and motor_mode != "developmental_fixture":
             raise AquariumError("developmental_controller brain requires developmental_fixture motor mode")
+        legacy_v2b = motor_mode == V2B_WIRE_MODE
+        if legacy_v2b:
+            motor_mode = V2B_MODE
+        if type(read_only) is not bool:
+            raise AquariumError("read_only must be boolean")
+        self._archive_v2a = motor_mode == V2A_ARCHIVE_MODE
+        self._read_only = self._archive_v2a or read_only
+        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE)
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
@@ -200,19 +207,18 @@ class Aquarium:
             self.manifest.update({
                 "brain_mode": self.brain_mode,
                 "brain_model_schema": DEVELOPMENTAL_BRAIN_SCHEMA,
-                "source_classification": (
-                    "synthetic_only_developmental_controller_no_neural_brain_no_mujoco"
-                ),
+                "source_classification": "synthetic_only_developmental_controller_no_neural_brain_no_mujoco",
             })
         # Do not modify the legacy scripted bootstrap for existing journals.
         if self._local_cell:
             self.manifest["exploration_mode"] = "goal_free"
-            self.manifest["developmental_schema"] = V2A_SCHEMA if self._read_only_archive else V2B_SCHEMA
-            if self._read_only_archive:
+            if self._archive_v2a:
+                self.manifest["developmental_schema"] = V2A_SCHEMA
                 self.manifest["motor_policy"] = "local_cell_v2"
                 self.manifest["motor_policy_schema"] = V2A_SCHEMA
             else:
-                self.manifest["developmental_policy"] = V2B_WIRE_MODE
+                self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
+                self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE
         elif self.motor is not None:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
@@ -242,18 +248,19 @@ class Aquarium:
             raise AquariumError("expected head must be a lowercase SHA-256 digest")
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
+        self._committed_count = 0
         first = _read_first_event(db_path, agent_id)
         if first is not None:
             self._check_bootstrap(first)
         elif external_expected_head is not None:
             raise AquariumError(
                 "expected head requires an existing journal; refusing to create a new one")
-        elif self._read_only_archive or legacy_v2b:
+        elif self._read_only or legacy_v2b:
             raise AquariumError("this motor selector requires an existing journal")
-        self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only_archive)
+        self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only)
         try:
             if self.store.count() == 0:
-                if self._read_only_archive or legacy_v2b:
+                if self._read_only or legacy_v2b:
                     raise AquariumError("this motor selector requires an existing journal")
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head, detect_sum=pulse_sum == "auto" and self.learner is not None)
@@ -270,12 +277,13 @@ class Aquarium:
         self.motor = None
         if self.motor_mode == "developmental_fixture":
             self.motor = MotorPlay()
-        elif self._read_only_archive:
+        elif self._archive_v2a:
             self.motor = ArchivedV2AExplorer()
+        elif self.motor_mode == V3_MODE:
+            self.motor = CellExplorerV3()
         elif self._local_cell:
             self.motor = CellExplorer()
-        self.brain = (DevelopmentalBrain()
-                      if self.brain_mode == "developmental_controller" else None)
+        self.brain = DevelopmentalBrain() if self.brain_mode == "developmental_controller" else None
         self.contact_model = ContactAssociations() if self.sensory_bridge is not None else None
         self.range_model = RangeOutcomeMemory() if self.temporal_mode == "range_guided" else None
         self.genome = GenomeLedger(self.seed)
@@ -303,14 +311,34 @@ class Aquarium:
         }
 
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
-        if self._read_only_archive:
-            raise AquariumError("v2A archive is read-only")
+        if self._read_only:
+            raise AquariumError("Aquarium journal is read-only")
         if self._local_cell and topic not in {"aquarium.bootstrap", "aquarium.frame"}:
             raise AquariumError("local-cell compatibility journals contain only frames")
-        if self.store.count() >= MAX_REPLAY_EVENTS:
-            raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
+        # The committed count is cached after bootstrap/replay/CAS append so a
+        # long history does not pay a global SQLite count scan per frame. A
+        # concurrent writer is still rejected by the append's CAS head check.
+        budget = self.journal_event_budget
+        if self._committed_count >= budget:
+            raise AquariumError(
+                f"journal event budget reached ({budget:,}); "
+                "export verified history and start a new journal")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
-        return self.store.append(event, expected_head=self._committed_head)
+        head = self.store.append(event, expected_head=self._committed_head)
+        self._committed_count += 1
+        return head
+
+    @property
+    def stored_events(self):
+        """Number of events this process has verified or committed."""
+        return self._committed_count
+
+    @property
+    def journal_event_budget(self):
+        """Event ceiling for this journal and its pinned motor wire."""
+        if self.motor is not None:
+            return min(MAX_REPLAY_EVENTS, MAX_MOTOR_REPLAY_EVENTS)
+        return MAX_REPLAY_EVENTS
 
     def _calculate(self, dx, dy):
         """Preserve the existing three-value scripted fixture test contract."""
@@ -357,12 +385,15 @@ class Aquarium:
         runtime.tick = self.tick
         output = runtime.step()
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
-        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
         if self._local_cell:
             sense = Proprioception(self.tick, self.world.revision, self.world.x, self.world.y,
                                    sensory["heartbeat"]["pulse"])
             intent = next_motor.decide(sense)
             dx, dy = intent["dx"], intent["dy"]
+        graph_brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        if graph_brain.get("status") != "UNIMPLEMENTED" or graph_brain.get("action") is not None:
+            raise AquariumError("unexpected privileged brain behavior in fixture")
+        brain = graph_brain
         if controller_mode:
             brain = self.brain.decide(
                 next_motor,
@@ -374,6 +405,7 @@ class Aquarium:
                     "world_revision": self.world.revision,
                 },
                 near_field=pre_move_sensor,
+                dt_ns=self.dt_ns,
                 avoid=avoid,
                 prefer=prefer,
             )
@@ -388,10 +420,6 @@ class Aquarium:
         next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot(), summation=self._pulse_sum)
                         if self.learner is not None else None)
         learning = next_learner.observe(sensory) if next_learner is not None else None
-        if (not controller_mode
-                and (brain.get("status") != "UNIMPLEMENTED"
-                     or brain.get("action") is not None)):
-            raise AquariumError("unexpected privileged brain behavior in fixture")
         payload = {
             "schema": SCHEMA, "tick": self.tick, "time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
@@ -501,8 +529,8 @@ class Aquarium:
         return copy.deepcopy(self.identity)
 
     def step(self, *, dx=None, dy=None):
-        if self._read_only_archive:
-            raise AquariumError("v2A archive is read-only")
+        if self._read_only:
+            raise AquariumError("Aquarium journal is read-only")
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
@@ -542,120 +570,140 @@ class Aquarium:
     def _check_bootstrap(self, first):
         expected = self._record("aquarium.bootstrap", "aquarium-bootstrap",
                                 self.manifest, 0, self.graph_sha256)
-        if first != expected or ((self.sensory_bridge is not None or self._local_cell) and
+        if first != expected or ((self.sensory_bridge is not None or self._local_cell
+                                  or self.brain_mode == "developmental_controller") and
                                  canonical(first) != canonical(expected)):
             raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
 
     def _replay(self, external_expected_head, *, detect_sum):
         verified = self.store.verify_chain(
-            external_expected_head=external_expected_head, strict_wire=self._local_cell,
+            external_expected_head=external_expected_head,
+            strict_wire=(self._local_cell or self.brain_mode == "developmental_controller"),
         )
         count = verified["count"]
-        if count > MAX_REPLAY_EVENTS:
-            raise AquariumError("R0.2 replay exceeds 10,000 journal events; streaming pending")
-        view = self.store.dataset(include_nonpublic=True, limit=MAX_REPLAY_EVENTS)
-        items = view["projection"]["items"]
-        if not items:
-            raise AquariumError("bootstrap event missing")
-        if len(items) != count or items[-1]["event_hash"] != verified["head"]:
-            raise AquariumError("journal changed since verification, reopen the aquarium")
-        self._check_bootstrap(items[0]["event"])
+        budget = self.journal_event_budget
+        if count > budget:
+            raise AquariumError(
+                f"journal exceeds the {budget:,}-event replay ceiling; "
+                "export verified history and start a new journal")
         try:
-            self._replay_events(items)
+            self._replay_stream(count, verified["head"])
         except _FrameMismatch:
             if not detect_sum:
                 raise
             # A single arithmetic rule must reproduce the entire verified history.
             other_sum = "ordered" if self._pulse_sum == "compensated" else "compensated"
             self._reset_replay_state(other_sum)
-            self._replay_events(items)
+            self._replay_stream(count, verified["head"])
         if self.store.head() != verified["head"]:
             raise AquariumError("journal advanced during replay, reopen the aquarium")
+        self._committed_count = count
         self._committed_head = verified["head"]
 
-    def _replay_events(self, items):
-        for entry in items[1:]:
-            event = entry["event"]
-            if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
-                raise AquariumError("unexpected journal ownership or visibility")
-            if event["observed_at_ns"] != self.tick * self.dt_ns:
-                raise AquariumError("unsynchronized event time")
-            if self._local_cell and event["topic"] != "aquarium.frame":
-                raise AquariumError("local-cell compatibility journals contain only frames")
-            if event["topic"] == "development.advance":
-                payload = event["payload"]
-                if not isinstance(payload, dict) or set(payload) != {
-                    "schema", "from_months", "to_months", "reason"
-                } or payload["schema"] != DEVELOPMENT_SCHEMA:
-                    raise AquariumError("invalid development journal event")
-                previous, target = payload["from_months"], payload["to_months"]
-                if (type(previous) is not int or previous != self.development_months or
-                        type(target) is not int or not 1 <= target - previous <= 12 or
-                        target > 192):
-                    raise AquariumError("development clock continuity broken")
-                _safe_event_text(payload["reason"], "development reason")
-                event_id = f"development-{previous:03d}-{target:03d}"
-                if event != self._record("development.advance", event_id,
-                                         payload, self.tick * self.dt_ns,
-                                         self.genome.revision):
-                    raise AquariumError("noncanonical development event")
-                self.development_months = target
-            elif event["topic"] == "identity.assigned":
-                payload = event["payload"]
-                if (self.identity is not None or not isinstance(payload, dict) or
-                        set(payload) != {"schema", "identity", "actor_id"} or
-                        payload["schema"] != IDENTITY_EVENT_SCHEMA):
-                    raise AquariumError("invalid or duplicate identity journal event")
-                _safe_event_text(payload["actor_id"], "human actor id", 128)
-                validated = validate_human_name(payload["identity"], self.agent_id)
-                if event != self._record("identity.assigned", "identity-assigned",
-                                         payload, self.tick * self.dt_ns,
-                                         self.genome.revision):
-                    raise AquariumError("noncanonical identity event")
-                self.identity = validated
-            elif event["topic"] == "genesis.acquisition":
-                raw = event["payload"].get("acquisition")
-                if not isinstance(raw, dict) or event["event_id"] != "acq-" + str(raw.get("event_id")):
-                    raise AquariumError("invalid acquisition envelope")
-                if raw.get("valid_from_tick", -1) < self.tick:
-                    raise AquariumError("retroactive committed acquisition")
-                if raw.get("recorded_at_ns") != event["recorded_at_ns"]:
-                    raise AquariumError("acquisition and journal recorded time differ")
-                next_ledger = GenomeLedger.from_snapshot(self.genome.snapshot())
-                next_ledger.append(raw, next_ledger.revision)
-                if next_ledger.revision != event["source_revision"]:
-                    raise AquariumError("acquired gene revision mismatch")
-                if event != self._record("genesis.acquisition", event["event_id"],
-                                         event["payload"], self.tick * self.dt_ns,
-                                         next_ledger.revision):
-                    raise AquariumError("noncanonical acquired event envelope")
-                self.genome = next_ledger
-            elif event["topic"] == "aquarium.frame":
-                if event["event_id"] != f"frame-{self.tick:012d}":
-                    raise AquariumError("frame identifier discontinuity")
-                move = event["payload"].get("movement_request")
-                if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
-                    raise AquariumError("invalid replayed movement")
-                # Re-derive internal intent from the previously committed evidence.
-                args = (move["dx"], move["dy"]) if self.motor is None else (None, None)
-                frame = self._calculate_frame(*args)
-                payload, next_world, next_learner, next_motor, next_contact, next_range = frame
-                expected = self._record("aquarium.frame", event["event_id"], payload,
-                                        self.tick * self.dt_ns, self.genome.revision)
-                # Compare JSON types for the opt-in wire. Python structural
-                # equality treats bools and numbers as interchangeable.
-                matches = (canonical(event) == canonical(expected)
-                           if self._local_cell or next_contact is not None else event == expected)
-                if not matches:
-                    raise _FrameMismatch("non-deterministic or mismatched committed frame")
-                self.world = next_world
-                self.learner = next_learner
-                self.motor = next_motor
-                self.contact_model = next_contact
-                self.range_model = next_range
-                self.tick += 1
-            else:
-                raise AquariumError("unexpected aquarium journal topic")
+    def _replay_stream(self, count, head):
+        """Rebuild state from bounded batches; never materialize the history."""
+        stream = self.store.iter_events(include_nonpublic=True,
+                                        batch_size=REPLAY_BATCH_SIZE)
+        try:
+            first = next(stream, None)
+            if first is None:
+                raise AquariumError("bootstrap event missing")
+            self._check_bootstrap(first["event"])
+            seen = 1
+            last_hash = first["event_hash"]
+            for entry in stream:
+                self._replay_event(entry)
+                seen += 1
+                last_hash = entry["event_hash"]
+        finally:
+            stream.close()
+        if seen != count or last_hash != head:
+            raise AquariumError("journal advanced during replay, reopen the aquarium")
+
+    def _replay_event(self, entry):
+        event = entry["event"]
+        if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
+            raise AquariumError("unexpected journal ownership or visibility")
+        if event["observed_at_ns"] != self.tick * self.dt_ns:
+            raise AquariumError("unsynchronized event time")
+        if self._local_cell and event["topic"] != "aquarium.frame":
+            raise AquariumError("local-cell compatibility journals contain only frames")
+        if event["topic"] == "development.advance":
+            payload = event["payload"]
+            if not isinstance(payload, dict) or set(payload) != {
+                "schema", "from_months", "to_months", "reason"
+            } or payload["schema"] != DEVELOPMENT_SCHEMA:
+                raise AquariumError("invalid development journal event")
+            previous, target = payload["from_months"], payload["to_months"]
+            if (type(previous) is not int or previous != self.development_months or
+                    type(target) is not int or not 1 <= target - previous <= 12 or
+                    target > 192):
+                raise AquariumError("development clock continuity broken")
+            _safe_event_text(payload["reason"], "development reason")
+            event_id = f"development-{previous:03d}-{target:03d}"
+            if event != self._record("development.advance", event_id,
+                                     payload, self.tick * self.dt_ns,
+                                     self.genome.revision):
+                raise AquariumError("noncanonical development event")
+            self.development_months = target
+        elif event["topic"] == "identity.assigned":
+            payload = event["payload"]
+            if (self.identity is not None or not isinstance(payload, dict) or
+                    set(payload) != {"schema", "identity", "actor_id"} or
+                    payload["schema"] != IDENTITY_EVENT_SCHEMA):
+                raise AquariumError("invalid or duplicate identity journal event")
+            _safe_event_text(payload["actor_id"], "human actor id", 128)
+            validated = validate_human_name(payload["identity"], self.agent_id)
+            if event != self._record("identity.assigned", "identity-assigned",
+                                     payload, self.tick * self.dt_ns,
+                                     self.genome.revision):
+                raise AquariumError("noncanonical identity event")
+            self.identity = validated
+        elif event["topic"] == "genesis.acquisition":
+            raw = event["payload"].get("acquisition")
+            if not isinstance(raw, dict) or event["event_id"] != "acq-" + str(raw.get("event_id")):
+                raise AquariumError("invalid acquisition envelope")
+            if raw.get("valid_from_tick", -1) < self.tick:
+                raise AquariumError("retroactive committed acquisition")
+            if raw.get("recorded_at_ns") != event["recorded_at_ns"]:
+                raise AquariumError("acquisition and journal recorded time differ")
+            next_ledger = GenomeLedger.from_snapshot(self.genome.snapshot())
+            next_ledger.append(raw, next_ledger.revision)
+            if next_ledger.revision != event["source_revision"]:
+                raise AquariumError("acquired gene revision mismatch")
+            if event != self._record("genesis.acquisition", event["event_id"],
+                                     event["payload"], self.tick * self.dt_ns,
+                                     next_ledger.revision):
+                raise AquariumError("noncanonical acquired event envelope")
+            self.genome = next_ledger
+        elif event["topic"] == "aquarium.frame":
+            if event["event_id"] != f"frame-{self.tick:012d}":
+                raise AquariumError("frame identifier discontinuity")
+            move = event["payload"].get("movement_request")
+            if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
+                raise AquariumError("invalid replayed movement")
+            # Re-derive internal intent from the previously committed evidence.
+            args = (move["dx"], move["dy"]) if self.motor is None else (None, None)
+            frame = self._calculate_frame(*args)
+            payload, next_world, next_learner, next_motor, next_contact, next_range = frame
+            expected = self._record("aquarium.frame", event["event_id"], payload,
+                                    self.tick * self.dt_ns, self.genome.revision)
+            # Compare JSON types for the opt-in wire. Python structural
+            # equality treats bools and numbers as interchangeable.
+            matches = (canonical(event) == canonical(expected)
+                       if (self._local_cell or next_contact is not None
+                           or self.brain_mode == "developmental_controller")
+                       else event == expected)
+            if not matches:
+                raise _FrameMismatch("non-deterministic or mismatched committed frame")
+            self.world = next_world
+            self.learner = next_learner
+            self.motor = next_motor
+            self.contact_model = next_contact
+            self.range_model = next_range
+            self.tick += 1
+        else:
+            raise AquariumError("unexpected aquarium journal topic")
 
     def checkpoint(self):
         state = {
@@ -706,11 +754,8 @@ def main():
     parser.add_argument("--dx", type=float)
     parser.add_argument("--dy", type=float)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
-    parser.add_argument(
-        "--brain-mode", choices=("placeholder", "developmental_controller"),
-        default="placeholder",
-        help="opt-in typed synthetic controller boundary; not a neural brain",
-    )
+    parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
+                        default="placeholder", help="opt-in synthetic controller, not a neural brain")
     parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"), default="none",
@@ -732,10 +777,10 @@ def main():
         parser.error("--pulse-sum requires shadow mode")
     if args.motor_mode == V2A_ARCHIVE_MODE and args.ticks != 0:
         parser.error("v2A archive requires --ticks 0")
-    if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
-        parser.error("developmental motor play does not accept --dx/--dy")
     if args.brain_mode == "developmental_controller" and args.motor_mode != "developmental_fixture":
         parser.error("--brain-mode developmental_controller requires --motor-mode developmental_fixture")
+    if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
+        parser.error("developmental motor play does not accept --dx/--dy")
     if args.sensory_mode == "toy_probe" and args.motor_mode != "developmental_fixture":
         parser.error("--sensory-mode toy_probe requires --motor-mode developmental_fixture")
     if args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
@@ -776,22 +821,20 @@ def main():
     with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
-        if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:
+        if aquarium.stored_events + args.ticks > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=dx, dy=dy)
         # The checkpoint's final head check also covers the count read here.
-        stored_events = aquarium.store.count()
+        stored_events = aquarium.stored_events
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = stored_events
         checkpoint["status"] = (
             "SYNTHETIC_DEVELOPMENTAL_CONTROLLER_NOT_NEURAL_OR_MUJOCO"
             if aquarium.brain_mode == "developmental_controller"
-            else (
-                "SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
-                if aquarium.neural_mode == "shadow"
-                else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
-            )
+            else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
+                  if aquarium.neural_mode == "shadow"
+                  else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
         )
         if aquarium.motor is not None:
             checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"
