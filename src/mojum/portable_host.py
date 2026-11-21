@@ -220,14 +220,19 @@ def main(argv=None):
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
                     "brain_mode": args.brain_mode,
-                    "motor_mode": aquarium.motor_mode,
-                    "sensory_mode": aquarium.sensory_mode,
                     "temporal_mode": args.temporal_mode,
                     "wall_elapsed_seconds": round(time.monotonic() - started, 3),
                     "stop_reason": "signal" if stopped.is_set() else "completed",
                     "classification": "PRIVATE_SYNTHETIC_FOREGROUND_NOT_FULL_BRAIN",
                     "journal_trust": "checksum_only_not_authenticated",
                 }
+                if aquarium.motor_mode == V4_MODE:
+                    # Do not silently extend the legacy run/2 stdout contract.
+                    status.update({
+                        "schema": "mojum.portable-host.run/3",
+                        "motor_mode": aquarium.motor_mode,
+                        "sensory_mode": aquarium.sensory_mode,
+                    })
         except (AquariumError, PortableHostError) as exc:
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
