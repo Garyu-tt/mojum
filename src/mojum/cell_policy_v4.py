@@ -105,6 +105,7 @@ class CellExplorerV4:
             last_seen = state["last_seen_at"][key]
             if type(last_seen) is not int or not 0 <= last_seen <= state["last_tick"]:
                 raise CellV4Error("invalid last observed cell tick")
+            cell_observations = 0
             for action, counts in actions.items():
                 if (type(counts) is not list or len(counts) != 2
                         or any(type(v) is not int for v in counts)
@@ -113,7 +114,12 @@ class CellExplorerV4:
                         or counts[1] > 1
                         or (action == "rest" and counts[1])):
                     raise CellV4Error("invalid v4 measured counters")
-                observed_live += counts[0]
+                cell_observations += counts[0]
+            # A cell can be observed at most once per absolute tick, and ticks
+            # start at 0, so it cannot hold more observations than elapsed ticks.
+            if cell_observations > last_seen + 1:
+                raise CellV4Error("more v4 cell observations than elapsed ticks")
+            observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV4Error("v4 lost or double-counted learned observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:

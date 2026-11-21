@@ -32,6 +32,11 @@ from .cell_policy_v3 import (
     LEARNING_SCHEMA as V3_LEARNING_SCHEMA,
     SCHEMA as V3_SCHEMA,
 )
+from .cell_policy_v3_escape import (
+    LEARNING_SCHEMA as V3E_LEARNING_SCHEMA,
+    MAX_CONSECUTIVE_RESTS as V3E_MAX_CONSECUTIVE_RESTS,
+    SCHEMA as V3E_SCHEMA,
+)
 from .cell_policy_v4 import (
     LEARNING_SCHEMA as V4_LEARNING_SCHEMA,
     SCHEMA as V4_SCHEMA,
@@ -202,6 +207,18 @@ POLICIES = validate_identities((
         state_schema=V3_SCHEMA, learning_schema=V3_LEARNING_SCHEMA,
         intent_source="bounded_goal_free_local_cell_motor_play_v3",
         configuration="developmental_policy=local_cell_v3",
+    ),
+    PolicyIdentity(
+        inspection_id="local_cell_v3_escape",
+        selectors=(
+            ("exploration_mode", "goal_free"),
+            ("developmental_schema", V3E_SCHEMA),
+            ("developmental_policy", "local_cell_v3_escape"),
+            ("max_consecutive_rests", V3E_MAX_CONSECUTIVE_RESTS),
+        ),
+        state_schema=V3E_SCHEMA, learning_schema=V3E_LEARNING_SCHEMA,
+        intent_source="bounded_goal_free_local_cell_escape_probe_v3e",
+        configuration="developmental_policy=local_cell_v3_escape",
     ),
     PolicyIdentity(
         inspection_id="local_cell_v4",

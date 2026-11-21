@@ -8,6 +8,22 @@ The checked-in Python stdlib fixture runs **offline on one CPU**. It has a versi
 
 Release acceptance and the remaining work on the integrated sensorimotor loop are tracked on GitHub. [Acceptance #51](https://github.com/Garyu-tt/mojum/issues/51) · [Sensorimotor integration #55](https://github.com/Garyu-tt/mojum/issues/55)
 
+## Exact-head CI merge gate (acceptance tooling)
+
+`mojum.merge_gate` turns a PR snapshot into a `ready` / `defer` / `reject`
+verdict for one exact commit and never performs a merge. Pass the snapshot from
+`gh pr view --json ...` with the SHA you intend to merge:
+
+```sh
+PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
+  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+```
+
+Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
+See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
+the recommended `gh pr merge --match-head-commit` sequence. The gate is a
+client-side guard; repository rulesets remain authoritative.
+
 ## Offline room designer (experimental)
 
 Open [the local SVG editor](tools/room_designer.html) with its three adjacent JavaScript files to draw a synthetic 2D point-room, move the start marker and rectangles, preserve exact decimal tokens, save/reopen JSON and preview up to 512 collision-only steps. Undo/Redo and a bounded 64-snapshot history work without a server. For a **single portable HTML file**, use `python tools/package_room_designer.py --out room-designer-offline.html`. See [editor limitations](docs/R015_VISUAL_ROOM_DESIGNER.md).
