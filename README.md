@@ -84,12 +84,6 @@ browser and select the exported file. At tick 5 the selected move is north.
 The viewer reports a prediction based on one earlier observation and the
 recorded change from range bucket 0 to 1.
 
-Current exports must retain their SHA-256 frame metadata: the viewer rejects
-a modern checkpoint whose proof has been stripped, even if the JSONL frames
-themselves still parse. Only a genuinely older checkpoint without the current
-trace-range marker can be opened through the viewer's explicit legacy
-checkbox, and it remains visibly marked as unverified.
-
 The exporter verifies the complete journal on a temporary SQLite copy. Use the
 same mode flags as the recording. Add `--expected-head SHA256` when verifying
 against a separately recorded journal head. For longer histories, add
@@ -117,6 +111,19 @@ mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 
 Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. The `mojum-aquarium` entry point also accepts `--motor-mode developmental_fixture`. [Offline install instructions](docs/LOCAL_INSTALL_R01.md)
 
+## Identify a journal's stored policy
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium_wire --db ./dante_fixture.sqlite3
+```
+
+The read-only command checks the SQLite event chain and prints the stored
+policy schema, frame count and head. Use `--expected-head` to verify against
+a separately recorded head. The experimental journals from #112 and #115
+report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
+formats even though the original CLIs used the same mode name. Keep each
+journal with the matching runtime for deterministic replay.
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
@@ -130,3 +137,7 @@ Starting from a new journal, the second run reaches tick 150 with 151 stored eve
 Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
 
 **License:** undecided; repository visibility does not grant a license.
+
+## Offline trace import safety
+
+The viewer verifies the SHA-256 of frames in modern Aquarium JSONL exports and fails closed if the checksum, export status, room or range metadata is incomplete. Truly older traces without proof metadata are **rejected by default**; a user must explicitly enable the unchecked `legacy` checkbox to view them. Such traces are visibly marked **unverified**, and SHA-256 integrity is not authentication or an authorization to disclose PRIVATE history.
