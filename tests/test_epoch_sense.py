@@ -33,6 +33,12 @@ class EpochSenseTests(unittest.TestCase):
                     split_tick(bad)
         with self.assertRaises(DevelopmentError):
             EpochProprioception(10000, 0, 10000, REV, 1, 2, False)
+        # Python equality treats True == 1 and 0.0 == 0 as equal.
+        # Explicitly forbid type-coerced epoch/local_tick in persisted /4.
+        for epoch, local_tick in ((True, 0), (1.0, 0), (1, False), (1, 0.0)):
+            with self.subTest(epoch=epoch, local_tick=local_tick):
+                with self.assertRaises(DevelopmentError):
+                    EpochProprioception(9999, epoch, local_tick, REV, 1, 2, False)
         with self.assertRaises(DevelopmentError):
             EpochProprioception.at(5, "x", 1, 2, False)
         for epoch, local in ((True, 0), (1.0, 0), (1, False), (1, 0.0)):
