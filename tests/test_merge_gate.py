@@ -27,7 +27,7 @@ from mojum.merge_gate import (
 
 HEAD = "a" * 40
 OTHER = "b" * 40
-REQUIRED = ("Aquarium*", "Motor Gate", "Mesh contract")
+REQUIRED = ("test", "motor", "mesh")
 
 
 def run(status="COMPLETED", conclusion="SUCCESS", name="Aquarium QA", workflow=None, head_sha=None):
@@ -215,14 +215,14 @@ class GateVerdictTests(unittest.TestCase):
             )
 
     def test_pending_check_defers(self):
-        checks = self.green() + [run(status="IN_PROGRESS", conclusion=None, workflow="Mesh contract")]
+        checks = self.green() + [run(name="mesh", status="IN_PROGRESS", conclusion=None, workflow="Mesh contract")]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "CHECK_PENDING")
         self.assertEqual(result.exit_code, EXIT_DEFER)
 
     def test_queued_check_defers(self):
-        checks = [run(status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
+        checks = [run(name="test", status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
         checks += self.green()
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "defer")
@@ -237,14 +237,14 @@ class GateVerdictTests(unittest.TestCase):
             "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE", "ERROR",
         ]:
             with self.subTest(conclusion=conclusion):
-                checks = [run(conclusion=conclusion, workflow="Mesh contract")]
+                checks = [run(name="mesh", conclusion=conclusion, workflow="Mesh contract")]
                 result = evaluate_checks(checks)
                 self.assertEqual(result.verdict, "reject")
                 self.assertEqual(result.code, "CHECK_FAILED")
 
     def test_failure_wins_over_pending(self):
-        checks = [run(conclusion="FAILURE", workflow="Mesh contract")]
-        checks += [run(status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
+        checks = [run(name="mesh", conclusion="FAILURE", workflow="Mesh contract")]
+        checks += [run(name="test", status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
@@ -257,14 +257,14 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_SKIPPED_UNWAIVED")
 
-        waived = evaluate_checks(checks, waivers={"Mesh contract": "docs-only change"})
+        waived = evaluate_checks(checks, waivers={"mesh": "docs-only change"})
         self.assertEqual(waived.verdict, "ready")
 
     def test_waiver_never_masks_a_failure(self):
         checks = [
             run(name="mesh", conclusion="FAILURE", workflow="Mesh contract")
         ]
-        result = evaluate_checks(checks, waivers={"Mesh contract": "flaky"})
+        result = evaluate_checks(checks, waivers={"mesh": "flaky"})
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
@@ -276,33 +276,64 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "ready")
 
     def test_unknown_conclusion_rejects(self):
-        checks = [run(conclusion="SOMETHING_NEW", workflow="Mesh contract")]
+        checks = [run(name="mesh", conclusion="SOMETHING_NEW", workflow="Mesh contract")]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_UNKNOWN_CONCLUSION")
 
     def test_unknown_status_defers(self):
-        checks = [run(status="MYSTERY", conclusion=None, workflow="Mesh contract")]
+        checks = [run(name="mesh", status="MYSTERY", conclusion=None, workflow="Mesh contract")]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "CHECK_UNKNOWN_STATUS")
 
     def test_stale_check_head_sha_defers(self):
-        checks = [run(head_sha=OTHER, workflow="Mesh contract")]
+        checks = [run(name="mesh", head_sha=OTHER, workflow="Mesh contract")]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "STALE_CHECK")
 
-    def test_all_checks_matching_a_pattern_must_pass(self):
+    def test_duplicate_exact_job_identity_must_all_pass(self):
         checks = [
-            run(name="linux", workflow="Aquarium regression QA"),
-            run(name="windows", conclusion="FAILURE", workflow="Aquarium regression QA"),
+            run(name="test", workflow="Aquarium regression QA"),
+            run(name="test", conclusion="FAILURE", workflow="Aquarium regression QA"),
             run(name="motor", workflow="Motor Gate"),
             run(name="mesh", workflow="Mesh contract"),
         ]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
+
+    def test_one_green_matrix_job_does_not_certify_missing_siblings(self):
+        workflow = "Mojum R0.3 online-learning aquarium regression"
+        one = [run(name="aquarium-stdlib (3.11)", workflow=workflow)]
+        required = (
+            "aquarium-stdlib (3.11)",
+            "aquarium-stdlib (3.12)",
+            "aquarium-stdlib (3.13)",
+        )
+        partial = evaluate_checks(one, required=required)
+        self.assertEqual(partial.verdict, "defer")
+        self.assertEqual(partial.code, "MISSING_REQUIRED_CHECK")
+        full = one + [
+            run(name="aquarium-stdlib (3.12)", workflow=workflow),
+            run(name="aquarium-stdlib (3.13)", workflow=workflow),
+        ]
+        self.assertEqual(evaluate_checks(full, required=required).verdict, "ready")
+
+    def test_wildcard_or_workflow_only_cannot_be_a_merge_certificate(self):
+        one = [run(
+            name="aquarium-stdlib (3.11)",
+            workflow="Mojum R0.3 online-learning aquarium regression",
+        )]
+        unsafe = evaluate_checks(one, required=("*aquarium*",))
+        self.assertEqual(unsafe.verdict, "reject")
+        self.assertEqual(unsafe.code, "UNSAFE_CHECK_SELECTOR")
+        workflow_only = evaluate_checks(
+            one, required=("Mojum R0.3 online-learning aquarium regression",),
+        )
+        self.assertEqual(workflow_only.verdict, "defer")
+        self.assertEqual(workflow_only.code, "MISSING_REQUIRED_CHECK")
 
     def test_draft_pr_defers(self):
         result = evaluate_checks(self.green(), is_draft=True)
@@ -383,9 +414,9 @@ class CliTests(unittest.TestCase):
         return [
             "--input", str(path),
             "--expected-head-sha", HEAD,
-            "--require", "Aquarium*",
-            "--require", "Motor Gate",
-            "--require", "Mesh contract",
+            "--require", "test",
+            "--require", "motor",
+            "--require", "mesh",
         ]
 
     def test_ready_exit_zero_and_never_merges(self):
@@ -398,7 +429,7 @@ class CliTests(unittest.TestCase):
 
     def test_defer_exit_two(self):
         payload = self.snapshot([
-            run(status="QUEUED", conclusion=None, workflow="Mesh contract"),
+            run(name="mesh", status="QUEUED", conclusion=None, workflow="Mesh contract"),
         ])
         code, result, _ = self.invoke(*self.base_args(self.write(payload)))
         self.assertEqual(code, EXIT_DEFER)
@@ -406,7 +437,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], EXIT_DEFER)
 
     def test_reject_exit_one(self):
-        payload = self.snapshot([run(conclusion="FAILURE", workflow="Mesh contract")])
+        payload = self.snapshot([run(name="mesh", conclusion="FAILURE", workflow="Mesh contract")])
         code, result, _ = self.invoke(
             *self.base_args(self.write(payload))
         )
@@ -421,11 +452,11 @@ class CliTests(unittest.TestCase):
         ]
         args = self.base_args(self.write(self.snapshot(checks))) + [
             "--waive",
-            "Mesh contract=docs-only",
+            "mesh=docs-only",
         ]
         code, result, _ = self.invoke(*args)
         self.assertEqual(code, EXIT_READY)
-        self.assertEqual(result["waivers"], {"Mesh contract": "docs-only"})
+        self.assertEqual(result["waivers"], {"mesh": "docs-only"})
 
     def test_stdin_input(self):
         path = self.write(self.snapshot())
@@ -468,9 +499,9 @@ class CliTests(unittest.TestCase):
             code, result, _ = self.invoke(
                 "--pr", "419",
                 "--expected-head-sha", HEAD,
-                "--require", "Aquarium*",
-                "--require", "Motor Gate",
-                "--require", "Mesh contract",
+                "--require", "test",
+                "--require", "motor",
+                "--require", "mesh",
             )
         self.assertEqual(code, EXIT_READY)
         self.assertEqual(result["number"], 999)
