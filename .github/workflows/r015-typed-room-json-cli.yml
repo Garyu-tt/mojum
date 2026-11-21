@@ -10,6 +10,7 @@ on:
       - "src/mojum/typed_room_resume.py"
       - "tests/test_new_room_json_cli.py"
       - "examples/room_exact_mixed.json"
+      - "examples/room_simple_mixed.json"
       - "docs/R015_TYPED_ROOM_CLI_QUICKSTART.md"
   workflow_dispatch:
 
