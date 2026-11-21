@@ -7,15 +7,16 @@ never calls a write endpoint, and needs no third-party packages.
 
 The merge API is not proof that PR-triggered workflows finished. The gate reads
 a snapshot, checks the recorded head SHA against the SHA the caller intends to
-merge, and returns `ready`, `defer` or `reject` with machine-readable reasons.
+merge, checks that the PR's recorded base commit is still the current target
+commit, and returns `ready`, `defer` or `reject` with machine-readable reasons.
 
 ## Verdicts
 
 | Verdict | Exit | Meaning |
 | --- | --- | --- |
-| `ready` | 0 | Every required check passed in the supplied head rollup, the target branch matches, and GitHub reports a clean merge state. |
-| `defer` | 2 | Evidence is incomplete: a check is queued/running/missing, the PR is a draft, or mergeability is still unknown. Re-query later. |
-| `reject` | 1 | Evidence is bad: head/base mismatch, conflicts, or a required check failed, was cancelled, timed out, or was skipped without a waiver. |
+| `ready` | 0 | Every required check passed in the supplied head rollup, the PR base SHA equals the independently read current target SHA, and GitHub reports a clean merge state. |
+| `defer` | 2 | Evidence is incomplete or stale: a check is queued/running/missing, the PR was tested against an older base, the PR is a draft, or mergeability is unknown. Re-query after updating the branch when necessary. |
+| `reject` | 1 | Evidence is bad: head/base identity is missing or contradictory, conflicts exist, or a required check failed, was cancelled, timed out, or was skipped without a waiver. |
 
 `reject` wins over `defer`: a failing check is never hidden by another check
 that is still running. `INVALID_INPUT` (unreadable snapshot, malformed waiver,
@@ -47,6 +48,13 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - `--expected-head-sha` requires a full 40- or 64-character Git object ID.
   Omitting it returns `EXPECTED_HEAD_REQUIRED`. `--expected-base` names a
   branch and defaults to `main`.
+- Base evidence uses two full object IDs: `baseRefOid` is the base commit
+  recorded for this PR/check cycle, while `currentBaseRefOid` (or
+  `--expected-base-sha`) is an independent read of the target branch now. A
+  mismatch returns `STALE_BASE`, even when GitHub reports
+  `mergeStateStatus=CLEAN`; update the PR branch and rerun CI.
+- `--pr` obtains both base IDs through read-only GitHub API calls and rejects a
+  head or branch that changes between the rollup and PR metadata reads.
 - For non-`main` targets, an empty inventory returns `NO_REQUIRED_CHECKS`.
 
 ## Offline usage
@@ -54,10 +62,22 @@ failed `gh` call) is also a `reject` and never a `ready`.
 Snapshot a PR to JSON, then evaluate it without network access:
 
 ```sh
-gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup > pr.json
+PR=419
+gh pr view "$PR" --json number,headRefOid,baseRefName,headRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup > pr-view.json
+PR_BASE_SHA=$(gh api "repos/{owner}/{repo}/pulls/$PR" --jq .base.sha)
+CURRENT_BASE_SHA=$(gh api repos/{owner}/{repo}/git/ref/heads/main --jq .object.sha)
+jq --arg pr_base "$PR_BASE_SHA" --arg current_base "$CURRENT_BASE_SHA" \
+  '. + {baseRefOid:$pr_base,currentBaseRefOid:$current_base}' \
+  pr-view.json > pr.json
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --input pr.json --expected-head-sha "$(git rev-parse HEAD)"
+  --input pr.json --expected-head-sha "$(git rev-parse HEAD)" \
+  --expected-base-sha "$CURRENT_BASE_SHA"
 ```
+
+An offline `pr.json` must contain `baseRefOid` in addition to the normal
+`gh pr view` fields. It should also contain an independently captured
+`currentBaseRefOid`; the explicit `--expected-base-sha` above can supply that
+second value instead. Missing base evidence fails closed.
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
 (opt-in network). Output is one JSON object on stdout:
@@ -70,10 +90,12 @@ PYTHONPATH=src python3 -m mojum.merge_gate \
 
 ### Accepted input shapes
 
-Both `gh pr view --json` output (camelCase, `statusCheckRollup`, `CheckRun`
-and `StatusContext` entries) and a snake_case fixture form (`head_sha`,
-`base_ref`, `checks`) are accepted. This keeps tests hermetic while the CLI can
-be pointed at real PR data. Input is capped at 4 MiB.
+Enriched `gh pr view --json` output (camelCase, `baseRefOid`,
+`currentBaseRefOid`, `statusCheckRollup`, `CheckRun` and `StatusContext`
+entries) and a snake_case fixture form (`head_sha`, `base_ref`, `base_sha`,
+`current_base_sha`, `checks`) are accepted. This keeps tests hermetic while
+the live CLI can read the extra base identities itself. Input is capped at
+4 MiB.
 
 ## Check a live PR rollup
 
@@ -86,10 +108,10 @@ PYTHONPATH=src python3 -m mojum.merge_gate \
 ```
 
 Treat a `ready` result as a prerequisite for the
-[merge acceptance policy](MERGE_ACCEPTANCE_POLICY.md). Verify the current base
-commit and required check-run provenance against that policy before submitting
-a merge guarded by `--match-head-commit`. The policy also calls for a GitHub
-repository ruleset to enforce the requirements at merge time.
+[merge acceptance policy](MERGE_ACCEPTANCE_POLICY.md). Verify required
+check-run provenance against that policy before submitting a merge guarded by
+`--match-head-commit`. The policy also calls for a GitHub repository ruleset to
+enforce the requirements at merge time.
 
 ## Limitations
 
@@ -98,9 +120,10 @@ repository ruleset to enforce the requirements at merge time.
   each PR based on the applicable workflow definitions.
 - GitHub branch rulesets enforce repository-level policy independently of the
   local gate. Use an up-to-date base rule to protect against base movement.
-- The gate checks the base ref name and records a point-in-time head verdict.
-  Verify the base commit separately and re-run immediately before merging
-  with `--match-head-commit`.
+- The gate records a point-in-time head and base verdict. The target branch can
+  still move after a client-side read, so re-run immediately before merging
+  with `--match-head-commit`; only a repository ruleset closes that server-side
+  race completely.
 - `gh pr view` reports the rollup GitHub considers current. A rollup entry with
   an explicit `headSha` different from the PR head is treated as stale, but
   entries without `headSha` are trusted to belong to the rollup's head.

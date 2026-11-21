@@ -27,6 +27,8 @@ from mojum.merge_gate import (
 
 HEAD = "a" * 40
 OTHER = "b" * 40
+BASE = "c" * 40
+OLD_BASE = "d" * 40
 REQUIRED = ("Aquarium regression QA / test", "Motor Gate / motor", "Mesh contract / mesh")
 MAIN_MATRIX_CHECKS = (
     ("Mojum R0.3 online-learning aquarium regression", "aquarium-stdlib"),
@@ -52,6 +54,8 @@ def facts(checks, **overrides):
     defaults = dict(
         head_sha=HEAD,
         base_ref="release",
+        base_sha=BASE,
+        current_base_sha=BASE,
         checks=tuple(checks),
         number=419,
         is_draft=False,
@@ -63,16 +67,22 @@ def facts(checks, **overrides):
 
 
 def evaluate_checks(checks, **overrides):
-    fact_fields = {"head_sha", "base_ref", "is_draft", "mergeable", "merge_state_status"}
+    fact_fields = {
+        "head_sha", "base_ref", "base_sha", "current_base_sha", "is_draft",
+        "mergeable", "merge_state_status",
+    }
     fact_overrides = {k: v for k, v in overrides.items() if k in fact_fields}
     kwargs = {k: v for k, v in overrides.items() if k not in fact_fields}
     kwargs.setdefault("expected_head_sha", HEAD)
     kwargs.setdefault("expected_base", fact_overrides.get("base_ref", "release"))
+    kwargs.setdefault("expected_base_sha", BASE)
     kwargs.setdefault("required", REQUIRED)
     parsed = parse_snapshot(
         {
             "headRefOid": HEAD,
             "baseRefName": "main",
+            "baseRefOid": BASE,
+            "currentBaseRefOid": BASE,
             "checks": list(checks),
         }
     )
@@ -85,6 +95,8 @@ class SnapshotParsingTests(unittest.TestCase):
             "number": 415,
             "headRefOid": HEAD,
             "baseRefName": "main",
+            "baseRefOid": BASE,
+            "currentBaseRefOid": BASE,
             "headRefName": "feature/x",
             "isDraft": False,
             "mergeable": "MERGEABLE",
@@ -102,6 +114,8 @@ class SnapshotParsingTests(unittest.TestCase):
         parsed = parse_snapshot(snapshot)
         self.assertEqual(parsed.head_sha, HEAD)
         self.assertEqual(parsed.base_ref, "main")
+        self.assertEqual(parsed.base_sha, BASE)
+        self.assertEqual(parsed.current_base_sha, BASE)
         self.assertEqual(parsed.number, 415)
         self.assertEqual(parsed.head_ref, "feature/x")
         self.assertEqual([c.name for c in parsed.checks], ["aquarium", "legacy/gate"])
@@ -114,6 +128,8 @@ class SnapshotParsingTests(unittest.TestCase):
             "number": 1,
             "head_sha": HEAD,
             "base_ref": "main",
+            "base_sha": BASE,
+            "current_base_sha": BASE,
             "is_draft": True,
             "mergeable": "MERGEABLE",
             "merge_state_status": "DRAFT",
@@ -179,6 +195,22 @@ class SnapshotParsingTests(unittest.TestCase):
                         "checks": [run(head_sha=oid)],
                     })
 
+    def test_snapshot_rejects_malformed_or_conflicting_base_object_ids(self):
+        for oid in (BASE[:7], BASE[:39], BASE + "f", BASE + "\n", " " + BASE):
+            with self.subTest(oid=oid), self.assertRaises(SnapshotError):
+                parse_snapshot({
+                    "headRefOid": HEAD,
+                    "baseRefName": "main",
+                    "baseRefOid": oid,
+                })
+        with self.assertRaisesRegex(SnapshotError, "conflicting aliases"):
+            parse_snapshot({
+                "headRefOid": HEAD,
+                "baseRefName": "main",
+                "baseRefOid": BASE,
+                "base_sha": OLD_BASE,
+            })
+
     def test_snapshot_accepts_full_sha256_object_id(self):
         oid = "f" * 64
         parsed = parse_snapshot({
@@ -233,6 +265,26 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "BASE_MISMATCH")
 
+    def test_expected_base_sha_is_mandatory(self):
+        result = evaluate_checks(self.green(), expected_base_sha=None)
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.code, "EXPECTED_BASE_SHA_REQUIRED")
+
+    def test_missing_pr_base_sha_rejects(self):
+        result = evaluate_checks(self.green(), base_sha=None)
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.code, "BASE_SHA_REQUIRED")
+
+    def test_stale_base_defers_even_when_merge_state_is_clean(self):
+        result = evaluate_checks(self.green(), base_sha=OLD_BASE)
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "STALE_BASE")
+
+    def test_caller_base_sha_must_match_independent_live_base(self):
+        result = evaluate_checks(self.green(), expected_base_sha=OLD_BASE)
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.code, "CURRENT_BASE_SHA_MISMATCH")
+
     def test_blank_expected_base_is_invalid(self):
         with self.assertRaisesRegex(ValueError, "expected_base"):
             evaluate_checks(self.green(), expected_base="")
@@ -241,6 +293,11 @@ class GateVerdictTests(unittest.TestCase):
         for oid in ("zzz", HEAD[:7], HEAD[:39], HEAD + "f", HEAD + "\n", " " + HEAD):
             with self.subTest(oid=oid), self.assertRaises(ValueError):
                 evaluate_checks(self.green(), expected_head_sha=oid)
+
+    def test_malformed_expected_base_sha_raises(self):
+        for oid in ("zzz", BASE[:7], BASE[:39], BASE + "f", BASE + "\n", " " + BASE):
+            with self.subTest(oid=oid), self.assertRaises(ValueError):
+                evaluate_checks(self.green(), expected_base_sha=oid)
 
     def test_expected_head_with_trailing_newline_raises(self):
         for value in ["a" * 40 + "\n", "abcdef1\n", "abcdef1 ", "\nabcdef1"]:
@@ -526,9 +583,11 @@ class CliTests(unittest.TestCase):
 
     def snapshot(self, checks=None):
         return {
-            "number": 999,
+            "number": 419,
             "headRefOid": HEAD,
             "baseRefName": "release",
+            "baseRefOid": BASE,
+            "currentBaseRefOid": BASE,
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
@@ -557,6 +616,7 @@ class CliTests(unittest.TestCase):
             "--input", str(path),
             "--expected-head-sha", HEAD,
             "--expected-base", "release",
+            "--expected-base-sha", BASE,
             "--require", "Aquarium regression QA / test",
             "--require", "Motor Gate / motor",
             "--require", "Mesh contract / mesh",
@@ -568,7 +628,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(err, "")
         self.assertEqual(payload["schema"], SCHEMA)
         self.assertEqual(payload["verdict"], "ready")
+        self.assertEqual(payload["base_sha"], BASE)
+        self.assertEqual(payload["expected_base_sha"], BASE)
         self.assertFalse(payload["merge_performed"])
+
+    def test_offline_snapshot_without_base_evidence_rejects(self):
+        snapshot = self.snapshot()
+        snapshot.pop("baseRefOid")
+        snapshot.pop("currentBaseRefOid")
+        args = [arg for arg in self.base_args(self.write(snapshot))]
+        index = args.index("--expected-base-sha")
+        del args[index:index + 2]
+        code, payload, _ = self.invoke(*args)
+        self.assertEqual(code, EXIT_REJECT)
+        self.assertEqual(payload["code"], "EXPECTED_BASE_SHA_REQUIRED")
 
     def test_main_floor_runs_without_require_flags(self):
         snapshot = self.snapshot([
@@ -647,10 +720,26 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["code"], "INVALID_INPUT")
 
     def test_pr_mode_uses_gh_and_reports_snapshot(self):
-        completed = subprocess.CompletedProcess(
+        view = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=json.dumps(self.snapshot()), stderr=""
         )
-        with mock.patch("mojum.merge_gate.subprocess.run", return_value=completed) as runner:
+        pull = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps({
+                "number": 419,
+                "head": {"sha": HEAD},
+                "base": {
+                    "ref": "release",
+                    "sha": BASE,
+                    "repo": {"full_name": "Garyu-tt/mojum"},
+                },
+            }), stderr="",
+        )
+        current = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps({"object": {"sha": BASE}}), stderr=""
+        )
+        with mock.patch(
+            "mojum.merge_gate.subprocess.run", side_effect=[view, pull, current]
+        ) as runner:
             code, result, _ = self.invoke(
                 "--pr", "419",
                 "--expected-head-sha", HEAD,
@@ -660,10 +749,41 @@ class CliTests(unittest.TestCase):
                 "--require", "Mesh contract / mesh",
             )
         self.assertEqual(code, EXIT_READY)
-        self.assertEqual(result["number"], 999)
-        command = runner.call_args.args[0]
-        self.assertEqual(command[:3], ["gh", "pr", "view"])
-        self.assertIn("statusCheckRollup", command[-1])
+        self.assertEqual(result["number"], 419)
+        self.assertEqual(result["base_sha"], BASE)
+        self.assertEqual(result["current_base_sha"], BASE)
+        commands = [call.args[0] for call in runner.call_args_list]
+        self.assertEqual(commands[0][:3], ["gh", "pr", "view"])
+        self.assertIn("statusCheckRollup", commands[0][-1])
+        self.assertEqual(commands[1][:2], ["gh", "api"])
+        self.assertIn("/pulls/419", commands[1][2])
+        self.assertIn("/git/ref/heads/release", commands[2][2])
+
+    def test_pr_mode_rejects_a_head_that_changes_between_queries(self):
+        view = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(self.snapshot()), stderr=""
+        )
+        pull = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps({
+                "number": 419,
+                "head": {"sha": OTHER},
+                "base": {
+                    "ref": "release",
+                    "sha": BASE,
+                    "repo": {"full_name": "Garyu-tt/mojum"},
+                },
+            }), stderr="",
+        )
+        with mock.patch(
+            "mojum.merge_gate.subprocess.run", side_effect=[view, pull]
+        ):
+            code, result, _ = self.invoke(
+                "--pr", "419", "--expected-head-sha", HEAD,
+                "--expected-base", "release", "--require", "x",
+            )
+        self.assertEqual(code, EXIT_REJECT)
+        self.assertEqual(result["code"], "INVALID_INPUT")
+        self.assertIn("head changed", result["error"])
 
     def test_pr_mode_failure_is_invalid_input(self):
         completed = subprocess.CompletedProcess(

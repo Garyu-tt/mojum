@@ -6,7 +6,8 @@ a pull request plus the SHA the caller intends to merge into a deterministic
 verdict:
 
 * ``ready``  -- every required check completed successfully for that exact
-  head SHA, the base matches, and GitHub reports a clean merge state;
+  head SHA, the PR's recorded base is still the current target commit, and
+  GitHub reports a clean merge state;
 * ``defer``  -- checks are queued/running/missing, the PR is a draft, or the
   merge state is not fresh enough to decide (re-query later);
 * ``reject`` -- a required check failed/was cancelled/timed out/was skipped
@@ -32,6 +33,7 @@ import re
 import subprocess
 import sys
 from typing import Iterable, Mapping, Sequence
+from urllib.parse import quote
 
 SCHEMA = "mojum.merge-gate.v1"
 MAX_INPUT_BYTES = 4 * 1024 * 1024
@@ -110,6 +112,8 @@ class CheckOutcome:
 class PullRequestFacts:
     head_sha: str
     base_ref: str
+    base_sha: str | None = None
+    current_base_sha: str | None = None
     checks: tuple[CheckOutcome, ...] = ()
     number: int | None = None
     head_ref: str | None = None
@@ -230,6 +234,14 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
     if not base_ref:
         raise SnapshotError("snapshot has no base ref")
+    base_sha = _read_oid(raw, "snapshot base SHA", "baseRefOid", "base_sha", "baseSha")
+    current_base_sha = _read_oid(
+        raw,
+        "current base SHA",
+        "currentBaseRefOid",
+        "current_base_sha",
+        "currentBaseSha",
+    )
 
     rollup = raw.get("statusCheckRollup", raw.get("checks", []))
     if rollup is None:
@@ -251,6 +263,8 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     return PullRequestFacts(
         head_sha=head_sha,
         base_ref=base_ref,
+        base_sha=base_sha,
+        current_base_sha=current_base_sha,
         checks=checks,
         number=number,
         head_ref=_text(raw, "headRefName", "head_ref", "headRef"),
@@ -272,6 +286,7 @@ def evaluate(
     *,
     expected_head_sha: str | None,
     expected_base: str = "main",
+    expected_base_sha: str | None = None,
     required: Sequence[str] = (),
     waivers: Mapping[str, str] | None = None,
 ) -> GateResult:
@@ -283,6 +298,13 @@ def evaluate(
         raise ValueError("expected_head_sha must be a full 40- or 64-character hexadecimal Git object ID")
     if not isinstance(expected_base, str) or not expected_base.strip():
         raise ValueError("expected_base must name a branch")
+    if expected_base_sha is not None and (
+        not isinstance(expected_base_sha, str)
+        or _SHA_RE.fullmatch(expected_base_sha) is None
+    ):
+        raise ValueError(
+            "expected_base_sha must be a full 40- or 64-character hexadecimal Git object ID"
+        )
 
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
@@ -312,6 +334,37 @@ def evaluate(
             GateReason(
                 "BASE_MISMATCH",
                 f"PR targets {facts.base_ref!r}, expected {expected_base!r}",
+            )
+        )
+
+    if not expected_base_sha:
+        rejects.append(
+            GateReason(
+                "EXPECTED_BASE_SHA_REQUIRED",
+                "pass the current target-branch SHA; a branch name alone cannot prove CI tested the current base",
+            )
+        )
+    elif facts.current_base_sha and (
+        facts.current_base_sha.lower() != expected_base_sha.lower()
+    ):
+        rejects.append(
+            GateReason(
+                "CURRENT_BASE_SHA_MISMATCH",
+                f"live base {facts.current_base_sha} is not the expected {expected_base_sha}",
+            )
+        )
+    elif facts.base_sha is None:
+        rejects.append(
+            GateReason(
+                "BASE_SHA_REQUIRED",
+                "snapshot has no PR base SHA; mergeStateStatus alone does not prove an up-to-date tested base",
+            )
+        )
+    elif facts.base_sha.lower() != expected_base_sha.lower():
+        defers.append(
+            GateReason(
+                "STALE_BASE",
+                f"PR checks are based on {facts.base_sha}, not current {expected_base_sha}; update the branch and rerun CI",
             )
         )
 
@@ -468,12 +521,9 @@ def evaluate(
     )
 
 
-def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
-    """Read a PR snapshot through the GitHub CLI (network; opt-in only)."""
+def _run_gh_json(command: list[str], *, label: str) -> dict[str, object]:
+    """Run one read-only ``gh`` query and require an object response."""
 
-    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
-        raise ValueError("PR number must be a positive integer")
-    command = [gh, "pr", "view", str(pr), "--json", _GH_FIELDS]
     try:
         completed = subprocess.run(
             command, capture_output=True, text=True, check=False, timeout=60
@@ -482,13 +532,79 @@ def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
         raise FetchError(f"cannot run {' '.join(command)}: {error}") from error
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
-        raise FetchError(f"gh pr view exited {completed.returncode}: {detail}")
+        raise FetchError(f"{label} exited {completed.returncode}: {detail}")
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise FetchError(f"gh pr view returned invalid JSON: {error}") from error
+        raise FetchError(f"{label} returned invalid JSON: {error}") from error
     if not isinstance(payload, dict):
-        raise FetchError("gh pr view did not return a JSON object")
+        raise FetchError(f"{label} did not return a JSON object")
+    return payload
+
+
+def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
+    """Read a PR rollup plus its tested and current base SHAs through ``gh``."""
+
+    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
+        raise ValueError("PR number must be a positive integer")
+
+    payload = _run_gh_json(
+        [gh, "pr", "view", str(pr), "--json", _GH_FIELDS],
+        label="gh pr view",
+    )
+    pull = _run_gh_json(
+        [gh, "api", f"repos/{{owner}}/{{repo}}/pulls/{pr}"],
+        label="gh api pull",
+    )
+
+    head = pull.get("head")
+    base = pull.get("base")
+    if not isinstance(head, Mapping) or not isinstance(base, Mapping):
+        raise FetchError("gh api pull response has no head/base objects")
+    base_repo = base.get("repo")
+    if not isinstance(base_repo, Mapping):
+        raise FetchError("gh api pull response has no base repository")
+
+    try:
+        api_head_sha = _read_oid(head, "API head SHA", "sha")
+        api_base_sha = _read_oid(base, "API base SHA", "sha")
+    except SnapshotError as error:
+        raise FetchError(str(error)) from error
+    api_base_ref = _text(base, "ref")
+    api_base_repo = _text(base_repo, "full_name")
+    if api_head_sha is None or api_base_sha is None or not api_base_ref:
+        raise FetchError("gh api pull response has incomplete head/base identity")
+    if not api_base_repo or len(api_base_repo.split("/")) != 2:
+        raise FetchError("gh api pull response has an invalid base repository name")
+
+    snapshot_head = _read_oid(payload, "snapshot head SHA", "headRefOid")
+    snapshot_base_ref = _text(payload, "baseRefName")
+    snapshot_number = payload.get("number")
+    if snapshot_number != pr:
+        raise FetchError(f"gh snapshots disagree on PR number {snapshot_number!r} != {pr}")
+    if snapshot_head is None or snapshot_head.lower() != api_head_sha.lower():
+        raise FetchError("PR head changed while the acceptance snapshot was being read")
+    if snapshot_base_ref != api_base_ref:
+        raise FetchError("PR base changed while the acceptance snapshot was being read")
+
+    encoded_repo = quote(api_base_repo, safe="/")
+    encoded_ref = quote(api_base_ref, safe="")
+    current_ref = _run_gh_json(
+        [gh, "api", f"repos/{encoded_repo}/git/ref/heads/{encoded_ref}"],
+        label="gh api base ref",
+    )
+    current_object = current_ref.get("object")
+    if not isinstance(current_object, Mapping):
+        raise FetchError("gh api base ref response has no object")
+    try:
+        current_base_sha = _read_oid(current_object, "current base SHA", "sha")
+    except SnapshotError as error:
+        raise FetchError(str(error)) from error
+    if current_base_sha is None:
+        raise FetchError("gh api base ref response has no SHA")
+
+    payload["baseRefOid"] = api_base_sha
+    payload["currentBaseRefOid"] = current_base_sha
     return payload
 
 
@@ -542,6 +658,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--expected-base", default="main", help="expected base ref")
     parser.add_argument(
+        "--expected-base-sha",
+        help=(
+            "current full target-branch SHA; --pr reads it independently when omitted"
+        ),
+    )
+    parser.add_argument(
         "--require",
         action="append",
         default=[],
@@ -582,10 +704,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             snapshot = _load_snapshot(args.input)
         facts = parse_snapshot(snapshot)
+        expected_base_sha = args.expected_base_sha or facts.current_base_sha
         result = evaluate(
             facts,
             expected_head_sha=args.expected_head_sha,
             expected_base=args.expected_base,
+            expected_base_sha=expected_base_sha,
             required=args.require,
             waivers=waivers,
         )
@@ -613,6 +737,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "expected_head_sha": args.expected_head_sha,
             "base_ref": facts.base_ref,
             "expected_base": args.expected_base,
+            "base_sha": facts.base_sha,
+            "current_base_sha": facts.current_base_sha,
+            "expected_base_sha": expected_base_sha,
             "required": list(result.required),
             "matched": list(result.matched),
             "waivers": waivers,
