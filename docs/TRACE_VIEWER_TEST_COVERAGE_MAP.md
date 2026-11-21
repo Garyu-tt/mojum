@@ -17,6 +17,8 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 | no private data on stdout | `::test_cli_exports_to_file_without_leaking_private_payload_to_stdout` |
 | no-clobber and 0600 | `::test_existing_destination_is_never_overwritten`, mode check at line 76 |
 | metadata-only footer | `::test_guided_cli_exports_...` (footer excludes `temporal_range_state`) and footer checks in the integrity test |
+| UI navigation, replay from end, play/pause, speed timer replacement, completion, hidden-tab stop and invalid-file stop | `test_private_trace_integrity.py` (`controls` deterministic Node VM clock; #319 follow-up) |
+| optional 5 cm rays, numeric toy contact/probe/prediction/updates | same (`diagnostic` display-only synthetic legacy fixture; modern integrity still required) |
 | real Chrome | `tests/smoke_real_chromium_viewer.py`, `tests/smoke_r09_chromium_viewer.py` |
 
 Limit-boundary regression cases (64k line, 5000 frames) were added in PR #387 (closed 2026-11-21). See the current `tests/test_private_trace_integrity.py` Node harness for the assertions. This map is an inventory of tests, not evidence of a successful run on the latest `main` SHA.
