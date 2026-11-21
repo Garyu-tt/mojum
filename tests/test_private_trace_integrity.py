@@ -34,7 +34,7 @@ const {TextDecoder,TextEncoder}=require("node:util");
 function openDOM(){
  const registry=new Map();
  const make=id=>({
-   id,disabled:false,value:"0",max:"0",textContent:"",
+   id,disabled:false,checked:false,value:"0",max:"0",textContent:"",
    children:[],listeners:{},files:[],classList:{toggle(){}},
    addEventListener(event,fn){this.listeners[event]=fn;},
    replaceChildren(){this.children=[];},
@@ -71,8 +71,9 @@ function openDOM(){
  },{timeout:3000});
  return get;
 }
-async function attempt(source){
+async function attempt(source, allowLegacy=false){
  const get=openDOM(),input=get("file");
+ get("allow-legacy").checked=allowLegacy;
  input.files=[{name:"recorded.private.jsonl",
    size:Buffer.byteLength(source),arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
  await input.listeners.change.call(input);
@@ -101,11 +102,13 @@ function replaceFooter(source,transform){
  const brokenProof=await attempt(replaceFooter(wire,
    f=>{f.trace_integrity.sha256="0".repeat(64)}));
  const missingProof=await attempt(replaceFooter(wire, f=>{delete f.trace_integrity}));
- const legacy=await attempt(replaceFooter(wire,
+ const legacyDefault=await attempt(replaceFooter(wire,
    f=>{delete f.trace_integrity;delete f.export_status}));
+ const legacyOptIn=await attempt(replaceFooter(wire,
+   f=>{delete f.trace_integrity;delete f.export_status}), true);
  const encoding=await attempt(Buffer.concat([Buffer.from(wire),Buffer.from([255])]));
  process.stdout.write(JSON.stringify({valid,altered,truncated,mismatch,
-                                      brokenProof,missingProof,legacy,encoding})+"\n");
+                                      brokenProof,missingProof,legacyDefault,legacyOptIn,encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
@@ -184,8 +187,10 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertFalse(values["missingProof"]["enabled"])
         self.assertIn("SHA-256", values["missingProof"]["status"])
         self.assertFalse(values["encoding"]["enabled"])
-        self.assertTrue(values["legacy"]["enabled"])
-        self.assertIn("не проверен", values["legacy"]["status"])
+        self.assertFalse(values["legacyDefault"]["enabled"])
+        self.assertIn("SHA-256", values["legacyDefault"]["status"])
+        self.assertTrue(values["legacyOptIn"]["enabled"])
+        self.assertIn("не проверен", values["legacyOptIn"]["status"])
 
 
 if __name__ == "__main__":
