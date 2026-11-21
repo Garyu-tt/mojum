@@ -56,6 +56,19 @@ class CheckpointIdentityPredecodeTests(unittest.TestCase):
             unpack(forged, expected_revision=7,
                    expected_organism_id="dante-1")
 
+    def test_manifest_subclasses_keep_existing_in_memory_compatibility(self):
+        class Manifest(dict):
+            pass
+
+        class OrganismId(str):
+            pass
+
+        compatible = copy.deepcopy(self.bundle)
+        compatible["manifest"] = Manifest(compatible["manifest"])
+        compatible["manifest"]["organism_id"] = OrganismId("dante-1")
+        self.assertEqual(unpack(compatible, expected_revision=7,
+                                expected_organism_id="dante-1"), self.parts)
+
     def test_loads_verifies_five_components_exactly_once(self):
         import mojum.checkpoint_bundle as module
         wire = dumps(self.bundle)
