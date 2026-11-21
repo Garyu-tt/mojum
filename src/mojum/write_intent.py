@@ -229,15 +229,19 @@ def inspect_prepared(journal_path, registry_path, seed, graph, *,
             row = store._row(organism_id)
             intent = _pending(store, organism_id)
             if intent is None:
-                label = "NO_PREPARED_INTENT"
-                return _status(row, label, None, None, None)
-            if (row["phase"] != "FROZEN" or row["pending_writer"] is not None
-                    or row["writer"] != intent["writer"]
-                    or row["epoch"] != intent["epoch"]
-                    or row["generation"] != intent["generation"]
-                    or row["head"] != intent["previous_head"]
-                    or row["event_count"] != intent["previous_count"]
-                    or row["tick"] != intent["previous_tick"]):
+                if row["phase"] != "ACTIVE" or row["pending_writer"] is not None:
+                    return _status(
+                        row, "AUTHORITY_FROZEN_WITHOUT_INTENT_STOP", None, None, None,
+                    )
+                # A missing intent is NOT evidence that the current journal
+                # matches the registry. Verify the snapshot below even then.
+            elif (row["phase"] != "FROZEN" or row["pending_writer"] is not None
+                  or row["writer"] != intent["writer"]
+                  or row["epoch"] != intent["epoch"]
+                  or row["generation"] != intent["generation"]
+                  or row["head"] != intent["previous_head"]
+                  or row["event_count"] != intent["previous_count"]
+                  or row["tick"] != intent["previous_tick"]):
                 return _status(row, "UNTRUSTED_INTENT_STATE_STOP", intent, None, None)
 
             # SQLite Backup API includes WAL commits, unlike copying the
@@ -273,6 +277,14 @@ def inspect_prepared(journal_path, registry_path, seed, graph, *,
                 if (actual_count, actual_head) != (count, head):
                     return _status(row, "JOURNAL_CHANGED_DURING_AUDIT_STOP",
                                    intent, count, head)
+
+            if intent is None:
+                if (count == row["event_count"] and head == row["head"]
+                        and tick == row["tick"]):
+                    label = "NO_PREPARED_INTENT"
+                else:
+                    label = "UNANCHORED_JOURNAL_WITHOUT_INTENT_STOP"
+                return _status(row, label, None, count, head)
 
             if (count == intent["previous_count"]
                     and head == intent["previous_head"]
