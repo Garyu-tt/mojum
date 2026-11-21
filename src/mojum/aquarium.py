@@ -247,6 +247,7 @@ class Aquarium:
                     self.manifest["epoch_transition_schema"] = EPOCH_EVENT_SCHEMA
                     self.manifest["epoch_ticks"] = EPOCH_TICKS
                     self.manifest["proprioception_schema"] = EPOCH_SENSE_SCHEMA
+                    self.manifest["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS
                 else:
                     self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
                     self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE

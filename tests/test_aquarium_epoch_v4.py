@@ -156,6 +156,21 @@ class EpochJournalV4Tests(unittest.TestCase):
                 with self.assertRaisesRegex(NoosphereError, "require sensory_mode none"):
                     _stored_policy(bogus)
 
+    def test_wire_pins_v4_absolute_tick_cap_in_bootstrap(self):
+        from mojum.aquarium_wire import _stored_policy
+
+        with self.open() as aquarium:
+            manifest = deepcopy(aquarium.manifest)
+        for mutation in ("missing", MAX_ABSOLUTE_TICKS + 1):
+            with self.subTest(mutation=mutation):
+                bogus = deepcopy(manifest)
+                if mutation == "missing":
+                    del bogus["max_absolute_ticks"]
+                else:
+                    bogus["max_absolute_ticks"] = mutation
+                with self.assertRaisesRegex(NoosphereError, "ambiguous or unknown"):
+                    _stored_policy(bogus)
+
     def test_v4_cli_omits_motor_arguments_and_commits_real_frames(self):
         process = subprocess.run(
             [sys.executable, "-m", "mojum.aquarium",

@@ -10,6 +10,7 @@ import re
 from .aquarium import (
     EPOCH_EVENT_SCHEMA,
     MANIFEST_SCHEMA,
+    MAX_ABSOLUTE_TICKS,
     MAX_REPLAY_EVENTS,
     SCHEMA as FRAME_SCHEMA,
 )
@@ -38,6 +39,7 @@ _MOTOR_KEYS = {
     "exploration_mode", "developmental_schema", "developmental_policy",
     "motor_policy", "motor_mode", "motor_policy_schema",
     "epoch_transition_schema", "epoch_ticks", "proprioception_schema",
+    "max_absolute_ticks",
 }
 _POLICY_SELECTORS = (
     ({}, "scripted_v1", None),
@@ -61,7 +63,8 @@ _POLICY_SELECTORS = (
       "developmental_policy": "local_cell_v4",
       "epoch_transition_schema": EPOCH_EVENT_SCHEMA,
       "epoch_ticks": EPOCH_TICKS,
-      "proprioception_schema": EPOCH_SENSE_SCHEMA}, "local_cell_v4",
+      "proprioception_schema": EPOCH_SENSE_SCHEMA,
+      "max_absolute_ticks": MAX_ABSOLUTE_TICKS}, "local_cell_v4",
      (V4_SCHEMA, _V4_OUTCOME,
       "bounded_goal_free_local_cell_motor_play_v4")),
 )
@@ -283,6 +286,7 @@ def inspect_journal(path, *, external_expected_head=None):
     if policy == "local_cell_v4":
         result["epoch_schema"] = EPOCH_SENSE_SCHEMA
         result["epoch_ticks"] = EPOCH_TICKS
+        result["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS
     return result
 
 
