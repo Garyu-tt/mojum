@@ -1,0 +1,33 @@
+name: Mojum local-cell v2 crash and journal recovery QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/aquarium-cell-policy-v2-faults.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/cell_policy_v2.py"
+      - "src/mojum/noosphere.py"
+      - "tests/test_aquarium_cell_policy_v2_faults.py"
+      - "tests/test_aquarium_cell_policy_v2.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cold-replay-and-fail-closed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Inject synthetic SQLite failures and validate v2 recovery
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_aquarium_cell_policy_v2*.py' -v
