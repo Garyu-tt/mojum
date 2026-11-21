@@ -38,6 +38,23 @@ PYTHONPATH=src python -m mojum.aquarium --db ./motor_play_PRIVATE.sqlite3 --tick
 
 The second command reaches tick 150 with 151 stored events. The policy explores virtual cardinal moves and uses their recorded success or blockage to guide later choices. Use `--dx` and `--dy` with scripted mode. [Motor exploration contract](docs/DEVELOPMENTAL_R013.md)
 
+### Synthetic contact learning
+
+Use a fresh local journal to pair developmental motor play with numeric
+near-field sensing and virtual probes. Run the same mode to cold-replay and
+continue the journal.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./toy_probe_PRIVATE.sqlite3 --ticks 1 --motor-mode developmental_fixture --sensory-mode toy_probe
+PYTHONPATH=src python -m mojum.aquarium --db ./toy_probe_PRIVATE.sqlite3 --ticks 1 --motor-mode developmental_fixture --sensory-mode toy_probe
+```
+
+The first tick measures a deflection of `0.75` for RGB cue `220:70:30`.
+The second uses that prediction and skips the redundant probe. The JSON
+checkpoint reports the learned mean and observation count in
+`toy_contact_state`. The wheel command `mojum-aquarium` accepts the same flags.
+Keep the SQLite journal and its learned state private.
+
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
