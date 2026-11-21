@@ -45,25 +45,39 @@ CUDA/model compatibility, load the exact GGUF, verify layer placement, test
 sample coding prompts, check throughput, GPU power and thermal behavior and
 confirm no OOM during sustained two-server operation.
 
-## Pinned GGUF provenance (verified from upstream HTTP metadata)
+## Selected immutable GGUF provenance (live VM200 HEAD metadata)
 
 Source repository: `ggml-org/gpt-oss-20b-GGUF` on Hugging Face.
-Use this exact immutable repository revision when staging files:
+
+The approved **download staging** for VM200 uses this exact immutable revision
+observed directly by HTTPS HEAD from the guest (not a mutable `main` URL):
 
 ```text
-Revision: ccd679448b30b7438e83f3662ea0108c4b6011c3
-File: gpt-oss-20b-mxfp4.gguf
-Expected bytes: 12109566560
-Expected SHA-256: be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935
-URL: https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/ccd679448b30b7438e83f3662ea0108c4b6011c3/gpt-oss-20b-mxfp4.gguf
+Revision: 41e8a94d15d62070b36cf4553a0250717ecf46b8
+File: gpt-oss-20b-MXFP4.gguf
+Expected bytes: 12109566624
+Expected SHA-256 (upstream x-linked-etag): 27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901
+URL: https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/41e8a94d15d62070b36cf4553a0250717ecf46b8/gpt-oss-20b-MXFP4.gguf
+VM200 destination: /srv/alt/gpu-legion-stage/gpt-oss-20b-MXFP4.gguf
 ```
 
-Check file size and `sha256sum` before renaming a downloaded `.part`
-file into place. Never overwrite the existing ALT 120B checkpoint. The model
-is intentionally **not** stored inside this GitHub repository. The observed
-Mikoshi VM200 mount `/srv/alt` has its own filesystem; however, remote
-model staging has **not completed**, and the old `alt-factory-3.service`
-remains active until a tested replacement exists.
+Read-only verification on VM200 confirmed the pinned HEAD response, 12.1 GB
+expected content length, CUDA-linked llama-server binary, 106 GB of free space
+and active ALT service. The separate `/srv/alt/gpu-legion-stage` directory
+is used for a **resumable temporary download**, not an ALT service modification.
+A partial download or an upstream HTTP 200 response is **not** a verified
+model: only a full local SHA-256 + size + GGUF validation receipt qualifies.
+
+**Legacy alternative, not selected for this staging:** immutable revision
+`ccd679448b30b7438e83f3662ea0108c4b6011c3`,
+file `gpt-oss-20b-mxfp4.gguf`, size `12109566560`,
+SHA-256 `be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935`.
+Never mix the legacy file name, hash or byte count with the selected revision.
+
+Do **not** overwrite `/srv/alt/models/gpt-oss-120b-MXFP4.gguf` or modify the
+existing `alt-factory-3.service` before verifying an independent replacement
+and rollback procedure. A staged GGUF, even if verified, does not imply a
+running GPU replica or completed cutover.
 
 ## Read-only planning
 
@@ -163,23 +177,18 @@ revision**, without altering ALT. The stdlib-only verifier rejects changed
 bytes, wrong GGUF magic, symlinks, pipes and size mismatches. It reads the
 whole model in bounded chunks, without downloading it or launching a model.
 
-For the **immutable ccd6794... revision listed above only**:
+For the **selected immutable revision 41e8a94...**:
 
 ```sh
 python3 tools/gpu_legion_artifact_check.py \
-  --file /srv/alt/models/gpt-oss-20b-mxfp4.gguf \
-  --bytes 12109566560 \
-  --sha256 be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935
+  --file /srv/alt/gpu-legion-stage/gpt-oss-20b-MXFP4.gguf \
+  --bytes 12109566624 \
+  --sha256 27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901
 ```
 
-The separate **current upstream main snapshot** observed 2026-11-22 uses
-the case-sensitive filename `gpt-oss-20b-MXFP4.gguf`, size 12109566624 and
-LFS SHA-256
-`27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901`.
-Those values must **never** be mixed with the older immutable revision.
-Pin its own full repository revision before creating a production manifest:
-`https://huggingface.co/api/models/ggml-org/gpt-oss-20b-GGUF/tree/main`
-is a **mutable** source, not a stable deployment pin.
+Run only after the temporary file has been fully transferred and atomically
+promoted. Upstream metadata, an incomplete `.partial` file, a previously
+created receipt, and the legacy lowercase filename are not substitutes.
 
 A passing verifier means only that bytes match the chosen expected digest.
 It does not prove the source of the supplied digest, CUDA compatibility,
