@@ -10,6 +10,10 @@ import re
 from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
 from .developmental import SCHEMA as MOTOR_PLAY
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
+from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2
+from .sensory_bridge import OCCLUSION_SCHEMA
+from .sensory_bridge_v2 import SCHEMA as SENSORY_BRIDGE_V2
+from .sensory_play import SENSE_SCHEMA
 
 
 _COARSE_V1 = "mojum.developmental.explorer/1"
@@ -57,11 +61,33 @@ def _stored_policy(manifest):
     else:
         raise NoosphereError("ambiguous or unknown stored Aquarium policy")
 
+    sensory_mode = manifest.get("sensory_mode")
+    if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
+        raise NoosphereError("ambiguous or unknown stored sensory policy")
+    if sensory_mode == "toy_probe_v2":
+        if {
+            "sensory_mode": sensory_mode,
+            "sensory_schema": manifest.get("sensory_schema"),
+            "sensory_model_schema": manifest.get("sensory_model_schema"),
+            "contact_bridge_schema": manifest.get("contact_bridge_schema"),
+            "occlusion_schema": manifest.get("occlusion_schema"),
+            "sensory_reprobe_period_ticks": manifest.get("sensory_reprobe_period_ticks"),
+        } != {
+            "sensory_mode": "toy_probe_v2",
+            "sensory_schema": SENSE_SCHEMA,
+            "sensory_model_schema": SENSORY_MODEL_V2,
+            "contact_bridge_schema": SENSORY_BRIDGE_V2,
+            "occlusion_schema": OCCLUSION_SCHEMA,
+            "sensory_reprobe_period_ticks": 2,
+        }:
+            raise NoosphereError("ambiguous or unknown stored sensory policy")
+        policy_id = policy_id + "+toy_probe_v2"
+
     temporal = {key: manifest[key] for key in _TEMPORAL_FIELDS.keys() & manifest.keys()}
     if temporal and (temporal != _TEMPORAL_FIELDS or policy_id != "motor_play_v1"
                      or manifest.get("sensory_mode") != "toy_probe"):
         raise NoosphereError("ambiguous or unknown stored temporal policy")
-    return policy_id, frame_contract, temporal.get("temporal_schema")
+    return policy_id, frame_contract, temporal.get("temporal_schema"), sensory_mode
 
 
 def _object_field(event, name):
@@ -71,7 +97,7 @@ def _object_field(event, name):
     return value
 
 
-def _check_policy_frame(frame, contract, temporal_schema):
+def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
     if frame.get("schema") != FRAME_SCHEMA:
         raise NoosphereError("unknown Aquarium frame schema")
     if contract is None:
@@ -96,6 +122,15 @@ def _check_policy_frame(frame, contract, temporal_schema):
             raise NoosphereError("frame disagrees with its pinned temporal schema")
     elif "range_guidance" in frame:
         raise NoosphereError("unexpected temporal guidance frame")
+    if sensory_mode == "toy_probe_v2":
+        contact = _object_field(frame, "toy_contact")
+        if contact.get("schema") != SENSORY_BRIDGE_V2:
+            raise NoosphereError("frame disagrees with its pinned sensory schema")
+        learning = contact.get("learning")
+        if learning is not None and learning.get("schema") != "mojum.sensory-curiosity.learning/2":
+            raise NoosphereError("frame disagrees with its pinned sensory schema")
+    elif sensory_mode == "toy_probe" and "toy_contact" not in frame:
+        raise NoosphereError("frame disagrees with its pinned sensory schema")
 
 
 def inspect_journal(path, *, external_expected_head=None):
@@ -108,11 +143,11 @@ def inspect_journal(path, *, external_expected_head=None):
         type(external_expected_head) is not str or _HEAD.fullmatch(external_expected_head) is None
     ):
         raise NoosphereError("expected head must be a lowercase SHA-256")
-    policy = contract = temporal = None
+    policy = contract = temporal = sensory_mode = None
     frames = 0
 
     def inspect_event(seq, event):
-        nonlocal policy, contract, temporal, frames
+        nonlocal policy, contract, temporal, sensory_mode, frames
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -122,14 +157,14 @@ def inspect_journal(path, *, external_expected_head=None):
             if topic != "aquarium.bootstrap" or event["event_id"] != "aquarium-bootstrap":
                 raise NoosphereError("first event must bootstrap Aquarium")
             manifest = event["payload"]
-            policy, contract, temporal = _stored_policy(manifest)
+            policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
         elif topic == "aquarium.frame":
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
-            _check_policy_frame(frame, contract, temporal)
+            _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
@@ -146,7 +181,7 @@ def inspect_journal(path, *, external_expected_head=None):
         )
     if policy is None:
         raise NoosphereError("no committed Aquarium bootstrap")
-    return {
+    result = {
         "schema": "mojum.aquarium.wire-inspection/1",
         "format": policy,
         "state_schema": contract[0] if contract else None,
@@ -157,6 +192,9 @@ def inspect_journal(path, *, external_expected_head=None):
         "integrity": ("chain-and-independent-head-checked" if external_expected_head is not None
                       else "chain-checked-not-authenticated"),
     }
+    if sensory_mode == "toy_probe_v2":
+        result["sensory_schema"] = SENSORY_MODEL_V2
+    return result
 
 
 def main():
