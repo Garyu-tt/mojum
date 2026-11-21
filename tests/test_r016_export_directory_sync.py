@@ -92,6 +92,13 @@ class OutputDirectorySyncQA(unittest.TestCase):
     def test_success_fsyncs_file_then_directory_after_private_stage_unlink(self):
         seen = []
         original = os.fsync
+        original_fchmod = os.fchmod
+
+        def audited_fchmod(fd, mode):
+            self.assertEqual(mode, 0o600)
+            self.assertTrue(stat.S_ISREG(os.fstat(fd).st_mode))
+            seen.append("mode")
+            return original_fchmod(fd, mode)
 
         def audited_fsync(fd):
             info = os.fstat(fd)
@@ -103,15 +110,20 @@ class OutputDirectorySyncQA(unittest.TestCase):
                 )
                 seen.append("directory")
             elif stat.S_ISREG(info.st_mode):
+                self.assertEqual(stat.S_IMODE(info.st_mode), 0o600)
+                self.assertEqual(seen, ["mode"],
+                                 "mode must be finalized before file fsync")
                 seen.append("file")
             else:
                 self.fail("fsync encountered unexpected descriptor type")
             return original(fd)
 
-        with patch("mojum.aquarium_trace_export.os.fsync",
+        with patch("mojum.aquarium_trace_export.os.fchmod",
+                   side_effect=audited_fchmod), \
+             patch("mojum.aquarium_trace_export.os.fsync",
                    side_effect=audited_fsync):
             result = self.export("complete.jsonl")
-        self.assertEqual(seen, ["file", "directory"])
+        self.assertEqual(seen, ["mode", "file", "directory"])
         self.assertEqual(result["frames"], 3)
         self.assert_valid_output(self.directory / "complete.jsonl")
         self.assertEqual(self.db.read_bytes(), self.original_bytes)
@@ -142,6 +154,44 @@ class OutputDirectorySyncQA(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "new filename"):
             self.export(path.name)
+        self.assertEqual(self.db.read_bytes(), self.original_bytes)
+
+    def test_private_mode_hardening_failure_does_not_publish_any_jsonl(self):
+        # The tempfile is 0600 by construction; nevertheless a failed
+        # explicit inode-mode syscall must NEVER report success or publish.
+        dest = self.directory / "mode-failed.jsonl"
+        with patch("mojum.aquarium_trace_export.os.fchmod",
+                   side_effect=OSError(errno.EPERM, "synthetic fchmod denial")):
+            with self.assertRaisesRegex(OSError, "fchmod denial"):
+                self.export(dest.name)
+        self.assertFalse(dest.exists())
+        self.assertEqual(
+            list(self.directory.glob(".mojum-private-trace-*.jsonl")), []
+        )
+        self.assertEqual(self.db.read_bytes(), self.original_bytes)
+
+    def test_file_fsync_failure_does_not_publish_or_acknowledge(self):
+        dest = self.directory / "file-sync-failed.jsonl"
+        original = os.fsync
+        seen = []
+
+        def fail_file_only(fd):
+            info = os.fstat(fd)
+            if stat.S_ISREG(info.st_mode):
+                self.assertEqual(stat.S_IMODE(info.st_mode), 0o600)
+                seen.append("file_sync_failed")
+                raise OSError(errno.EIO, "synthetic data fsync failure")
+            self.fail("directory fsync cannot precede successful file sync")
+
+        with patch("mojum.aquarium_trace_export.os.fsync",
+                   side_effect=fail_file_only):
+            with self.assertRaisesRegex(OSError, "data fsync failure"):
+                self.export(dest.name)
+        self.assertEqual(seen, ["file_sync_failed"])
+        self.assertFalse(dest.exists())
+        self.assertEqual(
+            list(self.directory.glob(".mojum-private-trace-*.jsonl")), []
+        )
         self.assertEqual(self.db.read_bytes(), self.original_bytes)
 
     def test_no_clobber_does_not_open_or_fsync_parent_directory(self):
