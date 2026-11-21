@@ -23,6 +23,9 @@ from .body_genetics import (compile_body, compile_body_at_month,
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
+from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
+from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
+from .local_cell_sense import Proprioception
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
 from .noosphere import (
@@ -42,6 +45,10 @@ from .world_room import (
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 10_000
+V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
+V2B_MODE = "local_cell_v2b"
+V2B_WIRE_MODE = "local_cell_v2"
+MOTOR_MODES = ("scripted", "developmental_fixture", V2B_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE)
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
     "world.room", "brain.placeholder", "memory.episode",
@@ -121,16 +128,17 @@ class Aquarium:
             raise AquariumError("invalid agent ID")
         if neural_mode not in ("shadow", "disabled"):
             raise AquariumError("neural_mode must be shadow or disabled")
-        if motor_mode not in ("scripted", "developmental_fixture"):
-            raise AquariumError("motor_mode must be scripted or developmental_fixture")
+        if type(motor_mode) is not str or motor_mode not in MOTOR_MODES:
+            raise AquariumError("unknown Aquarium motor mode")
         if brain_mode not in ("placeholder", "developmental_controller"):
-            raise AquariumError(
-                "brain_mode must be placeholder or developmental_controller"
-            )
+            raise AquariumError("brain_mode must be placeholder or developmental_controller")
         if brain_mode == "developmental_controller" and motor_mode != "developmental_fixture":
-            raise AquariumError(
-                "developmental_controller brain requires developmental_fixture motor mode"
-            )
+            raise AquariumError("developmental_controller brain requires developmental_fixture motor mode")
+        legacy_v2b = motor_mode == V2B_WIRE_MODE
+        if legacy_v2b:
+            motor_mode = V2B_MODE
+        self._read_only_archive = motor_mode == V2A_ARCHIVE_MODE
+        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE)
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
@@ -168,6 +176,12 @@ class Aquarium:
             self.start = (_start_coordinate(start[0]), _start_coordinate(start[1]))
         except AquariumError as exc:
             raise AquariumError("invalid room start coordinates") from exc
+        if self._local_cell and (
+                type(self.room.width) is not int or self.room.width != 4
+                or type(self.room.height) is not int or self.room.height != 4
+                or canonical(self.room.obstacles) != "[[2,1,0.1,2]]"
+                or self.start != (1.0, 2.0)):
+            raise AquariumError("local-cell compatibility requires the exact built-in room and start")
         self.sensory_bridge = None
         if sensory_mode == "toy_probe":
             scene = ToyScene() if sensory_scene is None else sensory_scene
@@ -186,12 +200,18 @@ class Aquarium:
             self.manifest.update({
                 "brain_mode": self.brain_mode,
                 "brain_model_schema": DEVELOPMENTAL_BRAIN_SCHEMA,
-                "source_classification": (
-                    "synthetic_only_developmental_controller_no_neural_brain_no_mujoco"
-                ),
+                "source_classification": "synthetic_only_developmental_controller_no_neural_brain_no_mujoco",
             })
         # Do not modify the legacy scripted bootstrap for existing journals.
-        if self.motor is not None:
+        if self._local_cell:
+            self.manifest["exploration_mode"] = "goal_free"
+            self.manifest["developmental_schema"] = V2A_SCHEMA if self._read_only_archive else V2B_SCHEMA
+            if self._read_only_archive:
+                self.manifest["motor_policy"] = "local_cell_v2"
+                self.manifest["motor_policy_schema"] = V2A_SCHEMA
+            else:
+                self.manifest["developmental_policy"] = V2B_WIRE_MODE
+        elif self.motor is not None:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
         if self.sensory_bridge is not None:
@@ -226,9 +246,13 @@ class Aquarium:
         elif external_expected_head is not None:
             raise AquariumError(
                 "expected head requires an existing journal; refusing to create a new one")
-        self.store = LocalNoosphere(db_path, agent_id)
+        elif self._read_only_archive or legacy_v2b:
+            raise AquariumError("this motor selector requires an existing journal")
+        self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only_archive)
         try:
             if self.store.count() == 0:
+                if self._read_only_archive or legacy_v2b:
+                    raise AquariumError("this motor selector requires an existing journal")
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head, detect_sum=pulse_sum == "auto" and self.learner is not None)
         except BaseException:
@@ -241,9 +265,14 @@ class Aquarium:
     def _reset_replay_state(self, pulse_sum):
         self._pulse_sum = pulse_sum
         self.learner = PulsePredictor(summation=pulse_sum) if self.neural_mode == "shadow" else None
-        self.motor = MotorPlay() if self.motor_mode == "developmental_fixture" else None
-        self.brain = (DevelopmentalBrain()
-                      if self.brain_mode == "developmental_controller" else None)
+        self.motor = None
+        if self.motor_mode == "developmental_fixture":
+            self.motor = MotorPlay()
+        elif self._read_only_archive:
+            self.motor = ArchivedV2AExplorer()
+        elif self._local_cell:
+            self.motor = CellExplorer()
+        self.brain = DevelopmentalBrain() if self.brain_mode == "developmental_controller" else None
         self.contact_model = ContactAssociations() if self.sensory_bridge is not None else None
         self.range_model = RangeOutcomeMemory() if self.temporal_mode == "range_guided" else None
         self.genome = GenomeLedger(self.seed)
@@ -271,6 +300,10 @@ class Aquarium:
         }
 
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
+        if self._read_only_archive:
+            raise AquariumError("v2A archive is read-only")
+        if self._local_cell and topic not in {"aquarium.bootstrap", "aquarium.frame"}:
+            raise AquariumError("local-cell compatibility journals contain only frames")
         if self.store.count() >= MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
@@ -293,7 +326,7 @@ class Aquarium:
             prefer = tuple(action for action, result in predictions.items()
                            if action != "rest" and result["blocked"] is False
                            and result["next_bucket"] != before.range_bucket_10cm)
-        next_motor = (MotorPlay.from_snapshot(self.motor.snapshot())
+        next_motor = (type(self.motor).from_snapshot(self.motor.snapshot())
                       if self.motor is not None else None)
         controller_mode = self.brain_mode == "developmental_controller"
         if next_motor is None:
@@ -306,8 +339,9 @@ class Aquarium:
         else:
             if dx is not None or dy is not None:
                 raise AquariumError("developmental motor play rejects external dx/dy")
-            intent = next_motor.choose(self.tick, avoid=avoid, prefer=prefer)
-            dx, dy = intent["dx"], intent["dy"]
+            if not self._local_cell:
+                intent = next_motor.choose(self.tick, avoid=avoid, prefer=prefer)
+                dx, dy = intent["dx"], intent["dy"]
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
         adapted = copy.deepcopy(self.graph)
@@ -319,8 +353,16 @@ class Aquarium:
         runtime = Simulation(adapted, dt_ns=self.dt_ns)
         runtime.tick = self.tick
         output = runtime.step()
-        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
+        if self._local_cell:
+            sense = Proprioception(self.tick, self.world.revision, self.world.x, self.world.y,
+                                   sensory["heartbeat"]["pulse"])
+            intent = next_motor.decide(sense)
+            dx, dy = intent["dx"], intent["dy"]
+        graph_brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        if graph_brain.get("status") != "UNIMPLEMENTED" or graph_brain.get("action") is not None:
+            raise AquariumError("unexpected privileged brain behavior in fixture")
+        brain = graph_brain
         if controller_mode:
             brain = self.brain.decide(
                 next_motor,
@@ -346,10 +388,6 @@ class Aquarium:
         next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot(), summation=self._pulse_sum)
                         if self.learner is not None else None)
         learning = next_learner.observe(sensory) if next_learner is not None else None
-        if (not controller_mode
-                and (brain.get("status") != "UNIMPLEMENTED"
-                     or brain.get("action") is not None)):
-            raise AquariumError("unexpected privileged brain behavior in fixture")
         payload = {
             "schema": SCHEMA, "tick": self.tick, "time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
@@ -360,7 +398,16 @@ class Aquarium:
             "movement_request": {"dx": dx, "dy": dy},
             "physical_model": "NONE_FIXTURE_ONLY",
         }
-        if next_motor is not None:
+        if self._local_cell:
+            payload["developmental"] = {
+                "schema": self.manifest["developmental_schema"],
+                "observation": sense.public(),
+                "intent": intent,
+                "learning": next_motor.observe(sense, intent, world_obs["blocked"]),
+                "policy_sha256": digest(next_motor.snapshot()),
+                "motor_capability": "SYNTHETIC_POINT_ROOM_ONLY",
+            }
+        elif next_motor is not None:
             outcome = next_motor.observe(
                 tick=self.tick, kind=intent["kind"], blocked=world_obs["blocked"],
             )
@@ -450,6 +497,8 @@ class Aquarium:
         return copy.deepcopy(self.identity)
 
     def step(self, *, dx=None, dy=None):
+        if self._read_only_archive:
+            raise AquariumError("v2A archive is read-only")
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
@@ -489,12 +538,14 @@ class Aquarium:
     def _check_bootstrap(self, first):
         expected = self._record("aquarium.bootstrap", "aquarium-bootstrap",
                                 self.manifest, 0, self.graph_sha256)
-        if first != expected or (self.sensory_bridge is not None and
+        if first != expected or ((self.sensory_bridge is not None or self._local_cell) and
                                  canonical(first) != canonical(expected)):
             raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
 
     def _replay(self, external_expected_head, *, detect_sum):
-        verified = self.store.verify_chain(external_expected_head=external_expected_head)
+        verified = self.store.verify_chain(
+            external_expected_head=external_expected_head, strict_wire=self._local_cell,
+        )
         count = verified["count"]
         if count > MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 replay exceeds 10,000 journal events; streaming pending")
@@ -525,6 +576,8 @@ class Aquarium:
                 raise AquariumError("unexpected journal ownership or visibility")
             if event["observed_at_ns"] != self.tick * self.dt_ns:
                 raise AquariumError("unsynchronized event time")
+            if self._local_cell and event["topic"] != "aquarium.frame":
+                raise AquariumError("local-cell compatibility journals contain only frames")
             if event["topic"] == "development.advance":
                 payload = event["payload"]
                 if not isinstance(payload, dict) or set(payload) != {
@@ -587,8 +640,8 @@ class Aquarium:
                                         self.tick * self.dt_ns, self.genome.revision)
                 # Compare JSON types for the opt-in wire. Python structural
                 # equality treats bools and numbers as interchangeable.
-                matches = (event == expected if next_contact is None
-                           else canonical(event) == canonical(expected))
+                matches = (canonical(event) == canonical(expected)
+                           if self._local_cell or next_contact is not None else event == expected)
                 if not matches:
                     raise _FrameMismatch("non-deterministic or mismatched committed frame")
                 self.world = next_world
@@ -619,7 +672,9 @@ class Aquarium:
                                 if self.identity is not None else "not_assigned"),
             "trust": "checksum_only_not_authenticated",
         }
-        if self.motor is not None:
+        if self._local_cell:
+            state["developmental_state"] = self.motor.snapshot()
+        elif self.motor is not None:
             state["motor_mode"] = self.motor_mode
             state["motor_state"] = self.motor.snapshot()
         if self.contact_model is not None:
@@ -647,12 +702,9 @@ def main():
     parser.add_argument("--dx", type=float)
     parser.add_argument("--dy", type=float)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
-    parser.add_argument(
-        "--brain-mode", choices=("placeholder", "developmental_controller"),
-        default="placeholder",
-        help="opt-in typed synthetic controller boundary; not a neural brain",
-    )
-    parser.add_argument("--motor-mode", choices=("scripted", "developmental_fixture"),
+    parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
+                        default="placeholder", help="opt-in synthetic controller, not a neural brain")
+    parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"), default="none",
                         help="opt-in synthetic contact learning with developmental motor play")
@@ -671,10 +723,12 @@ def main():
         parser.error("--expected-head must be exactly 64 lowercase hexadecimal characters")
     if args.neural_mode == "disabled" and args.pulse_sum != "auto":
         parser.error("--pulse-sum requires shadow mode")
-    if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
-        parser.error("developmental motor play does not accept --dx/--dy")
+    if args.motor_mode == V2A_ARCHIVE_MODE and args.ticks != 0:
+        parser.error("v2A archive requires --ticks 0")
     if args.brain_mode == "developmental_controller" and args.motor_mode != "developmental_fixture":
         parser.error("--brain-mode developmental_controller requires --motor-mode developmental_fixture")
+    if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
+        parser.error("developmental motor play does not accept --dx/--dy")
     if args.sensory_mode == "toy_probe" and args.motor_mode != "developmental_fixture":
         parser.error("--sensory-mode toy_probe requires --motor-mode developmental_fixture")
     if args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
@@ -726,11 +780,9 @@ def main():
         checkpoint["status"] = (
             "SYNTHETIC_DEVELOPMENTAL_CONTROLLER_NOT_NEURAL_OR_MUJOCO"
             if aquarium.brain_mode == "developmental_controller"
-            else (
-                "SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
-                if aquarium.neural_mode == "shadow"
-                else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
-            )
+            else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
+                  if aquarium.neural_mode == "shadow"
+                  else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
         )
         if aquarium.motor is not None:
             checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"

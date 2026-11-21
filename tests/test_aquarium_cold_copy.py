@@ -60,6 +60,28 @@ class ColdAquariumCopyTests(unittest.TestCase):
             source.step(dx=0.0)
             self.assertEqual(source.tick, 10)
 
+    def test_export_never_opens_source_as_writable_aquarium(self):
+        # The backup must not initialize or replay through a writable
+        # Aquarium on the original source, even when the journal is valid.
+        with Aquarium(self.source, SEED, GRAPH) as writer:
+            for _ in range(3):
+                writer.step(dx=0.01)
+            expected = writer.checkpoint()
+            before_bytes = self.source.read_bytes()
+            real_aquarium = Aquarium
+
+            def no_source_writes(path, *args, **kwargs):
+                if Path(path) == self.source:
+                    raise AssertionError("export opened the original source writable")
+                return real_aquarium(path, *args, **kwargs)
+
+            with patch("mojum.aquarium_cold_copy.Aquarium", side_effect=no_source_writes):
+                result = self._export()
+            self.assertEqual(result["journal_head"], expected["journal_head"])
+            self.assertEqual(result["tick"], expected["tick"])
+            self.assertEqual(self.source.read_bytes(), before_bytes)
+            self.assertEqual(self._verify(result)["tick"], expected["tick"])
+
     def test_acquired_genome_and_shadow_neural_state_replay(self):
         with Aquarium(self.source, SEED, GRAPH) as child:
             child.step(dx=0)
@@ -158,6 +180,22 @@ class ColdAquariumCopyTests(unittest.TestCase):
                 self.assertEqual(candidate.read_bytes(), before)
                 self.assertFalse(self.exported.exists())
                 self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file mode test")
+    def test_export_never_chmods_or_rewrites_valid_source(self):
+        # Before this fix, export reopened the original via writable Aquarium.
+        # LocalNoosphere.__init__ chmod(0600) makes the violation observable.
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            child.step()
+        original = self.source.read_bytes()
+        self.source.chmod(0o400)
+        try:
+            exported = self._export()
+            self.assertEqual(self.source.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(self.source.read_bytes(), original)
+            self.assertEqual(self._verify(exported)["tick"], 1)
+        finally:
+            self.source.chmod(0o600)
 
     def test_missing_source_does_not_create_new_database(self):
         with self.assertRaises(ValueError):
