@@ -17,7 +17,6 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError
-from .noosphere import STORE_SCHEMA, _open_readonly
 from .noosphere import _read_first_event
 
 MAX_BACKUP_BYTES = 128_000_000
@@ -50,27 +49,6 @@ def _destination(path):
     if os.path.lexists(dest):
         raise FileExistsError("checkpoint destination already exists")
     return dest
-
-
-def _require_existing_source_journal(path, agent_id):
-    """Reject incomplete source journals before Aquarium can create/repair SQLite.
-
-    Export operates on existing history only. Aquarium is deliberately writable
-    and bootstraps an empty store, so checking path existence is insufficient.
-    """
-    with _open_readonly(path) as db:
-        db.execute("BEGIN")
-        tables = {row["name"] for row in db.execute(
-            "SELECT name FROM sqlite_schema "
-            "WHERE type='table' AND name IN ('metadata', 'events')"
-        )}
-        if tables != {"metadata", "events"}:
-            raise ValueError("export requires existing metadata and events tables")
-        saved = dict(db.execute("SELECT k,v FROM metadata"))
-        if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
-            raise ValueError("export requires complete matching journal metadata")
-        if db.execute("SELECT 1 FROM events LIMIT 1").fetchone() is None:
-            raise ValueError("export requires an existing committed Aquarium event")
 
 
 def _sha256(path):
@@ -146,57 +124,59 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
 def export_cold_copy(source_db, destination_db, seed, graph, *,
                      agent_id="dante-fixture-001", neural_mode="shadow",
                      room=None, start=(1.0, 2.0), dt_ns=10_000_000):
-    """Make and replay-verify a no-clobber SQLite backup of a running journal.
+    """Publish a replay-verified, no-clobber SQLite backup without writing source.
 
-    The Aquarium source is opened and fully replayed first; SQLite's backup
-    API includes committed WAL pages, unlike a plain copy of an open .sqlite3.
-    If a concurrent writer changes the source between replay and backup,
-    the copied head/checkpoint must still match or publication is refused.
+    Take a consistent SQLite backup through a read-only connection. All Aquarium
+    initialization and replay happen on the private temporary copy. A concurrent
+    writer may advance the source; the exported artifact represents the exact
+    committed snapshot taken by sqlite3.Connection.backup().
     """
     source = _source_file(source_db)
     destination = _destination(destination_db)
-    # Export is for a committed journal, never a request to initialize one.
-    # Aquarium auto-bootstraps empty SQLite sources after a writable open.
-    # Inspect the existing source read-only before allowing that side effect.
-    if _read_first_event(source, agent_id) is None:
-        raise ValueError("export requires an existing nonempty Aquarium journal")
-    opts = _options(agent_id, neural_mode, room, start, dt_ns)
+    # An existing source must have a valid committed Aquarium bootstrap.
+    # Never initialize an unrelated or empty source (even in a read-only probe).
     _require_existing_source_journal(source, agent_id)
-    with Aquarium(source, seed, graph, **opts) as original:
-        before = original.checkpoint()
-        count = original.store.count()
-        connection = original.store._db  # LocalNoosphere's live SQLite handle.
-        if (connection.execute("PRAGMA page_count").fetchone()[0]
-                * connection.execute("PRAGMA page_size").fetchone()[0]
-                > MAX_BACKUP_BYTES):
-            raise ValueError("source SQLite exceeds copy budget")
-        fd, temporary = tempfile.mkstemp(
-            prefix=".mojum-cold-copy-", suffix=".sqlite3",
-            dir=destination.parent,
-        )
-        os.close(fd)
-        try:
+    opts = _options(agent_id, neural_mode, room, start, dt_ns)
+    temporary = None
+    try:
+        # The original database must never be opened as a writable Aquarium.
+        # SQLite's read-only backup includes committed WAL pages.
+        with closing(sqlite3.connect(
+                source.absolute().as_uri() + "?mode=ro", uri=True, timeout=10.0)) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            if (connection.execute("PRAGMA page_count").fetchone()[0]
+                    * connection.execute("PRAGMA page_size").fetchone()[0]
+                    > MAX_BACKUP_BYTES):
+                raise ValueError("source SQLite exceeds copy budget")
+            fd, temporary = tempfile.mkstemp(
+                prefix=".mojum-cold-copy-", suffix=".sqlite3",
+                dir=destination.parent,
+            )
+            os.close(fd)
             with closing(sqlite3.connect(temporary)) as target:
                 connection.backup(target)
-            with Aquarium(temporary, seed, graph,
-                          external_expected_head=before["journal_head"],
-                          **opts) as reopened:
-                if reopened.checkpoint() != before:
-                    raise AquariumError("copied journal differs from validated source")
-            # Reopening in WAL mode must not leave any unexported sidecars.
-            if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
-                raise AquariumError("unexported SQLite backup WAL sidecar")
-            checksum = _sha256(temporary)
-            # Windows rejects fsync on a read-only descriptor (unlike the
-            # POSIX runners that originally exercised this path).  The
-            # temporary file is ours and still writable, so use a descriptor
-            # that can flush the copied SQLite bytes on every supported host.
-            with open(temporary, "r+b") as stream:
-                os.fsync(stream.fileno())
-            # Same-filesystem hard link atomically publishes a *new* name.
-            # Unlike os.replace, it cannot overwrite a preexisting destination.
-            os.link(temporary, destination)
-        finally:
+        # The live source can change while backup runs. Verify the copied
+        # history itself instead of trusting an earlier source checkpoint.
+        _require_existing_source_journal(temporary, agent_id)
+        with Aquarium(temporary, seed, graph, **opts) as copied:
+            before = copied.checkpoint()
+            count = copied.store.count()
+        with Aquarium(temporary, seed, graph,
+                      external_expected_head=before["journal_head"],
+                      **opts) as reopened:
+            if reopened.checkpoint() != before:
+                raise AquariumError("copied journal changed during verified replay")
+        if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
+            raise AquariumError("unexported SQLite backup WAL sidecar")
+        checksum = _sha256(temporary)
+        with open(temporary, "r+b") as stream:
+            os.fsync(stream.fileno())
+        # Atomic no-clobber hard link; mkstemp sets the backup to mode 0600.
+        os.link(temporary, destination)
+    except sqlite3.Error as exc:
+        raise ValueError("unable to back up SQLite journal read-only") from exc
+    finally:
+        if temporary is not None:
             for suffix in ("", "-wal", "-shm"):
                 try:
                     os.unlink(temporary + suffix)
