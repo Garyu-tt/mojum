@@ -81,6 +81,31 @@ class WriteIntentTests(unittest.TestCase):
             self.assertEqual(writer.checkpoint()["tick"], 1)
         self.assertEqual(self.read()["classification"], "NO_PREPARED_INTENT")
 
+    def test_absent_intent_does_not_hide_unanchored_raw_journal_event(self):
+        self.install()
+        with Aquarium(self.db, SEED, GRAPH) as bypass:
+            bypass.step(dx=-.021)
+        result = self.read()
+        self.assertEqual(result["classification"],
+                         "UNANCHORED_JOURNAL_WITHOUT_INTENT_STOP")
+        self.assertFalse(result["auto_repair_allowed"])
+        self.assertTrue(result["operator_review_required"])
+        self.assertEqual(self.state()["head"], self.baseline.head)
+
+    def test_no_intent_during_frozen_transfer_never_reports_clear(self):
+        self.install()
+        with LocalAuthority(self.registry) as registry:
+            registry.freeze_transfer(
+                self.baseline, self.baseline,
+                source_writer="node-a", target_writer="node-b",
+                epoch=1, generation=1,
+            )
+        report = self.read()
+        self.assertEqual(report["classification"],
+                         "AUTHORITY_FROZEN_WITHOUT_INTENT_STOP")
+        self.assertTrue(report["operator_review_required"])
+        self.assertFalse(report["auto_repair_allowed"])
+
     def test_normal_step_is_prepared_committed_finalized(self):
         self.install()
         with self.guard() as writer:
