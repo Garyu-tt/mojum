@@ -293,6 +293,9 @@ def main():
             assert second["prediction"] == "0.75", (mode,"learned prediction")
             assert second["counter"] == "2 / 2", (mode,"counter")
             assert "verified.synthetic.private.jsonl" in second["source"]
+            assert "SHA-256 кадров совпадает" in second["source"], (
+                mode, "WebCrypto digest was not visibly verified", second["source"]
+            )
             assert viewport["width"] > 0
             if mode == "mobile":
                 assert viewport["width"] == 390, (
