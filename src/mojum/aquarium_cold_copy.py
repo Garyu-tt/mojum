@@ -227,7 +227,7 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
         with open(temporary, "r+b") as stream:
             os.fsync(stream.fileno())
         # Publish the validated artifact under a new name, never clobbering.
-        os.link(temporary, destination)
+        os.link(temporary, _destination(destination))
     finally:
         for suffix in ("", *_SQLITE_SIDECARS):
             try:

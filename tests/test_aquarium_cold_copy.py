@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError, V4_MODE
-from mojum.aquarium_cold_copy import export_cold_copy, verify_cold_copy
+from mojum.aquarium_cold_copy import _sha256, export_cold_copy, verify_cold_copy
 from mojum.aquarium_wire import inspect_journal
 from mojum.genesis import ACQUISITION_SCHEMA
 
@@ -156,6 +156,22 @@ class ColdAquariumCopyTests(unittest.TestCase):
                 self.assertFalse(self.exported.exists())
                 self.assertEqual(sidecar.read_bytes(), b"existing sidecar")
                 sidecar.unlink()
+
+    def test_export_rechecks_destination_after_replay(self):
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            child.step()
+        sidecar = self.exported.with_name(self.exported.name + "-wal")
+
+        def add_sidecar_after_replay(path):
+            sidecar.write_bytes(b"new sidecar")
+            return _sha256(path)
+
+        with patch("mojum.aquarium_cold_copy._sha256", side_effect=add_sidecar_after_replay):
+            with self.assertRaisesRegex(FileExistsError, "existing SQLite sidecars"):
+                self._export()
+        self.assertFalse(self.exported.exists())
+        self.assertEqual(sidecar.read_bytes(), b"new sidecar")
+        self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
 
     def test_existing_empty_sqlite_source_refused_without_bootstrap(self):
         # Export must never turn an unrelated existing SQLite into an
