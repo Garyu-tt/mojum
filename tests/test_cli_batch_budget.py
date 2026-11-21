@@ -34,10 +34,13 @@ class CliBatchBudgetTests(unittest.TestCase):
 
                 # One more frame would exceed the three-event cap.
                 argv[-1] = "1"
-                with patch.object(sys, "argv", argv), redirect_stderr(io.StringIO()):
+                error_output = io.StringIO()
+                with patch.object(sys, "argv", argv), redirect_stderr(error_output):
                     with self.assertRaises(SystemExit) as rejected:
                         main()
                 self.assertEqual(rejected.exception.code, 2)
+                self.assertIn("requested ticks exceed remaining journal event budget",
+                              error_output.getvalue())
 
                 with Aquarium(db, SEED, GRAPH) as resumed:
                     self.assertEqual(resumed.checkpoint(), before)
