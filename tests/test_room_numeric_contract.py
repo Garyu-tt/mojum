@@ -114,6 +114,12 @@ class ExactRoomScalarContractTests(unittest.TestCase):
                     decode_room_exact(bad)
         with self.assertRaises(RoomContractError):
             decode_room_exact(value, legacy_room={"width": 99})
+        # Python equality wrongly treats 4 and 4.0 as equivalent; serialized
+        # world revision and bootstrap types must remain distinguishable.
+        inconsistent = _room_manifest(room, (1.0, 2.0))
+        inconsistent["width"] = 4
+        with self.assertRaisesRegex(RoomContractError, "projection"):
+            decode_room_exact(value, legacy_room=inconsistent)
         with self.assertRaises(RoomContractError):
             encode_room_exact(room, (True, 2.0))
 
@@ -130,6 +136,10 @@ class ExactRoomScalarContractTests(unittest.TestCase):
         self.assertEqual(code["start"][0]["hex"], "-0x0.0p+0")
         self.assertEqual(position[0].hex(), "-0x0.0p+0")
         self.assertEqual(position[1].hex(), (0.1).hex())
+        legacy_wrong_zero = _room_manifest(room, (-0.0, 0.1))
+        legacy_wrong_zero["start"][0] = 0.0
+        with self.assertRaisesRegex(RoomContractError, "projection"):
+            decode_room_exact(code, legacy_room=legacy_wrong_zero)
         self.assertEqual(_revision(room, 0, -0.0, 0.1),
                          _revision(decoded, 0, *position))
 
