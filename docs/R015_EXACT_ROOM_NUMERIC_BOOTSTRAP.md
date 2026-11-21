@@ -10,7 +10,7 @@ The legacy Aquarium bootstrap uses `width: float(room.width)` and `height: float
 
 New explicit `room_numeric_contract="typed_v1"` option for **new** Aquarium journals and CLI `--room-numeric-contract typed_v1`. The default stays `legacy`, byte-for-byte, for all existing persisted R0.13/R0.14 room manifests. An existing journal cannot silently switch between contracts; replay compares the complete bootstrap and fails closed. Historical v2A archive mode **cannot** opt in or be rewritten.
 
-Typed new journals retain the legacy `room` projection unchanged and **add** an independent, versioned `room_exact` field:
+Typed new journals use a **new top-level bootstrap identity** `mojum.aquarium.bootstrap/2` (legacy retains exactly `mojum.aquarium.bootstrap/1`), retain the old `room` projection for explicit comparison, and **add** an independent versioned `room_exact` field:
 
 ```json
 {
