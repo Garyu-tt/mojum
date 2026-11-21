@@ -1,0 +1,48 @@
+name: Mojum R0.15 portable epoch-v4 acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-portable-epoch-v4.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/portable_host.py"
+      - "src/mojum/aquarium_wire.py"
+      - "src/mojum/cell_policy_v4.py"
+      - "src/mojum/epoch_sense_v2.py"
+      - "tests/test_aquarium_epoch_v4.py"
+      - "tests/test_portable_host.py"
+      - "tests/test_portable_host_v4.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-epoch-v4:
+    name: portable epoch v4 + legacy (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile host and typed runtime
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m compileall -q src/mojum/portable_host.py src/mojum/aquarium.py
+      - name: Run real SQLite epoch and portable-host acceptance
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m unittest discover -s tests -p 'test_portable_host.py' -v
+          python -m unittest discover -s tests -p 'test_portable_host_v4.py' -v
+          python -m unittest discover -s tests -p 'test_aquarium_epoch_v4.py' -v
