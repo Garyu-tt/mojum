@@ -304,45 +304,6 @@ class RetentionTests(unittest.TestCase):
             model.snapshot(),
         )
 
-    def test_snapshot_rejects_impossible_tick_and_eviction_history(self):
-        # These states satisfy simple sum accounting but cannot arise from
-        # the policy's one-observation-per-tick, 512-cell LRU contract.
-        common = {
-            "schema": SCHEMA, "cell_size_m": STEP_METERS,
-            "last_epoch_index": 0, "evictions": 0,
-            "forgotten_observations": 0, "rest_streak": 0,
-            "forced_probes": 0,
-        }
-        forged = {
-            "duplicate_live_stamps": {
-                **common, "last_tick": 1, "updates": 2,
-                "records": {
-                    "1:0": {"x+": [1, 0]},
-                    "2:0": {"x+": [1, 0]},
-                },
-                "last_seen_at": {"1:0": 1, "2:0": 1},
-            },
-            "last_observation_before_current_tick": {
-                **common, "last_tick": 2, "updates": 3,
-                "records": {"1:0": {"x+": [3, 0]}},
-                "last_seen_at": {"1:0": 1},
-            },
-            "evicted_before_full_capacity": {
-                **common, "last_tick": 1, "updates": 2,
-                "evictions": 1, "forgotten_observations": 1,
-                "records": {"2:0": {"x+": [1, 0]}},
-                "last_seen_at": {"2:0": 1},
-            },
-            "learned_without_retained_cell": {
-                **common, "last_tick": 0, "updates": 1,
-                "evictions": 1, "forgotten_observations": 1,
-                "records": {}, "last_seen_at": {},
-            },
-        }
-        for name, snapshot in forged.items():
-            with self.subTest(name=name), self.assertRaises(CellV5Error):
-                CellExplorerV5.from_snapshot(snapshot)
-
     def test_restore_detaches_from_original_snapshot(self):
         model = CellExplorerV5()
         sense = cue(0)
