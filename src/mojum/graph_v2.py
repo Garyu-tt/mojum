@@ -79,8 +79,8 @@ def upgrade_v1(graph, *, labels=None):
 def _v1_projection(checked):
     """Drop the additive v2 metadata to reconstruct the recorded v1 wire.
 
-    Callers must run the full ``validate_v2`` checks first; this helper only
-    performs the lossless structural projection.
+    Only call this after verifying the v2 envelope and each node's required
+    metadata. The full validator subsequently checks projected v1 provenance.
     """
     legacy = copy.deepcopy(checked)
     legacy["schema"] = V1_SCHEMA
@@ -108,7 +108,6 @@ def validate_v2(graph):
     nodes = checked.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         raise GraphError("graph-v2 requires nodes")
-    legacy = _v1_projection(checked)
     levels = {}
     for node in nodes:
         if not isinstance(node, dict):
@@ -126,6 +125,9 @@ def validate_v2(graph):
                 or declared["inputs"] != inputs or declared["outputs"] != outputs):
             raise GraphError("graph-v2 ports do not match registered node kind")
         levels[node_id] = _VISIBILITY_LEVEL[node["visibility"]]
+    # Project only after all node envelopes and required v2 metadata are checked.
+    # Otherwise malformed input could leak KeyError/TypeError instead of GraphError.
+    legacy = _v1_projection(checked)
     validate_v1(legacy)  # Same canonical endpoints, type checking, DAG, and limits.
     if _sha(legacy) != origin["sha256"]:
         raise GraphError("v1 provenance checksum mismatch")
