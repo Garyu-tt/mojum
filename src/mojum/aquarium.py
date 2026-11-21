@@ -19,6 +19,11 @@ from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as CELL_V2_SCHEMA
 from .cell_policy_v3 import CellExplorerV3, SCHEMA as CELL_V3_SCHEMA
+from .cell_policy_v4 import CellExplorerV4, SCHEMA as CELL_V4_SCHEMA
+from .epoch_sense_v2 import (
+    EpochProprioception, SCHEMA as EPOCH_SENSE_SCHEMA,
+    EPOCH_TICKS, MAX_ABSOLUTE_TICKS,
+)
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import (ToyContactBridge, validate_scene,
                              SCHEMA as TOY_CONTACT_SCHEMA,
@@ -28,7 +33,7 @@ from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .verified_snapshot import (
-    STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
+    STATE_SCHEMA, STATE_SCHEMA_V4, SnapshotError, load_snapshot, save_snapshot,
     runtime_source_sha256,
 )
 
@@ -36,6 +41,7 @@ from .verified_snapshot import (
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 100_000  # Still bounded; full replay is CPU-linear.
+EPOCH_EVENT_SCHEMA = "mojum.aquarium.epoch-transition/1"
 _OMITTED_MOVEMENT = object()  # Distinguish omitted dx/dy from explicit None.
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
@@ -91,7 +97,7 @@ class Aquarium:
         if exploration_mode not in ("scripted", "goal_free"):
             raise AquariumError("exploration_mode must be scripted or goal_free")
         if type(developmental_policy) is not str or developmental_policy not in (
-                "legacy", "local_cell_v2", "local_cell_v3"):
+                "legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"):
             raise AquariumError("unknown versioned developmental policy")
         if developmental_policy != "legacy" and exploration_mode != "goal_free":
             raise AquariumError("versioned local-cell requires goal_free exploration")
@@ -101,6 +107,10 @@ class Aquarium:
             raise AquariumError("toy_probe requires goal_free exploration")
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("unused synthetic sensory scene")
+        if developmental_policy == "local_cell_v4" and sensory_mode != "none":
+            # Numeric toy association currently caps at 4000 measurements.
+            # Do not silently reinterpret its persisted model to cross epochs.
+            raise AquariumError("v4 epoch experiment requires sensory_mode=none; toy probe epoch schema pending")
         if (replay_snapshot_file is None) != (replay_snapshot_key_file is None):
             raise AquariumError("replay snapshot file and key file must be supplied together")
         self._snapshot_file = replay_snapshot_file
@@ -148,7 +158,8 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.explorer = (
-            (CellExplorerV3() if developmental_policy == "local_cell_v3"
+            (CellExplorerV4() if developmental_policy == "local_cell_v4"
+             else CellExplorerV3() if developmental_policy == "local_cell_v3"
              else CellExplorer() if developmental_policy == "local_cell_v2"
              else Explorer()) if exploration_mode == "goal_free" else None
         )
@@ -159,9 +170,11 @@ class Aquarium:
                 validate_scene(self.room, scene), motor_room=self.room,
             )
         self.tick = 0
+        self.epoch_index = 0  # R0.15 only; original journal/checkpoint fields unchanged.
         if self.explorer is not None:
             self.manifest["developmental_schema"] = (
-                CELL_V3_SCHEMA if developmental_policy == "local_cell_v3"
+                CELL_V4_SCHEMA if developmental_policy == "local_cell_v4"
+                else CELL_V3_SCHEMA if developmental_policy == "local_cell_v3"
                 else CELL_V2_SCHEMA if developmental_policy == "local_cell_v2"
                 else DEVELOPMENT_SCHEMA
             )
@@ -169,6 +182,10 @@ class Aquarium:
             if developmental_policy != "legacy":
                 # Explicit new journal only; original bootstrap is unchanged.
                 self.manifest["developmental_policy"] = developmental_policy
+            if developmental_policy == "local_cell_v4":
+                self.manifest["epoch_transition_schema"] = EPOCH_EVENT_SCHEMA
+                self.manifest["epoch_ticks"] = EPOCH_TICKS
+                self.manifest["proprioception_schema"] = EPOCH_SENSE_SCHEMA
         if self.sensory_bridge is not None:
             self.manifest["sensory_mode"] = "toy_probe"
             self.manifest["sensory_schema"] = SENSE_SCHEMA
@@ -220,6 +237,60 @@ class Aquarium:
         self._committed_event_count += 1
         return committed
 
+    def required_events_for_steps(self, ticks):
+        """Compute journal admissions including pending v4 epoch markers."""
+        if type(ticks) is not int or ticks < 0:
+            raise AquariumError("steps must be a nonnegative integer")
+        if self.developmental_policy != "local_cell_v4":
+            return ticks
+        end = self.tick + ticks
+        if end > MAX_ABSOLUTE_TICKS:
+            raise AquariumError("v4 absolute tick budget exhausted")
+        markers = max(0, (end - 1) // EPOCH_TICKS - self.epoch_index) if ticks else 0
+        return ticks + markers
+
+    def _epoch_event(self, index):
+        """Canonical separate commit, keeping full absolute clock history."""
+        return self._record(
+            "aquarium.epoch", f"epoch-{index:08d}",
+            {"schema": EPOCH_EVENT_SCHEMA, "absolute_tick": self.tick,
+             "epoch_index": index, "previous_epoch_index": index - 1,
+             "epoch_tick": 0,
+             "source": "explicit_bounded_epoch_rollover_without_reset"},
+            self.tick * self.dt_ns, self.genome.revision,
+        )
+
+    def _commit_pending_epoch(self):
+        if self.developmental_policy != "local_cell_v4":
+            return
+        next_index = self.tick // EPOCH_TICKS
+        if next_index == self.epoch_index:
+            return
+        if (self.tick <= 0 or self.tick % EPOCH_TICKS != 0
+                or next_index != self.epoch_index + 1):
+            raise AquariumError("noncanonical epoch boundary state")
+        marker = self._epoch_event(next_index)
+        committed = self._append_record(
+            marker["topic"], marker["event_id"], marker["payload"],
+            marker["observed_at_ns"], marker["source_revision"],
+        )
+        # Crash after SQLite commit but before these RAM assignments is
+        # reconstructed from the durable explicit epoch event at reopen.
+        self.epoch_index = next_index
+        self._committed_head = committed
+
+    def _proprioception(self, pulse):
+        if self.developmental_policy == "local_cell_v4":
+            if self.epoch_index != self.tick // EPOCH_TICKS:
+                raise AquariumError("missing committed epoch boundary")
+            return EpochProprioception(
+                self.tick, self.epoch_index, self.tick % EPOCH_TICKS,
+                self.world.revision, self.world.x, self.world.y, pulse,
+            )
+        return Proprioception(
+            self.tick, self.world.revision, self.world.x, self.world.y, pulse,
+        )
+
     def _calculate(self, dx, dy):
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
@@ -241,10 +312,7 @@ class Aquarium:
                 raise AquariumError("goal-free mode rejects externally scripted movement")
             # Only pre-action proprioception and own pulse reach this policy.
             # Obstacle geometry, hidden objects and future frames stay private.
-            signal = Proprioception(
-                self.tick, self.world.revision, self.world.x, self.world.y,
-                sensory["heartbeat"]["pulse"],
-            )
+            signal = self._proprioception(sensory["heartbeat"]["pulse"])
             next_explorer = type(self.explorer).from_snapshot(self.explorer.snapshot())
             intent = next_explorer.decide(signal)
             dx, dy = intent["dx"], intent["dy"]
@@ -293,8 +361,7 @@ class Aquarium:
             return
         # Compute against a copy, validate the persisted causal event and
         # adopt only after the SQLite CAS append or successful replay.
-        cue = Proprioception(
-            self.tick, self.world.revision, self.world.x, self.world.y,
+        cue = self._proprioception(
             payload["interoception"]["heartbeat"]["pulse"],
         )
         clone = type(self.explorer).from_snapshot(self.explorer.snapshot())
@@ -323,6 +390,11 @@ class Aquarium:
         else:
             arguments = (0.02 if dx is _OMITTED_MOVEMENT else dx,
                          0.0 if dy is _OMITTED_MOVEMENT else dy)
+        if (self.developmental_policy == "local_cell_v4"
+                and self._committed_event_count +
+                    self.required_events_for_steps(1) > MAX_REPLAY_EVENTS):
+            raise AquariumError("v4 session journal budget exhausted before boundary")
+        self._commit_pending_epoch()
         payload, next_world, next_learner = self._calculate(*arguments)
         committed = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                                         self.tick * self.dt_ns, self.genome.revision)
@@ -360,7 +432,9 @@ class Aquarium:
         the newer tail, without pretending its state is the current head.
         """
         result = {
-            "schema": "mojum.aquarium.checkpoint/1",
+            "schema": ("mojum.aquarium.checkpoint/2"
+                       if self.developmental_policy == "local_cell_v4"
+                       else "mojum.aquarium.checkpoint/1"),
             "agent_id": self.agent_id, "tick": self.tick,
             "sim_time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
@@ -373,6 +447,9 @@ class Aquarium:
         }
         if self.explorer is not None:
             result["developmental_state"] = self.explorer.snapshot()
+        if self.developmental_policy == "local_cell_v4":
+            result["epoch_index"] = self.epoch_index
+            result["epoch_tick"] = self.tick % EPOCH_TICKS
         if self.sensory_bridge is not None:
             result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
         return result
@@ -384,7 +461,14 @@ class Aquarium:
             "journal_events", "journal_head", "tick", "world", "genome", "learner",
             "explorer", "toy_contact_state", "checkpoint",
         }
-        if type(state) is not dict or set(state) != required or state["schema"] != STATE_SCHEMA:
+        if self.developmental_policy == "local_cell_v4":
+            required.add("epoch_index")
+        expected_state_schema = (
+            STATE_SCHEMA_V4 if self.developmental_policy == "local_cell_v4"
+            else STATE_SCHEMA
+        )
+        if (type(state) is not dict or set(state) != required
+                or state["schema"] != expected_state_schema):
             raise SnapshotError("invalid replay state field contract")
         events, tick = state["journal_events"], state["tick"]
         if (type(events) is not int or not 1 <= events <= committed_count
@@ -398,6 +482,20 @@ class Aquarium:
                                 "move signed cache aside explicitly")
         if self.store.event_at(events)["event_hash"] != state["journal_head"]:
             raise SnapshotError("signed snapshot head is absent from SQLite prefix")
+        saved_epoch = 0
+        if self.developmental_policy == "local_cell_v4":
+            saved_epoch = state["epoch_index"]
+            if (type(saved_epoch) is not int or saved_epoch < 0
+                    or saved_epoch > tick // EPOCH_TICKS
+                    or saved_epoch < max(0, (tick - 1) // EPOCH_TICKS)):
+                raise SnapshotError("invalid signed epoch index")
+            # A signed checkpoint after a boundary marker but before
+            # its first motor frame needs the exact durable marker at
+            # the head, not merely a correctly signed claim.
+            if (tick > 0 and tick % EPOCH_TICKS == 0
+                    and saved_epoch == tick // EPOCH_TICKS
+                    and self.store.event_at(events)["event"]["topic"] != "aquarium.epoch"):
+                raise SnapshotError("signed epoch index has no journal marker")
         world = state["world"]
         if (type(world) is not dict or set(world) !=
                 {"tick", "x", "y", "revision"}
@@ -437,6 +535,8 @@ class Aquarium:
                 raise SnapshotError("sensory model has more measurements than ticks")
 
         self.tick = tick
+        if self.developmental_policy == "local_cell_v4":
+            self.epoch_index = saved_epoch
         self.world = RoomState(tick, float(world["x"]), float(world["y"]),
                                world["revision"])
         self.genome, self.learner, self.explorer = ledger, learner, explorer
@@ -463,7 +563,9 @@ class Aquarium:
         if self.store.head() != self._committed_head:
             raise SnapshotError("journal advanced while snapshot was prepared")
         state = {
-            "schema": STATE_SCHEMA,
+            "schema": (STATE_SCHEMA_V4
+                       if self.developmental_policy == "local_cell_v4"
+                       else STATE_SCHEMA),
             "agent_id": self.agent_id,
             "manifest_sha256": digest(self.manifest),
             "runtime_source_sha256": runtime_source_sha256(),
@@ -483,6 +585,8 @@ class Aquarium:
             ),
             "checkpoint": checkpoint,
         }
+        if self.developmental_policy == "local_cell_v4":
+            state["epoch_index"] = self.epoch_index
         return save_snapshot(self._snapshot_file, self._snapshot_key_file, state)
 
     def _replay(self, external_expected_head, *, signed_state=None):
@@ -525,7 +629,14 @@ class Aquarium:
                 raise AquariumError("unexpected journal ownership or visibility")
             if event["observed_at_ns"] != self.tick * self.dt_ns:
                 raise AquariumError("unsynchronized event time")
-            if event["topic"] == "genesis.acquisition":
+            if event["topic"] == "aquarium.epoch":
+                if (self.developmental_policy != "local_cell_v4"
+                        or self.tick == 0 or self.tick % EPOCH_TICKS != 0
+                        or self.epoch_index + 1 != self.tick // EPOCH_TICKS
+                        or event != self._epoch_event(self.epoch_index + 1)):
+                    raise AquariumError("invalid epoch boundary or forged transition")
+                self.epoch_index += 1
+            elif event["topic"] == "genesis.acquisition":
                 raw = event["payload"].get("acquisition")
                 if not isinstance(raw, dict) or event["event_id"] != "acq-" + str(raw.get("event_id")):
                     raise AquariumError("invalid acquisition envelope")
@@ -543,6 +654,9 @@ class Aquarium:
                     raise AquariumError("noncanonical acquired event envelope")
                 self.genome = next_ledger
             elif event["topic"] == "aquarium.frame":
+                if (self.developmental_policy == "local_cell_v4"
+                        and self.epoch_index != self.tick // EPOCH_TICKS):
+                    raise AquariumError("replay frame missing epoch transition")
                 if event["event_id"] != f"frame-{self.tick:012d}":
                     raise AquariumError("frame identifier discontinuity")
                 move = event["payload"].get("movement_request")
@@ -601,7 +715,7 @@ def main():
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
     parser.add_argument("--developmental-policy",
-                        choices=("legacy", "local_cell_v2", "local_cell_v3"),
+                        choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
                         default="legacy", help="new explicit policy-pinned SQLite journal")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")

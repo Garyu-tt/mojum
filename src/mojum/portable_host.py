@@ -21,6 +21,7 @@ import time
 
 from .aquarium import Aquarium, MAX_REPLAY_EVENTS
 from .developmental_policy import MAX_EPISODE_TICKS
+from .epoch_sense_v2 import MAX_ABSOLUTE_TICKS
 
 
 SCHEMA = "mojum.portable-host.run/1"
@@ -96,13 +97,19 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     current_tick = getattr(aquarium, "tick", None)
     if current_tick is None:
         current_tick = aquarium.store.count() - 1
-    if current_tick + ticks > MAX_EPISODE_TICKS:
+    is_v4 = getattr(aquarium, "developmental_policy", "legacy") == "local_cell_v4"
+    if is_v4:
+        if current_tick + ticks > MAX_ABSOLUTE_TICKS:
+            raise PortableHostError("v4 bounded absolute-tick budget exhausted")
+    elif current_tick + ticks > MAX_EPISODE_TICKS:
         raise PortableHostError(
             "requested run exceeds %d goal-free episode ticks; "
-            "explicit versioned epoch rollover is not implemented"
+            "versioned v4 epoch support is opt-in"
             % MAX_EPISODE_TICKS
         )
-    if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
+    events_needed = (aquarium.required_events_for_steps(ticks)
+                     if is_v4 else ticks)
+    if aquarium.store.count() + events_needed > MAX_REPLAY_EVENTS:
         raise PortableHostError(
             "requested ticks exceed bounded %d-event source journal budget; "
             "signed snapshot caching does not remove this hard limit"
@@ -147,7 +154,7 @@ def main(argv=None):
     parser.add_argument("--sensory-mode", choices=("toy_probe", "none"),
                         default="toy_probe")
     parser.add_argument("--developmental-policy",
-                        choices=("legacy", "local_cell_v2", "local_cell_v3"),
+                        choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
                         default="legacy",
                         help="version-pin motor policy in a NEW PRIVATE journal")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),

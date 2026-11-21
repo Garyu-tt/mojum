@@ -18,6 +18,7 @@ import tempfile
 
 SCHEMA = "mojum.aquarium.hmac-replay-snapshot/1"
 STATE_SCHEMA = "mojum.aquarium.replay-state/1"
+STATE_SCHEMA_V4 = "mojum.aquarium.replay-state/2"  # explicit epoch-index state
 MAX_SNAPSHOT_BYTES = 1_048_576
 HEX = frozenset("0123456789abcdef")
 
@@ -128,7 +129,8 @@ def load_snapshot(snapshot_file, key_file):
             any(char not in HEX for char in envelope["hmac_sha256"])):
         raise SnapshotError("unsupported or malformed signed snapshot envelope")
     state = envelope["state"]
-    if type(state) is not dict or state.get("schema") != STATE_SCHEMA:
+    if (type(state) is not dict
+            or state.get("schema") not in (STATE_SCHEMA, STATE_SCHEMA_V4)):
         raise SnapshotError("unsupported or malformed replay-state schema")
     expected = hmac.new(key, canonical(state), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, envelope["hmac_sha256"]):
@@ -143,7 +145,8 @@ def load_snapshot(snapshot_file, key_file):
 def save_snapshot(snapshot_file, key_file, state):
     """Atomic owner-only sidecar replacement; never touch SQLite source."""
     key = read_key(key_file)
-    if type(state) is not dict or state.get("schema") != STATE_SCHEMA:
+    if (type(state) is not dict
+            or state.get("schema") not in (STATE_SCHEMA, STATE_SCHEMA_V4)):
         raise SnapshotError("invalid snapshot state")
     mac = hmac.new(key, canonical(state), hashlib.sha256).hexdigest()
     raw = canonical({"schema": SCHEMA, "state": state, "hmac_sha256": mac})
