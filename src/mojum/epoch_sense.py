@@ -45,7 +45,8 @@ class EpochProprioception:
 
     def __post_init__(self):
         try:
-            ok = split_tick(self.absolute_tick) == (self.epoch, self.local_tick)
+            ok = (type(self.epoch) is int and type(self.local_tick) is int
+                  and split_tick(self.absolute_tick) == (self.epoch, self.local_tick))
         except DevelopmentError:
             ok = False
         if (not ok or type(self.epoch) is not int
