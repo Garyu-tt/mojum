@@ -105,6 +105,41 @@ class CellPolicyUnitTests(unittest.TestCase):
             model.observe(cue, intent, False)
 
 
+    def test_snapshot_rejects_unreachable_same_cell_blocks_and_blocked_rest(self):
+        for action, trials, blocked in (("x+", 2, 2), ("y-", 3, 2),
+                                         ("rest", 1, 1)):
+            with self.subTest(action=action, blocked=blocked):
+                invalid = {
+                    "schema": CELL_SCHEMA, "cell_size_m": 0.04,
+                    "last_tick": trials - 1, "updates": trials,
+                    "records": {"2:2": {action: [trials, blocked]}},
+                }
+                before = deepcopy(invalid)
+                with self.assertRaisesRegex(LocalCellError, "evidence counters"):
+                    CellExplorer.from_snapshot(invalid)
+                self.assertEqual(invalid, before)
+        # A direction can succeed twice and be blocked once in the same
+        # cell. That is reachable and must remain accepted.
+        valid = {
+            "schema": CELL_SCHEMA, "cell_size_m": 0.04,
+            "last_tick": 2, "updates": 3,
+            "records": {"2:2": {"x+": [3, 1]}},
+        }
+        self.assertEqual(CellExplorer.from_snapshot(valid).snapshot(), valid)
+
+    def test_blocked_rest_is_rejected_before_mutating_local_memory(self):
+        local = CellExplorer()
+        cue = Proprioception(0, "0" * 64, .08, .08, False)
+        intent = local.decide(cue)
+        self.assertEqual(intent["action"], "rest")
+        before = local.snapshot()
+        with self.assertRaisesRegex(LocalCellError, "rest cannot"):
+            local.observe(cue, intent, True)
+        self.assertEqual(local.snapshot(), before)
+        self.assertFalse(local.observe(cue, intent, False)["measured_blocked"])
+        self.assertEqual(local.updates, 1)
+
+
 class VersionedAquariumSQLiteTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
