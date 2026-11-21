@@ -128,6 +128,42 @@ class QueueTriageTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertFalse(json.loads(out.getvalue())["merge_authorized"])
 
+    def test_cli_rejects_duplicate_json_keys_and_nonfinite_values(self):
+        # JSON's default last-key-wins behavior can make contradictory check
+        # evidence appear CLEAN / SUCCESS. Reject ambiguity before triage.
+        valid = json.dumps({"base_sha": BASE, "pull_requests": [pr()]})
+        cases = {
+            "duplicate root base": valid.replace(
+                f'"base_sha": "{BASE}"',
+                f'"base_sha": "{OTHER}", "base_sha": "{BASE}"', 1),
+            "duplicate PR merge state": valid.replace(
+                '"mergeStateStatus": "CLEAN"',
+                '"mergeStateStatus": "DIRTY", "mergeStateStatus": "CLEAN"', 1),
+            "duplicate nested conclusion": valid.replace(
+                '"conclusion": "SUCCESS"',
+                '"conclusion": "FAILURE", "conclusion": "SUCCESS"', 1),
+            "nonfinite extra field": valid[:-1] + ', "ignored": NaN}',
+        }
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "snapshot.json"
+            for label, payload in cases.items():
+                with self.subTest(label=label):
+                    self.assertNotEqual(payload, valid)
+                    filename.write_text(payload, encoding="utf-8")
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        code = triage.main([
+                            "--input", str(filename), "--require", JOBS[0],
+                            "--require", JOBS[1], "--require", JOBS[2],
+                        ])
+                    self.assertEqual(code, 2)
+                    report = json.loads(output.getvalue())
+                    self.assertFalse(report["merge_authorized"])
+                    self.assertFalse(report["merge_performed"])
+
+
     def test_cli_rejects_oversize_input(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "snapshot.json"
