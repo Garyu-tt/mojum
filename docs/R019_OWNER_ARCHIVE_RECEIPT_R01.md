@@ -51,6 +51,36 @@ potentially sensitive metadata. The archives themselves remain
 **plaintext** until an independently approved encryption layer is
 deployed.
 
+## Manual offline owner receipt commands
+
+These commands operate only on a **synthetic or separately owner-authorized**
+PRIVATE archive. The receipt directory must be a preexisting owner-only 0700
+location **outside** the archive tree; the 32-byte HMAC key must be an
+independently protected 0600 file. Never commit or share the key.
+
+```bash
+PYTHONPATH=src python -m mojum.segment_archive_cli seal-root \
+  --archive-dir /private/archive-A \
+  --receipt-file /private/receipts/source-000001.json \
+  --key-file /private/secret-32bytes.key \
+  --source-events 130 --expected-source-head TRUSTED_SOURCE_HEAD
+
+# Pin the returned receipt_sha256 independently before checking it.
+PYTHONPATH=src python -m mojum.segment_archive_cli verify-root \
+  --receipt-file /private/receipts/source-000001.json \
+  --key-file /private/secret-32bytes.key \
+  --expected-receipt-sha TRUSTED_RECEIPT_SHA256
+
+PYTHONPATH=src python -m mojum.segment_archive_cli verify-copies \
+  --archive-dir-a /private/archive-A --archive-dir-b /private/archive-B \
+  --receipt-file /private/receipts/source-000001.json \
+  --key-file /private/secret-32bytes.key \
+  --expected-receipt-sha TRUSTED_RECEIPT_SHA256
+```
+
+The results print receipt metadata only. A successful comparison does
+not establish that A and B reside on different physical devices.
+
 ## Test gates
 
 ```bash
