@@ -52,12 +52,12 @@ if mode == "before_fsync":
         export_private_trace(source, dest, seed, graph, **opts)
 elif mode == "before_link":
     with patch("mojum.aquarium_trace_export.os.link",
-               side_effect=lambda *args: os._exit(71)):
+               side_effect=lambda *args, **kwargs: os._exit(71)):
         export_private_trace(source, dest, seed, graph, **opts)
 elif mode == "after_link":
     original = os.link
-    def link_and_crash(src, dst):
-        original(src, dst)
+    def link_and_crash(src, dst, **kwargs):
+        original(src, dst, **kwargs)
         os._exit(72)
     with patch("mojum.aquarium_trace_export.os.link",
                side_effect=link_and_crash):
