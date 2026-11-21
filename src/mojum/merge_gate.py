@@ -351,15 +351,6 @@ def evaluate(
                 f"required pattern {pattern!r} needs --require-count PATTERN=N "
                 "or explicit exact job labels",
             ))
-        if pattern in required_counts:
-            distinct_labels = {check.label for check in matches}
-            if len(distinct_labels) != required_counts[pattern] or len(matches) != len(distinct_labels):
-                defers.append(GateReason(
-                    "REQUIRED_INVENTORY_MISMATCH",
-                    f"{pattern!r} has {len(distinct_labels)} distinct jobs from "
-                    f"{len(matches)} entries; expected {required_counts[pattern]}",
-                ))
-
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -417,6 +408,15 @@ def evaluate(
                     f"{check.label} has an unrecognized conclusion {check.conclusion!r}",
                 )
             )
+
+        if pattern in required_counts:
+            distinct_labels = {check.label for check in matches}
+            if len(distinct_labels) != required_counts[pattern] or len(matches) != len(distinct_labels):
+                defers.append(GateReason(
+                    "REQUIRED_INVENTORY_MISMATCH",
+                    f"{pattern!r} has {len(distinct_labels)} distinct jobs from "
+                    f"{len(matches)} entries; expected {required_counts[pattern]}",
+                ))
 
     reasons = tuple(rejects + defers)
     if rejects:
