@@ -73,9 +73,15 @@ for name in mojumqawriter mojumqaclient mojumqastranger; do
     --shell /usr/sbin/nologin "$name"
   sudo usermod -aG mojumqaipc "$name"
 done
-MOJUM_TWO_UID_E2E=1 PYTHONPATH=src \
-  sudo -E python -m unittest discover -s tests \
-    -p 'test_writer_two_uid_e2e.py' -v
+# The checkout may be under a runner-only /home directory.
+# Stage only public code and synthetic examples for other Linux UIDs.
+stage="$(mktemp -d /tmp/mojum-two-uid-src-XXXXXX)"
+cp -R src examples "$stage/"
+chmod 0755 "$stage"
+chmod -R a+rX "$stage/src" "$stage/examples"
+sudo env MOJUM_TWO_UID_E2E=1 MOJUM_TWO_UID_SOURCE="$stage" \
+  PYTHONPATH="$PWD/src" "$(command -v python)" \
+  -m unittest discover -s tests -p 'test_writer_two_uid_e2e.py' -v
 ```
 
 **Do not run these commands on a production host.** They are for an
