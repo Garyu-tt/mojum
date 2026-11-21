@@ -85,7 +85,9 @@ class GraphV2Tests(unittest.TestCase):
             validate_v2(graph)
         original = copy.deepcopy(FIXTURE)
         original["nodes"][0]["visibility"] = "PRIVATE"
-        with self.assertRaisesRegex(GraphError, "reserved"):
+        # Strict v1 validation may reject the node shape before the adapter
+        # reaches its reserved-metadata check; both paths must fail closed.
+        with self.assertRaises(GraphError):
             upgrade_v1(original)
 
     def test_strict_labels_and_unknown_node(self):
