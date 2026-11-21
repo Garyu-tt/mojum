@@ -373,11 +373,12 @@ class SegmentedNoosphere:
         )
         verified_count = proven["count"]
         # A concurrent writer may have created another segment after verification.
-        with closing(self._db.execute(
+        boundaries = self._db.execute(
             "SELECT segment_index,first_seq,prior_segment_head "
             "FROM segments WHERE first_seq <= ? ORDER BY segment_index",
             (verified_count,),
-        )) as boundaries:
+        )
+        try:
             for bound in boundaries:
                 first = bound["first_seq"]
                 last = min(first + self.segment_size - 1, verified_count)
@@ -392,6 +393,8 @@ class SegmentedNoosphere:
                     "segment_head": self.event_at(last)["event_hash"],
                     "integrity": "metadata-only-verified-not-authenticated",
                 }
+        finally:
+            boundaries.close()
         if self.count() != verified_count or self.head() != proven["head"]:
             raise NoosphereError("journal advanced during receipt generation")
 
