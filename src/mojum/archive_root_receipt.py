@@ -193,6 +193,12 @@ def verify_two_archive_copies(archive_a, archive_b, receipt_file, key_file, *,
     root_b = private_directory(archive_b)
     if root_a.resolve() == root_b.resolve():
         raise ReceiptError("two archive paths must be distinct")
+    # Neither the owner signing secret nor its independent root receipt
+    # should be bundled with either of the two plaintext data archives.
+    for sensitive in (Path(key_file).resolve(), Path(receipt_file).resolve()):
+        if (sensitive.is_relative_to(root_a.resolve())
+                or sensitive.is_relative_to(root_b.resolve())):
+            raise ReceiptError("signing key and trusted receipt must be outside both archives")
     statement = verify_owner_receipt(
         receipt_file, key_file,
         independently_pinned_receipt_sha256=independently_pinned_receipt_sha256,
