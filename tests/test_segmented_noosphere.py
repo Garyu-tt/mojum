@@ -232,5 +232,75 @@ class AtomicSegmentQA(unittest.TestCase):
             self.assertEqual(q.count(), 1)
 
 
+    def test_readonly_schema_probe_closes_actual_sqlite_connection_on_all_paths(self):
+        """No deferred GC: real handles are closed on success and rejection."""
+        with self.open() as source:
+            original_head = source.append(record(0), expected_head=ZERO)
+            self.assertEqual(source.verify_chain()["head"], original_head)
+
+        # Keep strong refs so GC cannot hide a genuine unclosed connection.
+        real_connect = sqlite3.connect
+        connections = []
+
+        class ObservedConnection(sqlite3.Connection):
+            close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+                return super().close()
+
+        def observed_connect(*args, **kwargs):
+            if "factory" in kwargs:
+                raise AssertionError("Unexpected SQLite connection factory")
+            connection = real_connect(
+                *args, factory=ObservedConnection, **kwargs
+            )
+            connections.append(connection)
+            return connection
+
+        # Separate preexisting SQLite has no segmented metadata at all:
+        # one rejected SQL query (inside closing), not a writable migration.
+        empty_db = self.db.with_name("synthetic-not-a-segmented-source.sqlite3")
+        with real_connect(empty_db) as empty:
+            empty.execute("CREATE TABLE irrelevant_fixture(value INTEGER)")
+
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=observed_connect):
+            # Successful existing-db reopen makes two connections: readonly
+            # manifest probe and normal writer. Both must close deterministically.
+            with self.open() as source:
+                self.assertEqual(source.verify_chain()["head"], original_head)
+                self.assertEqual(source.count(), 1)
+
+            # Post-query schema/owner rejection, after probe has already closed.
+            for owner, size in (
+                (OWNER, 128),
+                ("different-synthetic-owner", 64),
+            ):
+                with self.subTest(owner=owner, segment_size=size):
+                    with self.assertRaisesRegex(NoosphereError, "wrong owner"):
+                        SegmentedNoosphere(
+                            self.db, owner, segment_size=size,
+                        )
+
+            # Error while reading schema must close the probe immediately.
+            with self.assertRaisesRegex(NoosphereError, "readable segmented manifest"):
+                SegmentedNoosphere(empty_db, OWNER, segment_size=64)
+
+        self.assertEqual(len(connections), 5, "one open plus four readonly probes")
+        for index, connection in enumerate(connections):
+            with self.subTest(connection_index=index):
+                self.assertEqual(connection.close_calls, 1)
+                with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+                    connection.execute("SELECT 1")
+
+        # No source bytes need to be rewritten; journal head remains a
+        # separate verification invariant even if SQLite WAL bookkeeping
+        # changes the raw main-database file header across normal opens.
+        with self.open() as source:
+            self.assertEqual(source.count(), 1)
+            self.assertEqual(source.verify_chain()["head"], original_head)
+
+
 if __name__ == "__main__":
     unittest.main()
