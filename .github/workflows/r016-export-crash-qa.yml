@@ -16,6 +16,12 @@ on:
 permissions:
   contents: read
 
+# A rapidly updated parallel-agent research stack can enqueue many obsolete
+# commits; only the latest revision of THIS QA workflow is meaningful.
+concurrency:
+  group: mojum-r016-crash-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   forced-crash-matrix:
     name: crash-atomicity (${{ matrix.python-version }})
