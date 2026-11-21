@@ -7,6 +7,7 @@ All PRIVATE files are synthetic in a temporary test directory only.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -128,6 +129,7 @@ def main():
         assert (path / "src/mojum/aquarium.py").is_file(), "missing pinned source tree"
     chrome = chrome_binary()
     reports = []
+    peer_records = {}
     html = VIEWER.read_text("utf-8")
     with tempfile.TemporaryDirectory(prefix="mojum-foreign-browser-") as scratch:
         for (tag, mode, schema, outcome_schema, label), checkout in zip(
@@ -135,6 +137,7 @@ def main():
         ):
             path = Path(scratch) / (tag + ".private.synthetic.jsonl")
             records = generate_foreign_trace(checkout, path, mode)
+            peer_records[tag] = records
             footer, frames = records[-1], records[:-1]
             assert footer["policy_schema"] == schema
             assert footer["trace_integrity"]["frame_count"] == 3
@@ -181,11 +184,63 @@ def main():
                     "digest_verified": True,
                     "synthetic_cold_replay": True,
                 })
+        # These adversarial files splice *real* independently generated
+        # peer frames, then recompute their exact SHA-256. Semantic policy
+        # rejection must work even if the in-file digest is self-consistent.
+        def forge(frames, footer):
+            wire = "".join(
+                json.dumps(frame, ensure_ascii=False, sort_keys=True,
+                           allow_nan=False, separators=(",", ":")) + "\n"
+                for frame in frames
+            ).encode("utf-8")
+            metadata = copy.deepcopy(footer)
+            metadata["trace_integrity"]["sha256"] = hashlib.sha256(wire).hexdigest()
+            metadata["trace_integrity"]["byte_length"] = len(wire)
+            metadata["trace_integrity"]["frame_count"] = len(frames)
+            return wire.decode("utf-8") + json.dumps(
+                metadata, ensure_ascii=False, sort_keys=True,
+                allow_nan=False, separators=(",", ":")
+            ) + "\n"
+
+        negative = (
+            ("mixed_original_v2b_v3b",
+             forge([peer_records["v2b"][0], peer_records["v3b"][1],
+                    peer_records["v2b"][2]], peer_records["v2b"][-1]),
+             "Смешаны разные версии моторной политики"),
+            ("wrong_foreign_learning_schema",
+             None, "Схема обучения не совпадает с моторной политикой"),
+            ("wrong_foreign_footer_policy",
+             None, "Политика checkpoint не совпадает с кадрами"),
+        )
+        corrupt_learning = copy.deepcopy(peer_records["v2b"][:3])
+        corrupt_learning[0]["developmental"]["learning"]["schema"] = (
+            "mojum.developmental.local-cell.outcome/3"
+        )
+        corrupt_footer = copy.deepcopy(peer_records["v3b"][-1])
+        corrupt_footer["policy_schema"] = "mojum.developmental.local-cell/2"
+        inputs = {
+            "wrong_foreign_learning_schema": forge(
+                corrupt_learning, peer_records["v2b"][-1]
+            ),
+            "wrong_foreign_footer_policy": forge(
+                peer_records["v3b"][:3], corrupt_footer
+            ),
+        }
+        for name, original, reason in negative:
+            source = original if original is not None else inputs[name]
+            fail = inspect_actual_browser(
+                chrome, instrumented_html(
+                    html, source, expected_rejection=reason
+                ), width=1280, height=800
+            )
+            assert fail["rejected"] is True and fail["controls_disabled"] is True, name
+            assert fail["displayed_policy"] == "—", name
     assert len(reports) == 4
     print(json.dumps({
         "status": "PASS_REAL_PEER_CHROME_READONLY",
         "contracts": [V2B_HEAD, V3B_HEAD],
         "report": reports,
+        "negative_real_peer_cases": 3,
         "privacy": "synthetic source-only, no uploaded PRIVATE artifacts or remote viewer",
         "release_status": "BLOCKED_NO_WRITABLE_ABI_PROMOTION",
     }, sort_keys=True, ensure_ascii=False))
