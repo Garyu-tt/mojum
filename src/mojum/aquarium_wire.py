@@ -141,6 +141,8 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
             if state_schema == V4_SCHEMA:
                 observation = _object_field(motor, "observation")
                 if (observation.get("schema") != EPOCH_SENSE_SCHEMA
+                        or any(type(observation.get(field)) is not int for field in (
+                            "absolute_tick", "epoch_index", "epoch_tick"))
                         or observation.get("absolute_tick") != frame.get("tick")
                         or observation.get("epoch_index") != frame.get("tick") // EPOCH_TICKS
                         or observation.get("epoch_tick") != frame.get("tick") % EPOCH_TICKS):
