@@ -141,6 +141,41 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
         self.assertEqual([tick for batch in batches for tick in batch], list(range(64)))
         self.assertTrue(all(sum(tick < 24 for tick in batch) <= 8 for batch in batches))
 
+    def test_export_returns_pinned_anchor_when_writer_advances_during_publication(self):
+        import mojum.segment_archive as archive_mod
+        first_head = self.build(64)
+        self.export(external_expected_head=first_head)
+        publish = archive_mod.publish_new
+        with SegmentedNoosphere(self.source, OWNER, segment_size=64) as writer:
+            pinned_head = writer.append_many(
+                [record(tick) for tick in range(64, 128)], expected_head=first_head,
+            )
+
+            def publish_then_roll_over(path, blocks):
+                publish(path, blocks)
+                if path.name == names(1)[1]:
+                    writer.append(record(128), expected_head=pinned_head)
+
+            with SegmentedNoosphere(
+                self.source, OWNER, segment_size=64, read_only=True,
+            ) as reader, patch.object(archive_mod, "publish_new", publish_then_roll_over):
+                export = export_sealed_segments(
+                    reader, self.archive, include_nonpublic=True,
+                    external_expected_head=pinned_head,
+                )
+                self.assertEqual(reader.count(), 129)
+            self.assertNotEqual(writer.head(), pinned_head)
+        self.assertEqual(export["source_head"], pinned_head)
+        self.assertEqual(export["sealed_head"], pinned_head)
+        self.assertEqual(export["source_events"], 128)
+        self.assertEqual(export["unsealed_source_events"], 0)
+        self.assertEqual(export["copied_segments"], 1)
+        self.source.rename(self.root / "source-offline.sqlite3")
+        restored = restore_into_new_sqlite(
+            self.archive, self.recovered, external_expected_head=export["sealed_head"],
+        )
+        self.assertEqual(restored["restored_events"], 128)
+
     def test_private_never_exported_by_default(self):
         self.build(64)
         with SegmentedNoosphere(self.source, OWNER, segment_size=64) as q:

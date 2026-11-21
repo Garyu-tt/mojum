@@ -77,12 +77,22 @@ def export_sealed_segments(store, directory, *, include_nonpublic=False,
     by default. Unsealed tail stays exclusively in original SQLite.
     Existing archived segments are fully validated, never overwritten.
     """
-    from .segment_archive_verify import _indices, verify_segment
     if type(store) is not SegmentedNoosphere:
         raise ArchiveError("export needs an explicit segmented Noosphere source")
     if include_nonpublic is not True:
         raise ArchiveError("PRIVATE data export requires explicit include_nonpublic=True")
     root = private_directory(directory)
+    # Keep verification, receipts, and event reads on one SQLite snapshot.
+    # A WAL writer may advance without invalidating the archive being published.
+    db = store._db
+    db.execute("BEGIN")
+    with db:
+        return _export_from_snapshot(store, root, external_expected_head)
+
+
+def _export_from_snapshot(store, root, external_expected_head):
+    from .segment_archive_verify import _indices, verify_segment
+
     source = store.verify_chain(external_expected_head=external_expected_head)
     count = source["count"]
     sealed = count // store.segment_size
@@ -156,8 +166,6 @@ def export_sealed_segments(store, directory, *, include_nonpublic=False,
             publish_new(manifest_file, [_canonical(manifest).encode("utf-8")])
             copied += 1
         previous = receipt["segment_head"]
-    if store.head() != source["head"] or store.count() != count:
-        raise ArchiveError("source journal advanced during export")
     return {
         "schema": SCHEMA, "copied_segments": copied,
         "sealed_segments": sealed, "archived_events": sealed*store.segment_size,

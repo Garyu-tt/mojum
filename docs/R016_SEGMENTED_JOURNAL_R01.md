@@ -73,9 +73,9 @@ PYTHONPATH=src python -m mojum.segment_archive_cli restore \
   --archive-dir "$ARCHIVE_DIR" --expected-sealed-head "$SEALED_HEAD" --new-db "$NEW_DB"
 ```
 
-Export opens SQLite for reading and copies complete segments into
+Export reads one SQLite snapshot and copies its complete segments into
 versioned manifest and JSONL pairs. The export summary reports how many
-unsealed events remain in the source. Retain the verified sealed head
+unsealed events were present in that snapshot. Retain the verified sealed head
 separately from the archive. It can differ from the full source head.
 Verification and restore use that independent anchor without opening the
 source. Restore publishes a new SQLite file after checking the full

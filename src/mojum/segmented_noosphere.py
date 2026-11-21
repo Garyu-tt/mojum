@@ -11,6 +11,7 @@ cryptographic authentication, or continuous Aquarium beyond its tick cap.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -122,7 +123,8 @@ class SegmentedNoosphere:
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA trusted_schema=OFF")
             db.execute("PRAGMA query_only=ON")
-            actual = dict(db.execute("SELECT k,v FROM metadata"))
+            with closing(db.execute("SELECT k,v FROM metadata")) as metadata:
+                actual = dict(metadata)
             if actual != {
                 "schema": STORE_SCHEMA, "owner": self.agent_id,
                 "segment_size": str(self.segment_size),
