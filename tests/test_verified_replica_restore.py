@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -104,6 +105,19 @@ class SignedHistoricalCopyRecoveryQA(unittest.TestCase):
             ).fetchone()
             self.assertEqual(custody["state"], "QUARANTINED_READ_ONLY")
             self.assertEqual(custody["pinned_source_head"], head)
+            with self.assertRaises(sqlite3.IntegrityError):
+                q._db.execute(
+                    "UPDATE recovery_custody SET state='OTHER' WHERE id=1"
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                q._db.execute("DELETE FROM recovery_custody WHERE id=1")
+            self.assertEqual(
+                q._db.execute(
+                    "SELECT count(*) FROM recovery_custody"
+                ).fetchone()[0], 1,
+            )
+            self.assertEqual(q.count(), before_count)
+            self.assertEqual(q.head(), before_head)
 
     def test_requires_explicit_private_consent_and_correct_actor(self):
         head, digest = self.make()
