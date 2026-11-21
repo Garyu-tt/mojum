@@ -3,6 +3,7 @@
 All data are synthetic, created under temporary directories, never copied
 from actual user PRIVATE Noosphere or touched on production/Android.
 """
+import errno
 import json
 import os
 from pathlib import Path
@@ -212,6 +213,37 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
                 self.archive,
                 external_expected_head="f" * 64,
             )
+
+    def test_failed_data_write_releases_source_read_transaction(self):
+        source_head = self.build(70)
+
+        def disk_full(_path, blocks):
+            next(blocks)
+            raise OSError(errno.ENOSPC, "injected disk full")
+
+        with (
+            SegmentedNoosphere(self.source, OWNER, segment_size=64) as writer,
+            SegmentedNoosphere(
+                self.source, OWNER, segment_size=64, read_only=True,
+            ) as reader,
+        ):
+            failure = None
+            with patch("mojum.segment_archive.publish_new", new=disk_full):
+                try:
+                    export_sealed_segments(
+                        reader, self.archive, include_nonpublic=True,
+                        external_expected_head=source_head,
+                    )
+                except OSError as exc:
+                    failure = exc
+            # The caller can retain a failed export's traceback. A suspended
+            # source cursor must still release its SQLite read transaction.
+            self.assertIsNotNone(failure)
+            writer.append(record(70), expected_head=source_head)
+            writer._db.execute("PRAGMA busy_timeout=0")
+            checkpoint = writer._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            self.assertEqual(tuple(checkpoint), (0, 0, 0))
+            self.assertEqual(failure.errno, errno.ENOSPC)
 
     def test_existing_destination_and_cross_source_mismatch_fail_closed(self):
         self.build(64)

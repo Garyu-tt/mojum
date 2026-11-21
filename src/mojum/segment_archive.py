@@ -6,6 +6,7 @@ SHA256 checks detect changes only against an independently trusted head.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import os
 from pathlib import Path
@@ -138,7 +139,8 @@ def export_sealed_segments(store, directory, *, include_nonpublic=False,
                         yield wire
                 finally:
                     cursor.close()
-            publish_new(data_file, blocks())
+            with closing(blocks()) as content:
+                publish_new(data_file, content)
             manifest = {
                 "schema": SCHEMA, "agent_id": store.agent_id,
                 "segment_index": index, "segment_size": store.segment_size,
