@@ -74,6 +74,23 @@ class GraphV2DowngradeTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             downgrade_v2(upgraded)
 
+    def test_malformed_v2_nodes_fail_closed_as_graph_error(self):
+        # Regression: projection before checking required v2 fields raised
+        # KeyError / TypeError instead of the public GraphError contract.
+        for name, transform in (
+            ("non_mapping_node", lambda g: g["nodes"].__setitem__(0, None)),
+            ("missing_visibility", lambda g: g["nodes"][0].pop("visibility")),
+            ("missing_ports", lambda g: g["nodes"][0].pop("ports")),
+            ("null_ports", lambda g: g["nodes"][0].__setitem__("ports", None)),
+        ):
+            with self.subTest(name=name):
+                upgraded = upgrade_v1(FIXTURE)
+                transform(upgraded)
+                for operation in (validate_v2, downgrade_v2):
+                    with self.subTest(operation=operation.__name__):
+                        with self.assertRaises(GraphError):
+                            operation(upgraded)
+
     def test_downgrade_never_returns_a_v2_graph(self):
         converted = downgrade_v2(upgrade_v1(FIXTURE))
         self.assertNotEqual(converted["schema"], V2_SCHEMA)
