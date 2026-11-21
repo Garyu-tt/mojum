@@ -204,6 +204,50 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
 
+    def test_snapshot_terminal_streaks_need_measured_evidence(self):
+        # A genuine final rest has a matching rest observation in its cell.
+        resting = CellExplorerV3Escape()
+        rest_sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
+        rest_intent = resting.decide(rest_sense)
+        self.assertEqual(rest_intent["action"], "rest")
+        resting.observe(rest_sense, rest_intent, False)
+        rest_state = resting.snapshot()
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(rest_state).snapshot(),
+            rest_state,
+        )
+        # Keep the global observation total and last_seen intact. Only the
+        # terminal rest evidence is forged into a successful move.
+        no_rest = dict(
+            rest_state,
+            records={rest_intent["zone"]: {"x+": [1, 0]}},
+        )
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "rest streak lacks measured evidence"
+        ):
+            CellExplorerV3Escape.from_snapshot(no_rest)
+
+        # A genuine blocked move similarly increments the probe streak.
+        probing = CellExplorerV3Escape()
+        probe_sense = Proprioception(0, "0" * 64, 1.0, 2.0, True)
+        probe_intent = probing.decide(probe_sense)
+        self.assertNotEqual(probe_intent["action"], "rest")
+        probing.observe(probe_sense, probe_intent, True)
+        probe_state = probing.snapshot()
+        self.assertEqual(probe_state["consecutive_blocked_probes"], 1)
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(probe_state).snapshot(),
+            probe_state,
+        )
+        no_block = dict(
+            probe_state,
+            records={probe_intent["zone"]: {probe_intent["action"]: [1, 0]}},
+        )
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "blocked-probe streak lacks measured evidence"
+        ):
+            CellExplorerV3Escape.from_snapshot(no_block)
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
