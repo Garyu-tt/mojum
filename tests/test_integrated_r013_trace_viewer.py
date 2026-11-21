@@ -227,6 +227,8 @@ const doc={
  }),addEventListener(){},hidden:false
 };
 const globals={document:doc,JSON,Math,Number,Promise,Array,String,
+ crypto:require('node:crypto').webcrypto,
+ TextEncoder:require('node:util').TextEncoder,
  setInterval(){throw Error("unexpected playback timer")},
  clearInterval(){},
  fetch(){throw Error("network forbidden")},
