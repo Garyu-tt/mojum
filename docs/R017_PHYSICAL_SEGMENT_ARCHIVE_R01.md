@@ -41,6 +41,38 @@ published. A crash between those steps leaves an orphan data file;
 a retry refuses it for operator quarantine instead of rewriting the
 source or making up a manifest. Source events are never deleted.
 
+## Explicit offline CLI (metadata-only output)
+
+The new `mojum.segment_archive_cli` runs on ordinary CPython
+without a GPU or remote API. It never prints PRIVATE event payload,
+genome state, file paths or HMAC secrets.
+
+Example for a **new synthetic** segmented database already written
+and independently trusted source head `SOURCE_SHA256`:
+
+```bash
+PYTHONPATH=src python -m mojum.segment_archive_cli export \
+  --db /private/synthetic-segmented.sqlite3 --agent-id dante-fixture-001 \
+  --segment-size 4096 --archive-dir /private/archive-A \
+  --expected-source-head SOURCE_SHA256 --include-private
+
+PYTHONPATH=src python -m mojum.segment_archive_cli verify \
+  --archive-dir /private/archive-A \
+  --expected-sealed-head INDEPENDENTLY_RECORDED_SEALED_SHA256
+
+PYTHONPATH=src python -m mojum.segment_archive_cli restore \
+  --archive-dir /private/archive-A \
+  --new-db /private/NEW-restored-sealed-prefix.sqlite3 \
+  --expected-sealed-head INDEPENDENTLY_RECORDED_SEALED_SHA256
+```
+
+The archive directory must exist already with 0700 permissions
+and cannot be a symlink. Do not put unencrypted PRIVATE history
+in a public volume. The expected source head and sealed-prefix
+head are **different** if an unsealed tail remains. The latter
+must come from a separately trusted record, not blindly copied
+from a possibly compromised manifest.
+
 ## Verification without the SQLite source
 
 `mojum.segment_archive_verify.verify_sealed_archive(directory,
