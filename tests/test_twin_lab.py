@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+
+import mojum.twin_lab as twin_lab
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.noosphere import NoosphereError
@@ -73,6 +76,24 @@ class TwinLabTests(unittest.TestCase):
         with self.assertRaises(AquariumError):
             self.pair()
         self.assertEqual(self.left.read_bytes(), first)
+
+    def test_racing_second_journal_is_never_opened_or_modified(self):
+        # Simulate another creator arriving after _new_path preflight but
+        # immediately before the exclusive reservation of the right journal.
+        reserve = twin_lab._reserve_new_path
+        foreign_bytes = b"foreign journal; must not be read or overwritten"
+
+        def raced_reservation(path):
+            if path == self.right:
+                self.right.write_bytes(foreign_bytes)
+            return reserve(path)
+
+        with patch.object(twin_lab, "_reserve_new_path", side_effect=raced_reservation):
+            with self.assertRaisesRegex(AquariumError, "existing"):
+                self.pair()
+        self.assertEqual(self.right.read_bytes(), foreign_bytes)
+        self.assertFalse(self.left.exists())
+        self.assertFalse(Path(str(self.right) + "-wal").exists())
 
     def test_mentor_validation_prevents_partial_append(self):
         self.pair()
