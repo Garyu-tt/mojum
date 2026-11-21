@@ -286,6 +286,12 @@ class RetentionTests(unittest.TestCase):
                 "last_seen_at": {"1:1": 1},
                 "evictions": 1, "forgotten_observations": 1,
             },
+            "eviction_must_preserve_a_full_table": {
+                **common, "last_tick": 512, "updates": 513,
+                "records": {"1:1": {"rest": [1, 0]}},
+                "last_seen_at": {"1:1": 512},
+                "evictions": 1, "forgotten_observations": 512,
+            },
             "updates_without_any_live_cell": {
                 **common, "last_tick": 0, "updates": 1,
                 "records": {}, "last_seen_at": {},
