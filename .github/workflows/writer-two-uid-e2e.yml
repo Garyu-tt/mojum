@@ -38,6 +38,13 @@ jobs:
           set -euo pipefail
           # Only this isolated job invokes root. The tests immediately
           # drop each spawned server/client to its dedicated Unix UID.
-          sudo -E env MOJUM_TWO_UID_E2E=1 PYTHONPATH="$PYTHONPATH" \
-            "$(command -v python)" -m unittest discover \
-            -s tests -p 'test_writer_two_uid_e2e.py' -v
+          # GitHub checkout may live inside a runner-only 0700 home tree.
+          # Stage only code/public synthetic fixtures in /tmp so the separate
+          # unprivileged process UIDs can import the package and read examples.
+          stage="$(mktemp -d /tmp/mojum-two-uid-src-XXXXXX)"
+          cp -R src examples "$stage/"
+          chmod 0755 "$stage"
+          chmod -R a+rX "$stage/src" "$stage/examples"
+          sudo env MOJUM_TWO_UID_E2E=1 MOJUM_TWO_UID_SOURCE="$stage" \
+            PYTHONPATH="$PWD/src" "$(command -v python)" \
+            -m unittest discover -s tests -p 'test_writer_two_uid_e2e.py' -v
