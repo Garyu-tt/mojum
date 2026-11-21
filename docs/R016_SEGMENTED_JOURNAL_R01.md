@@ -40,8 +40,16 @@ Verification streams all events and segment metadata without
 materializing 100k source events in memory; checks noncanonical
 payload, all indexed SQL field copies, event hash, timestamps,
 contiguous sequence, expected segment and every parent segment
-link. The optional independently pinned expected final hash detects
-whole-log rollback only if the anchor remains independently trusted.
+link. It also rejects a head/count change seen during verification.
+`iter_segment_receipts(external_expected_head=...)` provides a
+stream of **metadata-only** records (segment index, absolute first/last
+sequence, prior segment hash and last event hash) after a full chain
+scan. This exposes neither PRIVATE event payload nor learned state.
+These receipts are *not yet authenticated*; future independent
+devices can persist them as external anchors rather than trusting
+a single local snapshot. The optional independently pinned expected
+final hash detects whole-log rollback **only** when the anchor
+remains independently trusted.
 
 Physical **single SQLite file**, not several separate files and
 not fault-tolerant replicas. An attacker who can rewrite the entire
