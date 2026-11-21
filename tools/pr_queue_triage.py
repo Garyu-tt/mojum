@@ -70,7 +70,11 @@ def _normalized_check(raw, index):
     label = f"{workflow.strip()} / {name.strip()}" if workflow else name.strip()
     status = raw.get("status")
     conclusion = raw.get("conclusion")
-    if status is None and raw.get("state") is not None:
+    # Legacy StatusContext uses `state`; modern CheckRun uses
+    # `status` and `conclusion`. Mixing these can forge CI evidence.
+    if raw.get("state") is not None:
+        if status is not None or conclusion is not None:
+            raise TriageInputError(f"check[{index}] mixes state and check-run fields")
         state = raw["state"]
         if not isinstance(state, str):
             raise TriageInputError(f"check[{index}] has an invalid state")
@@ -79,8 +83,7 @@ def _normalized_check(raw, index):
             status, conclusion = "COMPLETED", state
         else:
             status = state
-    if status is None and conclusion is not None:
-        status = "COMPLETED"
+    # Never infer a completed check from an orphan conclusion alone.
     if not isinstance(status, str):
         raise TriageInputError(f"check[{index}] has no valid status")
     if conclusion is not None and not isinstance(conclusion, str):
