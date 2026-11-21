@@ -4,6 +4,16 @@ import hashlib
 import json
 import math
 
+def _finite_scalar(value):
+    """Accept JSON-compatible finite real scalars, but never bool or huge ints."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 @dataclass(frozen=True)
 class Room:
     width: float
@@ -11,10 +21,15 @@ class Room:
     obstacles: tuple[tuple[float, float, float, float], ...] = ()
 
     def __post_init__(self):
-        if not all(math.isfinite(v) and v > 0 for v in (self.width, self.height)):
+        if not all(_finite_scalar(v) and v > 0 for v in (self.width, self.height)):
             raise ValueError("invalid dimensions")
-        for x, y, w, h in self.obstacles:
-            if not all(math.isfinite(v) for v in (x, y, w, h)) or w <= 0 or h <= 0:
+        if not isinstance(self.obstacles, (tuple, list)) or len(self.obstacles) > 4096:
+            raise ValueError("invalid obstacles")
+        for rect in self.obstacles:
+            if not isinstance(rect, (tuple, list)) or len(rect) != 4:
+                raise ValueError("invalid obstacle")
+            x, y, w, h = rect
+            if not all(_finite_scalar(v) for v in rect) or w <= 0 or h <= 0:
                 raise ValueError("invalid obstacle")
             if x < 0 or y < 0 or x + w > self.width or y + h > self.height:
                 raise ValueError("obstacle outside room")
@@ -27,7 +42,7 @@ class RoomState:
     revision: str
 
 def _valid(room, x, y):
-    return (math.isfinite(x) and math.isfinite(y)
+    return (_finite_scalar(x) and _finite_scalar(y)
             and 0 <= x <= room.width and 0 <= y <= room.height
             and not any(a <= x <= a+w and b <= y <= b+h
                         for a, b, w, h in room.obstacles))
@@ -62,23 +77,26 @@ def _revision(room, tick, x, y):
     return hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
 
 def initial_state(room: Room, x: float, y: float) -> RoomState:
-    if not _valid(room, x, y):
+    if not isinstance(room, Room) or not _valid(room, x, y):
         raise ValueError("invalid initial position")
     return RoomState(0, x, y, _revision(room, 0, x, y))
 
 def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
             expected_revision: str) -> tuple[RoomState, dict]:
     """One logical tick; exact segment-vs-AABB test prevents tunneling."""
+    if (not isinstance(room, Room) or not isinstance(state, RoomState)
+            or type(state.tick) is not int or state.tick < 0
+            or not _valid(room, state.x, state.y)):
+        raise ValueError("invalid starting state")
+    if (type(tick) is not int or tick != state.tick + 1
+            or not _finite_scalar(dx) or not _finite_scalar(dy)):
+        raise ValueError("invalid tick or displacement")
     if state.revision != expected_revision or state.revision != _revision(room, state.tick, state.x, state.y):
         raise ValueError("stale or corrupted revision")
-    if tick != state.tick + 1 or not all(math.isfinite(v) for v in (dx, dy)):
-        raise ValueError("invalid tick or displacement")
     # Sampling in 1 cm increments can miss any thinner obstacle. Test the
     # whole movement segment against closed rectangle boundaries instead.
     if math.hypot(dx, dy) > 1000.0:
         raise ValueError("displacement exceeds fixture budget")
-    if not _valid(room, state.x, state.y):
-        raise ValueError("invalid starting state")
     tx, ty = state.x + dx, state.y + dy
     blocked = (not _valid(room, tx, ty) or
                any(_segment_hits_rect(state.x, state.y, tx, ty, rect)
