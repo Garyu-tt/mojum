@@ -182,7 +182,7 @@ class DifferentLinuxUIDWriterTests(unittest.TestCase):
             **self._identity(account),
         )
 
-    def _launch(self, *, generation=1, must_start=True):
+    def _launch(self, *, generation=1, must_start=True, durable_intents=False):
         assert self._service is None
         cmd = [
             PYTHON, "-m", "mojum.writer_service", "serve",
@@ -194,6 +194,8 @@ class DifferentLinuxUIDWriterTests(unittest.TestCase):
             "--client-uid", str(self.client.pw_uid),
             "--client-gid", str(self.ipc.gr_gid),
         ]
+        if durable_intents:
+            cmd.append("--durable-intents")
         self._service = self._popen(self.writer, cmd)
         if not must_start:
             self._service.wait(timeout=5)
@@ -257,6 +259,43 @@ class DifferentLinuxUIDWriterTests(unittest.TestCase):
         self.assertEqual(st.st_gid, self.ipc.gr_gid)
         self.assertEqual(st.st_mode & 0o777, 0o660)
         self.sock.unlink()
+
+    def test_real_separate_client_uid_with_durable_intents(self):
+        # The new schema must be installed by the trusted service UID
+        # before daemon startup. Clients have no access to this path.
+        setup = self._process(
+            self.writer, [PYTHON, "-c",
+                "from mojum.write_intent import install_intent_table;"
+                "import sys;install_intent_table(sys.argv[1])",
+                str(self.registry)],
+        )
+        self.assertEqual(setup.returncode, 0, setup.stderr)
+        first = self._launch(durable_intents=True)
+        self.assertEqual(first["write_protocol"], "durable_intent_v1")
+        accepted = self._rpc(
+            self.client, {"op": "step", "expected_generation": 1,
+                          "dx": 0.03, "dy": 0.0},
+        )
+        self.assertTrue(accepted["ok"], accepted)
+        self.assertEqual(accepted["result"]["generation"], 2)
+        self.assertEqual(accepted["result"]["tick"], 2)
+        for path in (self.db, self.registry, self.source):
+            self._raw_denied(self.client, path)
+            self._raw_denied(self.stranger, path)
+        stranger = self._rpc(self.stranger, {"op": "status"})
+        self.assertEqual(stranger, {"ok": False, "error": "PermissionError"})
+        # The durable prepare is consumed atomically with the authority
+        # anchor; it must not remain FROZEN after a normal client write.
+        check = self._process(self.writer, [PYTHON, "-c", """
+import sys
+from mojum.local_authority import LocalAuthority
+with LocalAuthority(sys.argv[1]) as a:
+    row=a.state("dante-fixture-001")
+    waiting=a._db.execute("SELECT COUNT(*) FROM write_intents").fetchone()[0]
+    print(row["phase"],row["event_count"],row["generation"],waiting)
+""", str(self.registry)])
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertEqual(check.stdout.strip(), "ACTIVE 3 2 0")
 
     def test_true_second_uid_can_mutate_but_cannot_open_raw_sqlite(self):
         before = self._launch()

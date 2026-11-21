@@ -20,6 +20,7 @@ import sys
 
 from .guarded_aquarium import GuardedAquarium
 from .local_authority import AuthorityError
+from .write_intent import IntentGuardedAquarium
 
 MAX_RPC_BYTES = 64_000
 _SOCKET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z", re.ASCII)
@@ -140,13 +141,18 @@ class WriterService:
 
     def __init__(self, socket_path, db_path, registry_path, seed, graph, *,
                  writer, epoch, generation, archive_dir,
-                 client_uid=None, client_gid=None):
+                 client_uid=None, client_gid=None, durable_intents=False):
         if not hasattr(socket, "SO_PEERCRED") or not hasattr(socket, "AF_UNIX"):
             raise RuntimeError("Linux AF_UNIX/SO_PEERCRED required")
         self._socket_path = Path(socket_path)
         if not self._socket_path.is_absolute() or not self._socket_path.name:
             raise ValueError("socket path must be absolute")
         self._owner_uid = os.getuid()
+        if type(durable_intents) is not bool:
+            raise ValueError("durable_intents must be explicit boolean")
+        self._write_protocol = (
+            "durable_intent_v1" if durable_intents else "legacy_local_guard_v1"
+        )
         if (client_uid is None) != (client_gid is None):
             raise ValueError("client_uid and client_gid must be set together")
         self._client_gid = None
@@ -172,7 +178,11 @@ class WriterService:
         self._socket_identity = None
         self._running = False
         try:
-            self._guard = GuardedAquarium(
+            guard_class = IntentGuardedAquarium if durable_intents else GuardedAquarium
+            # IntentGuardedAquarium refuses missing schema, any pending intent,
+            # FROZEN ownership or journal-anchor mismatch BEFORE binding IPC.
+            # The schema is intentionally never installed by this daemon.
+            self._guard = guard_class(
                 db_path, registry_path, seed, graph,
                 writer=writer, epoch=epoch, generation=generation,
             )
@@ -219,6 +229,7 @@ class WriterService:
         checkpoint = self._guard.checkpoint()
         return {
             "status": "LOCAL_COOPERATIVE_WRITER_ONLY_NOT_NETWORK_FENCING",
+            "write_protocol": self._write_protocol,
             "organism_id": checkpoint["agent_id"],
             "tick": checkpoint["tick"],
             "journal_head": checkpoint["journal_head"],
@@ -355,6 +366,11 @@ def main(argv=None):
     serve.add_argument("--writer", required=True)
     serve.add_argument("--epoch", required=True, type=int)
     serve.add_argument("--generation", required=True, type=int)
+    serve.add_argument(
+        "--durable-intents", action="store_true",
+        help="opt-in prepared journal event hash in existing authority registry; "
+             "requires separately installed write-intents schema; no auto-repair",
+    )
     serve.add_argument("--client-uid", type=int,
                        help="one authorized separate client UID (not service UID)")
     serve.add_argument("--client-gid", type=int,
@@ -384,6 +400,7 @@ def main(argv=None):
             writer=args.writer, epoch=args.epoch,
             generation=args.generation, archive_dir=args.archive_dir,
             client_uid=args.client_uid, client_gid=args.client_gid,
+            durable_intents=args.durable_intents,
         ) as server:
             def shutdown(_signum, _frame):
                 server._running = False
