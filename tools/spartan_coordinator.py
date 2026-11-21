@@ -91,6 +91,13 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
 
 
 def expire(db: sqlite3.Connection, now: int) -> None:
+    # Repair exhausted queued rows as well as expired running leases.
+    # A worker-initiated requeue must never reset the retry budget.
+    db.execute(
+        "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
+        "updated_at=? WHERE state='queued' AND attempts>=?",
+        (now, MAX_ATTEMPTS),
+    )
     db.execute(
         "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
         "updated_at=? WHERE state='running' AND lease_until<=? AND attempts>=?",
@@ -118,13 +125,13 @@ def claim(db: sqlite3.Connection, worker_id: int, now: int, ttl: int = 900) -> d
         if row is None:
             row = db.execute("""
                 SELECT t.* FROM tasks AS t
-                WHERE t.state='queued'
+                WHERE t.state='queued' AND t.attempts < ?
                   AND NOT EXISTS (
                     SELECT 1 FROM tasks AS active
                     WHERE active.scope=t.scope AND active.state='running'
                   )
                 ORDER BY t.priority DESC, t.updated_at ASC, t.id ASC LIMIT 1
-            """).fetchone()
+            """, (MAX_ATTEMPTS,)).fetchone()
             if row:
                 db.execute(
                     "UPDATE tasks SET state='running', worker_id=?, lease_until=?, "
@@ -167,10 +174,12 @@ def finish(db: sqlite3.Connection, worker_id: int, task_id: str, result: str,
     db.execute("BEGIN IMMEDIATE")
     try:
         changed = db.execute(
-            "UPDATE tasks SET state=?, worker_id=NULL, lease_until=NULL, "
-            "artifact=?, updated_at=? WHERE id=? AND worker_id=? "
-            "AND state='running' AND lease_until>?",
-            (result, artifact or None, now, task_id, worker_id, now),
+            "UPDATE tasks SET state=CASE "
+            "WHEN ?='queued' AND attempts>=? THEN 'blocked' ELSE ? END, "
+            "worker_id=NULL, lease_until=NULL, artifact=?, updated_at=? "
+            "WHERE id=? AND worker_id=? AND state='running' AND lease_until>?",
+            (result, MAX_ATTEMPTS, result, artifact or None, now,
+             task_id, worker_id, now),
         ).rowcount
         db.execute("COMMIT")
         return changed == 1
