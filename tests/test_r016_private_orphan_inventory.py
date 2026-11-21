@@ -290,9 +290,8 @@ else:
             ("badoutcz", ("learning", "schema"), "future.unknown/99"),
         )
         expected = {}
-        for name, (group, field), forged_value in cases:
-            frames = copy.deepcopy(real_frames)
-            frames[0]["developmental"][group][field] = forged_value
+
+        def stage_forged(name, frames):
             wire = b"".join(
                 (json.dumps(frame, sort_keys=True, ensure_ascii=False,
                             allow_nan=False, separators=(",", ":")) + "\n")
@@ -308,6 +307,18 @@ else:
             ) + "\n").encode("utf-8")
             stage = self.stage(name, wire + footer_wire)
             expected[stage.name] = "incomplete_or_inconsistent"
+
+        for name, (group, field), forged_value in cases:
+            frames = copy.deepcopy(real_frames)
+            frames[0]["developmental"][group][field] = forged_value
+            stage_forged(name, frames)
+
+        # Regression for None==None: absence on BOTH sides must not
+        # masquerade as a matching heartbeat measurement.
+        no_pulse = copy.deepcopy(real_frames)
+        no_pulse[0]["developmental"]["observation"].pop("heartbeat_pulse")
+        no_pulse[0]["interoception"]["heartbeat"].pop("pulse")
+        stage_forged("bothgone", no_pulse)
         # The unmodified native-export file under the SAME anchored head
         # remains accepted, distinguishing format refusal from a bad digest.
         good = self.stage("untouched")
