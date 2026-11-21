@@ -210,6 +210,17 @@ to 512 active cells and evicts the least recently observed cell when a
 new one arrives at capacity. The journal records evictions and forgotten
 observations. The SQLite journal still has a 10,000-event budget.
 
+Use `--motor-mode local_cell_v4` for a new opt-in journal that keeps v3's
+bounded retention and adds a bounded rest rule (issue #106): a move with no
+measured block always outranks rest, and after at most three consecutive
+rests the policy re-probes the least-attempted direction instead of resting
+forever. Outcomes report `forced_probe`, `rest_streak` and eviction totals;
+`mojum.cell_policy_v4.summarize_transcript` reports attempts, blocked moves,
+successful movement, longest rest streak, idle fraction and visited cells
+together so a rest collapse cannot look like fewer collisions. Existing
+`/2` and `/3` journals are never reinterpreted; opening them in v4 mode
+fails before any append. See [the v4 contract](docs/LOCAL_CELL_V4_R015.md).
+
 To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
