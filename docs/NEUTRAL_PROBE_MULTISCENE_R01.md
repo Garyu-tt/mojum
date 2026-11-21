@@ -43,8 +43,8 @@ Across 10 cases and 1728 ticks **per arm**, the figures were:
 
 Local-cell had fewer blocked attempts than frozen in **2/10** cases and
 exactly equal in **8/10**; it had more successful moves in **2/10**
-and exactly equal in eight. **Only 2/10 scenarios generated ANY collision
-for the frozen arm.** In the other eight, all three arms' trajectories are
+and exactly equal in eight. **Only 3/10 scenarios generated ANY collision
+for the frozen arm.** In the other seven, all three arms' trajectories are
 identical, so these scenes say almost nothing about learning. This
 initial benchmark therefore has **LOW_CONTACT_EXPOSURE**, not evidence
 of generalizable learned navigation.
