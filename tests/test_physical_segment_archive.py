@@ -3,9 +3,11 @@
 All data are synthetic, created under temporary directories, never copied
 from actual user PRIVATE Noosphere or touched on production/Android.
 """
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -121,6 +123,7 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
             self.assertEqual(list(self.archive.iterdir()), [])
             exposed = self.root / "world-readable"
             exposed.mkdir(mode=0o755)
+            exposed.chmod(0o755)
             with self.assertRaisesRegex(ArchiveError, "group/other"):
                 export_sealed_segments(
                     q, exposed, include_nonpublic=True,
@@ -132,6 +135,7 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
         receipt = self.export()
         public = self.root / "world-readable-restore"
         public.mkdir(mode=0o755)
+        public.chmod(0o755)
         target = public / "PRIVATE-synthetic-recovered.sqlite3"
         with self.assertRaisesRegex(ArchiveError, "group/other"):
             restore_into_new_sqlite(
@@ -233,6 +237,10 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
     def test_real_offline_cli_export_verify_restore_no_private_stdout(self):
         # Explicit CLI proof: no external connector and no live user data.
         source_head = self.build(64)
+        with closing(sqlite3.connect(self.source)) as source:
+            mode = source.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+            self.assertEqual(mode, "delete")
+        source_bytes = self.source.read_bytes()
         env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
         root = Path(__file__).resolve().parents[1]
 
@@ -245,16 +253,27 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
             )
 
         base = (
-            "export", "--db", self.source,
+            "export",
             "--agent-id", OWNER, "--segment-size", "64",
             "--archive-dir", self.archive,
             "--expected-source-head", source_head,
         )
-        denied = call(*base)
+        denied = call(*base, "--db", self.source)
         self.assertNotEqual(denied.returncode, 0)
         self.assertEqual(list(self.archive.iterdir()), [])
-        allowed = call(*base, "--include-private")
+        missing = self.root / "missing.sqlite3"
+        absent = call(*base, "--db", missing, "--include-private")
+        self.assertNotEqual(absent.returncode, 0)
+        self.assertFalse(missing.exists())
+        self.assertEqual(list(self.archive.iterdir()), [])
+        with self.assertRaisesRegex(NoosphereError, "wrong owner/schema/segment size"):
+            with SegmentedNoosphere(
+                self.source, "other-owner", segment_size=64, read_only=True,
+            ):
+                pass
+        allowed = call(*base, "--db", self.source, "--include-private")
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertEqual(self.source.read_bytes(), source_bytes)
         summary = json.loads(allowed.stdout)
         self.assertEqual(summary["archived_events"], 64)
         self.assertNotIn("PRIVATE_SYNTHETIC", allowed.stdout)

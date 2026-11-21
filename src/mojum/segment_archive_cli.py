@@ -42,6 +42,7 @@ def main(argv=None):
                 parser.error("export of PRIVATE history requires --include-private")
             with SegmentedNoosphere(
                 args.db, args.agent_id, segment_size=args.segment_size,
+                read_only=True,
             ) as source:
                 status = export_sealed_segments(
                     source, args.archive_dir,

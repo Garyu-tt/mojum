@@ -50,36 +50,30 @@ class SegmentedNoosphere:
     segment, so no half-created segment is ever visible.
     """
 
-    def __init__(self, db_path, agent_id, *, segment_size=4096):
+    def __init__(self, db_path, agent_id, *, segment_size=4096, read_only=False):
         self.agent_id = _text(agent_id, "agent_id")
         if (type(segment_size) is not int
                 or not MIN_SEGMENT_SIZE <= segment_size <= MAX_SEGMENT_SIZE):
             raise NoosphereError("segment_size must be integer in 64..8192")
+        if type(read_only) is not bool:
+            raise NoosphereError("read_only must be boolean")
         self.segment_size = segment_size
+        self._read_only = read_only
         path = Path(db_path)
         if (path.is_symlink() or path.is_dir() or not path.name
                 or str(db_path) == ":memory:" or not path.parent.is_dir()):
             raise NoosphereError("segmented database needs an ordinary local file")
+        if read_only:
+            if not path.is_file():
+                raise NoosphereError("read-only open requires an existing segmented journal")
+            self._db = self._open_read_only(path)
+            return
         preexisting = path.exists()
         if preexisting:
             # An old LocalNoosphere database must fail *before* we open it
             # writable or change its SQLite journal-mode header. Do not
             # silently prepare migrations or rewrite PRIVATE histories.
-            uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=ro"
-            try:
-                with sqlite3.connect(uri, uri=True, timeout=5.0) as probe:
-                    actual = dict(probe.execute("SELECT k,v FROM metadata"))
-            except (sqlite3.Error, ValueError, TypeError) as exc:
-                raise NoosphereError(
-                    "existing journal has no readable segmented manifest"
-                ) from exc
-            if actual != {
-                "schema": STORE_SCHEMA, "owner": self.agent_id,
-                "segment_size": str(segment_size),
-            }:
-                raise NoosphereError(
-                    "wrong owner/schema/segment size; old journal unchanged"
-                )
+            self._open_read_only(path).close()
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         try:
@@ -99,6 +93,30 @@ class SegmentedNoosphere:
         except BaseException:
             self._db.close()
             raise
+
+    def _open_read_only(self, path):
+        uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=ro"
+        try:
+            probe = sqlite3.connect(uri, uri=True, timeout=5.0, isolation_level=None)
+            try:
+                probe.row_factory = sqlite3.Row
+                probe.execute("PRAGMA trusted_schema=OFF")
+                probe.execute("PRAGMA query_only=ON")
+                actual = dict(probe.execute("SELECT k,v FROM metadata"))
+            except BaseException:
+                probe.close()
+                raise
+        except (sqlite3.Error, ValueError, TypeError) as exc:
+            raise NoosphereError(
+                "existing journal has no readable segmented manifest"
+            ) from exc
+        if actual != {
+            "schema": STORE_SCHEMA, "owner": self.agent_id,
+            "segment_size": str(self.segment_size),
+        }:
+            probe.close()
+            raise NoosphereError("wrong owner/schema/segment size; old journal unchanged")
+        return probe
 
     def _setup(self):
         self._db.execute("BEGIN IMMEDIATE")
@@ -193,6 +211,8 @@ class SegmentedNoosphere:
         Multiple writers are serialized by BEGIN IMMEDIATE, and the expected
         *global* head CAS rejects stale writers even when they race rollover.
         """
+        if self._read_only:
+            raise NoosphereError("cannot append to a read-only segmented journal")
         if (type(events) not in (list, tuple)
                 or not 1 <= len(events) <= MAX_BATCH):
             raise NoosphereError("append_many requires 1..256 events")
