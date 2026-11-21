@@ -44,13 +44,26 @@ def unpack(bundle, *, expected_revision=None, expected_organism_id=None):
         raise ValueError("invalid bundle shape")
     if bundle["schema"] != SCHEMA or type(bundle["payloads"]) is not dict or set(bundle["payloads"]) != set(NAMES):
         raise ValueError("unsupported schema or components")
-    payloads = {name: _decode(bundle["payloads"][name]) for name in NAMES}
-    verify_manifest(bundle["manifest"], payloads, expected_revision=expected_revision)
-    # A valid digest/revision does not establish the intended organism identity.
+    manifest = bundle["manifest"]
+    # Optional caller-supplied identity gates are cheap preconditions. Reject
+    # a known mismatch before allocating up to five decoded 4 MiB buffers.
+    # These checks never establish trust: verify_manifest still authenticates
+    # the complete manifest-to-payload digest relationship below.
+    if expected_revision is not None and (
+            type(expected_revision) is not int
+            or type(manifest) is not dict
+            or type(manifest.get("revision")) is not int
+            or manifest["revision"] != expected_revision):
+        raise ValueError("stale checkpoint revision")
     if expected_organism_id is not None and (
             type(expected_organism_id) is not str
-            or bundle["manifest"]["organism_id"] != expected_organism_id):
+            or type(manifest) is not dict
+            or type(manifest.get("organism_id")) is not str
+            or manifest["organism_id"] != expected_organism_id):
         raise ValueError("checkpoint organism identity mismatch")
+
+    payloads = {name: _decode(bundle["payloads"][name]) for name in NAMES}
+    verify_manifest(manifest, payloads, expected_revision=expected_revision)
     return payloads
 
 
