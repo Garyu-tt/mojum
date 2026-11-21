@@ -208,6 +208,24 @@ class VersionedArchiveReceiptQA(unittest.TestCase):
             )
         self.assertFalse(self.receipt.exists())
 
+    def test_verification_receipt_cannot_be_embedded_with_second_copy(self):
+        tip = self.generate(130)
+        pinned = self.sign(tip)
+        self.copy_to_secondary()
+        bundled = self.secondary/"bundled-owner-receipt.json"
+        shutil.copy2(self.receipt, bundled)
+        with self.assertRaisesRegex(ReceiptError, "outside both archives"):
+            verify_two_archive_copies(
+                self.primary, self.secondary, bundled, self.key,
+                independently_pinned_receipt_sha256=pinned["receipt_sha256"],
+            )
+        with self.assertRaisesRegex(ReceiptError, "outside both archives"):
+            verify_two_archive_copies(
+                self.primary, self.secondary, self.receipt,
+                self.secondary/"signer-in-archive.key",
+                independently_pinned_receipt_sha256=pinned["receipt_sha256"],
+            )
+
     def test_genesis_only_tail_signing_recovery_and_no_private_payload_in_receipt(self):
         tip = self.generate(7)
         signed = self.sign(tip, count=7)
