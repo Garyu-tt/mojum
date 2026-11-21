@@ -96,6 +96,23 @@ python3 tools/gpu_legion_plan.py \
 python3 -m unittest discover -s tests -p 'test_gpu_legion_plan.py' -v
 ```
 
+### Heterogeneous-fleet packing
+
+For up to **12 supported GPUs**, placement now searches bounded device masks
+to maximize the number of disjoint model replicas first, then minimizes GPU
+card count and wasted usable VRAM. Greedy selection by smallest card count can
+underestimate feasible concurrency: with usable VRAM of
+`[3, 3, 3, 3, 9, 9]` GiB and a 15 GiB model budget, choosing the 9+9 pair
+yields only one replica, but two groups of 9+3+3 fit. The planner's
+`placement_strategy: exact_max_replicas` marks that bounded exact search.
+
+For **more than 12 supported GPUs**, the planner deliberately uses a
+deterministic greedy fallback, reports `placement_strategy: bounded_greedy`,
+and warns that the estimated number can be **lower** than the feasible maximum.
+This prevents accidental exponential work in a read-only capacity preflight.
+Neither strategy proves physical CUDA compatibility, memory peaks, or
+running instances.
+
 Each proposed replica includes:
 
 - nonoverlapping GPU indices, unique loopback inference port, and usable VRAM
