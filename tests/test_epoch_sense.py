@@ -35,6 +35,10 @@ class EpochSenseTests(unittest.TestCase):
             EpochProprioception(10000, 0, 10000, REV, 1, 2, False)
         with self.assertRaises(DevelopmentError):
             EpochProprioception.at(5, "x", 1, 2, False)
+        for epoch, local in ((True, 0), (1.0, 0), (1, False), (1, 0.0)):
+            with self.subTest(epoch=epoch, local_tick=local):
+                with self.assertRaises(DevelopmentError):
+                    EpochProprioception(9999, epoch, local, REV, 1, 2, False)
 
     def test_public_schema_distinct(self):
         public = EpochProprioception.at(10000, REV, 1, 2, True).public()
