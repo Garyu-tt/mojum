@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import islice
 from pathlib import Path
 import stat
 from typing import Any
@@ -53,7 +54,7 @@ def verify_scripted_fixture(
     try:
         if target.is_symlink() or not target.is_dir():
             raise SchoolContractError("fixture must be a real directory")
-        paths = list(target.iterdir())
+        paths = list(islice(target.iterdir(), 4))  # Only three files are permitted.
     except OSError as error:
         raise SchoolContractError("cannot list school fixture directory") from error
 
