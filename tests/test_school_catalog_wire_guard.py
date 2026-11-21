@@ -30,7 +30,7 @@ class SchoolCatalogWireGuardTests(unittest.TestCase):
 
     def test_in_memory_unknown_metadata_cannot_bypass_json_contract(self):
         invalid = (object(), float("nan"), float("inf"), "\ud800",
-                   {"nested": -float("inf")})
+                   {"nested": -float("inf")}, (1, 2), {1: "integer key"})
         for value in invalid:
             with self.subTest(value=repr(value)):
                 catalog = copy.deepcopy(self.catalog)
