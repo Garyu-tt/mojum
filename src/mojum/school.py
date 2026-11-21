@@ -314,14 +314,15 @@ def _verify_scripted_export(run: Any) -> None:
          "provenance": provenance, "evidence": evidence[index]}
         for index, phase in enumerate(PHASES)
     ]
-    # Python value equality collapses 43.0 and 43 (also True and 1).
-    # Canonical JSON keeps the serialized types distinct and rejects NaN.
+    # Python dict/list equality treats True == 1 and 1.0 == 1. PRIVATE
+    # event evidence must match its exact JSON wire types, not just values.
     try:
-        if (_canonical_json(events) != _canonical_json(expected_events)
-                or _canonical_json(run["feedback"]) != _canonical_json(evidence[-1])):
-            raise SchoolContractError("scripted events or feedback do not match artifacts")
-    except (TypeError, ValueError, RecursionError) as error:
-        raise SchoolContractError("invalid scripted JSON evidence") from error
+        actual_wire = _canonical_json({"events": events, "feedback": run["feedback"]})
+        expected_wire = _canonical_json({"events": expected_events, "feedback": evidence[-1]})
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise SchoolContractError("invalid scripted evidence encoding") from exc
+    if actual_wire != expected_wire:
+        raise SchoolContractError("scripted events or feedback do not match artifacts")
 
 
 def write_fixture(run: dict[str, Any], output_dir: str | Path) -> Path:
