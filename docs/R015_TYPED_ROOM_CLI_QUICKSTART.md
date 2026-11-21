@@ -41,7 +41,7 @@ This read-only local-file preflight prints dimensions, original `int`/`float` ty
 PYTHONPATH=src python -m mojum.aquarium \
   --db ./my-new-synthetic-room.sqlite3 \
   --exploration-mode goal_free \
-  --developmental-policy local_cell_v2 \
+  --developmental-policy local_cell_v2b \
   --room-numeric-contract typed_v1 \
   --new-room-contract examples/room_simple_mixed.json \
   --ticks 12
