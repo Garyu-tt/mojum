@@ -32,7 +32,7 @@ const wire=fs.readFileSync(process.argv[2],"utf8");
 const script=html.match(/<script>([\s\S]*?)<\/script>/);
 if(!script)throw Error("missing viewer script");
 const {TextDecoder,TextEncoder}=require("node:util");
-function openDOM(){
+function openDOM(clock=null){
  const registry=new Map();
  const make=id=>({
    id,disabled:false,checked:false,value:"0",max:"0",textContent:"",
@@ -66,7 +66,12 @@ function openDOM(){
  vm.runInNewContext(script[1],{
     document,Number,Math,JSON,Array,String,Promise,Set,
     crypto:require("node:crypto").webcrypto,TextEncoder,TextDecoder,
-    clearInterval(){},setInterval(){throw Error("unexpected timer")},
+    clearInterval(id){if(clock){clock.cleared.push(id);clock.callback=null;}},
+    setInterval(fn,ms){
+      if(!clock)throw Error("unexpected timer");
+      clock.callback=fn;clock.ms=ms;clock.starts++;
+      return clock.starts;
+    },
     fetch(){throw Error("forbidden fetch")},
     WebSocket(){throw Error("forbidden websocket")}
  },{timeout:3000});
@@ -130,6 +135,51 @@ async function race(source){
    reusableInput:input.value
  };
 }
+async function playbackControls(source){
+ const clock={callback:null,ms:null,starts:0,cleared:[]};
+ const get=openDOM(clock),input=get("file");
+ input.files=[{name:"controls.private.synthetic.jsonl",
+   size:Buffer.byteLength(source),
+   arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
+ await input.listeners.change.call(input);
+ const initial={
+   tick:get("tick").textContent,counter:get("counter").textContent,
+   seekMax:get("seek").max
+ };
+ get("next").listeners.click();
+ const next=get("tick").textContent;
+ get("prev").listeners.click();
+ const previous=get("tick").textContent;
+ get("end").listeners.click();
+ const end=get("tick").textContent;
+ get("start").listeners.click();
+ const start=get("tick").textContent;
+ get("speed").value="2";
+ get("play").listeners.click();
+ const playing={label:get("play").textContent,delay:clock.ms};
+ if(typeof clock.callback!=="function")throw Error("playback timer missing");
+ clock.callback();
+ const advanced=get("tick").textContent;
+ get("speed").value="4";
+ get("speed").listeners.change();
+ const accelerated={label:get("play").textContent,delay:clock.ms,
+   active:typeof clock.callback==="function"};
+ get("play").listeners.click();
+ const paused={label:get("play").textContent,
+   inactive:clock.callback===null,cleared:clock.cleared.length};
+ get("seek").value="2";
+ get("seek").listeners.input();
+ const sought=get("tick").textContent;
+ get("play").listeners.click();
+ const restarted={tick:get("tick").textContent,
+   active:typeof clock.callback==="function"};
+ clock.callback();
+ clock.callback();
+ const finished={tick:get("tick").textContent,
+   inactive:clock.callback===null,label:get("play").textContent};
+ return {initial,next,previous,end,start,playing,advanced,
+   accelerated,paused,sought,restarted,finished};
+}
 (async()=>{
  const valid=await attempt(wire);
  const altered=await attempt(wire.replace('"measured_deflection":0.75',
@@ -181,6 +231,7 @@ async function race(source){
    stored_events:5002}));
  const manyFrames=await attempt(manyRows.join("\n")+"\n", true);
  const raced=await race(legacyVariant(wire, f=>{f.brain.status="current"}));
+ const controls=await playbackControls(wire);
  const blankLine=await attempt(wire.replace("\n", "\n\n"));
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
  const trailingBlank=await attempt(wire + "\n");
@@ -193,7 +244,7 @@ async function race(source){
                                       legacyDefault,legacyOptIn,
                                       safe,gap,oversized,longLine,manyFrames,raced,
                                       blankLine,whitespaceLine,trailingBlank,
-                                      encoding})+"\n");
+                                      encoding,controls})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
@@ -338,6 +389,32 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertEqual(values["raced"]["tick"], "0")
         self.assertIn("current.jsonl", values["raced"]["status"])
         self.assertEqual(values["raced"]["reusableInput"], "")
+        # Exercise the *real* JavaScript playback handlers with a deterministic
+        # fake clock; no wall-clock sleeps, browser server or PRIVATE samples.
+        controls = values["controls"]
+        self.assertEqual(controls["initial"], {
+            "tick": "0", "counter": "1 / 3", "seekMax": "2"
+        })
+        self.assertEqual(controls["next"], "1")
+        self.assertEqual(controls["previous"], "0")
+        self.assertEqual(controls["end"], "2")
+        self.assertEqual(controls["start"], "0")
+        self.assertEqual(controls["playing"]["delay"], 200)
+        self.assertIn("Пауза", controls["playing"]["label"])
+        self.assertEqual(controls["advanced"], "1")
+        self.assertEqual(controls["accelerated"]["delay"], 100)
+        self.assertTrue(controls["accelerated"]["active"])
+        self.assertIn("Пауза", controls["accelerated"]["label"])
+        self.assertTrue(controls["paused"]["inactive"])
+        self.assertGreaterEqual(controls["paused"]["cleared"], 1)
+        self.assertIn("Воспроизвести", controls["paused"]["label"])
+        self.assertEqual(controls["sought"], "2")
+        self.assertEqual(controls["restarted"]["tick"], "0")
+        self.assertTrue(controls["restarted"]["active"])
+        self.assertEqual(controls["finished"]["tick"], "2")
+        self.assertTrue(controls["finished"]["inactive"])
+        self.assertIn("Воспроизвести", controls["finished"]["label"])
+
 
 
 class OfflineViewerRegressionQA(unittest.TestCase):
