@@ -6,6 +6,8 @@ separately pin an original event-chain head for an extra equality check.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -266,6 +268,68 @@ else:
                     ".mojum-private-trace-*.jsonl"
                 ):
                     stage.unlink()
+
+
+    def test_v4_adversarial_fields_refused_even_with_recomputed_frame_hash_and_matching_head(self):
+        # All attacking files derive from REAL Aquarium frames and preserve
+        # the original independent source head. Recomputed SHA and canonical
+        # encoding should never turn incoherent temporal history into data
+        # marked as self_consistent_head_matches by the incident auditor.
+        rows = [json.loads(x) for x in self.canonical_bytes.splitlines()]
+        real_frames, original_footer = rows[:-1], rows[-1]
+        self.assertEqual(len(real_frames), 3)
+        self.assertEqual(original_footer["journal_head"], self.head)
+        cases = (
+            ("badlearnz", ("learning", "schema"),
+             "mojum.developmental.local-cell.outcome/3"),
+            ("badepochz", ("observation", "epoch_tick"), 20),
+            ("badintent", ("intent", "tick"), 99),
+            ("badcountz", ("learning", "total_updates"), 200),
+            ("badpulsez", ("observation", "heartbeat_pulse"), 92312),
+            ("boolclock", ("observation", "absolute_tick"), True),
+            ("badoutcz", ("learning", "schema"), "future.unknown/99"),
+        )
+        expected = {}
+
+        def stage_forged(name, frames):
+            wire = b"".join(
+                (json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                            allow_nan=False, separators=(",", ":")) + "\n")
+                .encode("utf-8")
+                for frame in frames
+            )
+            footer = copy.deepcopy(original_footer)
+            footer["trace_integrity"]["sha256"] = hashlib.sha256(wire).hexdigest()
+            footer["trace_integrity"]["byte_length"] = len(wire)
+            footer_wire = (json.dumps(
+                footer, sort_keys=True, ensure_ascii=False,
+                allow_nan=False, separators=(",", ":")
+            ) + "\n").encode("utf-8")
+            stage = self.stage(name, wire + footer_wire)
+            expected[stage.name] = "incomplete_or_inconsistent"
+
+        for name, (group, field), forged_value in cases:
+            frames = copy.deepcopy(real_frames)
+            frames[0]["developmental"][group][field] = forged_value
+            stage_forged(name, frames)
+
+        # Regression for None==None: absence on BOTH sides must not
+        # masquerade as a matching heartbeat measurement.
+        no_pulse = copy.deepcopy(real_frames)
+        no_pulse[0]["developmental"]["observation"].pop("heartbeat_pulse")
+        no_pulse[0]["interoception"]["heartbeat"].pop("pulse")
+        stage_forged("bothgone", no_pulse)
+        # The unmodified native-export file under the SAME anchored head
+        # remains accepted, distinguishing format refusal from a bad digest.
+        good = self.stage("untouched")
+        expected[good.name] = "self_consistent_head_matches"
+        audited = inspect_private_trace_orphans(
+            self.directory, expected_journal_head=self.head
+        )
+        statuses = {row["name"]: row["status"] for row in audited["files"]}
+        self.assertEqual(statuses, expected)
+        self.assertEqual(self.source.read_bytes(), self.original_bytes)
+        self.assertEqual(self.normal.read_bytes(), self.canonical_bytes)
 
 
 if __name__ == "__main__":
