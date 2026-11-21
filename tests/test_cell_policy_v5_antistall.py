@@ -235,6 +235,29 @@ class RetentionTests(unittest.TestCase):
             CellExplorerV5.from_snapshot(forged)
         self.assertEqual(model.rest_streak, 0)
 
+    def test_snapshot_rejects_rest_without_four_measured_blocks(self):
+        model = CellExplorerV5()
+        drive(model, 5)
+        checkpoint = model.snapshot()
+        self.assertEqual(checkpoint["rest_streak"], 1)
+        self.assertEqual(CellExplorerV5.from_snapshot(checkpoint).snapshot(), checkpoint)
+
+        forged = deepcopy(checkpoint)
+        forged["records"]["0:0"]["x+"][1] = 0
+        with self.assertRaisesRegex(CellV5Error, "rest streak requires four measured blocks"):
+            CellExplorerV5.from_snapshot(forged)
+
+    def test_snapshot_requires_enough_ticks_for_forced_probes(self):
+        model = CellExplorerV5()
+        drive(model, 7)
+        with self.assertRaisesRegex(CellV5Error, "insufficient ticks for forced probes"):
+            CellExplorerV5.from_snapshot(dict(model.snapshot(), forced_probes=1))
+
+        drive(model, 1, start=7)
+        checkpoint = model.snapshot()
+        self.assertEqual(checkpoint["forced_probes"], 1)
+        self.assertEqual(CellExplorerV5.from_snapshot(checkpoint).snapshot(), checkpoint)
+
     def test_snapshot_rejects_forged_or_cross_version_envelopes(self):
         model = CellExplorerV5()
         for tick in range(40):
@@ -357,6 +380,17 @@ class RetentionTests(unittest.TestCase):
         with self.assertRaises(CellV5Error):
             model.observe(cue(5), intent, False)
         self.assertEqual(model.snapshot(), before)
+
+    def test_observe_rejects_equal_but_differently_typed_intent_fields(self):
+        model = CellExplorerV5()
+        sense = cue(0)
+        intent = model.decide(sense)
+        before = model.snapshot()
+        for field, value in (("forced_probe", 0), ("tick", False), ("epoch_index", 0.0)):
+            with self.subTest(field=field), self.assertRaises(CellV5Error):
+                model.observe(sense, dict(intent, **{field: value}), False)
+            self.assertEqual(model.snapshot(), before)
+        self.assertIs(model.observe(sense, intent, False)["forced_probe"], False)
 
 
 class TranscriptSummaryTests(unittest.TestCase):

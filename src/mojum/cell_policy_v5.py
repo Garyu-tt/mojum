@@ -115,6 +115,12 @@ class CellExplorerV5:
                 or type(state["forced_probes"]) is not int
                 or not 0 <= state["forced_probes"] <= state["updates"]):
             raise CellV5Error("invalid v5 retention envelope")
+        # Four measured blocks precede the first rest. Each forced probe
+        # consumes a separate streak of three rests and then resets it.
+        if (state["forced_probes"] and len(_MOVE_ACTIONS)
+                + state["forced_probes"] * (MAX_REST_STREAK + 1)
+                + state["rest_streak"] > state["updates"]):
+            raise CellV5Error("insufficient ticks for forced probes")
         observed_live = 0
         for key, actions in state["records"].items():
             if (type(key) is not str or _ZONE.fullmatch(key) is None
@@ -168,8 +174,11 @@ class CellExplorerV5:
             # Rest has zero displacement: all consecutive rest decisions
             # must belong to the most recently observed cell.
             latest_cell = max(state["last_seen_at"], key=state["last_seen_at"].get)
-            if state["records"][latest_cell].get("rest", [0, 0])[0] < state["rest_streak"]:
+            latest_actions = state["records"][latest_cell]
+            if latest_actions.get("rest", [0, 0])[0] < state["rest_streak"]:
                 raise CellV5Error("rest streak exceeds retained rest evidence")
+            if any(latest_actions.get(action, [0, 0])[1] == 0 for action in _MOVE_ACTIONS):
+                raise CellV5Error("rest streak requires four measured blocks")
 
         model = cls()
         model.last_tick = state["last_tick"]
@@ -219,9 +228,13 @@ class CellExplorerV5:
         }
 
     def observe(self, sense, intent, blocked):
-        if type(blocked) is not bool or intent != self.decide(sense):
+        expected = self.decide(sense)
+        if (type(blocked) is not bool or type(intent) is not dict
+                or intent.keys() != expected.keys()
+                or any(type(intent[key]) is not type(value) or intent[key] != value
+                       for key, value in expected.items())):
             raise CellV5Error("stale, forged or unmeasured v5 motor outcome")
-        cell, action = intent["zone"], intent["action"]
+        cell, action = expected["zone"], expected["action"]
         if action == "rest" and blocked:
             raise CellV5Error("rest cannot be a blocked motor outcome")
         evicted = None
@@ -249,7 +262,7 @@ class CellExplorerV5:
             self.rest_streak += 1
         else:
             self.rest_streak = 0
-        if intent["forced_probe"]:
+        if expected["forced_probe"]:
             self.forced_probes += 1
         self.last_tick = sense.tick
         self.last_epoch_index = sense.epoch_index
@@ -263,7 +276,7 @@ class CellExplorerV5:
             "total_updates": self.updates,
             "epoch_index": sense.epoch_index,
             "epoch_tick": sense.epoch_tick,
-            "forced_probe": intent["forced_probe"],
+            "forced_probe": expected["forced_probe"],
             "rest_streak": self.rest_streak,
             "evicted_cell": evicted,
             "evicted_observations": dropped,
