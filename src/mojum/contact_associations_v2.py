@@ -63,6 +63,12 @@ class ContactAssociationsV2(ContactAssociations):
         seen_last_updates = set()
         if (snapshot["evicted_cues"] > snapshot["evicted_observations"]):
             raise CuriosityError("inconsistent eviction accounting")
+        # Every eviction requires a fully populated MAX_CUES table and one
+        # later contact with a new cue. A real update always retains its cue.
+        if (snapshot["updates"] and not snapshot["table"]
+                or snapshot["evicted_cues"] > max(0, snapshot["updates"] - MAX_CUES)
+                or (snapshot["evicted_cues"] and len(snapshot["table"]) != MAX_CUES)):
+            raise CuriosityError("impossible association retention history")
         for key, entry in snapshot["table"].items():
             if not isinstance(key, str) or len(key) > 11:
                 raise CuriosityError("invalid numeric cue")
@@ -76,6 +82,7 @@ class ContactAssociationsV2(ContactAssociations):
                     or not 1 <= entry["count"] <= min(WINDOW, entry["total"])
                     or not entry["count"] == min(WINDOW, entry["total"])
                     or not 1 <= entry["last_update"] <= snapshot["updates"]
+                    or entry["total"] > entry["last_update"]
                     or not _finite(entry["mean_deflection"])
                     or not 0 <= entry["mean_deflection"] <= 1):
                 raise CuriosityError("invalid learned association")
@@ -85,6 +92,8 @@ class ContactAssociationsV2(ContactAssociations):
                 raise CuriosityError("duplicate association update timestamp")
             seen_last_updates.add(entry["last_update"])
             total += entry["total"]
+        if snapshot["updates"] and max(seen_last_updates) != snapshot["updates"]:
+            raise CuriosityError("latest association stamp does not match updates")
         if total != snapshot["updates"]:
             raise CuriosityError("inconsistent association count")
         # Every update stamps exactly one retained cue. The most recent
