@@ -10,6 +10,8 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 | tick gap rejected | `test_private_trace_integrity.py` (`gap` in the Node harness) |
 | oversize file rejected without reading | same (`oversized`, 25 MiB) |
 | stale async file-selection race | same (`race`) |
+| play/pause, speed change, seek, step, first/last, end-of-trace stop | `test_trace_viewer_playback_controls.py` (real viewer JS with virtual timers and disposable synthetic legacy JSONL) |
+| playback cancelled on tab hide or invalid import | same (virtual timer count and controls reset) |
 | HTML-looking payload stays literal text | same (`safe`) and `test_markup_remains_local_only_and_uses_safe_text_rendering` (no `innerHTML`) |
 | genuine committed SQLite rows, same tick order | `test_aquarium_trace_export.py::test_replays_real_private_frames_in_same_tick_order` |
 | WAL snapshot, source unchanged | `::test_source_open_with_uncheckpointed_wal_remains_unchanged` |
