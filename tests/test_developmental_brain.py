@@ -157,6 +157,42 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
         self.assertEqual(accepted["input"]["near_field"], cue)
         self.assertEqual(motor.snapshot(), original)
 
+
+    def test_future_or_stale_heartbeat_timestamp_is_rejected_without_mutation(self):
+        brain, motor = DevelopmentalBrain(), MotorPlay()
+        heartbeat = {
+            "kind": "interoception",
+            "heartbeat": {
+                "beat_index": 0, "phase_milli": 0,
+                "pulse": True, "synthetic": True,
+            },
+            "observed_at_ns": 0,
+        }
+        before = motor.snapshot()
+        for tick, observed_ns in ((0, 1), (0, 10_000_000),
+                                  (1, 0), (1, 20_000_000)):
+            with self.subTest(tick=tick, observed_ns=observed_ns):
+                proprio = {
+                    "tick": tick, "position": [1.0, 2.0],
+                    "world_revision": "a" * 64,
+                }
+                with self.assertRaises(DevelopmentalBrainError):
+                    brain.decide(
+                        motor, tick=tick,
+                        interoception={**heartbeat, "observed_at_ns": observed_ns},
+                        proprioception=proprio, dt_ns=10_000_000,
+                    )
+                self.assertEqual(motor.snapshot(), before)
+
+    def test_controller_uses_configured_virtual_dt_for_current_heartbeat(self):
+        with self.aquarium(dt_ns=20_000_000) as aquarium:
+            aquarium.step()
+            frame = aquarium.step()
+            self.assertEqual(
+                frame["brain"]["input"]["interoception"]["observed_at_ns"],
+                20_000_000,
+            )
+
     def test_direct_contract_rejects_hidden_sensor_metadata(self):
         brain = DevelopmentalBrain()
         interoception = {

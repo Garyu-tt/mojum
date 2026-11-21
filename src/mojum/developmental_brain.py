@@ -45,12 +45,12 @@ def _revision(value, field):
     return value
 
 
-def _interoception(value):
+def _interoception(value, *, expected_time_ns):
     if (not isinstance(value, dict)
             or set(value) != {"kind", "heartbeat", "observed_at_ns"}
             or value["kind"] != "interoception"
             or type(value["observed_at_ns"]) is not int
-            or value["observed_at_ns"] < 0):
+            or value["observed_at_ns"] != expected_time_ns):
         raise DevelopmentalBrainError("invalid interoception input")
     heartbeat = value["heartbeat"]
     if (not isinstance(heartbeat, dict)
@@ -141,11 +141,14 @@ class DevelopmentalBrain:
 
     def decide(
         self, motor: MotorPlay, *, tick, interoception, proprioception,
-        near_field=None, avoid=(), prefer=(),
+        near_field=None, avoid=(), prefer=(), dt_ns=10_000_000,
     ):
-        if type(tick) is not int or tick < 0 or type(motor) is not MotorPlay:
+        if (type(tick) is not int or tick < 0 or type(motor) is not MotorPlay
+                or type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
             raise DevelopmentalBrainError("invalid controller clock or policy")
-        current_interoception = _interoception(interoception)
+        current_interoception = _interoception(
+            interoception, expected_time_ns=tick * dt_ns
+        )
         current_proprioception = _proprioception(proprioception, tick)
         current_near_field = _near_field(
             near_field, tick=tick, world_revision=current_proprioception["world_revision"]

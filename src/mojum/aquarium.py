@@ -374,6 +374,7 @@ class Aquarium:
                     "world_revision": self.world.revision,
                 },
                 near_field=pre_move_sensor,
+                dt_ns=self.dt_ns,
                 avoid=avoid,
                 prefer=prefer,
             )

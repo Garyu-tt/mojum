@@ -21,7 +21,7 @@ PYTHONPATH=src python -m mojum.aquarium \
 Each committed frame contains a
 `mojum.neural.developmental-controller/1` record with:
 
-- the current synthetic heartbeat and numeric proprioception;
+- the current synthetic heartbeat (timestamp strictly equal to `tick * dt_ns`) and numeric proprioception;
 - the optional numeric near-field cue and numeric range guidance;
 - an action selected by the existing replayable `MotorPlay` state;
 - a bounded point-room safety declaration with external override and real
