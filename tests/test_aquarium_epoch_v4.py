@@ -193,10 +193,24 @@ class AquariumEpochV4Tests(unittest.TestCase):
             self.assertEqual(aquarium.store.count(), 1)
             self.assertEqual(aquarium.checkpoint(), before)
 
-            # Once the marker is durable, the pending first frame needs only
-            # one event and must not be charged for a duplicate marker.
+            # Commit an actual marker into the disposable journal, then model
+            # its verified count immediately below the cap. The pending first
+            # frame needs only one event and must not be charged for a
+            # duplicate marker.
+            marker = aquarium._epoch_event(1)
+            head = aquarium._append_record(
+                marker["topic"], marker["event_id"], marker["payload"],
+                marker["observed_at_ns"], marker["source_revision"],
+            )
             aquarium.epoch_index = 1
             aquarium._committed_count = aquarium.journal_event_budget - 1
+            aquarium._committed_head = head
+            self.assertEqual(aquarium.store.count(), 2)
+            stored_marker = next(
+                item["event"] for item in aquarium.store.iter_events(include_nonpublic=True)
+                if item["seq"] == 2
+            )
+            self.assertEqual(stored_marker["event_id"], "epoch-00000001")
             self.assertEqual(aquarium.required_events_for_steps(1), 1)
 
 
