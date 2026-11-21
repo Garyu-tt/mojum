@@ -244,6 +244,17 @@ class EpochJournalTests(unittest.TestCase):
             self.assertEqual((q.tick, q.epoch_index, q.store.count()),
                              (EPOCH_TICKS, 0, EPOCH_TICKS + 1))
             self.assertEqual(q.required_events_for_steps(1), 2)
+            # A rejected caller request cannot write the pending epoch marker.
+            # This complements the mocked birth-time preflight check with
+            # actual 9,999-frame SQLite state and an exact cold-replay tail.
+            original = q.checkpoint()
+            original_count = q.store.count()
+            for supplied in ({"dx": 0.04}, {"dy": 0.0}, {"dx": 0.0, "dy": 0.0}):
+                with self.subTest(supplied=supplied):
+                    with self.assertRaisesRegex(AquariumError, "rejects external dx/dy"):
+                        q.step(**supplied)
+                    self.assertEqual(q.checkpoint(), original)
+                    self.assertEqual(q.store.count(), original_count)
             with patch.object(q, "_calculate_frame",
                               side_effect=RuntimeError("before boundary frame")):
                 with self.assertRaisesRegex(RuntimeError, "before boundary frame"):
