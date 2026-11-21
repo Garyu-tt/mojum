@@ -22,7 +22,9 @@ from mojum.sensory_bridge import SensoryBridgeError
 from mojum.sensory_bridge_v2 import (
     ToyContactBridgeV2, SCHEMA as BRIDGE_V2_SCHEMA,
 )
-from mojum.verified_snapshot import create_key_file, load_snapshot
+from mojum.verified_snapshot import (
+    SnapshotError, create_key_file, load_snapshot, save_snapshot,
+)
 from mojum.world_room import Room, initial_state
 
 
@@ -243,6 +245,26 @@ class R015FullSensoryEpochSQLiteQA(unittest.TestCase):
             self.assertEqual(full.checkpoint(), final)
             self.assertEqual(full.store.verify_chain()["head"], final_head)
             self.assertEqual(full.tick, 10050)
+
+    def test_validly_signed_legacy_sensor_state_fails_without_sqlite_mutation(self):
+        with self.open() as a:
+            for _ in range(25):
+                a.step()
+            expected = a.checkpoint()
+            a.save_replay_snapshot()
+        signed = load_snapshot(self.snap, self.key)
+        self.assertEqual(signed["toy_contact_state"]["schema"],
+                         MODEL_V2_SCHEMA)
+        signed["toy_contact_state"]["schema"] = MODEL_SCHEMA
+        # A holder of the local HMAC secret can sign a malformed model;
+        # the exact bootstrap model contract must still reject it.
+        save_snapshot(self.snap, self.key, signed)
+        with self.assertRaises((ValueError, SnapshotError)):
+            with self.open():
+                pass
+        with self.open(signed=False) as a:
+            self.assertEqual(a.checkpoint(), expected)
+            self.assertEqual(a.store.count(), 26)
 
     def test_old_mode_and_wrong_policy_rejected_without_history_change(self):
         with self.open() as a:
