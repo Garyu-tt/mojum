@@ -82,6 +82,35 @@ def _sha(value):
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
+def _unique_object(pairs):
+    """Build one JSON object, refusing repeated keys.
+
+    ``json.loads`` keeps only the last of duplicate keys, and the stored event
+    hash is computed over that collapsed object.  A row that repeats a key
+    therefore keeps a valid hash while the raw bytes stay ambiguous to any
+    reader that resolves duplicates differently (for example SQLite
+    ``json_extract``).  Persisted journals are only ever written from
+    canonical JSON and never contain duplicates, so this is a fail-closed
+    rejection of tampered or foreign history, not a format change.
+    """
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise NoosphereError("duplicate JSON key in stored event")
+        obj[key] = value
+    return obj
+
+
+def _loads_wire(raw):
+    """Parse one stored ``wire_json`` value without collapsing duplicate keys."""
+    try:
+        return json.loads(raw, object_pairs_hook=_unique_object)
+    except NoosphereError:
+        raise
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise NoosphereError("invalid journal JSON") from exc
+
+
 def _validate_event(event, owner):
     mandatory = {
         "schema", "event_id", "agent_id", "topic", "observed_at_ns",
@@ -165,9 +194,9 @@ def _read_first_event(path, agent_id):
         if first is None:
             return None
         try:
-            event = json.loads(first["wire_json"])
-        except (TypeError, ValueError, RecursionError) as exc:
-            raise NoosphereError("invalid bootstrap JSON") from exc
+            event = _loads_wire(first["wire_json"])
+        except NoosphereError as exc:
+            raise NoosphereError(f"invalid bootstrap JSON: {exc}") from exc
         if type(event) is not dict:
             raise NoosphereError("expected an object for the first event")
         return event
@@ -185,7 +214,11 @@ def _verify_chain(db, agent_id, *, external_expected_head=None, strict_wire=Fals
         raw, prior, stored = row["wire_json"], row["prev_hash"], row["event_hash"]
         recorded = row["recorded_at_ns"]
         try:
-            event = _validate_event(json.loads(raw), agent_id)
+            parsed = _loads_wire(raw)
+        except NoosphereError as exc:
+            raise NoosphereError(f"invalid event at row {seq}: {exc}") from exc
+        try:
+            event = _validate_event(parsed, agent_id)
         except (ValueError, TypeError, RecursionError) as exc:
             raise NoosphereError(f"invalid event at row {seq}") from exc
         if strict_wire and (type(raw) is not str or _canonical(event) != raw):
@@ -398,9 +431,9 @@ class LocalNoosphere:
                     return
                 for row in rows:
                     try:
-                        event = json.loads(row["wire_json"])
-                    except (TypeError, ValueError, RecursionError) as exc:
-                        raise NoosphereError("invalid journal JSON") from exc
+                        event = _loads_wire(row["wire_json"])
+                    except NoosphereError as exc:
+                        raise NoosphereError(f"invalid journal JSON: {exc}") from exc
                     yield {"seq": row["seq"], "event": event,
                            "event_hash": row["event_hash"]}
         finally:
@@ -438,7 +471,14 @@ class LocalNoosphere:
         sql = "SELECT seq,wire_json,event_hash FROM events WHERE " + " AND ".join(where) + " ORDER BY seq LIMIT ?"
         args.append(limit)
         rows = self._db.execute(sql, args).fetchall()
-        items = [{"seq": row["seq"], "event": json.loads(row["wire_json"]), "event_hash": row["event_hash"]} for row in rows]
+        items = []
+        for row in rows:
+            try:
+                event = _loads_wire(row["wire_json"])
+            except NoosphereError as exc:
+                raise NoosphereError(f"invalid journal JSON: {exc}") from exc
+            items.append({"seq": row["seq"], "event": event,
+                          "event_hash": row["event_hash"]})
         projection = {
             "schema": DATASET_SCHEMA,
             "agent_id": self.agent_id,
