@@ -20,7 +20,7 @@ from test_segmented_noosphere import OWNER, ZERO, record
     "100k-event SQLite stress runs only in the dedicated CI job",
 )
 @unittest.skipUnless(
-    os.environ.get("MOJUM_R016_STRESS") == "1",
+    os.environ.get("MOJUM_SEGMENTED_100K_STRESS") == "1",
     "100k workload is verified by the dedicated R0.16 stress job",
 )
 class Beyond100KActualSQLiteTest(unittest.TestCase):
