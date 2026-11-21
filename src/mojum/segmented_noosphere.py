@@ -312,12 +312,44 @@ class SegmentedNoosphere:
             boundary.close()
         if external_expected_head is not None and previous != external_expected_head:
             raise NoosphereError("segmented head differs from independent anchor")
+        if self.count() != expected_seq - 1 or self.head() != previous:
+            raise NoosphereError("journal head advanced during segmented verification")
         return {
             "schema": STORE_SCHEMA, "agent_id": self.agent_id,
             "count": expected_seq - 1, "head": previous,
             "segments": (last_seg + 1),
             "integrity": "linked-segments-verified-not-authenticated",
         }
+
+    def iter_segment_receipts(self, *, external_expected_head=None):
+        """Stream metadata-only receipt candidates for independent anchoring.
+
+        They are NOT signatures, replicas, durable archives, encryption, or
+        trustworthy on their own. A second independent device/service must
+        record/compare the segment heads before using them as proof.
+        """
+        proven = self.verify_chain(
+            external_expected_head=external_expected_head
+        )
+        for bound in self._db.execute(
+            "SELECT segment_index,first_seq,prior_segment_head "
+            "FROM segments ORDER BY segment_index"
+        ):
+            first = bound["first_seq"]
+            last = min(first + self.segment_size - 1, proven["count"])
+            yield {
+                "schema": "mojum.noosphere.segment-receipt/1",
+                "agent_id": self.agent_id,
+                "segment_index": bound["segment_index"],
+                "first_seq": first,
+                "last_seq": last,
+                "events": last - first + 1,
+                "prior_segment_head": bound["prior_segment_head"],
+                "segment_head": self.event_at(last)["event_hash"],
+                "integrity": "metadata-only-verified-not-authenticated",
+            }
+        if self.count() != proven["count"] or self.head() != proven["head"]:
+            raise NoosphereError("journal advanced during receipt generation")
 
     def event_at(self, seq):
         _integer(seq, "seq", 1)
