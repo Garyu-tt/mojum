@@ -267,10 +267,12 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
       if (footer.schema !== "mojum.aquarium.checkpoint/2" ||
           footer.policy_schema !== V4 ||
           !Array.isArray(footer.epoch_boundaries) ||
+          !Number.isSafeInteger(footer.tick) ||
+          footer.tick < next || footer.tick > MAX_ABSOLUTE_TICKS ||
           !Number.isSafeInteger(footer.epoch_index) ||
           !Number.isSafeInteger(footer.epoch_tick) ||
           !footer.trace_range || !footer.trace_integrity ||
-          footer.epoch_index < Math.floor((next - 1) / EPOCH_TICKS) ||
+          footer.epoch_index !== Math.floor(footer.tick / EPOCH_TICKS) ||
           footer.epoch_tick !== footer.tick % EPOCH_TICKS ||
           footer.trace_range.source_total_ticks !== footer.tick)
         throw new Error("Нет проверенного checkpoint/2 и сведений эпохи v4");
