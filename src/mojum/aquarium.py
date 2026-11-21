@@ -641,6 +641,9 @@ class Aquarium:
     def step(self, *, dx=None, dy=None):
         if self._read_only:
             raise AquariumError("Aquarium journal is read-only")
+        # Validate API arguments before the epoch marker can commit.
+        if self._epoch_v4 and (dx is not None or dy is not None):
+            raise AquariumError("developmental motor play rejects external dx/dy")
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
