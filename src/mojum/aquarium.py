@@ -187,6 +187,8 @@ class Aquarium:
         """Persist an acquired-gene event. Only future/current ticks allowed."""
         if not isinstance(acquired, dict):
             raise AquariumError("acquired change must be an event object")
+        if type(acquired.get("valid_from_tick")) is not int:
+            raise AquariumError("valid_from_tick must be an integer")
         if acquired.get("valid_from_tick", -1) < self.tick:
             raise AquariumError("cannot retroactively change committed frames")
         if acquired.get("recorded_at_ns") != self.tick * self.dt_ns:
