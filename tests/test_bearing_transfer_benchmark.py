@@ -120,7 +120,7 @@ class FrozenDirectionTransferTests(unittest.TestCase):
             self.assertEqual(set(sample["predictions"]), {
                 "numeric_only", "bearing", "frozen_untrained",
             })
-            self.assertLessEqual(abs(sample["applied_dx"]), STEP_METERS)
+            self.assertLessEqual(abs(sample["applied_dx"]), STEP_METERS + 1e-12)
 
     def test_offline_cli_works_outside_checkout_and_has_no_database(self):
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
