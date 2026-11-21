@@ -72,7 +72,10 @@ class ParentWireInvariance(unittest.TestCase):
                     old_db = Path(tmp) / "old-private.sqlite3"
                     new_db = Path(tmp) / "candidate-private.sqlite3"
                     old_checkpoint = _run(BASELINE, old_db, arguments)
-                    new_checkpoint = _run(ROOT, new_db, arguments)
+                    # The immutable parent still uses the historical spelling.
+                    updated = [arg if arg != "local_cell_v2" else "local_cell_v2b"
+                               for arg in arguments]
+                    new_checkpoint = _run(ROOT, new_db, updated)
                     old_meta, old_events = _saved_wire(old_db)
                     new_meta, new_events = _saved_wire(new_db)
                     self.assertEqual(old_meta, new_meta)

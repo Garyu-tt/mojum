@@ -33,8 +33,22 @@ PYTHONPATH=src python -m mojum.migration_v2a_v2b \
 
 **Do not run on production histories** until independent security/restore review, user-authorized backups and a real recovery exercise exist. No automatic daemon or agent action invokes the transfer. Running it without `--create-new-journal`, with a wrong source head, with an existing destination, a symlink source, mismatched genotype/room, unverified/ambiguous JSON, unsupported sensory/acquired event or a single differing motor frame must fail with *no published destination*.
 
+Resume the new v2B journal with `--exploration-mode goal_free` and
+`--developmental-policy local_cell_v2b`. Use the original genome and graph
+and the neural mode from the source. The converter writes the original
+v2B wire schema. The historical `local_cell_v2` spelling can still resume
+an existing v2B journal. It cannot create one.
+
 ## CI, independent controls, limitations
 
 Pinned [#112 source SHA](https://github.com/Garyu-tt/mojum/commit/8d2eaf234c09177ae0b92dfef4bb41950529c912) is checked out separately in GitHub Actions. Three CPython versions (3.11, 3.12, 3.13) run real original v2A journal creation then candidate transfer, successful v2B cold replay/resume, source full-row fingerprint immutability, destination head differences, bad head/non-opt-in/budget, wrong seed, tampered duplicate JSON, existing output, injected divergent target policy, CLI confirmation and connection-leak checks. Existing full Aquarium/Motor/Mesh/HMAC/streaming gates remain required.
+
+The transfer matrix also runs on Windows. The verified staging file is
+synced using a writable descriptor before exclusive publication. The staged
+bytes are left intact. Comparison uses canonical JSON so numeric and boolean
+types are preserved. A subprocess from the pinned original [#115 writer](https://github.com/Garyu-tt/mojum/commit/b755da530634c0d6b8866107e7b4e9e325839175)
+opens the transferred file at tick 120 and appends tick 121. Its resulting
+checkpoint and chain head match a fresh 121-tick run of the same native
+runtime. The source v2A file remains byte-identical.
 
 **No automatic promotion:** distinct human/account review and explicit owner acceptance are still needed. Do not close #116: a *new journal* is not two-way wire interchange and the default runtime does not change. No complete organism, real neural brain, MuJoCo, Android device or distributed failover is claimed.
