@@ -146,65 +146,71 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
 def export_cold_copy(source_db, destination_db, seed, graph, *,
                      agent_id="dante-fixture-001", neural_mode="shadow",
                      room=None, start=(1.0, 2.0), dt_ns=10_000_000):
-    """Make and replay-verify a no-clobber SQLite backup of a running journal.
+    """Replay-verified SQLite cold copy, never opening caller's source writable.
 
-    The Aquarium source is opened and fully replayed first; SQLite's backup
-    API includes committed WAL pages, unlike a plain copy of an open .sqlite3.
-    If a concurrent writer changes the source between replay and backup,
-    the copied head/checkpoint must still match or publication is refused.
+    A read-only SQLite online backup captures committed WAL pages. The copied
+    journal is then independently replayed through Aquarium in private staging.
+    Concurrent source writes may be present in the captured point-in-time copy;
+    all reported metadata comes exclusively from that validated snapshot.
     """
     source = _source_file(source_db)
     destination = _destination(destination_db)
-    # Export is for a committed journal, never a request to initialize one.
-    # Aquarium auto-bootstraps empty SQLite sources after a writable open.
-    # Inspect the existing source read-only before allowing that side effect.
-    if _read_first_event(source, agent_id) is None:
-        raise ValueError("export requires an existing nonempty Aquarium journal")
     opts = _options(agent_id, neural_mode, room, start, dt_ns)
     _require_existing_source_journal(source, agent_id)
-    with Aquarium(source, seed, graph, **opts) as original:
-        before = original.checkpoint()
-        count = original.store.count()
-        connection = original.store._db  # LocalNoosphere's live SQLite handle.
-        if (connection.execute("PRAGMA page_count").fetchone()[0]
-                * connection.execute("PRAGMA page_size").fetchone()[0]
-                > MAX_BACKUP_BYTES):
-            raise ValueError("source SQLite exceeds copy budget")
-        fd, temporary = tempfile.mkstemp(
-            prefix=".mojum-cold-copy-", suffix=".sqlite3",
-            dir=destination.parent,
-        )
-        os.close(fd)
-        try:
+    temporary = None
+    try:
+        # Export must never initialize or repair the ORIGINAL source journal.
+        with closing(sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
+                                     uri=True, timeout=10.0)) as original:
+            original.execute("PRAGMA query_only=ON")
+            if (original.execute("PRAGMA page_count").fetchone()[0]
+                    * original.execute("PRAGMA page_size").fetchone()[0]
+                    > MAX_BACKUP_BYTES):
+                raise ValueError("source SQLite exceeds copy budget")
+            fd, temporary = tempfile.mkstemp(
+                prefix=".mojum-cold-copy-", suffix=".sqlite3",
+                dir=destination.parent,
+            )
+            os.close(fd)
             with closing(sqlite3.connect(temporary)) as target:
-                connection.backup(target)
-            with Aquarium(temporary, seed, graph,
-                          external_expected_head=before["journal_head"],
-                          **opts) as reopened:
-                if reopened.checkpoint() != before:
-                    raise AquariumError("copied journal differs from validated source")
-            # Reopening in WAL mode must not leave any unexported sidecars.
-            if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
-                raise AquariumError("unexported SQLite backup WAL sidecar")
-            checksum = _sha256(temporary)
-            # Windows rejects fsync on a read-only descriptor (unlike the
-            # POSIX runners that originally exercised this path).  The
-            # temporary file is ours and still writable, so use a descriptor
-            # that can flush the copied SQLite bytes on every supported host.
-            with open(temporary, "r+b") as stream:
-                os.fsync(stream.fileno())
-            # Same-filesystem hard link atomically publishes a *new* name.
-            # Unlike os.replace, it cannot overwrite a preexisting destination.
-            os.link(temporary, destination)
-        finally:
+                original.backup(target)
+
+        # Verify the exact snapshot, not a separately observed live source head.
+        _require_existing_source_journal(temporary, agent_id)
+        if _read_first_event(temporary, agent_id) is None:
+            raise ValueError("copied SQLite journal has no Aquarium bootstrap")
+        with _open_readonly(temporary) as copied:
+            row = copied.execute(
+                "SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1"
+            ).fetchone()
+            if row is None:
+                raise ValueError("copied SQLite journal has no committed history")
+            copied_head = row[0]
+
+        with Aquarium(temporary, seed, graph,
+                      external_expected_head=copied_head, **opts) as replayed:
+            snapshot = replayed.checkpoint()
+            if snapshot["journal_head"] != copied_head:
+                raise AquariumError("copied journal differs from committed source head")
+            count = replayed.store.count()
+        if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
+            raise AquariumError("unexported SQLite backup WAL sidecar")
+        checksum = _sha256(temporary)
+        # The stage is ours (0600); flush it before atomic, no-clobber publish.
+        with open(temporary, "r+b") as stream:
+            os.fsync(stream.fileno())
+        os.link(temporary, destination)
+    finally:
+        if temporary is not None:
             for suffix in ("", "-wal", "-shm"):
                 try:
                     os.unlink(temporary + suffix)
                 except FileNotFoundError:
                     pass
+
     return {"schema": "mojum.aquarium.cold-copy/1",
-            "agent_id": agent_id, "tick": before["tick"],
-            "journal_head": before["journal_head"],
+            "agent_id": agent_id, "tick": snapshot["tick"],
+            "journal_head": snapshot["journal_head"],
             "db_sha256": checksum, "event_count": count,
             "status": "VERIFIED_SYNTHETIC_REPLAY_NOT_LIVE_MIGRATION"}
 
