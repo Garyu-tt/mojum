@@ -9,6 +9,7 @@ requests, remote secrets, production databases, or external service calls.
 from __future__ import annotations
 
 from html.parser import HTMLParser
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -51,10 +52,11 @@ def chrome_binary():
     raise RuntimeError("Google Chrome/Chromium not installed; cannot claim browser smoke")
 
 
-def instrumented_html(original_html, source_text):
+def instrumented_html(original_html, source_text, *, expected_rejection=None):
     # Only a *test-owned, synthetic* local SQLite history is placed here.
     # Escaping '<' prevents any accidental closing of the inline script.
     literal = json.dumps(source_text, ensure_ascii=True).replace("<", "\\u003c")
+    rejection = json.dumps(expected_rejection, ensure_ascii=True).replace("<", "\\u003c")
     boot = r"""
 <script>
 window.addEventListener("load", async () => {
@@ -67,6 +69,22 @@ window.addEventListener("load", async () => {
       configurable: true, value: [file]
     });
     picker.dispatchEvent(new Event("change", {bubbles:true}));
+    const rejection = __REJECTION__;
+    if (rejection !== null) {
+      for (let retry=0;retry<100;retry++) {
+        if (el("status").textContent.includes(rejection)) {
+          document.documentElement.dataset.realChromeSmoke = JSON.stringify({
+            rejected: true,
+            reason: el("status").textContent,
+            controls_disabled: ["prev","play","next"].every(id => el(id).disabled),
+            displayed_policy: el("policy").textContent
+          });
+          return;
+        }
+        await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      throw Error("mixed-policy trace was not explicitly rejected");
+    }
     let loaded = false;
     for (let retry=0;retry<100;retry++) {
       if (el("tick").textContent === "0") {loaded=true;break;}
@@ -107,7 +125,7 @@ window.addEventListener("load", async () => {
   }
 });
 </script>
-""".replace("__TRACE__", literal)
+""".replace("__TRACE__", literal).replace("__REJECTION__", rejection)
     if original_html.count("</body>") != 1:
         raise AssertionError("viewer page missing unique body end")
     return original_html.replace("</body>", boot + "\n</body>")
@@ -260,6 +278,7 @@ def inspect_actual_mobile_chromedriver(chrome, html, *, width, height):
 def main():
     chrome = chrome_binary()  # No silent skip/fallback to JS VM.
     reports = []
+    source_by_policy = {}
     with tempfile.TemporaryDirectory(prefix="mojum-private-chrome-fixture-") as tmp:
         private = Path(tmp)
         original = VIEWER.read_text(encoding="utf-8")
@@ -279,6 +298,7 @@ def main():
                 motor_policy=policy,
             )
             data = trace.read_text(encoding="utf-8")
+            source_by_policy[policy] = data
             injected = instrumented_html(original, data)
             for width, height, mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
                 report = (inspect_actual_mobile_chromedriver(
@@ -336,6 +356,28 @@ def main():
                     "canvas_width_px": round(viewport["canvasWidth"]),
                     "horizontal_overflow": False,
                 })
+        # Adversarial file only: splice real committed first v1 frame and real
+        # committed second v2 frame, then recompute exact byte SHA-256.
+        # Viewer must fail closed because provenance is mixed even though
+        # the replacement footer has an internally consistent frame digest.
+        old_lines = source_by_policy["coarse_v1"].splitlines()
+        new_lines = source_by_policy["local_cell_v2"].splitlines()
+        wire = (old_lines[0] + "\n" + new_lines[1] + "\n").encode("utf-8")
+        footer = json.loads(old_lines[-1])
+        footer["trace_integrity"]["sha256"] = hashlib.sha256(wire).hexdigest()
+        footer["trace_integrity"]["byte_length"] = len(wire)
+        mixed = wire.decode("utf-8") + json.dumps(
+            footer, sort_keys=True, ensure_ascii=False,
+            allow_nan=False, separators=(",", ":")
+        ) + "\n"
+        result = inspect_actual_browser(
+            chrome, instrumented_html(
+                original, mixed, expected_rejection="Смешаны разные версии моторной политики"
+            ), width=1280, height=800
+        )
+        assert result["rejected"] is True
+        assert result["controls_disabled"] is True
+        assert result["displayed_policy"] == "—"
     assert len(reports) == 4, "both persisted policy versions need both browsers"
     print(json.dumps({
         "status": "PASS_ACTUAL_HEADLESS_CHROME",
