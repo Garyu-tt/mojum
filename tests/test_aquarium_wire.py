@@ -59,6 +59,23 @@ class AquariumWireTests(unittest.TestCase):
                     include_nonpublic=True)["projection"]["items"]
             ]
 
+    def committed_v4_sensory_events(self, ticks=3):
+        with Aquarium(
+            self.db.with_name("v4-sensory-source.sqlite3"),
+            SEED,
+            GRAPH,
+            neural_mode="disabled",
+            motor_mode="local_cell_v4",
+            sensory_mode="toy_probe_v2",
+        ) as aquarium:
+            for _ in range(ticks):
+                aquarium.step()
+            return [
+                item["event"]
+                for item in aquarium.store.dataset(
+                    include_nonpublic=True)["projection"]["items"]
+            ]
+
     def rewrite_journal(self, events, name):
         """Re-append events into a fresh chain so only the payload is forged."""
         path = self.db.with_name(name)
@@ -161,6 +178,28 @@ class AquariumWireTests(unittest.TestCase):
         for mutate, pattern, name in cases:
             with self.subTest(case=name):
                 self.assert_forged_frame_rejected(mutate, pattern, name)
+
+    def test_inspector_rejects_sensory_revision_detached_from_world(self):
+        cases = (
+            (self.committed_sensory_events, 1,
+             "forged-sensory-world-continuity.sqlite3"),
+            (self.committed_v4_sensory_events, 0,
+             "forged-v4-sensory-motor-revision.sqlite3"),
+        )
+        for make_events, frame_index, name in cases:
+            with self.subTest(case=name):
+                events = json.loads(json.dumps(make_events()))
+                frames = [
+                    event for event in events
+                    if event["topic"] == "aquarium.frame"
+                ]
+                contact = frames[frame_index]["payload"]["toy_contact"]
+                contact["observation"]["world_revision"] = "0" * 64
+                contact["probe_intent"]["source_revision"] = "0" * 64
+                path, head = self.rewrite_journal(events, name)
+                with self.assertRaisesRegex(
+                        NoosphereError, "causal world revision"):
+                    inspect_journal(path, external_expected_head=head)
 
     def test_genuine_versioned_sensory_journal_still_inspects(self):
         events = self.committed_sensory_events()

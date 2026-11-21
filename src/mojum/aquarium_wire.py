@@ -99,7 +99,8 @@ def _same_wire(left, right):
         return False
 
 
-def _check_sensory_v2_frame(contact, tick, model):
+def _check_sensory_v2_frame(
+        contact, tick, model, expected_world_revision=None):
     """Replay one versioned sensory transition and return its next model."""
     if (type(contact) is not dict or set(contact) != _SENSORY_KEYS
             or contact["schema"] != SENSORY_BRIDGE_V2
@@ -116,6 +117,11 @@ def _check_sensory_v2_frame(contact, tick, model):
             or type(observation["visible"]) is not bool
             or not _hex64(observation["world_revision"])):
         raise NoosphereError("sensory observation disagrees with the frame tick")
+    if (expected_world_revision is not None
+            and (not _hex64(expected_world_revision)
+                 or observation["world_revision"] != expected_world_revision)):
+        raise NoosphereError(
+            "sensory observation disagrees with the causal world revision")
 
     intent = contact["probe_intent"]
     if (type(intent) is not dict or set(intent) != _PROBE_KEYS
@@ -294,9 +300,10 @@ def _check_escape_frame(frame, motor):
 
 def _check_policy_frame(
         frame, contract, temporal_schema, sensory_mode=None,
-        sensory_model=None):
+        sensory_model=None, expected_sensory_world_revision=None):
     if frame.get("schema") != FRAME_SCHEMA:
         raise NoosphereError("unknown Aquarium frame schema")
+    motor_world_revision = None
     if contract is None:
         if "developmental" in frame or "developmental_controller" in frame:
             raise NoosphereError("unexpected developmental frame in scripted journal")
@@ -316,6 +323,7 @@ def _check_policy_frame(
                 raise NoosphereError("frame disagrees with its pinned policy schema")
             if state_schema == V4_SCHEMA:
                 observation = _object_field(motor, "observation")
+                motor_world_revision = observation.get("world_revision")
                 intent = _object_field(motor, "intent")
                 learning = _object_field(motor, "learning")
                 tick = frame["tick"]  # Verified as exact int by inspect_event.
@@ -328,6 +336,7 @@ def _check_policy_frame(
                     return any(type(fields.get(key)) is not int or
                                fields[key] != value for key, value in expected.items())
                 if (observation.get("schema") != EPOCH_SENSE_SCHEMA
+                        or not _hex64(motor_world_revision)
                         or wrong_clock(observation, {"absolute_tick": tick, **expected_epoch})
                         or wrong_clock(intent, {"tick": tick, **expected_epoch})
                         or wrong_clock(learning, expected_epoch)):
@@ -344,9 +353,19 @@ def _check_policy_frame(
         # sensory observations absent from the pinned bootstrap selector.
         raise NoosphereError("unexpected sensory frame without a pinned sensory policy")
     if sensory_mode == "toy_probe_v2":
+        if (motor_world_revision is not None
+                and expected_sensory_world_revision is not None
+                and motor_world_revision != expected_sensory_world_revision):
+            raise NoosphereError(
+                "motor observation disagrees with world revision continuity")
+        expected_revision = (
+            motor_world_revision
+            if motor_world_revision is not None
+            else expected_sensory_world_revision
+        )
         contact = _object_field(frame, "toy_contact")
         sensory_model = _check_sensory_v2_frame(
-            contact, frame["tick"], sensory_model)
+            contact, frame["tick"], sensory_model, expected_revision)
     elif sensory_mode == "toy_probe":
         contact = _object_field(frame, "toy_contact")
         if contact.get("schema") != SENSORY_BRIDGE_V1:
@@ -369,10 +388,11 @@ def inspect_journal(path, *, external_expected_head=None):
     dt_ns = None
     frames = 0
     sensory_model = None
+    sensory_world_revision = None
 
     def inspect_event(seq, event):
         nonlocal policy, contract, temporal, sensory_mode, frames, epoch_index, dt_ns
-        nonlocal sensory_model
+        nonlocal sensory_model, sensory_world_revision
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -410,7 +430,14 @@ def inspect_journal(path, *, external_expected_head=None):
                 if frames >= MAX_ABSOLUTE_TICKS:
                     raise NoosphereError("v4 frame exceeds the pinned absolute-tick cap")
             sensory_model = _check_policy_frame(
-                frame, contract, temporal, sensory_mode, sensory_model)
+                frame, contract, temporal, sensory_mode, sensory_model,
+                sensory_world_revision)
+            if sensory_mode == "toy_probe_v2":
+                world_revision = _object_field(frame, "world").get("revision")
+                if not _hex64(world_revision):
+                    raise NoosphereError(
+                        "sensory frame lacks its causal post-move world revision")
+                sensory_world_revision = world_revision
             frames += 1
         elif topic == "aquarium.epoch":
             if policy not in ("local_cell_v4", "local_cell_v4+toy_probe_v2"):
