@@ -74,8 +74,12 @@ def _stage_sqlite(source, stage):
         raise ValueError("copied SQLite snapshot exceeds 128 MB budget")
 
 
-def _render_private_frames(aquarium):
-    """Return bounded, validated UTF-8 bytes suitable for local File API."""
+def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
+    """Verify full history but emit only an explicitly requested bounded slice.
+
+    With neither range argument the behavior stays full-history or fail:
+    never silently truncate the user's private event log.
+    """
     snapshot = aquarium.checkpoint()
     count = aquarium.store.count()
     # A valid bootstrapped source is mandatory. No synthetic data generation.
@@ -88,7 +92,10 @@ def _render_private_frames(aquarium):
 
     wire_parts = []
     total = 0
+    total_frames = 0
     frames = 0
+    range_begin = 0 if start_tick is None else start_tick
+    range_end = None if start_tick is None else start_tick + frame_limit
     for row in rows:
         event = row["event"]
         if event["topic"] != "aquarium.frame":
@@ -98,8 +105,11 @@ def _render_private_frames(aquarium):
         frame = event["payload"]
         if (frame.get("schema") != "mojum.aquarium.frame/1"
                 or type(frame.get("tick")) is not int
-                or frame["tick"] != frames):
+                or frame["tick"] != total_frames):
             raise AquariumError("inconsistent committed frame sequence")
+        total_frames += 1
+        if frame["tick"] < range_begin or (range_end is not None and frame["tick"] >= range_end):
+            continue
         frames += 1
         if frames > MAX_FRAMES:
             raise ValueError("viewer supports at most 5000 frames; refusing truncation")
@@ -112,8 +122,12 @@ def _render_private_frames(aquarium):
         if total > MAX_TRACE_BYTES:
             raise ValueError("private trace exceeds viewer 24 MiB budget")
         wire_parts.append(encoded)
-    if not frames or frames != snapshot["tick"]:
+    if not total_frames or total_frames != snapshot["tick"]:
         raise AquariumError("expected nonempty complete Aquarium frame history")
+    if not frames:
+        raise ValueError("requested trace segment has no committed frames")
+    next_tick = range_begin + frames
+    has_more = next_tick < total_frames
 
     # Viewer recognizes checkpoint schema with stored_events; do not dump
     # internal neural weights or private genotype in the summary footer.
@@ -123,6 +137,8 @@ def _render_private_frames(aquarium):
         "tick": snapshot["tick"],
         "journal_head": snapshot["journal_head"],
         "stored_events": count,
+        "trace_range": {"start_tick": range_begin, "next_tick": next_tick,
+                        "has_more": has_more, "source_total_ticks": total_frames},
         "export_status": "REPLAY_VERIFIED_SYNTHETIC_PRIVATE_NOT_AUTHENTICATED",
     }
     encoded_footer = (json.dumps(footer, sort_keys=True, ensure_ascii=False,
@@ -131,7 +147,7 @@ def _render_private_frames(aquarium):
     if total > MAX_TRACE_BYTES:
         raise ValueError("private trace exceeds viewer 24 MiB budget")
     wire_parts.append(encoded_footer)
-    return b"".join(wire_parts), frames, snapshot, count
+    return b"".join(wire_parts), frames, snapshot, count, range_begin, next_tick, has_more
 
 
 def export_private_trace(source_db, output_jsonl, seed, graph, *,
@@ -140,7 +156,8 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
                          agent_id="dante-fixture-001",
                          neural_mode="shadow",
                          room=None, start=(1.0, 2.0),
-                         dt_ns=10_000_000):
+                         dt_ns=10_000_000,
+                         start_tick=None, frame_limit=None):
     """Export real verified SQLite events only to a fresh, mode-0600 local file.
 
     All integrity checks happen on a consistent temporary SQLite snapshot,
@@ -154,6 +171,13 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
             type(expected_journal_head) is not str
             or _HEAD.fullmatch(expected_journal_head) is None):
         raise ValueError("independent journal head must be lowercase 64-digit SHA-256")
+    if (start_tick is None) != (frame_limit is None):
+        raise ValueError("start_tick and frame_limit must be supplied together")
+    if start_tick is not None:
+        if type(start_tick) is not int or not 0 <= start_tick < 10_000:
+            raise ValueError("start_tick must be an integer in 0..9999")
+        if type(frame_limit) is not int or not 1 <= frame_limit <= MAX_FRAMES:
+            raise ValueError("frame_limit must be an integer in 1..5000")
     source = _source(source_db)
     dest = _destination(output_jsonl)
     if source.resolve() == dest.resolve():
@@ -175,7 +199,10 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
         with Aquarium(staged, seed, graph,
                       external_expected_head=expected_journal_head,
                       **options) as replayed:
-            payload, frames, checkpoint, events = _render_private_frames(replayed)
+            payload, frames, checkpoint, events, first_tick, next_tick, has_more = (
+                _render_private_frames(replayed, start_tick=start_tick,
+                                       frame_limit=frame_limit)
+            )
 
     # Atomic, no-clobber publication, with restrictive private permissions.
     # Only the completed validated bytes receive their final output filename.
@@ -199,6 +226,10 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
         "schema": SCHEMA,
         "agent_id": checkpoint["agent_id"],
         "frames": frames,
+        "first_tick": first_tick,
+        "next_tick": next_tick,
+        "has_more": has_more,
+        "source_total_ticks": checkpoint["tick"],
         "event_count": events,
         "journal_head": checkpoint["journal_head"],
         "trace_sha256": hashlib.sha256(payload).hexdigest(),
@@ -219,6 +250,8 @@ def main():
     parser.add_argument("--agent-id", default="dante-fixture-001")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--expected-head", default=None)
+    parser.add_argument("--start-tick", type=int)
+    parser.add_argument("--frame-limit", type=int)
     parser.add_argument("--allow-private-export", action="store_true",
                         help="explicitly acknowledge PRIVATE unencrypted local history disclosure")
     args = parser.parse_args()
@@ -229,6 +262,7 @@ def main():
         agent_id=args.agent_id, neural_mode=args.neural_mode,
         expected_journal_head=args.expected_head,
         allow_private_export=args.allow_private_export,
+        start_tick=args.start_tick, frame_limit=args.frame_limit,
     )
     print(json.dumps(meta, sort_keys=True, ensure_ascii=False, allow_nan=False))
 
