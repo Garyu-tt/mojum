@@ -1,0 +1,47 @@
+name: Mojum offline room designer independent QA
+
+on:
+  pull_request:
+    paths:
+      - "tools/room_designer.html"
+      - "tools/room_designer.js"
+      - "tests/qa_room_designer_node.cjs"
+      - ".github/workflows/r015-offline-room-designer.yml"
+      - "docs/R015_OFFLINE_ROOM_DESIGNER.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-room-designer:
+    name: SVG pointer/keyboard + Python ABI (${{ matrix.node-version }} / py${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22"]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "${{ matrix.node-version }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Offline HTML/JS UI and exact Python draft preflight
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          node --test tests/qa_room_designer_node.cjs 2>&1 | tee room-designer-qa.log
+          if grep -q '^not ok' room-designer-qa.log; then
+            echo "FAIL: room designer interaction test" >&2
+            exit 1
+          fi
