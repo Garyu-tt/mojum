@@ -68,6 +68,10 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         self.assertIn('id="import-file"', text)
         self.assertIn('id="download"', text)
         self.assertIn('mojum.world.point-room-draft/1', text)
+        # Current main has no typed-room journal CLI. Never bundle a stale
+        # command suggesting the authoring draft can be persisted as SQLite.
+        self.assertNotIn("python -m mojum.room_input", text)
+        self.assertNotIn("--new-room-contract", text)
         self.assertNotIn('src="http', text)
         self.assertNotIn('href="http', text)
         self.assertNotIn("localStorage.", text)
