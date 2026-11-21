@@ -237,6 +237,14 @@ class CellExplorerV3Escape:
             if (selected == "rest"
                     and self.consecutive_rests >= MAX_CONSECUTIVE_RESTS):
                 selected = unblocked_moves[0]
+            elif (selected != "rest"
+                    and self.consecutive_rests < MAX_CONSECUTIVE_RESTS
+                    and self.consecutive_blocked_probes
+                        >= REPROBE_BLOCKED_BEFORE_REST):
+                # The pause after a measured bout of failed probes is a
+                # property of the streak, not of the current cell. A fresh or
+                # foreign cell cannot extend it beyond the versioned ceiling.
+                selected = "rest"
         elif (self.consecutive_rests < MAX_CONSECUTIVE_RESTS
                 and self.consecutive_blocked_probes >= REPROBE_BLOCKED_BEFORE_REST):
             # One bounded pause after a measured bout of failed probes.
