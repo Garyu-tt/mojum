@@ -65,7 +65,7 @@ def _require_existing_source_journal(path, agent_id):
             "WHERE type='table' AND name IN ('metadata', 'events')"
         )}
         if tables != {"metadata", "events"}:
-            raise ValueError("export requires existing nonempty Aquarium journal: metadata and events tables missing")
+            raise ValueError("export requires existing metadata and events tables")
         saved = dict(db.execute("SELECT k,v FROM metadata"))
         if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
             raise ValueError("export requires complete matching journal metadata")
@@ -146,71 +146,78 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
 def export_cold_copy(source_db, destination_db, seed, graph, *,
                      agent_id="dante-fixture-001", neural_mode="shadow",
                      room=None, start=(1.0, 2.0), dt_ns=10_000_000):
-    """Replay-verified SQLite cold copy, never opening caller's source writable.
+    """Make and replay-verify a no-clobber SQLite backup of a running journal.
 
-    A read-only SQLite online backup captures committed WAL pages. The copied
-    journal is then independently replayed through Aquarium in private staging.
-    Concurrent source writes may be present in the captured point-in-time copy;
-    all reported metadata comes exclusively from that validated snapshot.
+    A read-only SQLite connection takes a consistent online backup, including
+    committed WAL pages. Only the temporary backup is opened for full Aquarium
+    replay, so source history is never opened writable during export.
+    Concurrent commits are reflected in the backup's verified snapshot.
     """
     source = _source_file(source_db)
     destination = _destination(destination_db)
+    # Export is for a committed journal, never a request to initialize one.
+    # Aquarium auto-bootstraps empty SQLite sources after a writable open.
+    # Inspect the existing source read-only before allowing that side effect.
+    if _read_first_event(source, agent_id) is None:
+        raise ValueError("export requires an existing nonempty Aquarium journal")
     opts = _options(agent_id, neural_mode, room, start, dt_ns)
     _require_existing_source_journal(source, agent_id)
-    temporary = None
+    # The source is an archive input, never a writable Aquarium. Reopening
+    # it through Aquarium would create a bootstrap in a valid-but-empty SQLite
+    # store (and can update WAL or file permissions on failed exports).
+    # SQLite's online backup API works with a read-only source connection and
+    # includes committed WAL pages in one consistent snapshot.
+    fd, temporary = tempfile.mkstemp(
+        prefix=".mojum-cold-copy-", suffix=".sqlite3",
+        dir=destination.parent,
+    )
+    os.close(fd)
     try:
-        # Export must never initialize or repair the ORIGINAL source journal.
         with closing(sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
-                                     uri=True, timeout=10.0)) as original:
+                                     uri=True, timeout=5.0)) as original:
             original.execute("PRAGMA query_only=ON")
             if (original.execute("PRAGMA page_count").fetchone()[0]
                     * original.execute("PRAGMA page_size").fetchone()[0]
                     > MAX_BACKUP_BYTES):
                 raise ValueError("source SQLite exceeds copy budget")
-            fd, temporary = tempfile.mkstemp(
-                prefix=".mojum-cold-copy-", suffix=".sqlite3",
-                dir=destination.parent,
-            )
-            os.close(fd)
             with closing(sqlite3.connect(temporary)) as target:
                 original.backup(target)
-
-        # Verify the exact snapshot, not a separately observed live source head.
-        _require_existing_source_journal(temporary, agent_id)
-        if _read_first_event(temporary, agent_id) is None:
-            raise ValueError("copied SQLite journal has no Aquarium bootstrap")
-        with _open_readonly(temporary) as copied:
-            row = copied.execute(
-                "SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1"
-            ).fetchone()
+        # Pin a nonempty recorded head before the temporary copy is opened
+        # through Aquarium. This prevents a plain/empty SQLite database from
+        # being silently upgraded into a new, apparently valid Aquarium backup.
+        with closing(sqlite3.connect(temporary)) as copied:
+            try:
+                row = copied.execute(
+                    "SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1"
+                ).fetchone()
+            except sqlite3.Error as exc:
+                raise ValueError("source lacks committed Aquarium history") from exc
             if row is None:
-                raise ValueError("copied SQLite journal has no committed history")
+                raise ValueError("source lacks committed Aquarium history")
             copied_head = row[0]
-
         with Aquarium(temporary, seed, graph,
-                      external_expected_head=copied_head, **opts) as replayed:
-            snapshot = replayed.checkpoint()
-            if snapshot["journal_head"] != copied_head:
+                      external_expected_head=copied_head, **opts) as reopened:
+            before = reopened.checkpoint()
+            if before["journal_head"] != copied_head:
                 raise AquariumError("copied journal differs from committed source head")
-            count = replayed.store.count()
+            count = reopened.store.count()
+        # Reopening in WAL mode must not leave any unexported sidecars.
         if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
             raise AquariumError("unexported SQLite backup WAL sidecar")
         checksum = _sha256(temporary)
-        # The stage is ours (0600); flush it before atomic, no-clobber publish.
         with open(temporary, "r+b") as stream:
             os.fsync(stream.fileno())
+        # Publish the validated artifact under a new name, never clobbering.
         os.link(temporary, destination)
     finally:
-        if temporary is not None:
-            for suffix in ("", "-wal", "-shm"):
-                try:
-                    os.unlink(temporary + suffix)
-                except FileNotFoundError:
-                    pass
-
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.unlink(temporary + suffix)
+            except FileNotFoundError:
+                pass
     return {"schema": "mojum.aquarium.cold-copy/1",
-            "agent_id": agent_id, "tick": snapshot["tick"],
-            "journal_head": snapshot["journal_head"],
+            "agent_id": agent_id, "tick": before["tick"],
+            "journal_head": before["journal_head"],
             "db_sha256": checksum, "event_count": count,
             "status": "VERIFIED_SYNTHETIC_REPLAY_NOT_LIVE_MIGRATION"}
 
