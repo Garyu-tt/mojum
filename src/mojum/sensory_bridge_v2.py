@@ -2,8 +2,10 @@
 
 The bridge keeps the legacy ``toy_probe`` path untouched.  ``toy_probe_v2``
 uses a two-tick empirical re-probe cadence so the bounded association model
-can be exercised beyond 4,000 measured contacts before the canonical 10,000
-event replay budget is reached.
+can be exercised beyond 4,000 measured contacts before the
+``developmental_fixture`` motor-specific 10,000-event replay ceiling is
+reached.  The global Aquarium journal ceiling is larger and is not changed by
+this opt-in bridge.
 """
 
 from __future__ import annotations
