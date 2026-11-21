@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from functools import lru_cache
 import itertools
 import json
 from pathlib import Path
@@ -34,6 +35,50 @@ def _unique_keys(pairs):
             raise InventoryError("duplicate JSON key: " + str(key))
         out[key] = value
     return out
+
+
+
+def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
+    """Exact, deterministic maximum-replica set packing for at most 12 GPUs.
+
+    The old smallest-cardinality-first greedy selection can strand small
+    devices: 9+9 GiB occupies both large GPUs, although 9+3+3 twice fits.
+    Cache by used-device mask and allow skipping a device entirely.
+    """
+    indices = sorted(devices)
+    if len(indices) > 12:
+        raise InventoryError("exact placement accepts at most 12 GPUs")
+    usable = {i: max(0, devices[i]["free_mib"] - reserve_mib) for i in indices}
+    n = len(indices)
+
+    def score(groups):
+        return (
+            -len(groups),
+            sum(len(group) for group in groups),
+            sum(sum(usable[i] for i in group) - model_mib for group in groups),
+            groups,
+        )
+
+    @lru_cache(maxsize=None)
+    def search(mask):
+        first = next((i for i in range(n) if not mask & (1 << i)), None)
+        if first is None:
+            return ()
+        best = search(mask | (1 << first))
+        remaining = [i for i in range(first + 1, n) if not mask & (1 << i)]
+        for count in range(1, min(max_gpus, len(remaining) + 1) + 1):
+            for tail in itertools.combinations(remaining, count - 1):
+                positions = (first,) + tail
+                candidate_group = tuple(indices[i] for i in positions)
+                if sum(usable[i] for i in candidate_group) < model_mib:
+                    continue
+                group_mask = sum(1 << i for i in positions)
+                candidate = (candidate_group,) + search(mask | group_mask)
+                if score(candidate) < score(best):
+                    best = candidate
+        return best
+
+    return search(0)
 
 
 def validate_inventory(data):
@@ -121,23 +166,31 @@ def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE
         raise InventoryError("invalid model path")
 
     unused = {gpu["index"]: gpu for gpu in gpus if gpu["supported"]}
+    # Exact maximum-replica placement is bounded at 12 devices (4096 masks).
+    # Larger fleets retain a deterministic greedy estimate, explicitly labeled.
+    exact_groups = (_optimal_placement(unused, model_mib, reserve_mib, max_gpus)
+                    if len(unused) <= 12 else None)
     groups = []
     while len(groups) < max_replicas:
-        chosen = None
-        # Choose the smallest cardinality, then the least wasted VRAM.
-        # Each replica owns whole devices; no GPU is shared between replicas.
-        for cardinality in range(1, min(max_gpus, len(unused)) + 1):
-            eligible = []
-            for devices in itertools.combinations(unused.values(), cardinality):
-                usable = sum(max(0, d["free_mib"] - reserve_mib) for d in devices)
-                if usable >= model_mib:
-                    eligible.append((usable - model_mib,
-                                     tuple(d["index"] for d in devices), devices))
-            if eligible:
-                chosen = min(eligible, key=lambda x: (x[0], x[1]))[2]
+        if exact_groups is not None:
+            if len(groups) >= len(exact_groups):
                 break
-        if chosen is None:
-            break
+            chosen = tuple(unused[i] for i in exact_groups[len(groups)])
+        else:
+            chosen = None
+            # Bounded heuristic only. This can underestimate a heterogeneous fleet.
+            for cardinality in range(1, min(max_gpus, len(unused)) + 1):
+                eligible = []
+                for devices in itertools.combinations(unused.values(), cardinality):
+                    usable = sum(max(0, d["free_mib"] - reserve_mib) for d in devices)
+                    if usable >= model_mib:
+                        eligible.append((usable - model_mib,
+                                         tuple(d["index"] for d in devices), devices))
+                if eligible:
+                    chosen = min(eligible, key=lambda x: (x[0], x[1]))[2]
+                    break
+            if chosen is None:
+                break
         indices = [d["index"] for d in chosen]
         for index in indices:
             del unused[index]
@@ -162,6 +215,8 @@ def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE
                 "Do not set --parallel above 1 before per-replica memory and throughput tests.",
                 "Do not expose the model service beyond loopback; do not launch via untrusted shell input.",
                 "Local GPU observation is neither cryptographic attestation nor deployment authorization."]
+    if exact_groups is None:
+        warnings.append("More than 12 supported GPUs: greedy estimate may undercount feasible replicas.")
     if any(g["supported"] and tuple(int(x) for x in g["compute_cap"].split(".")) < (7, 5)
            for g in gpus):
         warnings.append("Pascal/older GPUs need a compatible CUDA build; native MXFP4 hardware acceleration is unavailable.")
@@ -172,6 +227,7 @@ def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE
         "observed_local_inventory": False,
         "model_budget_mib": model_mib, "per_gpu_reserve_mib": reserve_mib,
         "estimated_replicas": len(groups), "live_replicas": 0,
+        "placement_strategy": "exact_max_replicas" if exact_groups is not None else "bounded_greedy",
         "deploy_performed": False, "ready_for_merge": False,
         "replicas": groups,
         "unused_gpu_indices": sorted(set(g["index"] for g in gpus) -
