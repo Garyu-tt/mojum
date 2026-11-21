@@ -114,38 +114,28 @@ head also needs separate trusted storage to prevent total rollback.
   independent acceptance; do not auto-promote them because QA passes.
 
 
-## Additional R0.16 parent compatibility regression discovered
+## Parent budget regression and upstream reconciliation
 
-While checking #140's exact baseline, the original Aquarium and v4
-epoch integration suites were **RED** (runs 44855942810 and
-44855942775). Three existing budget tests monkeypatched the legacy
-`MAX_REPLAY_EVENTS` downward, but #140 captured a static
-`self.journal_limit` on constructor and then used that cache
-for admission, replay and portable-host preflight. The tests reported
-`AssertionError: ...Error not raised`. This is a real legacy safety
-compatibility defect, not merely an obsolete test.
+During development, prior parent #140 SHA 06998554 was confirmed
+RED in its Aquarium and explicit-v4 epoch workflows. Three existing
+budget tests failed because a new static `journal_limit` no longer
+honored test/runtime reductions to legacy `MAX_REPLAY_EVENTS`.
+These are genuine compatibility/safety failures, not flakes.
 
-The daughter branch implements `Aquarium._effective_journal_limit()`
-and uses it for append, pre-epoch admission and cold-replay bounds.
-Legacy mode uses the **minimum** of original selected bound and the
-current fail-closed legacy `MAX_REPLAY_EVENTS`, including dynamically
-tightened budget settings. The explicit segmented source continues
-to use its own separate journal limit; the older constant must not
-silently defeat the opted-in higher backend capacity. The portable
-host uses both the actual Aquarium effective limit and its own
-legacy preflight limit. No policy/motor/sensor/SQLite wire schema
-changes.
+The separate parent developer has now fixed that defect directly in
+#140 HEAD b096520148621080dd2ab0beedc71b22c8383909.
+Our child branch has **adopted the parent's exact source blobs** of
+`src/mojum/aquarium.py` and `src/mojum/portable_host.py`, rather
+than independently imposing a second competing fix. The upstream
+`_selected_journal_limit()` method preserves a dynamic legacy limit
+while allowing explicitly segmented sources to use their own cap.
 
-Dedicated `test_r016_legacy_budget_compat.py` covers: already-open
-legacy writer refuses a newly tightened journal limit without appending;
-cold replay refuses an already over-limit source; portable host refuses
-the entire session before any step; and segmented v4 can still run
-under artificial tiny legacy test constants. The original preexisting
-`test_streaming_journal_replay.py`,
-`test_portable_host.py` and `test_epoch_v4.py` regressions must also
-return green on the exact child HEAD before any acceptance.
+The child adds `tests/test_r016_legacy_budget_compat.py` verifying
+already-open legacy refusal and cold replay preflight; a portable-host
+legacy refusal before writing; and the fact that opting into
+segmented-v4 still works under artificially tiny old legacy budgets.
+The original old tests remain in place, never skipped or modified.
 
-This compatibility change does not assert that owner-controlled
-configuration can safely modify quotas in production at runtime;
-it restores the prior testable fail-closed behavior and preserves
-the default legacy format and separate segmented source.
+**All exact-head CI must still turn green**: adopting a source patch
+does not itself demonstrate a passing build. Parent #140 and this
+child remain Draft, with no automatic main merge or owner approval.
