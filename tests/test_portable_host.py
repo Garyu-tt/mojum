@@ -208,6 +208,31 @@ class PortableHostTests(unittest.TestCase):
             self.assertEqual(reopened.checkpoint()["journal_head"],
                              two["journal_head"])
 
+    def test_explicit_controller_mode_commits_and_reopens_its_pinned_wire(self):
+        first = self.invoke("--brain-mode", "developmental_controller")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        one = json.loads(first.stdout)
+        self.assertEqual(one["brain_mode"], "developmental_controller")
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.tick, 4)
+            projection = aquarium.store.dataset(
+                include_nonpublic=True, limit=10,
+            )["projection"]["items"]
+            frame = projection[-1]["event"]["payload"]
+            self.assertEqual(frame["brain"]["status"],
+                             "SYNTHETIC_DEVELOPMENTAL_CONTROLLER")
+            first_head = aquarium.checkpoint()["journal_head"]
+
+        second = self.invoke("--brain-mode", "developmental_controller")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        two = json.loads(second.stdout)
+        self.assertEqual(two["brain_mode"], "developmental_controller")
+        self.assertEqual(two["start_tick"], 4)
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.checkpoint()["journal_head"],
+                             two["journal_head"])
+            self.assertNotEqual(two["journal_head"], first_head)
+
     def test_wrong_mode_or_head_refuses_extra_events(self):
         self.assertEqual(self.invoke().returncode, 0)
         with self.open_aquarium() as q:

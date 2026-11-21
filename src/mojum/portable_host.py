@@ -150,6 +150,11 @@ def main(argv=None):
                         help="wall-clock delay 20..3600000 ms, not virtual dt")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
+    parser.add_argument(
+        "--brain-mode", choices=("placeholder", "developmental_controller"),
+        default="placeholder",
+        help="opt-in typed synthetic controller; placeholder remains the default",
+    )
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
@@ -172,6 +177,7 @@ def main(argv=None):
                 motor_mode="developmental_fixture",
                 sensory_mode="toy_probe",
                 temporal_mode=args.temporal_mode,
+                brain_mode=args.brain_mode,
                 external_expected_head=args.expected_head,
             ) as aquarium:
                 begin_tick = aquarium.tick
@@ -191,6 +197,7 @@ def main(argv=None):
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
                     "temporal_mode": args.temporal_mode,
+                    "brain_mode": args.brain_mode,
                     "wall_elapsed_seconds": round(time.monotonic() - started, 3),
                     "stop_reason": "signal" if stopped.is_set() else "completed",
                     "classification": "PRIVATE_SYNTHETIC_FOREGROUND_NOT_FULL_BRAIN",

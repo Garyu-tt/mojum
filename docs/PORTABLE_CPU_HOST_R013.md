@@ -18,6 +18,17 @@ From the checkout:
 PYTHONPATH=src python -m mojum.portable_host --db ./dante-host.sqlite3 --ticks 20 --interval-ms 50
 ```
 
+The explicit typed controller is opt-in and keeps the same bounded local
+journal:
+
+```text
+PYTHONPATH=src python -m mojum.portable_host --db ./dante-controller.sqlite3 --ticks 20 --interval-ms 50 --brain-mode developmental_controller
+```
+
+The default remains `placeholder` for compatibility. `developmental_controller`
+is a deterministic synthetic sensor-to-intent boundary, not a trained neural
+brain, physical actuation, or evidence of a complete digital organism.
+
 An installed package also exposes `mojum-host`. Re-run the same command with
 the same database to resume at the committed tick instead of creating a
 second organism. Stdout contains metadata only: tick range, journal head,
