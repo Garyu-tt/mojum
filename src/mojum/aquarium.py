@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
@@ -28,7 +29,8 @@ from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
-from .room_contract import encode_room_exact
+from .room_contract import encode_room_exact, RoomContractError
+from .room_input import read_new_room_contract
 from .typed_room_resume import load_verified_typed_room, TypedRoomResumeError
 from .verified_snapshot import (
     STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
@@ -674,6 +676,8 @@ def main():
                         help="opt-in exact int/float geometry manifest for NEW journals")
     parser.add_argument("--resume-typed-room", action="store_true",
                         help="load room and start from an existing pinned-head typed SQLite")
+    parser.add_argument("--new-room-contract", type=Path,
+                        help="local exact typed-room JSON for a NEW SQLite only")
     parser.add_argument("--expected-journal-head",
                         help="independent 64-hex source head required with --resume-typed-room")
     parser.add_argument("--watch", action="store_true",
@@ -688,6 +692,15 @@ def main():
             parser.error("--resume-typed-room requires --expected-journal-head")
     elif args.expected_journal_head is not None:
         parser.error("--expected-journal-head is only valid with --resume-typed-room")
+    if args.new_room_contract is not None:
+        if args.resume_typed_room:
+            parser.error("--new-room-contract and --resume-typed-room are mutually exclusive")
+        if args.room_numeric_contract != "typed_v1":
+            parser.error("--new-room-contract requires --room-numeric-contract typed_v1")
+        if args.developmental_policy == ARCHIVE_MODE:
+            parser.error("--new-room-contract cannot create a historical v2A archive")
+        if args.db.exists() or args.db.is_symlink():
+            parser.error("--new-room-contract refuses an existing SQLite destination")
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
     if args.developmental_policy == ARCHIVE_MODE and args.ticks != 0:
@@ -725,6 +738,28 @@ def main():
             "room": room, "start": start,
             "external_expected_head": args.expected_journal_head,
         }
+    elif args.new_room_contract is not None:
+        try:
+            room, start = read_new_room_contract(args.new_room_contract)
+        except RoomContractError as exc:
+            parser.error(str(exc))
+        geometry = {"room": room, "start": start}
+        # Two independent processes may both pass the earlier existence
+        # preflight. O_EXCL atomically reserves *one* new name, and must
+        # never truncate an older or concurrently created private journal.
+        # A crash may leave an empty reserved stub; intentionally refuse
+        # later reuse instead of deleting possibly owned data.
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(args.db, flags, 0o600)
+        except FileExistsError:
+            parser.error("--new-room-contract destination already exists (no overwrite)")
+        except OSError as exc:
+            parser.error("cannot reserve a NEW SQLite path: " + str(exc))
+        else:
+            os.close(fd)
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
