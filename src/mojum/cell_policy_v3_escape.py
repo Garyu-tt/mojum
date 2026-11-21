@@ -157,6 +157,30 @@ class CellExplorerV3Escape:
                     "more escape cell observations than elapsed ticks"
                 )
             observed_live += cell_observations
+        # The last rest or blocked-probe streak is a summary of actual
+        # consecutive outcomes in the most recently observed cell. An
+        # imported snapshot may not claim a streak without that evidence.
+        if state["records"] and (state["consecutive_rests"]
+                                 or state["consecutive_blocked_probes"]):
+            newest_tick = max(state["last_seen_at"].values())
+            newest_cells = [
+                key for key, tick in state["last_seen_at"].items()
+                if tick == newest_tick
+            ]
+            if len(newest_cells) != 1:
+                raise CellV3EscapeError("ambiguous latest escape cell for streak")
+            latest = state["records"][newest_cells[0]]
+            if (state["consecutive_rests"]
+                    > latest.get("rest", (0, 0))[0]):
+                raise CellV3EscapeError("escape rest streak lacks measured evidence")
+            blocked = sum(
+                counts[1] for action, counts in latest.items()
+                if action != "rest"
+            )
+            if state["consecutive_blocked_probes"] > blocked:
+                raise CellV3EscapeError(
+                    "escape blocked-probe streak lacks measured evidence"
+                )
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV3EscapeError("escape lost or double-counted observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:
