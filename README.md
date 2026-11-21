@@ -71,6 +71,26 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Replay a committed decision offline
+
+After the six-tick guided run above, export a local trace from the same journal.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium_trace_export --db ./range_guided_PRIVATE.sqlite3 --output ./guided.private.jsonl --motor-mode developmental_fixture --sensory-mode toy_probe --temporal-mode range_guided --allow-private-export
+```
+
+Open [aquarium_trace_viewer.html](examples/aquarium_trace_viewer.html) in your
+browser and select the exported file. At tick 5 the selected move is north.
+The viewer reports a prediction based on one earlier observation and the
+recorded change from range bucket 0 to 1.
+
+The exporter verifies the complete journal on a temporary SQLite copy. Use the
+same mode flags as the recording. Add `--expected-head SHA256` when verifying
+against a separately recorded journal head. For longer histories, add
+`--start-tick` and `--frame-limit` together to export a particular segment.
+Use a new output filename in a directory with private access. The JSONL is
+plaintext and its checksum detects accidental corruption.
+
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
