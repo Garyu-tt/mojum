@@ -56,6 +56,32 @@ test("invalid displacement and corrupted preview start fail closed",()=>{
   assert.throws(()=>W.step(room,{...original,x:2.05,y:2},0,0),/Некорректный/);
 });
 
+test("corrupt counters and malformed trace history fail closed without mutation",()=>{
+  const room=example(), first=W.begin(room);
+  const good=W.step(room,first,.25,0);
+  const before=JSON.stringify(good);
+  const sparse=new Array(2);
+  sparse[1]=good.trail[1];
+  const forged=[
+    {...good,blocked:-1},
+    {...good,blocked:2},
+    {...good,blocked:"0"},
+    {...good,blocked:0.5},
+    {...good,trail:[]},
+    {...good,trail:null},
+    {...good,trail:good.trail.concat(good.trail[1])},
+    {...good,trail:sparse},
+    {...good,trail:[good.trail[0],{x:3,y:3}]},
+    {...good,trail:[{x:2.0,y:2.5},good.trail[1]]},
+    {...good,trail:[{x:NaN,y:2.5},good.trail[1]]},
+  ];
+  for(const state of forged){
+    assert.throws(()=>W.step(room,state,.25,0),/Некорректный шаг или исходное состояние/);
+  }
+  assert.equal(JSON.stringify(good),before,"rejecting a bad state never mutates a good one");
+  assert.deepEqual(W.step(room,good,.25,0).last.position,[1.75,2.5]);
+});
+
 test("bounded 512-step trace does not allocate unbounded browser history",()=>{
   const room=example();let state=W.begin(room);
   for(let i=0;i<W.MAX_PREVIEW_STEPS;i++)state=W.step(room,state,0,0);

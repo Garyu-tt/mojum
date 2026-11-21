@@ -58,6 +58,48 @@ class CellV3EscapeError(ValueError):
     """Invalid snapshot, causal observation or exhausted replay envelope."""
 
 
+def _check_streak_counters(state):
+    """Reject streak counters that no real observe() history can produce.
+
+    observe() resets the blocked-probe streak on rest and the rest streak on
+    any move, so both can never be non-zero together. The most recently
+    observed cell is never evicted (eviction only happens when a new cell is
+    being added, and that cell becomes the newest), so a live streak must be
+    backed by an outcome of the right kind in the cell seen at last_tick.
+    """
+    rests = state["consecutive_rests"]
+    probes = state["consecutive_blocked_probes"]
+    updates = state["updates"]
+    if rests and probes:
+        raise CellV3EscapeError("rest and blocked-probe streaks coexist")
+    if rests > updates or probes > updates:
+        raise CellV3EscapeError("escape streak longer than observed history")
+    if not (rests or probes):
+        return
+    last_cells = [
+        key for key, seen in state["last_seen_at"].items()
+        if seen == state["last_tick"]
+    ]
+    if len(last_cells) != 1:
+        raise CellV3EscapeError("escape streak without a last observed cell")
+    actions = state["records"][last_cells[0]]
+    if rests and "rest" not in actions:
+        raise CellV3EscapeError("rest streak without rest in last cell")
+    if probes and not any(
+        name != "rest" and counts[1] > 0 for name, counts in actions.items()
+    ):
+        raise CellV3EscapeError("blocked-probe streak without blocked move")
+    if probes:
+        live_blocked = sum(
+            counts[1] for acts in state["records"].values()
+            for counts in acts.values()
+        )
+        if probes > live_blocked + state["forgotten_observations"]:
+            raise CellV3EscapeError(
+                "blocked-probe streak exceeds measured blocked outcomes"
+            )
+
+
 class CellExplorerV3Escape:
     """Bounded 4cm memory plus measured rest-escape probing (opt-in profile)."""
 
@@ -163,6 +205,7 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
+        _check_streak_counters(state)
 
         model = cls()
         model.last_tick = state["last_tick"]
