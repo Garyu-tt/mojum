@@ -52,6 +52,13 @@ class ContactAssociationsV2(ContactAssociations):
                 or not isinstance(snapshot["table"], dict)
                 or len(snapshot["table"]) > MAX_CUES):
             raise CuriosityError("invalid developmental model snapshot")
+        # Each eviction requires a full MAX_CUES table and an observation
+        # of a new cue. The table stays full after every real eviction.
+        if (snapshot["evicted_cues"] > max(0, snapshot["updates"] - MAX_CUES)
+                or (snapshot["evicted_cues"] and len(snapshot["table"]) != MAX_CUES)):
+            raise CuriosityError("impossible eviction history")
+        if snapshot["updates"] and not snapshot["table"]:
+            raise CuriosityError("learned observations without retained cues")
         total = snapshot["evicted_observations"]
         seen_last_updates = set()
         if (snapshot["evicted_cues"] > snapshot["evicted_observations"]):
@@ -80,6 +87,10 @@ class ContactAssociationsV2(ContactAssociations):
             total += entry["total"]
         if total != snapshot["updates"]:
             raise CuriosityError("inconsistent association count")
+        # Every update stamps exactly one retained cue. The most recent
+        # contact cannot have been evicted without a later replacement.
+        if snapshot["updates"] and max(seen_last_updates) != snapshot["updates"]:
+            raise CuriosityError("latest association update missing")
         m = cls()
         m.table = copy.deepcopy(snapshot["table"])
         m.updates = snapshot["updates"]
