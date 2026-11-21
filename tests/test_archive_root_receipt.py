@@ -4,8 +4,12 @@ No actual production private data, real cloud/device copies, or keys.
 HMAC + a separately pinned receipt SHA prevents unsigned modification
 and replay of a different receipt *when that external digest is trusted*.
 """
+import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -152,6 +156,46 @@ class VersionedArchiveReceiptQA(unittest.TestCase):
                 self.primary, self.primary, self.receipt, self.key,
                 independently_pinned_receipt_sha256=signed["receipt_sha256"],
             )
+
+    def test_real_owner_receipt_cli_three_commands_no_payload_disclosure(self):
+        head = self.generate(130)
+        self.copy_to_secondary()
+        root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ, PYTHONPATH=str(root / "src"))
+
+        def cli(*args):
+            return subprocess.run(
+                [sys.executable, "-m", "mojum.segment_archive_cli", *map(str, args)],
+                cwd=root, env=env, capture_output=True, text=True, timeout=20,
+            )
+
+        seal = cli(
+            "seal-root", "--archive-dir", self.primary,
+            "--receipt-file", self.receipt,
+            "--key-file", self.key,
+            "--source-events", "130", "--expected-source-head", head,
+        )
+        self.assertEqual(seal.returncode, 0, seal.stderr)
+        sealed = json.loads(seal.stdout)
+        self.assertEqual(sealed["source_events"], 130)
+        self.assertNotIn("PRIVATE_SYNTHETIC", seal.stdout)
+        verified = cli(
+            "verify-root", "--receipt-file", self.receipt,
+            "--key-file", self.key,
+            "--expected-receipt-sha", sealed["receipt_sha256"],
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertEqual(json.loads(verified.stdout)["source_head"], head)
+        copies = cli(
+            "verify-copies", "--archive-dir-a", self.primary,
+            "--archive-dir-b", self.secondary,
+            "--receipt-file", self.receipt, "--key-file", self.key,
+            "--expected-receipt-sha", sealed["receipt_sha256"],
+        )
+        self.assertEqual(copies.returncode, 0, copies.stderr)
+        self.assertEqual(json.loads(copies.stdout)["copies_verified"], 2)
+        self.assertNotIn("PRIVATE_SYNTHETIC", copies.stdout)
+        self.assertNotIn(str(self.key), copies.stdout)
 
     def test_genesis_only_tail_signing_recovery_and_no_private_payload_in_receipt(self):
         tip = self.generate(7)
