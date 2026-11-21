@@ -59,6 +59,12 @@ class V4TypedEpochSenseQA(unittest.TestCase):
             with self.subTest(values=values), self.assertRaises(EpochSenseError):
                 EpochProprioception(*values, "a"*64, .16, .16, False)
 
+    def test_giant_numeric_coordinates_are_typed_rejection_not_overflow(self):
+        with self.assertRaises(EpochSenseError):
+            EpochProprioception(0, 0, 0, "a"*64, 10**1000, .16, False)
+        with self.assertRaises(EpochSenseError):
+            EpochProprioception(0, 0, 0, "a"*64, .16, 10**1000, False)
+
     def test_v4_matches_v3_motor_choices_before_first_epoch(self):
         old, new = CellExplorerV3(), CellExplorerV4()
         for tick in range(170):
