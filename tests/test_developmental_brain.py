@@ -159,6 +159,32 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             with self.aquarium():
                 pass
 
+    def test_controller_bootstrap_rejects_forged_bool_coordinate(self):
+        """A rehashed bootstrap must preserve exact start-coordinate JSON type."""
+        from mojum.noosphere import _canonical, _sha
+
+        with self.aquarium():
+            pass
+        with closing(sqlite3.connect(self.db)) as db, db:
+            seq, raw, previous = db.execute(
+                "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.bootstrap'"
+            ).fetchone()
+            event = json.loads(raw)
+            coordinate = event["payload"]["room"]["start"][0]
+            self.assertEqual(coordinate, 1.0)
+            self.assertIs(type(coordinate), float)
+            event["payload"]["room"]["start"][0] = True
+            self.assertEqual(event["payload"]["room"]["start"][0], coordinate)
+            db.execute("DROP TRIGGER noosphere_no_update")
+            db.execute(
+                "UPDATE events SET wire_json=?,event_hash=? WHERE seq=?",
+                (_canonical(event), _sha({"previous": previous, "event": event}), seq),
+            )
+            db.commit()
+        with self.assertRaisesRegex(AquariumError, "seed, room, graph, clock or mode mismatch"):
+            with self.aquarium():
+                pass
+
     def test_direct_contract_rejects_future_stale_and_foreign_sensor_cues(self):
         brain = DevelopmentalBrain()
         motor = MotorPlay()
