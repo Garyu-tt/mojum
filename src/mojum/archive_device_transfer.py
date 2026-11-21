@@ -54,13 +54,26 @@ def _inside(sensitive_file, root):
     return resolved == parent or resolved.is_relative_to(parent)
 
 
+def _deny_ancestor_symlinks(root):
+    # A swapped parent symlink could redirect plaintext after the initial
+    # directory preflight. Caller must provide direct, stable mount paths.
+    for part in (root, *root.parents):
+        if part.is_symlink():
+            raise TransferError("archive directory path contains a symlink ancestor")
+
+
 def _copy_blocks(source, byte_limit):
     """Yield strictly bounded chunks from an O_NOFOLLOW 0600 source file."""
+    copied = 0
     with _file(source, byte_limit) as stream:
         while True:
             data = stream.read(CHUNK_SIZE)
             if not data:
                 break
+            copied += len(data)
+            if copied > byte_limit:
+                # Concurrent source growth cannot create an unbounded write.
+                raise TransferError("source member grew beyond immutable byte budget")
             yield data
 
 
@@ -86,6 +99,8 @@ def copy_pinned_archive_to_device(
         raise TransferError("distinct-device check requires POSIX filesystem")
     source = private_directory(source_directory)
     destination = private_directory(destination_directory)
+    _deny_ancestor_symlinks(source)
+    _deny_ancestor_symlinks(destination)
     if source.resolve() == destination.resolve():
         raise TransferError("destination must be a different archive directory")
     if _device_id(source) == _device_id(destination):
