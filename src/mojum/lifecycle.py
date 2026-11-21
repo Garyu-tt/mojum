@@ -55,6 +55,12 @@ def validate_profile(profile):
     name = profile["organism_id"]
     if type(name) is not str or not 1 <= len(name) <= 128 or not name.strip():
         raise LifecycleError("invalid immutable organism ID")
+    # JSON can decode lone UTF-16 surrogates, but UTF-8 hashing cannot encode
+    # them. Reject at the untrusted boundary instead of crashing at revision.
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise LifecycleError("organism ID contains invalid Unicode") from exc
     # This fixture deliberately implements no senescence; a future experimental
     # policy must use an independently versioned schema, never silent migration.
     if profile["senescence_enabled"] is not False:
