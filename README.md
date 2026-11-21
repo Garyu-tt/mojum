@@ -8,6 +8,12 @@ The checked-in Python stdlib fixture runs **offline on one CPU**. It has a versi
 
 Release acceptance and the remaining work on the integrated sensorimotor loop are tracked on GitHub. [Acceptance #51](https://github.com/Garyu-tt/mojum/issues/51) · [Sensorimotor integration #55](https://github.com/Garyu-tt/mojum/issues/55)
 
+## Offline room designer (experimental)
+
+Open [the local SVG editor](tools/room_designer.html) with its three adjacent JavaScript files to draw a synthetic 2D point-room, move the start marker and rectangles, preserve exact decimal tokens, save/reopen JSON and preview up to 512 collision-only steps. Undo/Redo and a bounded 64-snapshot history work without a server. For a **single portable HTML file**, use `python tools/package_room_designer.py --out room-designer-offline.html`. See [editor limitations](docs/R015_VISUAL_ROOM_DESIGNER.md).
+
+**Input-only, offline authoring at this stage:** the typed-room JSON CLI required to create a custom Aquarium SQLite journal has not been merged into `main`; this editor does not claim runtime integration, MuJoCo or real physical contact.
+
 ## Run the current aquarium
 
 From the repository root, with Python 3.11+ and no third-party dependencies:
