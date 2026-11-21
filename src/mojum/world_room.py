@@ -66,6 +66,23 @@ def initial_state(room: Room, x: float, y: float) -> RoomState:
         raise ValueError("invalid initial position")
     return RoomState(0, x, y, _revision(room, 0, x, y))
 
+def restore_state(room: Room, snapshot: dict) -> RoomState:
+    """Reconstitute a room position only when its exact canonical revision matches."""
+    if (type(snapshot) is not dict or set(snapshot) !=
+            {"tick", "x", "y", "revision"} or
+            type(snapshot["tick"]) is not int or snapshot["tick"] < 0 or
+            type(snapshot["x"]) not in (int, float) or
+            type(snapshot["y"]) not in (int, float) or
+            type(snapshot["revision"]) is not str or
+            not _valid(room, snapshot["x"], snapshot["y"])):
+        raise ValueError("invalid recorded world state")
+    state = RoomState(snapshot["tick"], float(snapshot["x"]), float(snapshot["y"]),
+                      snapshot["revision"])
+    if state.revision != _revision(room, state.tick, state.x, state.y):
+        raise ValueError("recorded world revision does not match room/tick/position")
+    return state
+
+
 def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
             expected_revision: str) -> tuple[RoomState, dict]:
     """One logical tick; exact segment-vs-AABB test prevents tunneling."""
