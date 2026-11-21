@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 
@@ -242,6 +243,19 @@ class NoosphereTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(NoosphereError, "invalid event at row 1"):
             self.store.verify_chain()
+
+    def test_json_encoder_recursion_failure_is_atomic_contract_error(self):
+        # A fixed nesting depth is not a portable recursion failure on
+        # Python 3.11-3.13. Inject the encoder exception deterministically.
+        before = (self.store.head(), self.store.count())
+        with patch("mojum.noosphere.json.dumps",
+                   side_effect=RecursionError("synthetic JSON depth exhaustion")):
+            with self.assertRaisesRegex(NoosphereError, "canonical UTF-8 JSON"):
+                self.store.append(event(), expected_head=before[0])
+        self.assertEqual((self.store.head(), self.store.count()), before)
+        self.assertEqual(self.store.verify_chain()["count"], 0)
+        self.store.append(event(), expected_head=before[0])
+        self.assertEqual(self.store.verify_chain()["count"], 1)
 
     def test_oversize_event_rejected(self):
         huge = event(payload={"x": "0" * 200_000})
