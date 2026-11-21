@@ -3,6 +3,7 @@
 All files are disposable local fixtures; never open, repair, rewrite or
 delete a user's old PRIVATE Noosphere journal.
 """
+from contextlib import closing
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -261,7 +262,7 @@ class AtomicSegmentQA(unittest.TestCase):
         # Separate preexisting SQLite has no segmented metadata at all:
         # one rejected SQL query (inside closing), not a writable migration.
         empty_db = self.db.with_name("synthetic-not-a-segmented-source.sqlite3")
-        with real_connect(empty_db) as empty:
+        with closing(real_connect(empty_db)) as empty:
             empty.execute("CREATE TABLE irrelevant_fixture(value INTEGER)")
 
         with patch("mojum.segmented_noosphere.sqlite3.connect",
