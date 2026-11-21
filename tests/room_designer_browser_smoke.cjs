@@ -106,6 +106,36 @@ async function main() {
     assert.equal(first.count,1);
     assert.equal(JSON.parse(first.text).schema,"mojum.world.point-room-draft/1");
 
+    // Real browser interactions: offline movement preview changes neither
+    // source draft JSON nor persistent Noosphere (there is no SQLite access).
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#walk-right').disabled"),true);
+    await evaluate(cdp,"document.querySelector('#walk-toggle').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#walk-right').disabled"),false);
+    for(let i=0;i<3;i++){
+      await evaluate(cdp,"document.querySelector('#walk-right').click()");
+    }
+    const movement=JSON.parse(await evaluate(cdp,
+      "JSON.stringify({output:document.querySelector('#output').value,"+
+      "status:document.querySelector('#walk-status').textContent,"+
+      "dot:document.querySelector('#walk-trail circle').getAttribute('cx'),"+
+      "line:document.querySelector('#walk-trail polyline').getAttribute('points')})"));
+    assert.equal(movement.output,first.text,
+      "movement preview must never mutate authoring JSON");
+    assert.match(movement.status,/Шаги: 3\/512/);
+    assert.match(movement.status,/блокировок: 1/);
+    assert.equal(Number(movement.dot),1.75);
+    assert.ok(movement.line.length>5,"real SVG path is rendered");
+    await evaluate(cdp,"document.querySelector('#walk-reset').click()");
+    assert.match(await evaluate(cdp,
+      "document.querySelector('#walk-status').textContent"),/Шаги: 0\/512/);
+    await evaluate(cdp,"document.querySelector('#walk-toggle').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#walk-trail').children.length"),0);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#walk-right').disabled"),true);
+
     // Real click handlers, SVG obstacle creation.
     await evaluate(cdp,"document.querySelector('#add-obstacle').click()");
     const added = JSON.parse(await evaluate(cdp,
