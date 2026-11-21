@@ -1,6 +1,7 @@
 """R0.7 CPU-only goal-free motor learning and observer-trace tests."""
 
 import copy
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -131,7 +132,7 @@ class InfantTests(unittest.TestCase):
     def test_corrupt_journal_cannot_reopen(self):
         with self.open() as infant:
             infant.step()
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("DROP TRIGGER noosphere_no_update")
             db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
         with self.assertRaises(NoosphereError):
