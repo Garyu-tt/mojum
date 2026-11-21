@@ -176,6 +176,63 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
 
+    def test_snapshot_rejects_impossible_tick_and_eviction_history(self):
+        # A real two-cell trace must still restore unchanged.
+        model = CellExplorerV3Escape()
+        for tick in range(2):
+            sense = Proprioception(
+                tick, "0" * 64, (tick + 1) * STEP_METERS,
+                STEP_METERS, False,
+            )
+            model.observe(sense, model.decide(sense), False)
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+
+        common = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "evictions": 0, "forgotten_observations": 0,
+            "consecutive_rests": 0, "consecutive_blocked_probes": 0,
+        }
+        forged = {
+            "two_cells_on_one_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {
+                    "1:1": {"rest": [1, 0]},
+                    "2:1": {"rest": [1, 0]},
+                },
+                "last_seen_at": {"1:1": 1, "2:1": 1},
+            },
+            "latest_stamp_not_current_tick": {
+                **common, "last_tick": 2, "updates": 3,
+                "records": {"1:1": {"rest": [3, 0]}},
+                "last_seen_at": {"1:1": 1},
+            },
+            "premature_eviction": {
+                **common, "last_tick": 1, "updates": 2,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {"2:1": {"rest": [1, 0]}},
+                "last_seen_at": {"2:1": 1},
+            },
+            "updates_without_retained_cell": {
+                **common, "last_tick": 0, "updates": 1,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {}, "last_seen_at": {},
+            },
+            "one_cell_measured_more_often_than_elapsed_ticks": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {
+                    "0:0": {"rest": [5, 0]},
+                    "2500:0": {"rest": [95, 0]},
+                },
+                "last_seen_at": {"0:0": 0, "2500:0": 99},
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name), self.assertRaises(CellV3EscapeError):
+                CellExplorerV3Escape.from_snapshot(snapshot)
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
