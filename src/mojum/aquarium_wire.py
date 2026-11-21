@@ -209,6 +209,11 @@ def inspect_journal(path, *, external_expected_head=None):
             manifest = event["payload"]
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             dt_ns = manifest.get("dt_ns")
+            # Canonical v4 and its versioned sensory composition share the
+            # same strict bootstrap clock contract as runtime Aquarium.
+            if policy in ("local_cell_v4", "local_cell_v4+toy_probe_v2") and (
+                    type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
+                raise NoosphereError("invalid v4 bootstrap dt_ns")
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
         elif topic == "aquarium.frame":
