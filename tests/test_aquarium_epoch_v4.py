@@ -128,6 +128,20 @@ class EpochJournalV4Tests(unittest.TestCase):
         with self.assertRaisesRegex(AquariumError, "contain only frames"):
             self.open()
 
+    def test_wire_rejects_v4_sensory_bootstrap_alias(self):
+        # The production runtime forbids sensory bridges for v4. A forged
+        # manifest must not rewrite its inspector policy ID or skip epoch gates.
+        from mojum.aquarium_wire import _stored_policy
+
+        with self.open() as aquarium:
+            manifest = deepcopy(aquarium.manifest)
+        for sensory in ("toy_probe", "toy_probe_v2"):
+            with self.subTest(sensory=sensory):
+                bogus = deepcopy(manifest)
+                bogus["sensory_mode"] = sensory
+                with self.assertRaisesRegex(NoosphereError, "requires sensory_mode none"):
+                    _stored_policy(bogus)
+
     def test_wire_rejects_premature_epoch_marker_with_valid_hash_chain(self):
         """Read-only inspection must enforce the boundary, not just SHA-256."""
         with self.open() as aquarium:
