@@ -26,6 +26,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - **Explicit inventory required:** each `--require` names ONE concrete job
   (e.g. `aquarium-stdlib (3.12)`) or an exact `workflow / job` label.
   Repeat `--require` for **every expected job in every required matrix**.
+  Use `workflow / job` when names are reused across workflows. This syntax
+  checks the workflow as well as the job name.
 - Wildcards (`* ? [ ]`) are rejected with `AMBIGUOUS_REQUIRED_PATTERN`.
   Workflow-only names are not job selectors and cannot certify a partial
   matrix. Missing required jobs defer with `MISSING_REQUIRED_CHECK`.
@@ -41,7 +43,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
   (`MISSING_REQUIRED_CHECK`), because its workflow may not have registered yet.
 - A check whose recorded `headSha` differs from the snapshot head yields
   `defer` (`STALE_CHECK`).
-- `--expected-head-sha` is mandatory. Without it the verdict is `reject`
+- `--expected-head-sha` requires a full 40- or 64-character Git object ID.
+  Without it the verdict is `reject`
   (`EXPECTED_HEAD_REQUIRED`).
 - No requirements at all is `reject` (`NO_REQUIRED_CHECKS`): a gate that
   requires nothing proves nothing.

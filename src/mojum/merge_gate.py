@@ -62,7 +62,7 @@ FAILING_CONCLUSIONS = frozenset(
     }
 )
 
-_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_SHA_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
 _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"
@@ -145,7 +145,11 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         raise SnapshotError(f"check[{index}] has no name or context")
 
     workflow = _text(raw, "workflowName", "workflow")
-    head_sha = _text(raw, "headSha", "head_sha")
+    head_sha = raw.get("headSha", raw.get("head_sha"))
+    if head_sha is not None and (
+        not isinstance(head_sha, str) or _SHA_RE.fullmatch(head_sha) is None
+    ):
+        raise SnapshotError(f"check[{index}] head SHA must be a full hexadecimal Git object ID")
     typename = raw.get("__typename")
     status_raw = _text(raw, "status")
     conclusion_raw = _text(raw, "conclusion")
@@ -190,11 +194,11 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if not isinstance(raw, Mapping):
         raise SnapshotError("snapshot must be a JSON object")
 
-    head_sha = _text(raw, "headRefOid", "head_sha", "headSha")
-    if not head_sha:
+    head_sha = raw.get("headRefOid", raw.get("head_sha", raw.get("headSha")))
+    if head_sha is None:
         raise SnapshotError("snapshot has no head SHA")
-    if not _SHA_RE.match(head_sha):
-        raise SnapshotError("snapshot head SHA is not hexadecimal")
+    if not isinstance(head_sha, str) or _SHA_RE.fullmatch(head_sha) is None:
+        raise SnapshotError("snapshot head SHA must be a full hexadecimal Git object ID")
 
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
     if not base_ref:
@@ -232,10 +236,9 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
 def _matches(pattern: str, check: CheckOutcome) -> bool:
     # Never certify an incomplete matrix through an aggregate workflow name
     # or a wildcard. Every expected job must be enumerated by the caller.
-    return pattern == check.name or (
-        check.workflow is not None
-        and pattern == f"{check.workflow} / {check.name}"
-    )
+    if " / " in pattern:
+        return check.workflow is not None and pattern == check.label
+    return pattern == check.name
 
 
 def evaluate(
@@ -248,8 +251,10 @@ def evaluate(
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
 
-    if expected_head_sha is not None and not _SHA_RE.match(expected_head_sha):
-        raise ValueError("expected_head_sha must be 7-64 hexadecimal characters")
+    if expected_head_sha is not None and (
+        not isinstance(expected_head_sha, str) or _SHA_RE.fullmatch(expected_head_sha) is None
+    ):
+        raise ValueError("expected_head_sha must be a full 40- or 64-character hexadecimal Git object ID")
 
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
@@ -346,6 +351,15 @@ def evaluate(
                 )
                 continue
 
+            if check.conclusion in FAILING_CONCLUSIONS:
+                rejects.append(
+                    GateReason(
+                        "CHECK_FAILED",
+                        f"{check.label} concluded {check.conclusion}",
+                    )
+                )
+                continue
+
             if check.status == "PENDING":
                 defers.append(
                     GateReason(
@@ -371,14 +385,6 @@ def evaluate(
                     GateReason(
                         "CHECK_SKIPPED_UNWAIVED",
                         f"{check.label} was skipped without an explicit waiver",
-                    )
-                )
-                continue
-            if check.conclusion in FAILING_CONCLUSIONS:
-                rejects.append(
-                    GateReason(
-                        "CHECK_FAILED",
-                        f"{check.label} concluded {check.conclusion}",
                     )
                 )
                 continue

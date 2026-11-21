@@ -162,6 +162,28 @@ class SnapshotParsingTests(unittest.TestCase):
                 with self.assertRaises(SnapshotError):
                     parse_snapshot(snapshot)
 
+    def test_snapshot_rejects_malformed_head_object_ids(self):
+        for oid in (HEAD[:7], HEAD[:39], HEAD + "f", HEAD + "\n", " " + HEAD):
+            with self.subTest(oid=oid):
+                with self.assertRaises(SnapshotError):
+                    parse_snapshot({"headRefOid": oid, "baseRefName": "main"})
+                with self.assertRaises(SnapshotError):
+                    parse_snapshot({
+                        "headRefOid": HEAD,
+                        "baseRefName": "main",
+                        "checks": [run(head_sha=oid)],
+                    })
+
+    def test_snapshot_accepts_full_sha256_object_id(self):
+        oid = "f" * 64
+        parsed = parse_snapshot({
+            "headRefOid": oid,
+            "baseRefName": "main",
+            "checks": [run(head_sha=oid)],
+        })
+        self.assertEqual(parsed.head_sha, oid)
+        self.assertEqual(parsed.checks[0].head_sha, oid)
+
     def test_check_without_status_but_with_conclusion_is_completed(self):
         parsed = parse_snapshot(
             {
@@ -207,12 +229,9 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.code, "BASE_MISMATCH")
 
     def test_malformed_expected_head_raises(self):
-        with self.assertRaises(ValueError):
-            evaluate(
-                facts(self.green()),
-                expected_head_sha="zzz",
-                required=REQUIRED,
-            )
+        for oid in ("zzz", HEAD[:7], HEAD[:39], HEAD + "f", HEAD + "\n", " " + HEAD):
+            with self.subTest(oid=oid), self.assertRaises(ValueError):
+                evaluate_checks(self.green(), expected_head_sha=oid)
 
     def test_pending_check_defers(self):
         checks = self.green() + [run(status="IN_PROGRESS", conclusion=None, name="mesh", workflow="Mesh contract")]
@@ -248,6 +267,16 @@ class GateVerdictTests(unittest.TestCase):
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
+
+    def test_negative_conclusion_rejects_even_with_inconsistent_status(self):
+        for status in ("IN_PROGRESS", "QUEUED", "WAITING", "bogus"):
+            with self.subTest(status=status):
+                checks = self.green() + [
+                    run(name="mesh", workflow="Mesh contract", status=status, conclusion="FAILURE"),
+                ]
+                result = evaluate_checks(checks)
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_FAILED")
 
     def test_skipped_check_requires_a_waiver(self):
         checks = self.green()[:2] + [
@@ -376,6 +405,14 @@ class GateVerdictTests(unittest.TestCase):
             required=("Aquarium regression QA / linux",),
         )
         self.assertEqual(result.verdict, "ready")
+
+    def test_exact_full_label_requires_the_named_workflow(self):
+        result = evaluate_checks(
+            [run(name="Aquarium regression QA / linux", workflow="Other QA")],
+            required=("Aquarium regression QA / linux",),
+        )
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
 
 class CliTests(unittest.TestCase):
