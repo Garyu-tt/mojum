@@ -17,6 +17,12 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
+      - name: Reject deferred unclosed SQLite handles on Python 3.13
+        if: matrix.python-version == '3.13'
+        env:
+          PYTHONPATH: src
+          PYTHONTRACEMALLOC: '1'
+        run: python tests/audit_sqlite_resource_warnings.py
       - name: Offline habitat smoke and restart
         env:
           PYTHONPATH: src
