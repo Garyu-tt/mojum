@@ -180,7 +180,15 @@ class ExplicitSegmentedAquariumQA(unittest.TestCase):
             self.assertEqual(report["end_tick"], begin + 3)
             self.assertEqual(report["journal_events"], begin + 4)
             self.assertNotIn("neural_state", outcome.stdout)
-        with self.open() as q:
+        # Portable host uses its default point room and graph; reopening
+        # must supply precisely those canonical bootstrap settings.
+        with Aquarium(
+            self.db, SEED, GRAPH,
+            exploration_mode="goal_free", neural_mode="disabled",
+            sensory_mode="none", developmental_policy="local_cell_v4",
+            journal_backend="segmented", journal_segment_size=64,
+            replay_snapshot_file=self.cache, replay_snapshot_key_file=self.key,
+        ) as q:
             self.assertEqual(q.tick, 6)
             self.assertEqual(q.store.verify_chain()["count"], 7)
 
