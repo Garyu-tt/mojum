@@ -15,7 +15,7 @@ This isolated stdlib component in `mojum.lifecycle_ledger` is a candidate toward
 
 ```sh
 PYTHONPATH=src python examples/lifecycle_demo.py
-PYTHONPATH=src python -m unittest discover -s tests -p 'test_lifecycle_ledger*.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_lifecycle*.py' -v
 ```
 
 The demo artificially matures three regions, advances a billion virtual ticks with **no age-triggered decline**, then records extra learning units for cortex and replays the snapshot. This demonstrates **contract behavior only**.
