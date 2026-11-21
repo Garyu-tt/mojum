@@ -29,7 +29,7 @@ from .world_room import Room, advance, initial_state
 
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
-MAX_REPLAY_EVENTS = 10_000
+MAX_REPLAY_EVENTS = 100_000  # Still bounded; full replay is CPU-linear.
 _OMITTED_MOVEMENT = object()  # Distinguish omitted dx/dy from explicit None.
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
@@ -144,8 +144,9 @@ class Aquarium:
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
         self._committed_head = None
+        self._committed_event_count = self.store.count()
         try:
-            if self.store.count() == 0:
+            if self._committed_event_count == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head)
         except BaseException:
@@ -171,12 +172,14 @@ class Aquarium:
         }
 
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
-        if self.store.count() >= MAX_REPLAY_EVENTS:
-            raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
+        if self._committed_event_count >= MAX_REPLAY_EVENTS:
+            raise AquariumError("journal event budget reached; verified snapshot/compaction pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
         expected = (self.store.head() if self._committed_head is None
                     else self._committed_head)
-        return self.store.append(event, expected_head=expected)
+        committed = self.store.append(event, expected_head=expected)
+        self._committed_event_count += 1
+        return committed
 
     def _calculate(self, dx, dy):
         pheno = self.genome.phenotype(self.tick)
@@ -311,22 +314,28 @@ class Aquarium:
         return self.genome.revision
 
     def _replay(self, external_expected_head):
-        self.store.verify_chain(external_expected_head=external_expected_head)
+        # A bounded number of events can be replayed while keeping only the
+        # current deterministic Aquarium state and one SQLite fetchmany page
+        # in RAM. This is full CPU-linear replay, NOT snapshot fast-forward.
         count = self.store.count()
         if count > MAX_REPLAY_EVENTS:
-            raise AquariumError("R0.2 replay exceeds 10,000 journal events; streaming pending")
-        view = self.store.dataset(include_nonpublic=True, limit=MAX_REPLAY_EVENTS)
-        items = view["projection"]["items"]
-        if len(items) != count:
-            raise AquariumError("incomplete replay dataset")
-        if not items:
-            raise AquariumError("bootstrap event missing")
-        first = items[0]["event"]
-        if first != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
-                                 0, self.graph_sha256):
-            raise AquariumError("aquarium seed, room, graph or clock mismatch")
-        for entry in items[1:]:
+            raise AquariumError("journal exceeds bounded 100000-event replay budget")
+        verified = self.store.verify_chain(external_expected_head=external_expected_head)
+        if verified["count"] != count:
+            raise AquariumError("journal changed during integrity verification")
+        seen = 0
+        replayed_head = None
+        for entry in self.store.iter_events(include_nonpublic=True):
+            seen += 1
+            if entry["seq"] != seen:
+                raise AquariumError("journal sequence changed during streaming replay")
+            replayed_head = entry["event_hash"]
             event = entry["event"]
+            if seen == 1:
+                if event != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
+                                         0, self.graph_sha256):
+                    raise AquariumError("aquarium seed, room, graph or clock mismatch")
+                continue
             if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
                 raise AquariumError("unexpected journal ownership or visibility")
             if event["observed_at_ns"] != self.tick * self.dt_ns:
@@ -369,12 +378,17 @@ class Aquarium:
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
-        # Pin the exact committed sequence used to reconstruct this RAM state.
-        # Refuse a concurrent append that arrived while replay was running.
-        replayed_head = items[-1]["event_hash"]
+        # Verify no row disappeared or appeared between the chain scan and
+        # the streamed deterministic execution. Never adopt a partial RAM
+        # checkpoint after concurrent history changes.
+        if not seen:
+            raise AquariumError("bootstrap event missing")
+        if seen != count or replayed_head != verified["head"]:
+            raise AquariumError("incomplete or changed streaming replay")
         if self.store.head() != replayed_head or self.store.count() != count:
             raise AquariumError("journal advanced during aquarium replay")
         self._committed_head = replayed_head
+        self._committed_event_count = count
 
     def checkpoint(self):
         # No mixed snapshot: the database may have advanced in another process,
