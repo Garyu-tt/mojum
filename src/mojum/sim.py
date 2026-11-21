@@ -27,6 +27,7 @@ class Simulation:
 
     def step(self):
         results = {}
+        staged_episodes = []
         time_ns = self.tick * self.dt_ns
         for nid in self.order:
             spec = self.nodes[nid]
@@ -53,13 +54,17 @@ class Simulation:
                 result = {"observation": {"status": "UNIMPLEMENTED", "sensory_kind": inp["sensory"]["kind"], "world_light": inp["world"]["light"], "action": None}}
             elif kind == "memory.episode":
                 episode = {"tick": self.tick, "observed_at_ns": time_ns, "sensory": inp["sensory"], "brain_observation": inp["observation"], "provenance": "in-memory-fixture-not-Noosphere"}
-                self.episodes.append(copy.deepcopy(episode))
+                staged_episodes.append(copy.deepcopy(episode))
                 result = {"episode": episode}
             else:
                 raise GraphError("Unsupported executor node kind")
             results[nid] = result
+        # Commit all effects only after the entire graph has succeeded. A
+        # later independent node may still fail after memory.episode runs.
+        returned = copy.deepcopy(results)
+        self.episodes.extend(staged_episodes)
         self.tick += 1
-        return copy.deepcopy(results)
+        return returned
 
     def snapshot(self):
         state = {"schema": "mojum.sim-checkpoint/0.1", "graph_sha256": self.graph_hash, "tick": self.tick, "dt_ns": self.dt_ns, "episodes": copy.deepcopy(self.episodes)}
