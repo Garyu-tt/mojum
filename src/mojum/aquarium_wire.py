@@ -220,6 +220,10 @@ def inspect_journal(path, *, external_expected_head=None):
                     or expected != epoch_index + 1):
                 raise NoosphereError("invalid epoch transition")
             epoch_index = expected
+        elif policy == "local_cell_v4":
+            # The v4 replay runtime permits only frame/epoch after bootstrap.
+            # A coherent event hash does not make a foreign topic part of v4.
+            raise NoosphereError("unsupported local-cell v4 journal topic")
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
