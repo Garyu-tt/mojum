@@ -113,6 +113,16 @@ async function main() {
       "json:JSON.parse(document.querySelector('#output').value).obstacles.length})"));
     assert.deepEqual(added,{rects:2,json:2});
 
+    // Exercise real on-page undo/redo, including the SVG rectangles.
+    await evaluate(cdp,"document.querySelector('#undo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#obstacles').children.length"),1);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#redo').disabled"),false);
+    await evaluate(cdp,"document.querySelector('#redo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#obstacles').children.length"),2);
+
     // Text inputs must preserve the original numeric token 4.0.
     await evaluate(cdp,
       "(function(){const e=document.querySelector('#height');e.value='4.0';" +
@@ -125,6 +135,13 @@ async function main() {
       "e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
     assert.equal(await evaluate(cdp,
       "document.querySelector('#download').disabled"),true);
+    // Invalid intermediate input was never written to the history;
+    // one Undo restores the last valid room, not an older shape.
+    await evaluate(cdp,"document.querySelector('#undo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#download').disabled"),false);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#output').value"),canonicalExport);
 
     await evaluate(cdp,"document.querySelector('#reset-room').click()");
     assert.equal(await evaluate(cdp,
@@ -178,6 +195,13 @@ async function main() {
     const moved=await evaluate(cdp,
       "JSON.parse(document.querySelector('#output').value).start[0]");
     assert.ok(moved>pos.start,"Real SVG pointer drag must change start JSON");
+    // An entire pointer drag should be ONE undo entry.
+    await evaluate(cdp,"document.querySelector('#undo').click()");
+    assert.equal(await evaluate(cdp,
+      "JSON.parse(document.querySelector('#output').value).start[0]"),pos.start);
+    await evaluate(cdp,"document.querySelector('#redo').click()");
+    assert.equal(await evaluate(cdp,
+      "JSON.parse(document.querySelector('#output').value).start[0]"),moved);
 
     // Capture a non-private visual acceptance artifact at a phone-like
     // viewport. Nothing in this synthetic demo originates from a user DB.
@@ -199,8 +223,8 @@ async function main() {
     assert.equal(responsive.trim().split(" ").length,1,
       "Phone-width editor must stack its main columns");
 
-    console.log("PASS: offline file:// Chrome editor loaded; add, decimal input, invalid " +
-      "export block, reset, keyboard arrow and actual SVG pointer drag work");
+    console.log("PASS: offline file:// Chrome editor loaded; add, undo/redo, decimal input, invalid " +
+      "export block, reset, keyboard arrow, SVG pointer drag and its undo/redo work");
   } catch (error) {
     if (diagnostic) console.error("Chrome stderr: "+diagnostic);
     throw error;
