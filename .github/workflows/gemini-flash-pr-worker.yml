@@ -95,9 +95,14 @@ jobs:
           count=0
           while IFS= read -r -d '' path; do
             count=$((count+1))
+            # A narrow allowlist is safer than a blacklist: .env.local,
+            # setup.cfg, package scripts and other config must never pass
+            # merely because their exact spelling was not anticipated.
             case "$path" in
-              .github/*|.gemini/*|.git/*|*.env|*.pem|*.key|*credentials*|*secret*|package.json|package-lock.json|npm-shrinkwrap.json)
-                echo "Agent changed a forbidden path: $path" >&2
+              src/*.py|tests/*.py|tests/*.cjs|tools/*.js|docs/*.md)
+                ;;
+              *)
+                echo "Agent changed a non-allowlisted path: $path" >&2
                 exit 1 ;;
             esac
           done < <(git diff --cached --name-only -z)
