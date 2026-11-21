@@ -369,7 +369,9 @@ def main(argv: list[str] | None = None) -> int:
         run = run_scripted_activity(load_catalog(args.catalog), args.section,
                                     start_tick=args.start_tick, mode=args.mode)
         write_fixture(run, args.out)
-    except (SchoolContractError, FileExistsError, OSError) as error:
+    except FileExistsError:
+        parser.error("school output already exists. Choose a new output directory.")
+    except (SchoolContractError, OSError) as error:
         parser.error(str(error))
     print(_canonical_json({"status": "SYNTHETIC_FIXTURE_ONLY", "visibility": "PRIVATE",
                            "mode": args.mode, "phase_count": len(run["events"])}).decode("utf-8").strip())
