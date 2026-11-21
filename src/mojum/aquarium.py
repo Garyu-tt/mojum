@@ -190,11 +190,23 @@ class Aquarium:
                 "temporal_schema": RANGE_SCHEMA,
                 "motor_guidance_schema": GUIDANCE_SCHEMA,
             })
+        # An independently supplied anchor is only meaningful for history that
+        # already exists. Validate it before any writable SQLite open so a
+        # mistyped anchor cannot create a fresh PRIVATE journal as a side
+        # effect of a failed reopen.
+        if external_expected_head is not None and (
+                type(external_expected_head) is not str
+                or len(external_expected_head) != 64
+                or any(c not in "0123456789abcdef" for c in external_expected_head)):
+            raise AquariumError("expected head must be a lowercase SHA-256 digest")
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
         first = _read_first_event(db_path, agent_id)
         if first is not None:
             self._check_bootstrap(first)
+        elif external_expected_head is not None:
+            raise AquariumError(
+                "expected head requires an existing journal; refusing to create a new one")
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
@@ -595,7 +607,15 @@ def main():
                         help="guide virtual movement from measured range transitions")
     parser.add_argument("--pulse-sum", choices=("auto", "ordered", "compensated"), default="auto",
                         help="shadow predictor arithmetic for an untagged journal (default: detect on replay)")
+    parser.add_argument("--expected-head", metavar="SHA256",
+                        help="independent journal head to require before appending; "
+                             "needs an existing journal")
     args = parser.parse_args()
+    if args.expected_head is not None and (
+            type(args.expected_head) is not str
+            or len(args.expected_head) != 64
+            or any(c not in "0123456789abcdef" for c in args.expected_head)):
+        parser.error("--expected-head must be exactly 64 lowercase hexadecimal characters")
     if args.neural_mode == "disabled" and args.pulse_sum != "auto":
         parser.error("--pulse-sum requires shadow mode")
     if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
@@ -625,11 +645,18 @@ def main():
         validate_graph(graph)  # Fail before opening a new SQLite journal.
     except GraphError as exc:
         parser.error(str(exc))
-    with Aquarium(
-        args.db, seed, graph, agent_id=seed["genome_id"],
-        neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
-        sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
-    ) as aquarium:
+    try:
+        aquarium = Aquarium(
+            args.db, seed, graph, agent_id=seed["genome_id"],
+            neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
+            sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
+            external_expected_head=args.expected_head,
+        )
+    except (AquariumError, NoosphereError) as exc:
+        # A wrong independent anchor or a foreign journal is a command error,
+        # not a traceback. Construction leaves no committed mutation behind.
+        parser.error(str(exc))
+    with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
         if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:

@@ -117,6 +117,19 @@ mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 
 Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. The `mojum-aquarium` entry point also accepts `--motor-mode developmental_fixture`. [Offline install instructions](docs/LOCAL_INSTALL_R01.md)
 
+To reopen against a separately recorded head, pass the checkpoint's
+`journal_head` as `--expected-head`. The flag requires an existing journal and
+fails with exit status 2 before appending (or creating a file) when the head is
+malformed, missing or does not match the stored chain.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 1 \
+  --expected-head 0123...cdef
+```
+
+The anchor is an independent integrity check for accidental or concurrent
+rewrites; it is not authentication.
+
 ## Identify a journal's stored policy
 
 ```bash
