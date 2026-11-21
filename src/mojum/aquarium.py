@@ -282,13 +282,19 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    # Validate command-line movement before Aquarium can create a bootstrap
+    # journal. Invalid requests must not leave behind a new organism fixture.
+    try:
+        dx, dy = _movement(args.dx), _movement(args.dy)
+    except AquariumError as exc:
+        parser.error(str(exc))
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode,
     ) as aquarium:
         for _ in range(args.ticks):
-            aquarium.step(dx=args.dx, dy=args.dy)
+            aquarium.step(dx=dx, dy=dy)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (
