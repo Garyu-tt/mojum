@@ -13,6 +13,7 @@ dependencies = []
 [project.scripts]
 mojum-aquarium = "mojum.aquarium:main"
 mojum-fixture = "mojum.__main__:main"
+mojum-host = "mojum.portable_host:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
