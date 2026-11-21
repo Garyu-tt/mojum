@@ -48,6 +48,10 @@ _TEMPORAL_FIELDS = {
     "temporal_schema": "mojum.temporal.motor-play-range/1",
     "motor_guidance_schema": _GUIDANCE,
 }
+_SENSORY_FIELDS = {
+    "sensory_mode", "sensory_schema", "sensory_model_schema", "sensory_scene",
+    "contact_bridge_schema", "occlusion_schema", "sensory_reprobe_period_ticks",
+}
 
 
 def _stored_policy(manifest):
@@ -67,8 +71,8 @@ def _stored_policy(manifest):
     # Legacy toy_probe is incompatible with epoch motors; v5 is sensorless.
     if policy_id == "local_cell_v4" and sensory_mode == "toy_probe":
         raise NoosphereError("local_cell_v4 requires sensory_mode none or toy_probe_v2")
-    if policy_id == "local_cell_v5" and sensory_mode is not None:
-        raise NoosphereError("local_cell_v5 journals require sensory_mode none")
+    if policy_id == "local_cell_v5" and _SENSORY_FIELDS.intersection(manifest):
+        raise NoosphereError("unexpected sensory fields in local_cell_v5 bootstrap")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,

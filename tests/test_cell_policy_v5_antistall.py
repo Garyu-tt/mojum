@@ -16,7 +16,7 @@ from pathlib import Path
 
 from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE, V5_MODE
 from mojum.aquarium_wire import _check_policy_frame, _stored_policy, inspect_journal
-from mojum.noosphere import NoosphereError
+from mojum.noosphere import LocalNoosphere, NoosphereError
 from mojum.cell_policy_v3 import CellExplorerV3
 from mojum.cell_policy_v5 import (
     MAX_CELLS,
@@ -301,35 +301,35 @@ class RetentionTests(unittest.TestCase):
             "two_cells_on_one_tick": {
                 **common, "last_tick": 1, "updates": 2,
                 "records": {
-                    "1:1": {"rest": [1, 0]},
-                    "2:1": {"rest": [1, 0]},
+                    "1:1": {"x+": [1, 0]},
+                    "2:1": {"x+": [1, 0]},
                 },
                 "last_seen_at": {"1:1": 1, "2:1": 1},
                 "evictions": 0, "forgotten_observations": 0,
             },
             "latest_observation_before_current_tick": {
                 **common, "last_tick": 1, "updates": 2,
-                "records": {"1:1": {"rest": [2, 0]}},
+                "records": {"1:1": {"x+": [2, 0]}},
                 "last_seen_at": {"1:1": 0},
                 "evictions": 0, "forgotten_observations": 0,
             },
             "eviction_before_512_distinct_cells": {
                 **common, "last_tick": 1, "updates": 2,
-                "records": {"1:1": {"rest": [1, 0]}},
+                "records": {"1:1": {"x+": [1, 0]}},
                 "last_seen_at": {"1:1": 1},
                 "evictions": 1, "forgotten_observations": 1,
             },
             "eviction_must_preserve_a_full_table": {
                 **common, "last_tick": 512, "updates": 513,
-                "records": {"1:1": {"rest": [1, 0]}},
+                "records": {"1:1": {"x+": [1, 0]}},
                 "last_seen_at": {"1:1": 512},
                 "evictions": 1, "forgotten_observations": 512,
             },
             "cell_measured_more_often_than_ticks": {
                 **common, "last_tick": 99, "updates": 100,
                 "records": {
-                    "0:0": {"rest": [5, 0]},
-                    "2500:0": {"rest": [95, 0]},
+                    "0:0": {"x+": [5, 0]},
+                    "2500:0": {"x+": [95, 0]},
                 },
                 "last_seen_at": {"0:0": 0, "2500:0": 99},
                 "evictions": 0, "forgotten_observations": 0,
@@ -361,7 +361,7 @@ class RetentionTests(unittest.TestCase):
             "records": {"0:0": {"rest": [1, 0]}},
             "last_seen_at": {"0:0": 0},
         })
-        with self.assertRaisesRegex(CellV5Error, "rest streak without four blocked"):
+        with self.assertRaisesRegex(CellV5Error, "requires four measured blocks"):
             CellExplorerV5.from_snapshot(forged)
 
         # The real three-rest prefix after four measured blocked directions
@@ -426,6 +426,30 @@ class RetentionTests(unittest.TestCase):
             model.snapshot(),
         )
 
+    def test_snapshot_checks_probe_evidence_after_leaving_the_cell(self):
+        model = CellExplorerV5()
+        drive(model, 8)
+        drive(model, 1, start=8, x=STEP_METERS, blocked_rule=lambda _: False)
+        checkpoint = model.snapshot()
+        self.assertEqual(CellExplorerV5.from_snapshot(checkpoint).snapshot(), checkpoint)
+
+        missing_probe = dict(checkpoint, forced_probes=0)
+        missing_rest = deepcopy(checkpoint)
+        directions = missing_rest["records"]["0:0"]
+        once_blocked = next(action for action, counts in directions.items() if counts == [1, 1])
+        directions["rest"][0] -= 1
+        directions[once_blocked][0] += 1
+        for forged in (missing_probe, missing_rest):
+            with self.assertRaisesRegex(CellV5Error, "insufficient measured evidence"):
+                CellExplorerV5.from_snapshot(forged)
+
+        for tick in range(9, MAX_CELLS + 8):
+            sense = cue(tick, (tick - 7) * STEP_METERS)
+            model.observe(sense, model.decide(sense), False)
+        evicted = model.snapshot()
+        self.assertNotIn("0:0", evicted["records"])
+        self.assertEqual(CellExplorerV5.from_snapshot(evicted).snapshot(), evicted)
+
     def test_restore_detaches_from_original_snapshot(self):
         model = CellExplorerV5()
         sense = cue(0)
@@ -448,6 +472,11 @@ class RetentionTests(unittest.TestCase):
         with self.assertRaises(CellV5Error):
             model.observe(cue(5), intent, False)
         self.assertEqual(model.snapshot(), before)
+        for field, value in (("forced_probe", 0), ("tick", False), ("epoch_index", 0.0)):
+            with self.subTest(field=field), self.assertRaises(CellV5Error):
+                model.observe(sense, dict(intent, **{field: value}), False)
+            self.assertEqual(model.snapshot(), before)
+        self.assertIs(model.observe(sense, intent, False)["forced_probe"], False)
 
 
 class TranscriptSummaryTests(unittest.TestCase):
@@ -620,6 +649,22 @@ class V5AquariumVersionGateTests(unittest.TestCase):
         forged["developmental"]["observation"]["epoch_tick"] += 1
         with self.assertRaisesRegex(NoosphereError, "epoch"):
             _check_policy_frame(forged, contract, temporal, sensory)
+
+    def test_wire_inspector_rejects_v5_sensory_bootstrap_fields(self):
+        with self.aquarium() as rover:
+            bootstrap = next(rover.store.iter_events(include_nonpublic=True))["event"]
+        for field, value in (("sensory_mode", None), ("sensory_scene", {})):
+            with self.subTest(field=field):
+                path = self.root / f"{field}.sqlite3"
+                event = deepcopy(bootstrap)
+                event["payload"][field] = value
+                with LocalNoosphere(path, bootstrap["agent_id"]) as store:
+                    head = store.append(event, expected_head=store.head())
+                    self.assertEqual(store.verify_chain()["head"], head)
+                with self.assertRaisesRegex(AquariumError, "mismatch"):
+                    self.aquarium(path)
+                with self.assertRaisesRegex(NoosphereError, "unexpected sensory"):
+                    inspect_journal(path, external_expected_head=head)
 
     def test_existing_v4_journal_cannot_be_relabelled_as_v5(self):
         with self.aquarium(mode=V4_MODE) as rover:
