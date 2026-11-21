@@ -24,11 +24,12 @@ and closes it explicitly.
 
 1. Complete JSONL bytes are already verified against a fully cold
    replayed original SQLite, with an independent source-head check for v4.
-2. Write, flush and file-fsync stage bytes.
-3. Set private permissions 0600 and atomic no-clobber hard-link output.
-4. Unlink PRIVATE staging pathname.
-5. Open/verify/fsync/close the output **directory**.
-6. Only then return success metadata.
+2. The stage inode is already 0600 from `mkstemp`; reinforce its owner-only mode via **`fchmod` on the actual open file descriptor** (POSIX), **before** any file sync. Non-POSIX retains `chmod` by pathname before file fsync.
+3. Write, flush and **file-fsync bytes plus inode mode metadata**.
+4. Atomically no-clobber hard-link output.
+5. Unlink PRIVATE staging pathname.
+6. Open/verify/fsync/close the output **directory**.
+7. Only then return success metadata.
 
 This does not add an auto-overwrite, auto-restore or auto-cleanup
 process, and it does not change old journal formats, v4 learning,
@@ -56,9 +57,11 @@ motor policy, epoch markers, or output contents.
 
 - CPython 3.11/3.12/3.13, actual synthetic segmented-v4 SQLite source,
   real native exporter, and no network or service.
-- Instrumented actual OS-level `fsync` calls verify the **file first,
-  directory last** and that the staging pathname has already been
-  unlinked when the directory fsync is issued.
+- Instrumented actual OS-level `fchmod` and `fsync` calls verify
+  **private inode mode first, file fsync second, directory fsync last**;
+  stage pathname has already been unlinked by the time of final directory sync.
+- Injected `EPERM` on inode-mode hardening or `EIO` on file fsync
+  must reject publication altogether, with original SQLite unchanged.
 - Injected `EIO` on directory `fsync` must raise with a complete,
   mode-0600 and no-clobber final output still present. It must not
   publish a false success or change original SQLite.
