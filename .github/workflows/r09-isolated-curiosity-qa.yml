@@ -8,6 +8,8 @@ on:
       - "tests/test_sensory_curiosity_cue_bounds.py"
       - "docs/SENSORY_CURIOSITY_R09.md"
       - "examples/sensory_observer.html"
+      - "tests/smoke_r09_chromium_viewer.py"
+      - "tests/smoke_real_chromium_viewer.py"
       - ".github/workflows/r09-isolated-curiosity-qa.yml"
   workflow_dispatch:
 
@@ -36,3 +38,20 @@ jobs:
           test -f src/mojum/sensory_curiosity_lab.py
           export PYTHONPATH=src
           python -m unittest discover -s tests -p 'test_sensory_curiosity*.py' -v
+
+  actual-chrome:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Require actual Chrome and ChromeDriver
+        run: |
+          command -v google-chrome-stable || command -v google-chrome || command -v chromium
+          command -v chromedriver
+      - name: Real offline R0.9 viewer, local JSONL, desktop and mobile
+        run: python tests/smoke_r09_chromium_viewer.py
