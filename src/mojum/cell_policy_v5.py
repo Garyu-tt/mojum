@@ -177,7 +177,14 @@ class CellExplorerV5:
             # Rest has zero displacement: all consecutive rest decisions
             # must belong to the most recently observed cell.
             latest_cell = max(state["last_seen_at"], key=state["last_seen_at"].get)
-            if state["records"][latest_cell].get("rest", [0, 0])[0] < state["rest_streak"]:
+            latest_actions = state["records"][latest_cell]
+            # Rest can only be chosen after measured block evidence for all
+            # four moves in this same cell. Rest does not change the cell, so
+            # those counters cannot be evicted during the final rest streak.
+            if any(latest_actions.get(move, [0, 0])[1] == 0
+                   for move in _MOVE_ACTIONS):
+                raise CellV5Error("rest streak without four blocked moves")
+            if latest_actions.get("rest", [0, 0])[0] < state["rest_streak"]:
                 raise CellV5Error("rest streak exceeds retained rest evidence")
 
         model = cls()
