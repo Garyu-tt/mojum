@@ -4,6 +4,7 @@ All PRIVATE content is synthetic in disposable owner-only folders.
 Python unit tests mock VFS device IDs to simulate a separate mount for
 copy-path testing. This is NOT a real two-device hardware validation.
 """
+import io
 import json
 import os
 from pathlib import Path
@@ -239,6 +240,30 @@ class OfflinePhysicalArchiveTransferQA(unittest.TestCase):
             self.assertNotIn(str(self.source), allowed.stdout)
             self.assertNotIn(str(self.key), allowed.stdout)
             self.assertEqual(len(list(dest.iterdir())), 6)
+
+    def test_symlink_ancestor_cannot_redirect_plaintext_copy(self):
+        if os.name != "posix":
+            self.skipTest("symlink ancestral path test needs POSIX")
+        self.prepare()
+        link = self.root / "alias-to-original-parent"
+        try:
+            link.symlink_to(self.root, target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks not available")
+        aliased_source = link / self.source.name
+        with self.assertRaisesRegex(TransferError, "symlink ancestor"):
+            copy_pinned_archive_to_device(
+                aliased_source, self.target, self.receipt, self.key,
+                independently_pinned_receipt_sha256=self.digest,
+                include_nonpublic=True,
+            )
+        self.assertEqual(list(self.target.iterdir()), [])
+
+    def test_concurrent_source_growth_never_exceeds_copy_budget(self):
+        import mojum.archive_device_transfer as subject
+        with patch.object(subject, "_file", return_value=io.BytesIO(b"x"*32)):
+            with self.assertRaisesRegex(TransferError, "grew beyond"):
+                b"".join(subject._copy_blocks(self.root/"not-real", 8))
 
     def test_genesis_only_tail_copies_two_files(self):
         self.prepare(count=7)
