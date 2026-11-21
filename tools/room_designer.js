@@ -109,6 +109,11 @@
     if (!size) return Math.round(v * 1000) / 1000;
     return Math.round(Math.round(v / size) * size * 1000) / 1000;
   }
+  // Grid rounding can overshoot a non-grid-aligned wall (e.g. 4.9 -> 5.0).
+  // Both touch and keyboard placement must retain the exact room boundary.
+  function snapWithin(v, extent, size) {
+    return clamp(snap(clamp(v, 0, extent), size), 0, extent);
+  }
 
   // SVG preserveAspectRatio="xMidYMid meet". Letterbox offsets matter,
   // particularly on portrait Android screens. Cartesian origin = bottom-left.
@@ -125,7 +130,7 @@
   }
 
   const API = { SCHEMA, MAX_OBSTACLES, dimension, startCoordinate, validate, buildDraft,
-                floatToken, pointerToWorld, snap, withinRect };
+                floatToken, pointerToWorld, snap, snapWithin, withinRect };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (!root || !root.document) return;
   const doc = root.document;
@@ -184,7 +189,8 @@
     const world = pointerToWorld(
       event.clientX, event.clientY, svg.getBoundingClientRect(),
       size[0], size[1]);
-    return [snap(world[0], gridStep()), snap(world[1], gridStep())];
+    return [snapWithin(world[0], size[0], gridStep()),
+            snapWithin(world[1], size[1], gridStep())];
   }
   function drawScene(width, height) {
     svg.setAttribute("viewBox", "0 0 " + width + " " + height);
@@ -356,8 +362,8 @@
     event.preventDefault();
     const [width, height] = state.lastValidSize;
     setStart(
-      snap(clamp(state.start[0] + dx, 0, width), gridStep()),
-      snap(clamp(state.start[1] + dy, 0, height), gridStep())
+      snapWithin(state.start[0] + dx, width, gridStep()),
+      snapWithin(state.start[1] + dy, height, gridStep())
     );
   });
   doc.querySelectorAll("[data-tool]").forEach((button) => {
