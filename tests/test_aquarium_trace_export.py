@@ -4,6 +4,7 @@ All source data is created by the actual canonical Aquarium implementation,
 not forged demo-frame objects. Verify source bytes, replay, privacy and guards.
 """
 import copy
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -131,16 +132,18 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
         self.assertFalse(self.out.exists())
 
     def test_empty_sqlite_and_unrecognized_file_do_not_bootstrap_source(self):
-        with sqlite3.connect(self.db) as db:
-            db.execute("CREATE TABLE sentinel (value TEXT)")
-            db.execute("INSERT INTO sentinel VALUES ('untouched')")
+        with closing(sqlite3.connect(self.db)) as db:
+            with db:
+                db.execute("CREATE TABLE sentinel (value TEXT)")
+                db.execute("INSERT INTO sentinel VALUES ('untouched')")
         before = self.db.read_bytes()
         with self.assertRaises(ValueError):
             self.exported()
         self.assertEqual(self.db.read_bytes(), before)
         self.assertFalse(self.out.exists())
-        self.assertEqual(sqlite3.connect(self.db).execute(
-            "SELECT value FROM sentinel").fetchone()[0], "untouched")
+        with closing(sqlite3.connect(self.db)) as db:
+            self.assertEqual(db.execute(
+                "SELECT value FROM sentinel").fetchone()[0], "untouched")
 
     def test_missing_source_and_symlink_fail_without_side_effect(self):
         with self.assertRaisesRegex(ValueError, "missing"):
@@ -177,10 +180,11 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
     def test_changed_committed_history_fail_closed(self):
         with self.aquarium() as a:
             a.step()
-        with sqlite3.connect(self.db) as connection:
-            connection.execute("DROP TRIGGER noosphere_no_update")
-            connection.execute("UPDATE events SET event_hash=? WHERE seq=2",
-                               ("f" * 64,))
+        with closing(sqlite3.connect(self.db)) as connection:
+            with connection:
+                connection.execute("DROP TRIGGER noosphere_no_update")
+                connection.execute("UPDATE events SET event_hash=? WHERE seq=2",
+                                   ("f" * 64,))
         with self.assertRaises(NoosphereError):
             self.exported()
         self.assertFalse(self.out.exists())
