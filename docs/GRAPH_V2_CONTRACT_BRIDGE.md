@@ -23,8 +23,9 @@ fallback, declassification, kind inference or execute-on-import.
 downgrade_v2 is the explicit reverse migration for audit and offline
 interop. It first runs the full validate_v2 checks, then drops only the
 additive v2 metadata and returns the canonical v1 graph whose SHA-256 must
-equal the recorded origin. upgrade_v1 -> downgrade_v2 is byte-for-byte
-lossless; tampered configuration, forged visibility or non-additive fields
+equal the recorded origin. upgrade_v1 -> downgrade_v2 preserves canonical v1 JSON content and
+its canonical SHA-256; it does not promise identical original file bytes
+(whitespace or key order). tampered configuration, forged visibility or non-additive fields
 fail closed instead of being silently discarded.
 
 IMPORTANT: Origin SHA-256 is not an authenticated signature. Visibility
