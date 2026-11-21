@@ -176,6 +176,60 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
 
+    def test_snapshot_refuses_impossible_tick_and_retention_history(self):
+        # These passed the old escape snapshot envelope even though a single
+        # agent can observe only one cell per tick. Re-probes do not change it.
+        common = {
+            "schema": SCHEMA,
+            "cell_size_m": STEP_METERS,
+            "consecutive_rests": 0,
+            "consecutive_blocked_probes": 0,
+        }
+        forged = {
+            "two_cells_stamped_same_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {"0:0": {"x+": [1, 0]},
+                            "1:0": {"x+": [1, 0]}},
+                "last_seen_at": {"0:0": 1, "1:0": 1},
+                "evictions": 0, "forgotten_observations": 0,
+            },
+            "stale_newest_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {"0:0": {"x+": [2, 0]}},
+                "last_seen_at": {"0:0": 0},
+                "evictions": 0, "forgotten_observations": 0,
+            },
+            "observed_more_times_than_cell_tick": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {"0:0": {"x+": [5, 0]},
+                            "1:0": {"x+": [95, 0]}},
+                "last_seen_at": {"0:0": 0, "1:0": 99},
+                "evictions": 0, "forgotten_observations": 0,
+            },
+            "premature_eviction": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {"0:0": {"x+": [1, 0]}},
+                "last_seen_at": {"0:0": 1},
+                "evictions": 1, "forgotten_observations": 1,
+            },
+            "all_cells_evicted": {
+                **common, "last_tick": 0, "updates": 1,
+                "records": {}, "last_seen_at": {},
+                "evictions": 1, "forgotten_observations": 1,
+            },
+            "shrunk_full_table_after_eviction": {
+                **common, "last_tick": 512, "updates": 513,
+                "records": {"0:0": {"x+": [1, 0]}},
+                "last_seen_at": {"0:0": 512},
+                "evictions": 1, "forgotten_observations": 512,
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name), self.assertRaises(CellV3EscapeError):
+                CellExplorerV3Escape.from_snapshot(snapshot)
+        empty = CellExplorerV3Escape().snapshot()
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(empty).snapshot(), empty)
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
