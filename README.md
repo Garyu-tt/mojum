@@ -13,6 +13,12 @@ Two modes are available in this source candidate:
 
 The graph node `brain.placeholder` remains **UNIMPLEMENTED**. No MuJoCo body, real touch/camera, physically actuated motors, reliable multi-device failover, authenticated consensus, secure encrypted replication or Android background service is shipped.
 
+## Visual room designer (experimental Draft)
+
+Open [`tools/room_designer.html`](tools/room_designer.html) directly in a modern desktop or mobile browser, **offline and without any server**. Draw 2D obstacles by touch/mouse drag, set the organism's starting point, edit width/height, and export a compatible `mojum.world.point-room-draft/1` JSON. The browser does not create SQLite files, execute simulation ticks, or access private Noosphere memories. Numeric type distinctions such as `4` versus `4.0` are preserved for the next step.
+
+Use `PYTHONPATH=src python -m mojum.room_input mojum-room-draft.json` to validate the exported draft independently, then explicitly create a **new** Aquarium SQLite journal using the documented `--new-room-contract` and `--room-numeric-contract typed_v1` flags. For exact steps and the read-only hash-anchored restart, see [offline room designer instructions](docs/R015_OFFLINE_ROOM_DESIGNER.md). This is only deterministic point-room geometry, not MuJoCo or a neural brain; independent review and main-head release checks remain required.
+
 ## Run the current synthetic Aquarium
 
 From a source checkout with CPython 3.11+ and no third-party runtime packages:
