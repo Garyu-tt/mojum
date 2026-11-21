@@ -213,6 +213,9 @@ def inspect_journal(path, *, external_expected_head=None):
                         "previous_epoch_index", "epoch_tick", "source",
                     }
                     or payload["schema"] != EPOCH_EVENT_SCHEMA
+                    or any(type(payload.get(field)) is not int for field in (
+                        "absolute_tick", "epoch_index",
+                        "previous_epoch_index", "epoch_tick"))
                     or payload["absolute_tick"] != frames
                     or payload["epoch_index"] != expected_index
                     or payload["previous_epoch_index"] != epoch_index
