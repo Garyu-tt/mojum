@@ -209,6 +209,12 @@ def inspect_journal(path, *, external_expected_head=None):
             manifest = event["payload"]
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             dt_ns = manifest.get("dt_ns")
+            # Runtime creation accepts only this bounded virtual-clock interval.
+            # A read-only wire pass must not certify a bootstrap that cold
+            # Aquarium replay rejects for a forged or missing clock period.
+            if policy == "local_cell_v4" and (
+                    type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
+                raise NoosphereError("invalid v4 bootstrap dt_ns")
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
         elif topic == "aquarium.frame":
