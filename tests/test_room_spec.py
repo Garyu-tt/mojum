@@ -151,7 +151,8 @@ class ShapeErrorTests(unittest.TestCase):
     def test_extreme_json_exponents_are_rejected_without_decimal_overflow(self):
         # These are legal JSON number spellings but cannot be used safely
         # for finite CPU-bounded geometry calculations.
-        for exponent in (b"1e999999999", b"1e-999999999"):
+        for exponent in (b"1e999999999", b"1e-999999999",
+                         b"0e999999999", b"0e-999999999"):
             with self.subTest(exponent=exponent):
                 raw = (b'{"width":' + exponent
                        + b',"height":4,"obstacles":[],"start":[1,1]}')
