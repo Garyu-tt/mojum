@@ -110,6 +110,20 @@ function replaceFooter(source,transform){
    f=>{delete f.export_status}), true);
  const missingRange=await attempt(replaceFooter(wire,
    f=>{delete f.trace_range}), true);
+ // A present-but-forged status is not "legacy": it must fail closed even
+ // when the operator explicitly opts into unverified historical traces.
+ const wrongStatus=await attempt(replaceFooter(wire,
+   f=>{f.export_status="LEGACY_UNVERIFIED"}, true));
+ const frameCountMismatch=await attempt(replaceFooter(wire,
+   f=>{f.trace_integrity.frame_count+=1}));
+ const byteLengthMismatch=await attempt(replaceFooter(wire,
+   f=>{f.trace_integrity.byte_length+=1}));
+ // Frames after the single terminal checkpoint would otherwise extend the
+ // replay past the byte range the proof actually covers.
+ const afterCheckpoint=await attempt(wire.trimEnd()+"\n"+
+   JSON.stringify({schema:"mojum.aquarium.frame/1",tick:99,
+     world:{position:[0,0],blocked:false},
+     interoception:{heartbeat:{pulse:false}}})+"\n", true);
  const legacy=replaceFooter(wire,
    f=>{delete f.trace_integrity;delete f.export_status;delete f.trace_range;
        delete f.trace_room});
@@ -119,6 +133,8 @@ function replaceFooter(source,transform){
  process.stdout.write(JSON.stringify({valid,altered,truncated,mismatch,
                                       brokenProof,missingProof,strippedModern,
                                       strippedRange,missingStatus,missingRange,
+                                      wrongStatus,frameCountMismatch,
+                                      byteLengthMismatch,afterCheckpoint,
                                       legacyDefault,legacyOptIn,encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
@@ -205,6 +221,19 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         for name in ("missingStatus", "missingRange"):
             self.assertFalse(values[name]["enabled"], name)
             self.assertIn("SHA-256", values[name]["status"], name)
+        # A forged status value must not impersonate the explicit legacy path.
+        self.assertFalse(values["wrongStatus"]["enabled"])
+        self.assertIn("SHA-256", values["wrongStatus"]["status"])
+        # The proof binds both the frame count and the exact byte length.
+        self.assertFalse(values["frameCountMismatch"]["enabled"])
+        self.assertIn("метаданные SHA-256", values["frameCountMismatch"]["status"])
+        self.assertFalse(values["byteLengthMismatch"]["enabled"])
+        self.assertIn("Размер записанных кадров",
+                      values["byteLengthMismatch"]["status"])
+        # Nothing may follow the single terminal checkpoint, even with the
+        # legacy opt-in enabled.
+        self.assertFalse(values["afterCheckpoint"]["enabled"])
+        self.assertIn("checkpoint", values["afterCheckpoint"]["status"])
         self.assertFalse(values["legacyDefault"]["enabled"])
         self.assertIn("legacy", values["legacyDefault"]["status"])
         self.assertTrue(values["legacyOptIn"]["enabled"])
