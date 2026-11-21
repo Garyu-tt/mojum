@@ -51,14 +51,14 @@ def unpack(bundle, *, expected_revision=None, expected_organism_id=None):
     # the complete manifest-to-payload digest relationship below.
     if expected_revision is not None and (
             type(expected_revision) is not int
-            or type(manifest) is not dict
+            or not isinstance(manifest, dict)
             or type(manifest.get("revision")) is not int
             or manifest["revision"] != expected_revision):
         raise ValueError("stale checkpoint revision")
     if expected_organism_id is not None and (
             type(expected_organism_id) is not str
-            or type(manifest) is not dict
-            or type(manifest.get("organism_id")) is not str
+            or not isinstance(manifest, dict)
+            or not isinstance(manifest.get("organism_id"), str)
             or manifest["organism_id"] != expected_organism_id):
         raise ValueError("checkpoint organism identity mismatch")
 
