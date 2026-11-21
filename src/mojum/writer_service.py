@@ -82,7 +82,8 @@ def _send(stream, obj):
     stream.sendall(_HEADER.pack(len(raw)) + raw)
 
 
-def _private_directory(path, label):
+def _private_directory(path, label, *, client_gid=None):
+    """Require owner-only 0700, or strictly owned 0710 group-traverse socket dir."""
     path = Path(path)
     if not path.is_absolute() or path.is_symlink():
         raise ValueError(label + " must be an absolute trusted directory")
@@ -90,12 +91,35 @@ def _private_directory(path, label):
         st = path.stat()
     except OSError as exc:
         raise ValueError(label + " is missing") from exc
-    if (not stat.S_ISDIR(st.st_mode)
-            or os.name != "posix"
-            or st.st_uid != os.getuid()
-            or st.st_mode & 0o077):
-        raise ValueError(label + " must be owned and private (0700)")
+    if (not stat.S_ISDIR(st.st_mode) or os.name != "posix"
+            or st.st_uid != os.getuid()):
+        raise ValueError(label + " requires a service-owned directory")
+    if client_gid is None:
+        if st.st_mode & 0o077:
+            raise ValueError(label + " must be owned and private (0700)")
+    elif (st.st_gid != client_gid or st.st_mode & 0o777 != 0o710):
+        raise ValueError(label + " requires service-owned 0710 directory with client group")
     return path
+
+
+def _private_sqlite_file(path, label):
+    """Cross-UID mode: client group must have no access to DB or parent."""
+    path = Path(path)
+    _private_directory(path.parent, label + " parent")
+    if path.is_symlink():
+        raise ValueError(label + " cannot be symlinked")
+    try:
+        info = path.stat()
+    except OSError as exc:
+        raise ValueError(label + " unavailable") from exc
+    if (not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_mode & 0o077
+            or not info.st_mode & stat.S_IRUSR
+            or not info.st_mode & stat.S_IWUSR):
+        raise ValueError(label + " must be private 0600 service-owned SQLite")
+    return path
+
 
 
 def _archive_name(value):
@@ -108,18 +132,38 @@ def _archive_name(value):
 class WriterService:
     """Serial Unix AF_UNIX endpoint for a single GuardedAquarium instance.
 
-    The socket owner UID is the only admitted peer UID. This is an OS-local
-    identity check, not authentication of specific programs or devices.
+    By default only same-UID peers are admitted. Separate-UID mode accepts
+    exactly one configured client UID through a 0710 group-traverse parent
+    and 0660 socket; Noosphere/registry data stay private to service UID.
+    UID is not proof of a particular program or remote identity.
     """
 
     def __init__(self, socket_path, db_path, registry_path, seed, graph, *,
-                 writer, epoch, generation, archive_dir):
+                 writer, epoch, generation, archive_dir,
+                 client_uid=None, client_gid=None):
         if not hasattr(socket, "SO_PEERCRED") or not hasattr(socket, "AF_UNIX"):
             raise RuntimeError("Linux AF_UNIX/SO_PEERCRED required")
         self._socket_path = Path(socket_path)
         if not self._socket_path.is_absolute() or not self._socket_path.name:
             raise ValueError("socket path must be absolute")
-        _private_directory(self._socket_path.parent, "socket parent")
+        self._owner_uid = os.getuid()
+        if (client_uid is None) != (client_gid is None):
+            raise ValueError("client_uid and client_gid must be set together")
+        self._client_gid = None
+        self._allowed_client_uid = self._owner_uid
+        if client_uid is not None:
+            if (type(client_uid) is not int or not 0 < client_uid < 2**31
+                    or type(client_gid) is not int or not 0 < client_gid < 2**31
+                    or self._owner_uid == 0 or client_uid == self._owner_uid):
+                raise ValueError("cross-UID mode needs separate non-root client/service UIDs and GID")
+            if client_gid not in (os.getgid(), *os.getgroups()):
+                raise ValueError("service must belong to the configured client socket group")
+            self._client_gid = client_gid
+            self._allowed_client_uid = client_uid
+            _private_sqlite_file(db_path, "Aquarium journal")
+            _private_sqlite_file(registry_path, "authority registry")
+        _private_directory(self._socket_path.parent, "socket parent",
+                           client_gid=self._client_gid)
         self._archive_dir = _private_directory(archive_dir, "archive directory")
         if os.path.lexists(self._socket_path):
             raise ValueError("socket name already exists; never unlink another listener")
@@ -127,7 +171,6 @@ class WriterService:
         self._guard = None
         self._socket_identity = None
         self._running = False
-        self._owner_uid = os.getuid()
         try:
             self._guard = GuardedAquarium(
                 db_path, registry_path, seed, graph,
@@ -136,7 +179,11 @@ class WriterService:
             self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._socket.bind(str(self._socket_path))
             self._socket_identity = self._path_identity()
-            self._socket_path.chmod(0o600)
+            if self._client_gid is not None:
+                os.chown(self._socket_path, -1, self._client_gid)
+                self._socket_path.chmod(0o660)
+            else:
+                self._socket_path.chmod(0o600)
             self._socket.listen(16)
             self._socket.settimeout(0.2)
             self._running = True
@@ -152,6 +199,21 @@ class WriterService:
         if not stat.S_ISSOCK(info.st_mode):
             raise AuthorityError("writer socket is not a Unix socket")
         return (info.st_dev, info.st_ino)
+
+    def _assert_isolation(self):
+        """Recheck permission boundary before accepting each RPC."""
+        if self._client_gid is None:
+            return
+        _private_directory(self._socket_path.parent, "socket parent",
+                           client_gid=self._client_gid)
+        _private_directory(self._archive_dir, "archive directory")
+        _private_sqlite_file(self._guard._db_path, "Aquarium journal")
+        _private_sqlite_file(self._guard._registry_path, "authority registry")
+        st = self._socket_path.lstat()
+        if (not stat.S_ISSOCK(st.st_mode) or st.st_uid != self._owner_uid
+                or st.st_gid != self._client_gid
+                or st.st_mode & 0o777 != 0o660):
+            raise AuthorityError("writer socket permission boundary changed")
 
     def _status(self):
         checkpoint = self._guard.checkpoint()
@@ -208,6 +270,7 @@ class WriterService:
             raise RuntimeError("writer service is stopped")
         if self._path_identity() != self._socket_identity:
             raise AuthorityError("writer socket replaced; fail closed")
+        self._assert_isolation()
         try:
             conn, _ = self._socket.accept()
         except socket.timeout:
@@ -219,8 +282,8 @@ class WriterService:
                     conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
                                     _PEER.size)
                 )[1]
-                if uid != self._owner_uid:
-                    raise PermissionError("different local peer UID")
+                if uid != self._allowed_client_uid:
+                    raise PermissionError("local peer UID not enrolled")
                 cmd = _receive(conn)
                 answer = {"ok": True, "result": self._dispatch(cmd)}
             except (OSError, ValueError, PermissionError, OverflowError,
@@ -292,6 +355,10 @@ def main(argv=None):
     serve.add_argument("--writer", required=True)
     serve.add_argument("--epoch", required=True, type=int)
     serve.add_argument("--generation", required=True, type=int)
+    serve.add_argument("--client-uid", type=int,
+                       help="one authorized separate client UID (not service UID)")
+    serve.add_argument("--client-gid", type=int,
+                       help="socket access group; requires --client-uid")
     root = Path(__file__).resolve().parents[2]
     serve.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     serve.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
@@ -316,6 +383,7 @@ def main(argv=None):
             args.socket, args.db, args.registry, seed, graph,
             writer=args.writer, epoch=args.epoch,
             generation=args.generation, archive_dir=args.archive_dir,
+            client_uid=args.client_uid, client_gid=args.client_gid,
         ) as server:
             def shutdown(_signum, _frame):
                 server._running = False
