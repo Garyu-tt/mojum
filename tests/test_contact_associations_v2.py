@@ -3,6 +3,10 @@ import unittest
 
 from mojum.contact_associations_v2 import ContactAssociationsV2, WINDOW
 from mojum.sensory_play import ContactAssociations, CuriosityError, MAX_CUES, SENSE_SCHEMA
+from mojum.sensory_associations_v2 import (
+    SCHEMA as CANONICAL_V2_SCHEMA,
+    ContactAssociationsV2 as CanonicalContactAssociationsV2,
+)
 
 
 def sensor(tick, rgb):
@@ -46,6 +50,15 @@ class V2Test(unittest.TestCase):
         self.assertEqual(a.evicted_cues, 20)
         self.assertNotIn("0:0:0", a.table)
         self.assertEqual(ContactAssociationsV2.from_snapshot(a.snapshot()).snapshot(), a.snapshot())
+
+    def test_windowed_wire_identity_is_distinct_from_canonical_v2(self):
+        experimental = ContactAssociationsV2().snapshot()
+        canonical = CanonicalContactAssociationsV2().snapshot()
+        self.assertNotEqual(experimental["schema"], CANONICAL_V2_SCHEMA)
+        with self.assertRaises(CuriosityError):
+            ContactAssociationsV2.from_snapshot(canonical)
+        with self.assertRaises(CuriosityError):
+            CanonicalContactAssociationsV2.from_snapshot(experimental)
 
     def test_no_implicit_conversion(self):
         v1 = ContactAssociations()
