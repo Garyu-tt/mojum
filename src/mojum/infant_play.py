@@ -10,6 +10,7 @@ import copy
 import json
 import math
 from pathlib import Path
+import time
 
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere
@@ -386,20 +387,31 @@ def main():
     parser.add_argument("--ticks", type=int, default=40)
     parser.add_argument("--watch", action="store_true",
                         help="opt-in PRIVATE synthetic trace on this local terminal")
+    parser.add_argument("--pace-ms", type=int, default=0,
+                        help="optional wall-clock delay between ticks (0..10000 ms); does not change virtual time")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("ticks must be within 0..1000")
+    if type(args.pace_ms) is not int or not 0 <= args.pace_ms <= 10_000:
+        parser.error("--pace-ms must be within 0..10000")
+    if args.pace_ms and not args.watch:
+        parser.error("--pace-ms requires --watch so the user can observe the stream")
     with InfantPlay(
         args.db, json.loads(args.graph.read_text(encoding="utf-8")),
     ) as infant:
-        for _ in range(args.ticks):
+        for i in range(args.ticks):
             frame = infant.step()
             if args.watch:
-                print(json.dumps(frame["viewer"], ensure_ascii=False, allow_nan=False))
+                # Flush only AFTER a committed Noosphere step. An observing
+                # browser may tail this opt-in PRIVATE local JSONL file.
+                print(json.dumps(frame["viewer"], ensure_ascii=False, allow_nan=False),
+                      flush=True)
+            if args.pace_ms and i + 1 < args.ticks:
+                time.sleep(args.pace_ms / 1000)
         print(json.dumps(
             {"checkpoint": infant.checkpoint(), "events": infant.store.count()},
             ensure_ascii=False, allow_nan=False,
-        ))
+        ), flush=True)
 
 
 if __name__ == "__main__":
