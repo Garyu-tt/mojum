@@ -72,6 +72,36 @@ class NewTypedRoomCliTests(unittest.TestCase):
         self.assertEqual(_revision(room, 0, *start),
                          _revision(room, 0, 1.25, 2.5))
 
+    def test_preflight_preview_cli_validates_without_sqlite(self):
+        def preflight(file):
+            return subprocess.run(
+                [sys.executable, "-m", "mojum.room_input", str(file)],
+                cwd=ROOT, env=dict(os.environ, PYTHONPATH=str(ROOT / "src")),
+                capture_output=True, text=True, timeout=20,
+            )
+        simple = preflight(SIMPLE)
+        expert = preflight(EXAMPLE)
+        self.assertEqual(simple.returncode, 0, simple.stderr[-800:])
+        self.assertEqual(expert.returncode, 0, expert.stderr[-800:])
+        result = json.loads(simple.stdout)
+        self.assertEqual(result, json.loads(expert.stdout))
+        self.assertEqual(
+            result["status"], "VALID_SYNTHETIC_POINT_ROOM_NO_SQLITE_CREATED")
+        self.assertEqual(result["width_m"], 4.5)
+        self.assertEqual(result["width_type"], "float")
+        self.assertEqual(result["height_m"], 4)
+        self.assertEqual(result["height_type"], "int")
+        self.assertEqual(result["obstacle_count"], 1)
+        self.assertEqual(result["start"], [1.25, 2.5])
+        self.assertEqual(len(result["initial_world_revision"]), 64)
+        self.assertFalse(self.db.exists())
+        bad = self.root / "invalid-draft.json"
+        bad.write_text('{"schema":"bad-format"}', encoding="utf-8")
+        rejected = preflight(bad)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("invalid", rejected.stderr)
+        self.assertFalse(self.db.exists())
+
     def test_beginner_decimal_json_matches_exact_persisted_abi(self):
         expected_room, expected_start = read_new_room_contract(EXAMPLE)
         draft_room, draft_start = read_new_room_contract(SIMPLE)
