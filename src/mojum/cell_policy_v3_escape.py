@@ -150,10 +150,12 @@ class CellExplorerV3Escape:
                 if action == "rest" and counts[1]:
                     raise CellV3EscapeError("impossible blocked rest history")
                 cell_observations += counts[0]
-            # One measured action per tick, including deterministic re-probes.
-            # A cell cannot contain more observations than its own last tick.
+            # Each tick measures at most one cell. A cell last observed at
+            # tick t therefore cannot contain more than t + 1 outcomes.
             if cell_observations > last_seen + 1:
-                raise CellV3EscapeError("more escape observations than elapsed ticks")
+                raise CellV3EscapeError(
+                    "more escape cell observations than elapsed ticks"
+                )
             observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV3EscapeError("escape lost or double-counted observations")
