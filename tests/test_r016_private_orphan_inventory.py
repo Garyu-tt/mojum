@@ -192,5 +192,85 @@ class PrivateOrphanInventoryTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), self.original_bytes)
 
 
+    def test_real_crashed_export_process_leaves_audit_only_private_stage(self):
+        # Actual production code, NOT a handcrafted JSONL: terminate before
+        # atomic link after the file was flushed/fsynced, and verify scanner
+        # sees the surviving 0600 stage without creating/altering final.
+        script = r"""
+import json
+import os
+from pathlib import Path
+import sys
+from unittest.mock import patch
+from mojum.aquarium_trace_export import export_private_trace
+source, dest, head, root, mode = sys.argv[1:]
+root = Path(root)
+seed = json.loads((root / "examples/genesis_seed.json").read_text("utf-8"))
+graph = json.loads((root / "examples/first_loop.json").read_text("utf-8"))
+def interrupted_link(src, dst):
+    if mode == "before":
+        os._exit(71)
+    os.link.__wrapped__(src, dst)
+if mode == "before":
+    with patch("mojum.aquarium_trace_export.os.link",
+               side_effect=lambda src, dst: os._exit(71)):
+        export_private_trace(
+            source, dest, seed, graph,
+            allow_private_export=True, expected_journal_head=head,
+            neural_mode="disabled", exploration_mode="goal_free",
+            developmental_policy="local_cell_v4", sensory_mode="none",
+            journal_backend="segmented", journal_segment_size=64,
+        )
+else:
+    real_link = os.link
+    def link_then_die(src, dst):
+        real_link(src, dst)
+        os._exit(72)
+    with patch("mojum.aquarium_trace_export.os.link",
+               side_effect=link_then_die):
+        export_private_trace(
+            source, dest, seed, graph,
+            allow_private_export=True, expected_journal_head=head,
+            neural_mode="disabled", exploration_mode="goal_free",
+            developmental_policy="local_cell_v4", sensory_mode="none",
+            journal_backend="segmented", journal_segment_size=64,
+        )
+"""
+        for mode, code in (("before", 71), ("after", 72)):
+            with self.subTest(crash=mode):
+                final = self.directory / ("crashed-" + mode + ".jsonl")
+                env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+                result = subprocess.run(
+                    [sys.executable, "-c", script, str(self.source),
+                     str(final), self.head, str(ROOT), mode],
+                    cwd=ROOT, env=env, capture_output=True, text=True,
+                    timeout=60,
+                )
+                self.assertEqual(result.returncode, code, result.stderr[-700:])
+                audit = inspect_private_trace_orphans(
+                    self.directory, expected_journal_head=self.head
+                )
+                statuses = {r["name"]: r for r in audit["files"]}
+                self.assertEqual(len(statuses), 1)
+                record = next(iter(statuses.values()))
+                if mode == "before":
+                    self.assertFalse(final.exists())
+                    self.assertEqual(record["status"],
+                                     "self_consistent_head_matches")
+                    self.assertEqual(record["hard_links"], 1)
+                else:
+                    self.assertTrue(final.is_file())
+                    self.assertEqual(record["status"],
+                                     "linked_manual_reconciliation")
+                    self.assertEqual(record["hard_links"], 2)
+                    self.assertEqual(final.read_bytes(), self.canonical_bytes)
+                self.assertEqual(self.source.read_bytes(), self.original_bytes)
+                # Only inside this disposable synthetic QA directory.
+                for stage in self.directory.glob(
+                    ".mojum-private-trace-*.jsonl"
+                ):
+                    stage.unlink()
+
+
 if __name__ == "__main__":
     unittest.main()
