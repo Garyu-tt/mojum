@@ -532,6 +532,22 @@ class V5AquariumVersionGateTests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "epoch"):
             _check_policy_frame(forged, contract, temporal, sensory)
 
+    def test_wire_inspector_rejects_v5_sensory_bootstrap_fields(self):
+        with self.aquarium() as rover:
+            bootstrap = next(rover.store.iter_events(include_nonpublic=True))["event"]
+        for field, value in (("sensory_mode", None), ("sensory_scene", {})):
+            with self.subTest(field=field):
+                path = self.root / f"{field}.sqlite3"
+                event = deepcopy(bootstrap)
+                event["payload"][field] = value
+                with LocalNoosphere(path, bootstrap["agent_id"]) as store:
+                    head = store.append(event, expected_head=store.head())
+                    self.assertEqual(store.verify_chain()["head"], head)
+                with self.assertRaisesRegex(AquariumError, "mismatch"):
+                    self.aquarium(path)
+                with self.assertRaisesRegex(NoosphereError, "unexpected sensory"):
+                    inspect_journal(path, external_expected_head=head)
+
     def test_existing_v4_journal_cannot_be_relabelled_as_v5(self):
         with self.aquarium(mode=V4_MODE) as rover:
             for _ in range(10):
