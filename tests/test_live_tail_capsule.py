@@ -6,6 +6,8 @@ PRIVATE Noosphere, physical device, server volume or production mutation.
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -208,6 +210,57 @@ class SyntheticTailArchiveQA(unittest.TestCase):
                 self.folder, source_events=130,
                 external_expected_source_head=head,
             )
+
+    def test_explicit_cpu_cli_backups_unsealed_tail_no_private_stdout(self):
+        head = self.make(130)
+        # Seal the 128-event prefix explicitly; the CLI never exports
+        # the PRIVATE tail or additional history without a separate flag.
+        with SegmentedNoosphere(self.db, OWNER, segment_size=64) as q:
+            export_sealed_segments(
+                q, self.folder, include_nonpublic=True,
+                external_expected_head=head,
+            )
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+
+        def run(*args):
+            return subprocess.run([
+                sys.executable, "-m", "mojum.segment_archive_cli",
+                *map(str, args),
+            ], env=env, cwd=ROOT, text=True, capture_output=True,
+               timeout=20)
+
+        common = (
+            "capture-tail", "--db", self.db, "--agent-id", OWNER,
+            "--segment-size", "64", "--archive-dir", self.folder,
+            "--expected-source-head", head,
+        )
+        denied = run(*common)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertNotIn("PRIVATE_SYNTHETIC", denied.stdout)
+        accepted = run(*common, "--include-private")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        report = json.loads(accepted.stdout)
+        self.assertEqual(report["tail_events"], 2)
+        self.assertEqual(report["archived_events"], 130)
+        self.assertNotIn("PRIVATE_SYNTHETIC", accepted.stdout)
+        verify = run(
+            "verify-point", "--archive-dir", self.folder,
+            "--source-events", "130", "--expected-source-head", head,
+        )
+        self.assertEqual(verify.returncode, 0, verify.stderr)
+        self.assertEqual(json.loads(verify.stdout)["source_head"], head)
+        self.db.rename(self.root/"disconnected-source.sqlite3")
+        restore = run(
+            "restore-point", "--archive-dir", self.folder,
+            "--new-db", self.restored, "--source-events", "130",
+            "--expected-source-head", head,
+        )
+        self.assertEqual(restore.returncode, 0, restore.stderr)
+        self.assertEqual(json.loads(restore.stdout)["restored_events"], 130)
+        self.assertNotIn(str(self.restored), restore.stdout)
+        self.assertNotIn("PRIVATE_SYNTHETIC", restore.stdout)
+        with SegmentedNoosphere(self.restored, OWNER, segment_size=64) as q:
+            self.assertEqual(q.verify_chain(external_expected_head=head)["count"], 130)
 
     def test_new_restore_path_only_and_no_overwrite(self):
         head = self.make(65)
