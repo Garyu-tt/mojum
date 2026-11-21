@@ -19,6 +19,8 @@ from mojum.developmental_policy_v2 import LocalCellExplorer, SCHEMA as V2_SCHEMA
 from mojum.world_room import Room, advance, initial_state
 
 FIXTURE_SEED = 0xC0111D3
+# Pinned after the first exact-head green CI run (not an independent preregistration).
+EXPECTED_FIXTURE_SHA256 = "3371da882a06b7bb5b03b966887d9378a9656f5ef756de45f7dcbc143e1df20e"
 SCENES = 24
 TICKS = 160
 MODES = ("coarse_v1", "local_cell_v2", "frozen")
@@ -209,6 +211,7 @@ class GeneratedDistributionQA(unittest.TestCase):
         x = fingerprint()
         self.assertEqual(len(x), 64)
         self.assertEqual(x, fingerprint())
+        self.assertEqual(x, EXPECTED_FIXTURE_SHA256)
         self.assertRegex(x, r"^[a-f0-9]{64}$")
 
     def test_measured_causal_loop_stable_across_regenerated_cases(self):
