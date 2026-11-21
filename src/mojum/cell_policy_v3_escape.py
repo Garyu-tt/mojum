@@ -181,6 +181,18 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("impossible escape eviction history")
         if state["evictions"] and len(state["records"]) != MAX_CELLS:
             raise CellV3EscapeError("escape retention shrank after eviction")
+        # A per-cell bound is not enough: two cells can each have <= t+1
+        # observations while together claiming more than the t+1 ticks
+        # that existed when the earlier of their final observations occurred.
+        # Evicted cells only consume more ticks, so this remains necessary.
+        prefix_observations = 0
+        for seen_tick, key in sorted(
+                (tick, key) for key, tick in state["last_seen_at"].items()):
+            prefix_observations += sum(
+                counts[0] for counts in state["records"][key].values())
+            if prefix_observations > seen_tick + 1:
+                raise CellV3EscapeError(
+                    "escape retained observations exceed elapsed tick prefix")
 
         model = cls()
         model.last_tick = state["last_tick"]
