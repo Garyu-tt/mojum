@@ -17,7 +17,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError
-from .noosphere import _read_first_event
+from .noosphere import STORE_SCHEMA, _open_readonly, _read_first_event
 
 MAX_BACKUP_BYTES = 128_000_000
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -49,6 +49,27 @@ def _destination(path):
     if os.path.lexists(dest):
         raise FileExistsError("checkpoint destination already exists")
     return dest
+
+
+def _require_existing_source_journal(path, agent_id):
+    """Reject incomplete source journals before Aquarium can create/repair SQLite.
+
+    Export operates on existing history only. Aquarium is deliberately writable
+    and bootstraps an empty store, so checking path existence is insufficient.
+    """
+    with _open_readonly(path) as db:
+        db.execute("BEGIN")
+        tables = {row["name"] for row in db.execute(
+            "SELECT name FROM sqlite_schema "
+            "WHERE type='table' AND name IN ('metadata', 'events')"
+        )}
+        if tables != {"metadata", "events"}:
+            raise ValueError("export requires existing metadata and events tables")
+        saved = dict(db.execute("SELECT k,v FROM metadata"))
+        if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
+            raise ValueError("export requires complete matching journal metadata")
+        if db.execute("SELECT 1 FROM events LIMIT 1").fetchone() is None:
+            raise ValueError("export requires an existing committed Aquarium event")
 
 
 def _sha256(path):
