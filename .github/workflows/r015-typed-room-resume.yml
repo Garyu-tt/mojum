@@ -1,0 +1,44 @@
+name: Mojum verified typed-room SQLite cold-resume QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-typed-room-resume.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/typed_room_resume.py"
+      - "src/mojum/room_contract.py"
+      - "tests/test_typed_room_resume.py"
+      - "docs/R015_VERIFIED_TYPED_ROOM_RESUME.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typed-room-resume:
+    name: independently anchored typed room resume (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Verify no silent journal birth, tamper or hash bypass
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p test_typed_room_resume.py -v 2>&1 | tee typed-resume-qa.log
+          if grep -q 'ResourceWarning: unclosed database' typed-resume-qa.log; then
+            echo "FAIL: SQLite connection leak in typed-room resume QA" >&2
+            exit 1
+          fi

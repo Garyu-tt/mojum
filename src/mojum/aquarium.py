@@ -29,6 +29,7 @@ from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .room_contract import encode_room_exact
+from .typed_room_resume import load_verified_typed_room, TypedRoomResumeError
 from .verified_snapshot import (
     STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
     runtime_source_sha256,
@@ -85,6 +86,7 @@ class Aquarium:
         exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
         replay_snapshot_file=None, replay_snapshot_key_file=None,
         developmental_policy="legacy", room_numeric_contract="legacy",
+        read_only_existing=False,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -110,7 +112,21 @@ class Aquarium:
         if type(room_numeric_contract) is not str or room_numeric_contract not in (
                 "legacy", "typed_v1"):
             raise AquariumError("unknown room numeric contract")
+        if type(read_only_existing) is not bool:
+            raise AquariumError("read_only_existing must be boolean")
+        self._read_only_existing = read_only_existing
         self._read_only_archive = developmental_policy == ARCHIVE_MODE
+        if self._read_only_existing:
+            if self._read_only_archive or room_numeric_contract != "typed_v1":
+                raise AquariumError(
+                    "read-only typed journal must use exact typed_v1 policy")
+            if not Path(db_path).is_file() or Path(db_path).is_symlink():
+                raise AquariumError("read-only typed journal must already exist")
+            if (type(external_expected_head) is not str
+                    or len(external_expected_head) != 64):
+                raise AquariumError("read-only typed journal needs independently supplied head")
+            if replay_snapshot_file is not None:
+                raise AquariumError("read-only typed journal cannot use HMAC sidecars")
         if self._read_only_archive and room_numeric_contract != "legacy":
             raise AquariumError("archived v2A room contract is fixed and cannot be rewritten")
         self.room_numeric_contract = room_numeric_contract
@@ -209,7 +225,8 @@ class Aquarium:
             # historical sensory frames under a different physical model.
             self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
         self.store = LocalNoosphere(
-            db_path, agent_id, read_only=self._read_only_archive)
+            db_path, agent_id,
+            read_only=(self._read_only_archive or self._read_only_existing))
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
         self._committed_head = None
@@ -217,6 +234,8 @@ class Aquarium:
         try:
             if self._read_only_archive and self._committed_event_count == 0:
                 raise AquariumError("archived v2A journal requires a bootstrap")
+            if self._read_only_existing and self._committed_event_count == 0:
+                raise AquariumError("read-only typed journal requires existing bootstrap")
             if self._committed_event_count == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head, signed_state=signed_state)
@@ -243,6 +262,8 @@ class Aquarium:
         }
 
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
+        if self._read_only_existing:
+            raise AquariumError("verified typed journal is strictly read-only")
         if self._committed_event_count >= MAX_REPLAY_EVENTS:
             raise AquariumError("journal event budget reached; verified snapshot/compaction pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
@@ -347,6 +368,8 @@ class Aquarium:
             self.sensory_bridge.adopt(self.world, payload["toy_contact"])
 
     def step(self, *, dx=_OMITTED_MOVEMENT, dy=_OMITTED_MOVEMENT):
+        if self._read_only_existing:
+            raise AquariumError("verified typed journal is strictly read-only")
         if self._read_only_archive:
             raise AquariumError("archived v2A journal is strictly read-only")
         if self.explorer is not None:
@@ -371,6 +394,8 @@ class Aquarium:
 
     def acquire(self, acquired):
         """Persist an acquired-gene event. Only future/current ticks allowed."""
+        if self._read_only_existing:
+            raise AquariumError("verified typed journal is strictly read-only")
         if self._read_only_archive:
             raise AquariumError("archived v2A journal is strictly read-only")
         if not isinstance(acquired, dict):
@@ -490,6 +515,8 @@ class Aquarium:
         Snapshot is a speed cache, not the journal. At save time a full SQLite
         hash-chain verification pins the current head/count before publication.
         """
+        if self._read_only_existing:
+            raise AquariumError("verified typed journal cannot create a replay snapshot")
         if self._read_only_archive:
             raise AquariumError("archived v2A journal cannot create a replay snapshot")
         if self._snapshot_file is None:
@@ -628,7 +655,8 @@ def main():
     parser.add_argument("--db", type=Path, required=True, help="explicit local SQLite file; not cloud")
     parser.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
-    parser.add_argument("--ticks", type=int, default=120)
+    parser.add_argument("--ticks", type=int, default=None,
+                        help="new: default 120; typed restore: default 0 (no append)")
     # None means the option was absent; a supplied nominal value is still an
     # external motor request and must not be silently accepted in goal_free.
     parser.add_argument("--dx", type=float, default=None)
@@ -644,9 +672,22 @@ def main():
     parser.add_argument("--room-numeric-contract",
                         choices=("legacy", "typed_v1"), default="legacy",
                         help="opt-in exact int/float geometry manifest for NEW journals")
+    parser.add_argument("--resume-typed-room", action="store_true",
+                        help="load room and start from an existing pinned-head typed SQLite")
+    parser.add_argument("--expected-journal-head",
+                        help="independent 64-hex source head required with --resume-typed-room")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
+    if args.ticks is None:
+        args.ticks = 0 if args.resume_typed_room else 120
+    if args.resume_typed_room:
+        if args.room_numeric_contract != "typed_v1":
+            parser.error("--resume-typed-room requires --room-numeric-contract typed_v1")
+        if args.expected_journal_head is None:
+            parser.error("--resume-typed-room requires --expected-journal-head")
+    elif args.expected_journal_head is not None:
+        parser.error("--expected-journal-head is only valid with --resume-typed-room")
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
     if args.developmental_policy == ARCHIVE_MODE and args.ticks != 0:
@@ -669,6 +710,21 @@ def main():
             _movement(0.0 if args.dy is None else args.dy)
         except AquariumError as exc:
             parser.error(str(exc))
+    # An archived source is verified READ-ONLY with a separately supplied
+    # head *before* opening the writable Aquarium. The Aquarium then checks
+    # the same head again so a concurrent source append cannot be adopted.
+    geometry = {}
+    if args.resume_typed_room:
+        try:
+            room, start, _ = load_verified_typed_room(
+                args.db, agent_id="dante-fixture-001",
+                expected_journal_head=args.expected_journal_head)
+        except TypedRoomResumeError as exc:
+            parser.error(str(exc))
+        geometry = {
+            "room": room, "start": start,
+            "external_expected_head": args.expected_journal_head,
+        }
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
@@ -676,6 +732,8 @@ def main():
         sensory_mode=args.sensory_mode,
         developmental_policy=args.developmental_policy,
         room_numeric_contract=args.room_numeric_contract,
+        read_only_existing=(args.resume_typed_room and args.ticks == 0),
+        **geometry,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
