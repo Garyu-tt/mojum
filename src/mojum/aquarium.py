@@ -33,7 +33,7 @@ from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .verified_snapshot import (
-    STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
+    STATE_SCHEMA, STATE_SCHEMA_V4, SnapshotError, load_snapshot, save_snapshot,
     runtime_source_sha256,
 )
 
@@ -463,7 +463,12 @@ class Aquarium:
         }
         if self.developmental_policy == "local_cell_v4":
             required.add("epoch_index")
-        if type(state) is not dict or set(state) != required or state["schema"] != STATE_SCHEMA:
+        expected_state_schema = (
+            STATE_SCHEMA_V4 if self.developmental_policy == "local_cell_v4"
+            else STATE_SCHEMA
+        )
+        if (type(state) is not dict or set(state) != required
+                or state["schema"] != expected_state_schema):
             raise SnapshotError("invalid replay state field contract")
         events, tick = state["journal_events"], state["tick"]
         if (type(events) is not int or not 1 <= events <= committed_count
@@ -558,7 +563,9 @@ class Aquarium:
         if self.store.head() != self._committed_head:
             raise SnapshotError("journal advanced while snapshot was prepared")
         state = {
-            "schema": STATE_SCHEMA,
+            "schema": (STATE_SCHEMA_V4
+                       if self.developmental_policy == "local_cell_v4"
+                       else STATE_SCHEMA),
             "agent_id": self.agent_id,
             "manifest_sha256": digest(self.manifest),
             "runtime_source_sha256": runtime_source_sha256(),
