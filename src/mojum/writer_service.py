@@ -105,7 +105,7 @@ def _private_directory(path, label, *, client_gid=None):
 def _private_sqlite_file(path, label):
     """Cross-UID mode: client group must have no access to DB or parent."""
     path = Path(path)
-    _private_directory(path.parent.resolve(), label + " parent")
+    _private_directory(path.parent, label + " parent")
     if path.is_symlink():
         raise ValueError(label + " cannot be symlinked")
     try:
