@@ -34,4 +34,4 @@ The test is intentionally separate from the canonical R0.13 Aquarium to avoid br
 
 ## Source and review
 
-Branch is stacked on the exact then-current RC #75 head `d70d739685f4db22ce3c686a04caffa060f5d174`, so upstream QA improvements are preserved. All three GitHub CI families (full Aquarium, Mesh and Motor Gate) must pass on the final PR head with Python 3.11, 3.12 and 3.13. Parent RC and this experimental PR need independent approval. Neither should be merged automatically or described as a completed digital organism.
+Branch is stacked on the exact then-current RC #75 head `016c0c2c81c581e25cd891a3f0940e14c4950307`, so upstream QA improvements are preserved. All three GitHub CI families (full Aquarium, Mesh and Motor Gate) must pass on the final PR head with Python 3.11, 3.12 and 3.13. Parent RC and this experimental PR need independent approval. Neither should be merged automatically or described as a completed digital organism.
