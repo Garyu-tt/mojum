@@ -210,6 +210,33 @@ to 512 active cells and evicts the least recently observed cell when a
 new one arrives at capacity. The journal records evictions and forgotten
 observations. The SQLite journal still has a 10,000-event budget.
 
+Use `--motor-mode local_cell_v4` only for a **new** experimental journal when
+the 9,999-tick v1/v2/v3 episode limit is the blocker:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./v4_PRIVATE.sqlite3 \
+  --motor-mode local_cell_v4 --neural-mode disabled --ticks 120
+```
+
+v4 uses a new `proprioception/2` contract with monotonic absolute ticks,
+explicit epoch/local-tick fields, and an `aquarium.epoch` marker committed
+before the first frame at ticks 9,999, 19,998, ... . It keeps the same 512-cell
+bounded retention policy under a new `/4` wire schema and uses a distinct
+checkpoint schema. Old v1/v2/v3 journals are never reinterpreted or migrated
+by this selector. The v4 path is still finite (absolute tick < 99,999 and the
+existing 100,000-event SQLite ceiling), CPU-linear, checksum-only and
+synthetic; it is not an endless organism, an authenticated snapshot, a
+distributed replica, a neural brain or a physical actuator.
+
+The v4 acceptance regression includes an actual SQLite 9,999→10,000 boundary,
+a committed-marker interruption before the first post-boundary frame, cold
+replay, and continuation to tick 10,050:
+
+```bash
+PYTHONPATH=src python -m unittest \
+  tests.test_aquarium_epoch_v4 -v
+```
+
 To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained

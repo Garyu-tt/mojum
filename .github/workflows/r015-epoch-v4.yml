@@ -1,0 +1,35 @@
+name: Mojum R0.15 explicit v4 epoch QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-epoch-v4.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/aquarium_wire.py"
+      - "src/mojum/cell_policy_v4.py"
+      - "src/mojum/epoch_sense_v2.py"
+      - "tests/test_aquarium_epoch_v4.py"
+      - "docs/R015_EXPLICIT_EPOCH_V4.md"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  epoch-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run v4 typed and real SQLite boundary tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_aquarium_epoch_v4 -v
