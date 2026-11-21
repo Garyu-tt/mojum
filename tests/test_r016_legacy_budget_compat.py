@@ -69,7 +69,7 @@ class LegacyBudgetPreservationTests(TestCase):
                     self.assertEqual(done, 4)
                     self.assertEqual(a.checkpoint()["tick"], 4)
                     self.assertEqual(a.store.count(), 5)
-                    self.assertGreater(a._effective_journal_limit(), 3)
+                    self.assertGreater(a._selected_journal_limit(), 3)
 
 
 if __name__ == "__main__":
