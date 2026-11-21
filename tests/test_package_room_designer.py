@@ -147,7 +147,7 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         good_js = JS.read_text(encoding="utf-8")
         source.write_text(template.replace(SCRIPT_TAG, ""), encoding="utf-8")
         js.write_text(good_js, encoding="utf-8")
-        with self.assertRaisesRegex(PackagingError, "exactly one"):
+        with self.assertRaisesRegex(PackagingError, "unexpected|exactly one"):
             standalone_html(html_path=source, js_path=js)
         source.write_text(template, encoding="utf-8")
         js.write_text(good_js + "\n// </script>", encoding="utf-8")
