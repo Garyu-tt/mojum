@@ -89,8 +89,9 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
         raise PortableHostError("portable host requires opt-in goal_free Aquarium")
     if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
         raise PortableHostError(
-            "requested ticks exceed fixed 10000-event replay budget; "
-            "use a smaller bounded run, streaming replay is not implemented"
+            "requested ticks exceed bounded %d-event replay budget; "
+            "use a smaller run; snapshot acceleration is not implemented"
+            % MAX_REPLAY_EVENTS
         )
 
     clock = time.monotonic if monotonic is None else monotonic

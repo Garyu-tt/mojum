@@ -1,0 +1,29 @@
+name: Mojum bounded-memory 10k+ SQLite history stress
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/streaming-journal-boundary.yml"
+      - "src/mojum/noosphere.py"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/aquarium_trace_export.py"
+      - "src/mojum/portable_host.py"
+      - "tests/stress_streaming_journal_boundary.py"
+      - "tests/test_streaming_journal_replay.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Real synthetic 10003-event SQLite to cold replay and PRIVATE JSONL
+        run: |
+          python tests/stress_streaming_journal_boundary.py
