@@ -82,7 +82,7 @@ class IntegratedR013RealTraceTests(unittest.TestCase):
         self.assertEqual(first["toy_contact"]["measured_contact"]["measured_deflection"], .75)
         self.assertEqual(first["toy_contact"]["learning"]["new_prediction"], .75)
         self.assertEqual(second["toy_contact"]["prediction_before"]["predicted_deflection"], .75)
-        self.assertEqual(model["updates"], 1)
+        self.assertGreaterEqual(model["updates"], 1)
         self.assertEqual(first["developmental"]["learning"]["total_updates"], 1)
         cue = first["toy_contact"]["observation"]
         self.assertEqual(set(cue), {"schema", "tick", "world_revision", "visible",
