@@ -33,6 +33,9 @@ class NeutralProbeMultisceneTests(unittest.TestCase):
         self.assertEqual(first, evaluate())
         self.assertEqual(first["schema"], SCHEMA)
         self.assertEqual(first["scene_count"], len(SCENARIOS))
+        # Frozen after initial observed CI run, before policy tuning.
+        self.assertEqual(first["suite_sha256"],
+                         "b46a6a156cb250552b8069affc69703e8c48d1643eefe8eddbf5e6d80850283c")
         self.assertEqual(first["total_ticks_each_arm"],
                          sum(s["ticks"] for s in SCENARIOS))
         for scene in first["scenes"]:
@@ -79,6 +82,21 @@ class NeutralProbeMultisceneTests(unittest.TestCase):
             report["classification"],
             "PUBLIC_SYNTHETIC_PREDECLARED_CASES_NOT_BLINDED",
         )
+        evidence = report["evidence_quality"]
+        actual_contact_ids = [
+            scene["id"] for scene in report["scenes"]
+            if scene["arms"]["frozen"]["blocked"] > 0
+        ]
+        self.assertEqual(evidence["frozen_contact_scene_ids"],
+                         actual_contact_ids)
+        self.assertEqual(evidence["frozen_contact_scene_count"],
+                         len(actual_contact_ids))
+        self.assertEqual(evidence["no_contact_frozen_scene_count"],
+                         len(report["scenes"]) - len(actual_contact_ids))
+        self.assertEqual(evidence["behavior_divergence_scene_count"],
+                         len(evidence["behavior_divergence_scene_ids"]))
+        self.assertTrue(evidence["no_generalization_claim"])
+        self.assertEqual(evidence["status"], "LOW_CONTACT_EXPOSURE")
 
     def test_pulse_generation_has_no_global_rng_or_wall_clock(self):
         seeded = next(s for s in SCENARIOS if s["pulse"] == "seeded")
