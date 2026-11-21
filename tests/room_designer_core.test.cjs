@@ -38,6 +38,40 @@ test("preserve integer and decimal JSON tokens rather than JSON.stringify coerci
   assert.notEqual(C.draftJSON(room), json);
 });
 
+test("strict local import roundtrip preserves the original decimal lexical tokens", () => {
+  const original = fresh();
+  original.height = "4.0";
+  original.start.x = "1.250";
+  const wire = C.draftJSON(original);
+  const restored = C.fromDraftJSON(wire);
+  assert.deepEqual(restored, original);
+  assert.equal(C.draftJSON(restored), wire);
+  const saved = fs.readFileSync(
+    path.join(__dirname, "../examples/room_simple_mixed.json"), "utf8");
+  assert.deepEqual(C.fromDraftJSON(saved), fresh());
+});
+
+test("reject duplicate keys, altered formatting and malformed local import", () => {
+  const canonical = C.draftJSON(fresh());
+  const cases = [
+    canonical.replace('"schema": ', '"schema": "evil", "schema": '),
+    canonical.replace('"width": 4.5,', '"width": 4.5, "width": 4.5,'),
+    canonical.replace('"height": 4,', '"height": "4",'),
+    canonical.replace('"height": 4,', '"height": 4e0,'),
+    canonical.replace('"start": [1.25, 2.5]', '"start": [2.01, 2.5]'),
+    canonical.replace('  "width":', ' "width":'),
+    canonical.replace('"obstacles": [', '"unknown": 1, "obstacles": ['),
+    canonical.replace('"schema": "mojum.world.point-room-draft/1"',
+                      '"schema": "mojum.world.room-exact-scalars/1"'),
+    "{broken",
+    " ".repeat(1_048_577),
+  ];
+  for (const text of cases) {
+    assert.throws(() => C.fromDraftJSON(text), undefined,
+      "incorrectly imported modified/ambiguous JSON");
+  }
+});
+
 test("strictly reject invalid numeric text, nonfinite and code injection", () => {
   for (const text of [
     "", " 4", "4 ", "-0", "-1", "04", "0.", ".5", "4e0",
@@ -109,6 +143,7 @@ test("offline HTML has all real controls with no remote script or network fetch"
     "scene","add-obstacle","delete-obstacle","reset-room","status",
     "width","height","start-x","start-y","obstacle-list",
     "ob-x","ob-y","ob-w","ob-h","output","copy","download",
+    "import-button","import-file",
   ];
   ids.forEach(id=> assert.ok(html.includes('id="' + id + '"'), id));
   assert.match(html, /<script src="\.\/room_designer_core\.js"><\/script>/);
