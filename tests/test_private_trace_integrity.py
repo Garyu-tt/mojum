@@ -165,6 +165,8 @@ async function playbackControls(source){
   get("seek").value="2";get("seek").listeners.input();
   const seek={tick:get("tick").textContent,counter:get("counter").textContent};
   get("start").listeners.click();
+  // The fake DOM does not parse the HTML select default (1x).
+  get("speed").value="1";
   get("play").listeners.click();
   const playing={tick:get("tick").textContent,
     label:get("play").textContent,timer:get.timerState()};
