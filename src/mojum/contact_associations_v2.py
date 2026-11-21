@@ -1,0 +1,123 @@
+"""Separately versioned, bounded-retention contact associations (issue #133).
+
+``mojum.sensory-curiosity.association/2`` never converts or reinterprets
+``/1`` snapshots: ``/1`` snapshots are rejected here and ``/2`` snapshots are
+rejected by ``ContactAssociations.from_snapshot``.
+
+Retention is deterministic and bounded:
+* per-cue mean uses a sliding-window step ``1/min(count, WINDOW)`` (decay);
+* when the cue table is full, the least-recently-updated cue is evicted
+  (ties: smallest key) and its observations are accounted as forgotten;
+* invariant: ``sum(entry.total) + evicted_observations == updates``.
+"""
+
+from __future__ import annotations
+
+import copy
+
+from .sensory_play import (
+    CuriosityError, ContactAssociations, MAX_CUES, _finite,
+)
+
+MODEL_SCHEMA_V2 = "mojum.sensory-curiosity.association/2"
+WINDOW = 64
+MAX_UPDATES_V2 = 10**9
+
+
+class ContactAssociationsV2(ContactAssociations):
+    def __init__(self):
+        super().__init__()
+        self.evicted_cues = 0
+        self.evicted_observations = 0
+
+    def snapshot(self):
+        return {
+            "schema": MODEL_SCHEMA_V2, "table": copy.deepcopy(self.table),
+            "updates": self.updates, "evicted_cues": self.evicted_cues,
+            "evicted_observations": self.evicted_observations,
+        }
+
+    @classmethod
+    def from_snapshot(cls, snapshot):
+        if (not isinstance(snapshot, dict)
+                or set(snapshot) != {"schema", "table", "updates", "evicted_cues",
+                                     "evicted_observations"}
+                or snapshot["schema"] != MODEL_SCHEMA_V2
+                or any(type(snapshot[k]) is not int or snapshot[k] < 0
+                       for k in ("updates", "evicted_cues", "evicted_observations"))
+                or snapshot["updates"] > MAX_UPDATES_V2
+                or not isinstance(snapshot["table"], dict)
+                or len(snapshot["table"]) > MAX_CUES):
+            raise CuriosityError("invalid developmental model snapshot")
+        total = snapshot["evicted_observations"]
+        if (snapshot["evicted_cues"] > snapshot["evicted_observations"]):
+            raise CuriosityError("inconsistent eviction accounting")
+        for key, entry in snapshot["table"].items():
+            if not isinstance(key, str) or len(key) > 11:
+                raise CuriosityError("invalid numeric cue")
+            parts = key.split(":")
+            if (len(parts) != 3 or any(not v.isdecimal() or str(int(v)) != v
+                                        or not 0 <= int(v) <= 255 for v in parts)):
+                raise CuriosityError("invalid numeric cue")
+            if (not isinstance(entry, dict)
+                    or set(entry) != {"count", "total", "last_update", "mean_deflection"}
+                    or any(type(entry[k]) is not int for k in ("count", "total", "last_update"))
+                    or not 1 <= entry["count"] <= min(WINDOW, entry["total"])
+                    or not entry["count"] == min(WINDOW, entry["total"])
+                    or not 1 <= entry["last_update"] <= snapshot["updates"]
+                    or not _finite(entry["mean_deflection"])
+                    or not 0 <= entry["mean_deflection"] <= 1):
+                raise CuriosityError("invalid learned association")
+            total += entry["total"]
+        if total != snapshot["updates"]:
+            raise CuriosityError("inconsistent association count")
+        m = cls()
+        m.table = copy.deepcopy(snapshot["table"])
+        m.updates = snapshot["updates"]
+        m.evicted_cues = snapshot["evicted_cues"]
+        m.evicted_observations = snapshot["evicted_observations"]
+        return m
+
+    def learn(self, sensor, measurement, prediction):
+        if prediction != self.predict(sensor):
+            raise CuriosityError("stale association prediction")
+        if (not isinstance(measurement, dict) or type(measurement.get("contact")) is not bool
+                or measurement.get("instrument") != "synthetic_probe_not_material_classifier"
+                or type(measurement.get("source_tick")) is not int
+                or measurement["source_tick"] != sensor["tick"]):
+            raise CuriosityError("invalid measured probe feedback")
+        if not measurement["contact"]:
+            if measurement.get("measured_deflection") is not None:
+                raise CuriosityError("no contact but response was supplied")
+            return {
+                "learned": False, "observed_deflection": None, "prediction_error": None,
+                "new_prediction": prediction["predicted_deflection"],
+                "evidence_count": prediction["observations"], "updates": self.updates,
+                "status": "no_contact_observation",
+            }
+        value = measurement.get("measured_deflection")
+        if not _finite(value) or not 0 <= value <= 1 or prediction["cue"] is None:
+            raise CuriosityError("invalid or unsupported contact response")
+        if self.updates >= MAX_UPDATES_V2:
+            raise CuriosityError("sensory association update budget reached")
+        key = prediction["cue"]
+        if key not in self.table and len(self.table) >= MAX_CUES:
+            victim = min(self.table, key=lambda k: (self.table[k]["last_update"], k))
+            self.evicted_cues += 1
+            self.evicted_observations += self.table.pop(victim)["total"]
+        entry = self.table.setdefault(
+            key, {"count": 0, "total": 0, "last_update": 0, "mean_deflection": 0.0})
+        entry["count"] = min(WINDOW, entry["count"] + 1)
+        entry["total"] += 1
+        entry["mean_deflection"] += (value - entry["mean_deflection"]) / entry["count"]
+        entry["mean_deflection"] = min(1.0, max(0.0, entry["mean_deflection"]))
+        self.updates += 1
+        entry["last_update"] = self.updates
+        return {
+            "learned": True, "observed_deflection": value,
+            "prediction_error": None if prediction["predicted_deflection"] is None
+            else value - prediction["predicted_deflection"],
+            "new_prediction": entry["mean_deflection"],
+            "evidence_count": entry["count"], "updates": self.updates,
+            "status": "empirical_measurement_not_object_semantics",
+        }
