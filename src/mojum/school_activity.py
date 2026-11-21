@@ -70,10 +70,15 @@ def _validate_catalog_wire_budget(document):
         encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True,
                                    separators=(",", ":"), allow_nan=False)
         size = 0
+        fragments = []
         for fragment in encoder.iterencode(document):
             size += len(fragment.encode("utf-8", errors="strict"))
             if size > MAX_CATALOG_BYTES:
                 raise SchoolError("catalog byte budget exceeded")
+            # Buffer at most one valid wire-size catalog for a lossless check.
+            fragments.append(fragment)
+        if json.loads("".join(fragments)) != document:
+            raise SchoolError("catalog cannot round-trip losslessly as JSON")
     except SchoolError:
         raise
     except (TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as exc:
