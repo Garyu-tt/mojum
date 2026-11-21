@@ -20,11 +20,11 @@ import math
 from pathlib import Path
 
 from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
+from .developmental import SCHEMA as MOTOR_SCHEMA
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
 
 SCHEMA = "mojum.aquarium.mobility-audit/1"
 GATE_SCHEMA = "mojum.aquarium.mobility-gates/1"
-MOTOR_SCHEMA_PREFIX = "mojum.developmental.motor-play/"
 MOVE_KINDS = frozenset(("east", "north", "west", "south"))
 REST_KIND = "rest"
 
@@ -106,7 +106,7 @@ def _manifest_policy(manifest):
         raise MobilityAuditError("unknown Aquarium bootstrap schema")
     if (manifest.get("motor_mode") != "developmental_fixture"
             or type(manifest.get("motor_policy_schema")) is not str
-            or not manifest["motor_policy_schema"].startswith(MOTOR_SCHEMA_PREFIX)):
+            or manifest["motor_policy_schema"] != MOTOR_SCHEMA):
         raise MobilityAuditError("journal has no measured developmental motor policy")
     return {
         "motor_mode": manifest["motor_mode"],
