@@ -254,6 +254,12 @@ For original #112 history, use `--motor-mode local_cell_v2_a_archive
 --ticks 0` and the original genome, graph, and neural mode. Both profiles
 use the exact built-in point-room and frame-only journals without toy sensing.
 
+`aquarium_wire` identifies the older `coarse_v1` goal-free journals from
+#112 and #115 as `legacy_coarse_v1`. Replay a copy using the original
+runtime and `--exploration-mode goal_free`. Current Aquarium refuses
+those journals under either v2 profile and preserves the source file.
+[Pinned historical runtimes](.github/workflows/aquarium-wire-archives.yml)
+
 To transfer a verified v2A history into a separate new v2B file, use
 `python -m mojum.migration_v2a_v2b` with the original genome and graph,
 an independently recorded `--expected-source-head`, and the explicit
