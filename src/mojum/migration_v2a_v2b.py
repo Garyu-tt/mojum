@@ -17,7 +17,7 @@ import sqlite3
 import sys
 import tempfile
 
-from .aquarium import Aquarium, ARCHIVE_MODE, AquariumError
+from .aquarium import Aquarium, ARCHIVE_MODE, AquariumError, V2B_MODE
 from .cell_policy_v2 import SCHEMA as TARGET_SCHEMA
 from .archived_policy_v2a import SCHEMA as SOURCE_SCHEMA
 from .developmental_policy import STEP_METERS
@@ -153,7 +153,7 @@ def _verify_new_journal(path, *, seed, graph, room, start, agent_id, dt_ns,
             path, seed, graph, room=room, start=start, agent_id=agent_id,
             dt_ns=dt_ns, neural_mode=neural_mode,
             exploration_mode="goal_free", sensory_mode="none",
-            developmental_policy="local_cell_v2",
+            developmental_policy=V2B_MODE,
             external_expected_head=head) as reopened:
         if (reopened.store.count() != count
                 or reopened.store.head() != head):
@@ -217,7 +217,7 @@ def transfer_v2a_to_v2b(
                     working, seed, graph, room=room, start=start,
                     agent_id=agent_id, dt_ns=dt_ns, neural_mode=neural_mode,
                     exploration_mode="goal_free", sensory_mode="none",
-                    developmental_policy="local_cell_v2") as replacement:
+                    developmental_policy=V2B_MODE) as replacement:
                 matched = 0
                 for entry in archived.store.iter_events(include_nonpublic=True):
                     if entry["seq"] == 1:

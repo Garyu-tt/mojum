@@ -17,7 +17,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V2B_MODE, V2B_WIRE_MODE
 from mojum.cell_policy_v2 import CellExplorer
 from mojum.migration_v2a_v2b import (
     SCHEMA, TransferError, transfer_v2a_to_v2b,
@@ -107,7 +107,7 @@ class ExplicitSQLiteV2TransferQA(unittest.TestCase):
 
         with Aquarium(self.target, SEED, GRAPH,
                       exploration_mode="goal_free",
-                      developmental_policy="local_cell_v2") as reopened:
+                      developmental_policy=V2B_MODE) as reopened:
             self.assertEqual(reopened.tick, 120)
             self.assertEqual(reopened.store.count(), 121)
             self.assertEqual(reopened.store.head(), result["destination_head"])
@@ -126,31 +126,84 @@ class ExplicitSQLiteV2TransferQA(unittest.TestCase):
             self.assertEqual(archived.tick, 120)
             self.assertEqual(archived.store.head(), expected)
 
+    def original_v2b(self, db, ticks):
+        proc = subprocess.run(
+            [sys.executable, "-m", "mojum.aquarium", "--db", str(db),
+             "--ticks", str(ticks), "--exploration-mode", "goal_free",
+             "--developmental-policy", "local_cell_v2"],
+            cwd=SOURCE115, env=dict(os.environ, PYTHONPATH=str(SOURCE115 / "src")),
+            encoding="utf-8", capture_output=True, check=True, timeout=45,
+        )
+        return json.loads(proc.stdout)
+
+
     @unittest.skipUnless(SOURCE115 is not None, "original #115 target runtime required")
     def test_original_v2b_runtime_resumes_new_journal(self):
         head = self.create_source(120)
         original = self.source.read_bytes()
         transfer = self.migrate(head)
 
-        def original_v2b(db, ticks):
-            proc = subprocess.run(
-                [sys.executable, "-m", "mojum.aquarium", "--db", str(db),
-                 "--ticks", str(ticks), "--exploration-mode", "goal_free",
-                 "--developmental-policy", "local_cell_v2"],
-                cwd=SOURCE115, env=dict(os.environ, PYTHONPATH=str(SOURCE115 / "src")),
-                encoding="utf-8", capture_output=True, check=True, timeout=45,
-            )
-            return json.loads(proc.stdout)
-
-        prior = original_v2b(self.target, 0)
+        prior = self.original_v2b(self.target, 0)
         self.assertEqual((prior["tick"], prior["stored_events"]), (120, 121))
         self.assertEqual(prior["journal_head"], transfer["destination_head"])
-        after = original_v2b(self.target, 1)
+        after = self.original_v2b(self.target, 1)
         self.assertEqual((after["tick"], after["stored_events"]), (121, 122))
         self.assertNotEqual(after["journal_head"], prior["journal_head"])
-        self.assertEqual(after, original_v2b(self.root / "native-control.sqlite3", 121))
+        self.assertEqual(after, self.original_v2b(self.root / "native-control.sqlite3", 121))
         self.assertEqual(self.source.read_bytes(), original)
         self.assertEqual(fingerprint(self.source)[2], head)
+
+    @unittest.skipUnless(SOURCE115 is not None, "original #115 target runtime required")
+    def test_b_selectors_resume_original_v2b_journal_and_native_writer_can_continue(self):
+        original = self.original_v2b(self.target, 12)
+        for policy in (V2B_MODE, V2B_WIRE_MODE):
+            with self.subTest(policy=policy), Aquarium(
+                self.target, SEED, GRAPH, exploration_mode="goal_free",
+                developmental_policy=policy, external_expected_head=original["journal_head"],
+            ) as resumed:
+                self.assertEqual(resumed.tick, 12)
+                self.assertEqual(resumed.manifest["developmental_policy"], V2B_WIRE_MODE)
+                self.assertEqual(resumed.checkpoint()["journal_head"], original["journal_head"])
+        with Aquarium(self.target, SEED, GRAPH, exploration_mode="goal_free",
+                      developmental_policy=V2B_MODE) as resumed:
+            resumed.step()
+            appended = resumed.checkpoint()
+        native = self.original_v2b(self.target, 1)
+        self.assertEqual(native["tick"], 14)
+        self.assertNotEqual(native["journal_head"], appended["journal_head"])
+        self.assertEqual(native, self.original_v2b(self.root / "native-round-trip.sqlite3", 14))
+
+    def test_legacy_name_cannot_birth_journal_and_new_cli_name_preserves_wire(self):
+        command = [sys.executable, "-m", "mojum.aquarium", "--db", str(self.target),
+                   "--ticks", "2", "--exploration-mode", "goal_free", "--developmental-policy"]
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        old = subprocess.run([*command, V2B_WIRE_MODE], cwd=ROOT, env=env,
+                             encoding="utf-8", capture_output=True, timeout=35)
+        self.assertNotEqual(old.returncode, 0)
+        self.assertIn("requires an existing v2B journal", old.stderr)
+        self.assertFalse(self.target.exists())
+        with self.assertRaisesRegex(AquariumError, "Use local_cell_v2b"):
+            Aquarium(self.target, SEED, GRAPH, exploration_mode="goal_free",
+                     developmental_policy=V2B_WIRE_MODE)
+        self.assertFalse(self.target.exists())
+        created = json.loads(subprocess.check_output([*command, V2B_MODE], cwd=ROOT, env=env,
+                                                    encoding="utf-8", timeout=35))
+        self.assertEqual((created["tick"], created["stored_events"]), (2, 3))
+        with Aquarium(self.target, SEED, GRAPH, exploration_mode="goal_free",
+                      developmental_policy=V2B_WIRE_MODE) as legacy:
+            self.assertEqual(legacy.manifest["developmental_policy"], V2B_WIRE_MODE)
+            self.assertEqual(legacy.checkpoint()["journal_head"], created["journal_head"])
+
+    def test_b_selectors_refuse_v2a_before_changing_sqlite_bytes(self):
+        self.create_source(4)
+        with closing(sqlite3.connect(self.source)) as db:
+            self.assertEqual(db.execute("pragma journal_mode=delete").fetchone()[0], "delete")
+        before = self.source.read_bytes()
+        for policy in (V2B_MODE, V2B_WIRE_MODE):
+            with self.subTest(policy=policy), self.assertRaisesRegex(AquariumError, "mismatch"):
+                Aquarium(self.source, SEED, GRAPH, exploration_mode="goal_free",
+                         developmental_policy=policy)
+            self.assertEqual(self.source.read_bytes(), before)
 
     def test_json_type_change_cannot_publish_new_journal(self):
         head = self.create_source(4)

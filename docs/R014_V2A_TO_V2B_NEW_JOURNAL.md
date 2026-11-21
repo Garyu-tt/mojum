@@ -33,6 +33,12 @@ PYTHONPATH=src python -m mojum.migration_v2a_v2b \
 
 **Do not run on production histories** until independent security/restore review, user-authorized backups and a real recovery exercise exist. No automatic daemon or agent action invokes the transfer. Running it without `--create-new-journal`, with a wrong source head, with an existing destination, a symlink source, mismatched genotype/room, unverified/ambiguous JSON, unsupported sensory/acquired event or a single differing motor frame must fail with *no published destination*.
 
+Resume the new v2B journal with `--exploration-mode goal_free` and
+`--developmental-policy local_cell_v2b`. Use the original genome and graph
+and the neural mode from the source. The converter writes the original
+v2B wire schema. The historical `local_cell_v2` spelling can still resume
+an existing v2B journal. It cannot create one.
+
 ## CI, independent controls, limitations
 
 Pinned [#112 source SHA](https://github.com/Garyu-tt/mojum/commit/8d2eaf234c09177ae0b92dfef4bb41950529c912) is checked out separately in GitHub Actions. Three CPython versions (3.11, 3.12, 3.13) run real original v2A journal creation then candidate transfer, successful v2B cold replay/resume, source full-row fingerprint immutability, destination head differences, bad head/non-opt-in/budget, wrong seed, tampered duplicate JSON, existing output, injected divergent target policy, CLI confirmation and connection-leak checks. Existing full Aquarium/Motor/Mesh/HMAC/streaming gates remain required.
