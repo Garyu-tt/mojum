@@ -64,7 +64,7 @@ def _require_existing_source_journal(path, agent_id):
             "WHERE type='table' AND name IN ('metadata', 'events')"
         )}
         if tables != {"metadata", "events"}:
-            raise ValueError("export requires existing metadata and events tables")
+            raise ValueError("export requires an existing nonempty Aquarium journal: metadata/events tables missing")
         saved = dict(db.execute("SELECT k,v FROM metadata"))
         if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
             raise ValueError("export requires complete matching journal metadata")
