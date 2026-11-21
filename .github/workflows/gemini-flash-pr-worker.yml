@@ -50,6 +50,13 @@ jobs:
             echo 'GEMINI_API_KEY repository secret not set: no model call or PR.' >&2
             exit 1
           fi
+          # Gemini workspace settings override the HOME-level tool denylist.
+          # Fail closed rather than let a future trusted checkout restore
+          # shell/network/MCP access while the model API key is in scope.
+          if [ -e .gemini ]; then
+            echo 'Unsafe workspace .gemini configuration: refusing model run.' >&2
+            exit 1
+          fi
           mkdir -p "$HOME/.gemini"
           cat > "$HOME/.gemini/settings.json" <<'JSON'
           {
