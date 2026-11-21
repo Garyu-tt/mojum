@@ -129,7 +129,13 @@ def load_manifest(path):
 def select_form(manifest, visual_age_years):
     """Select a clamped whole keyframe; never morph, reset or mutate an agent."""
     manifest = validate_manifest(manifest)
-    if type(visual_age_years) not in (int, float) or not math.isfinite(visual_age_years) or visual_age_years < 0:
+    if type(visual_age_years) is int:
+        invalid = visual_age_years < 0
+    elif type(visual_age_years) is float:
+        invalid = not math.isfinite(visual_age_years) or visual_age_years < 0
+    else:
+        invalid = True
+    if invalid:
         raise CharacterAssetError("invalid visual age")
     forms = manifest["forms"]
     selected = forms[0]
