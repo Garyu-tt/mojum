@@ -23,6 +23,9 @@ ACTIONS = ("rest", "x+", "x-", "y+", "y-")
 SEED = 2027
 MAX_EVENTS = 10_000
 MAX_CELLS = 512
+# Cell IDs double the metre coordinate, so the half-open [0, 5000) m square
+# maps injectively onto canonical 0..9999 integer coordinates.
+MAX_SPATIAL_M = 5000.0
 
 
 class InfantError(ValueError):
@@ -41,9 +44,13 @@ def _finite(value):
 def _cell(state):
     if not _finite(state.x) or not _finite(state.y):
         raise InfantError("invalid position")
-    x, y = int(state.x * 2), int(state.y * 2)
-    if min(x, y) < 0 or max(x, y) >= 10_000:
+    # Reject out-of-budget coordinates *before* scaling. Floor keeps every
+    # cell half-open, so small negative positions fail closed instead of
+    # truncating into cell 0:0; finite-but-huge values like 1e308 cannot
+    # overflow the doubling into an uncaught int(inf) error.
+    if not (0.0 <= state.x < MAX_SPATIAL_M and 0.0 <= state.y < MAX_SPATIAL_M):
         raise InfantError("world beyond spatial memory budget")
+    x, y = math.floor(state.x * 2), math.floor(state.y * 2)
     return f"{x}:{y}"
 
 

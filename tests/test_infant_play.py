@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -164,6 +165,32 @@ class InfantTests(unittest.TestCase):
         with self.assertRaises(InfantError):
             MotorExperience(seed=True)
         self.assertEqual(motor.snapshot(), baseline)
+
+    def test_spatial_cell_keys_fail_closed_outside_memory_budget(self):
+        motor = MotorExperience()
+        for x, y in (
+            (-1e-9, 0.0), (0.0, -0.5), (-0.49, 1.0),
+            (5000.0, 0.0), (0.0, 10000.0),
+            (1e308, 0.0), (0.0, -1e308),
+            (float("inf"), 0.0), (0.0, float("nan")),
+        ):
+            with self.subTest(x=x, y=y):
+                with self.assertRaises(InfantError):
+                    motor.propose(SimpleNamespace(x=x, y=y), False)
+        # Rejected positions must not consume a cell or advance exploration.
+        self.assertEqual(motor.cells, {})
+        self.assertEqual(motor.updates, 0)
+        self.assertEqual(motor.rng, motor.seed)
+
+    def test_spatial_cell_keys_use_half_open_floor_boundaries(self):
+        motor = MotorExperience()
+        self.assertEqual(
+            motor.propose(SimpleNamespace(x=0.5, y=0.0), False)["cell"], "1:0")
+        self.assertEqual(
+            motor.propose(SimpleNamespace(x=0.4999, y=0.25), False)["cell"], "0:0")
+        self.assertEqual(
+            motor.propose(SimpleNamespace(x=4999.5, y=4999.9), False)["cell"],
+            "9999:9999")
 
     def test_forged_motor_action_never_commits(self):
         original = MotorExperience.propose
