@@ -212,8 +212,14 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
-            if policy == "local_cell_v4" and frames // EPOCH_TICKS != epoch_index:
-                raise NoosphereError("missing durable v4 epoch marker before frame")
+            if policy == "local_cell_v4":
+                if (event["event_id"] != f"frame-{frames:012d}"
+                        or type(dt_ns) is not int
+                        or type(event.get("observed_at_ns")) is not int
+                        or event["observed_at_ns"] != frames * dt_ns):
+                    raise NoosphereError("noncanonical v4 frame envelope")
+                if frames // EPOCH_TICKS != epoch_index:
+                    raise NoosphereError("missing durable v4 epoch marker before frame")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
