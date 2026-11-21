@@ -122,7 +122,9 @@ same mode flags as the recording. Add `--expected-head SHA256` when verifying
 against a separately recorded journal head. For longer histories, add
 `--start-tick` and `--frame-limit` together to export a particular segment.
 Use a new output filename in a directory with private access. The JSONL is
-plaintext and its checksum detects accidental corruption.
+plaintext and its checksum detects accidental corruption. See the [offline
+viewer guide](docs/REAL_AQUARIUM_TRACE_VIEWER_R01.md) for the exact integrity
+and legacy-format boundaries.
 
 Run regression tests (Python 3.11–3.13 are the CI target):
 

@@ -3,6 +3,7 @@
 Source frames originate in actual R0.13 Aquarium + SQLite, not a fabricated
 web animation. Test only synthetic local files; never attach to CI artifacts.
 """
+from html.parser import HTMLParser
 import hashlib
 import json
 import os
@@ -71,18 +72,21 @@ function openDOM(){
  },{timeout:3000});
  return get;
 }
-async function attempt(source, allowLegacy=false){
+async function attempt(source, allowLegacy=false, size=Buffer.byteLength(source)){
  const get=openDOM(),input=get("file");
  get("allow-legacy").checked=allowLegacy;
  input.files=[{name:"recorded.private.jsonl",
-   size:Buffer.byteLength(source),arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
+   size,arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
  await input.listeners.change.call(input);
  return {
    enabled:!get("play").disabled,
    status:get("status").textContent,
    tick:get("tick").textContent,
    probe:get("probe").textContent,
-   pred:get("prediction").textContent
+   pred:get("prediction").textContent,
+   brain:get("brain").textContent,
+   rows:get("events").children.length,
+   reusableInput:input.value
  };
 }
 function replaceFooter(source,transform){
@@ -91,6 +95,40 @@ function replaceFooter(source,transform){
  transform(last);
  lines[lines.length-1]=JSON.stringify(last);
  return lines.join("\n")+"\n";
+}
+function replaceFrames(source,transform){
+ const lines=source.trimEnd().split("\n");
+ for(let i=0;i<lines.length-1;i++){
+   const frame=JSON.parse(lines[i]);
+   transform(frame,i);
+   lines[i]=JSON.stringify(frame);
+ }
+ return lines.join("\n")+"\n";
+}
+function legacyVariant(source,transform){
+ return replaceFrames(replaceFooter(source,
+   f=>{delete f.trace_integrity;delete f.export_status;delete f.trace_range;
+       delete f.trace_room}),transform);
+}
+async function race(source){
+ const get=openDOM(),input=get("file");
+ get("allow-legacy").checked=true;
+ let resolveOld;
+ input.files=[{name:"old.jsonl",size:1024,
+   arrayBuffer:()=>new Promise(resolve=>{resolveOld=resolve;})}];
+ const oldImport=input.listeners.change.call(input);
+ input.files=[{name:"current.jsonl",size:Buffer.byteLength(source),
+   arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
+ await input.listeners.change.call(input);
+ resolveOld(Uint8Array.from(Buffer.from(legacyVariant(source,
+   f=>{f.brain.status="old"}))).buffer);
+ await oldImport;
+ return {
+   enabled:!get("play").disabled,
+   status:get("status").textContent,
+   tick:get("tick").textContent,
+   reusableInput:input.value
+ };
 }
 (async()=>{
  const valid=await attempt(wire);
@@ -129,6 +167,12 @@ function replaceFooter(source,transform){
        delete f.trace_room});
  const legacyDefault=await attempt(legacy);
  const legacyOptIn=await attempt(legacy, true);
+ const safe=await attempt(legacyVariant(wire,
+   f=>{f.brain.status="<img src=x onerror=alert(1)>"}), true);
+ const gap=await attempt(legacyVariant(wire,
+   (f,i)=>{if(i===1)f.tick+=1}), true);
+ const oversized=await attempt(legacyVariant(wire, ()=>{}), true, 25*1024*1024);
+ const raced=await race(legacyVariant(wire, f=>{f.brain.status="current"}));
  const blankLine=await attempt(wire.replace("\n", "\n\n"));
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
  const trailingBlank=await attempt(wire + "\n");
@@ -139,10 +183,28 @@ function replaceFooter(source,transform){
                                       wrongStatus,frameCountMismatch,
                                       byteLengthMismatch,afterCheckpoint,
                                       legacyDefault,legacyOptIn,
+                                      safe,gap,oversized,raced,
                                       blankLine,whitespaceLine,trailingBlank,
                                       encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
+
+
+class _ViewerMarkup(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.ids = set()
+        self.external_scripts = []
+        self.csp = ""
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if "id" in attributes:
+            self.ids.add(attributes["id"])
+        if tag == "script" and "src" in attributes:
+            self.external_scripts.append(attributes["src"])
+        if tag == "meta" and attributes.get("http-equiv") == "Content-Security-Policy":
+            self.csp = attributes.get("content", "")
 
 
 class PrivateTraceIntegrityQA(unittest.TestCase):
@@ -249,7 +311,45 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("legacy", values["legacyDefault"]["status"])
         self.assertTrue(values["legacyOptIn"]["enabled"])
         self.assertIn("не проверен", values["legacyOptIn"]["status"])
+        # Legacy traces still render untrusted values as literal text, reject
+        # tick gaps and oversized files, and keep the newest async import.
+        self.assertTrue(values["safe"]["enabled"])
+        self.assertEqual(values["safe"]["tick"], "0")
+        self.assertEqual(values["safe"]["brain"], "<img src=x onerror=alert(1)>")
+        self.assertEqual(values["safe"]["rows"], 3)
+        self.assertEqual(values["safe"]["reusableInput"], "")
+        self.assertFalse(values["gap"]["enabled"])
+        self.assertIn("Пропуск", values["gap"]["status"])
+        self.assertFalse(values["oversized"]["enabled"])
+        self.assertIn("24 МиБ", values["oversized"]["status"])
+        self.assertTrue(values["raced"]["enabled"])
+        self.assertEqual(values["raced"]["tick"], "0")
+        self.assertIn("current.jsonl", values["raced"]["status"])
+        self.assertEqual(values["raced"]["reusableInput"], "")
 
+
+class OfflineViewerRegressionQA(unittest.TestCase):
+    def test_markup_remains_local_only_and_uses_safe_text_rendering(self):
+        parsed = _ViewerMarkup()
+        html = VIEWER.read_text(encoding="utf-8")
+        parsed.feed(html)
+        for required in (
+            "file", "allow-legacy", "room", "seek", "play", "prev", "next",
+            "start", "end", "tick", "position", "pulse", "action", "blocked",
+            "range", "probe", "deflection", "prediction", "learned", "brain",
+            "events", "status",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, parsed.ids)
+        self.assertEqual(parsed.external_scripts, [])
+        self.assertIn("default-src 'none'", parsed.csp)
+        self.assertIn("connect-src 'none'", parsed.csp)
+        self.assertIn("img-src 'none'", parsed.csp)
+        self.assertNotIn("innerHTML", html)
+        self.assertNotIn("localStorage", html)
+        self.assertNotIn("sessionStorage", html)
+        self.assertNotIn("http://", html)
+        self.assertNotIn("https://", html)
 
 if __name__ == "__main__":
     unittest.main()
