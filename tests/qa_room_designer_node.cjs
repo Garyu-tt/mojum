@@ -253,6 +253,8 @@ test("actual offline UI can draw, move start, erase and export valid JSON", () =
     nodes["room-width"].value = "3.5";
     nodes["room-width"].dispatch("input");
     assert.equal(nodes.status.dataset.status, "error");
+    // A recoverable invalid start must not leave the SVG in its old coordinate system.
+    assert.equal(svg.getAttribute("viewBox"), "0 0 3.5 4");
     svg.dispatch("pointerdown", {
       pointerType:"touch", clientX:75, clientY:300, pointerId:82
     });
