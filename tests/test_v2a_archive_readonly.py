@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError, ARCHIVE_MODE
 from mojum.archived_policy_v2a import SCHEMA as V2A_SCHEMA
@@ -90,6 +91,32 @@ class ReadOnlySQLiteStoreUnit(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "read_only must be boolean"):
             LocalNoosphere(self.db, "dante-synthetic", read_only="yes")
         self.assertFalse(self.db.exists())
+
+    def test_archive_closes_connection_when_initial_event_count_fails(self):
+        agent = SEED["genome_id"]
+        with LocalNoosphere(self.db, agent):
+            pass
+        with closing(sqlite3.connect(self.db)) as raw:
+            raw.execute("DROP TABLE events")
+        before = self.db.read_bytes()
+
+        connect = sqlite3.connect
+        opened = []
+
+        def track_connect(*args, **kwargs):
+            conn = connect(*args, **kwargs)
+            opened.append(conn)
+            self.addCleanup(conn.close)
+            return conn
+
+        with patch("mojum.noosphere.sqlite3.connect", side_effect=track_connect):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "no such table: events"):
+                Aquarium(self.db, SEED, GRAPH, agent_id=agent,
+                          exploration_mode="goal_free", developmental_policy=ARCHIVE_MODE)
+        self.assertEqual(len(opened), 1)
+        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed database"):
+            opened[0].execute("SELECT 1")
+        self.assertEqual(self.db.read_bytes(), before)
 
 
 @unittest.skipUnless(PINNED_SOURCE is not None,
