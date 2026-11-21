@@ -24,7 +24,7 @@ from .policy_identity import (
 )
 from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2, LEARNING_SCHEMA as SENSORY_LEARNING_V2
 from .sensory_bridge import OCCLUSION_SCHEMA
-from .sensory_bridge_v2 import SCHEMA as SENSORY_BRIDGE_V2
+from .sensory_bridge_v2 import REPROBE_PERIOD_TICKS, SCHEMA as SENSORY_BRIDGE_V2
 from .sensory_play import SENSE_SCHEMA
 
 
@@ -75,8 +75,8 @@ def _stored_policy(manifest):
             "sensory_model_schema": SENSORY_MODEL_V2,
             "contact_bridge_schema": SENSORY_BRIDGE_V2,
             "occlusion_schema": OCCLUSION_SCHEMA,
-            "sensory_reprobe_period_ticks": 2,
-        }:
+            "sensory_reprobe_period_ticks": REPROBE_PERIOD_TICKS,
+        } or type(manifest.get("sensory_reprobe_period_ticks")) is not int:
             raise NoosphereError("ambiguous or unknown stored sensory policy")
         policy_id += "+toy_probe_v2"
 

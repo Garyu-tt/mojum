@@ -253,7 +253,13 @@ def by_selector(selectors):
     """Return the single identity pinned by an extracted manifest selector set."""
     if type(selectors) is not dict:
         raise PolicyIdentityError("ambiguous or unknown stored Aquarium policy")
-    matches = [item for item in POLICIES if item.selector_dict == selectors]
+    # Python dictionary equality considers an integer equal to its float
+    # representation. Persisted JSON selectors must also match their types.
+    matches = [
+        item for item in POLICIES
+        if item.selector_dict == selectors
+        and all(type(selectors[key]) is type(value) for key, value in item.selectors)
+    ]
     if len(matches) != 1:
         raise PolicyIdentityError("ambiguous or unknown stored Aquarium policy")
     return matches[0]

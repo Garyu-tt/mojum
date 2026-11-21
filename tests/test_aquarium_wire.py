@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V3_ESCAPE_MODE, V4_MODE
 from mojum.aquarium_wire import inspect_journal
 from mojum.noosphere import LocalNoosphere, NoosphereError
 
@@ -130,6 +130,45 @@ class AquariumWireTests(unittest.TestCase):
         with self.aquarium() as stocked:
             self.assertEqual(stocked.tick, 0)
         self.assertEqual(inspect_journal(self.db)["format"], "scripted_v1")
+
+    def test_inspector_requires_integer_policy_selectors(self):
+        for motor_mode, sensory_mode, expected_format, selector_fields in (
+            (V3_ESCAPE_MODE, "none", V3_ESCAPE_MODE, ("max_consecutive_rests",)),
+            (V4_MODE, "none", V4_MODE, ("epoch_ticks", "max_absolute_ticks")),
+            (V4_MODE, "toy_probe_v2", f"{V4_MODE}+toy_probe_v2",
+             ("sensory_reprobe_period_ticks",)),
+        ):
+            modes = {"motor_mode": motor_mode, "sensory_mode": sensory_mode}
+            source = self.db.with_name(f"{expected_format}.sqlite3")
+            with Aquarium(source, SEED, GRAPH, **modes) as aquarium:
+                aquarium.step()
+                checkpoint = aquarium.checkpoint()
+                bootstrap, frame = [
+                    row["event"] for row in aquarium.store.iter_events(include_nonpublic=True)
+                ]
+            with Aquarium(source, SEED, GRAPH, **modes) as replayed:
+                self.assertEqual(replayed.checkpoint(), checkpoint)
+            report = inspect_journal(source, external_expected_head=checkpoint["journal_head"])
+            self.assertEqual((report["format"], report["frames"]), (expected_format, 1))
+
+            for field in selector_fields:
+                with self.subTest(format=expected_format, field=field):
+                    payload = dict(bootstrap["payload"])
+                    payload[field] = float(payload[field])
+                    db = self.db.with_name(f"{expected_format}-{field}.sqlite3")
+                    with LocalNoosphere(db, bootstrap["agent_id"]) as store:
+                        head = store.append(
+                            {**bootstrap, "payload": payload}, expected_head=store.head(),
+                        )
+                        head = store.append(frame, expected_head=head)
+                        self.assertEqual(store.verify_chain()["head"], head)
+                    before = db.read_bytes()
+                    with self.assertRaisesRegex(AquariumError, "mode mismatch"):
+                        with Aquarium(db, SEED, GRAPH, **modes):
+                            pass
+                    with self.assertRaisesRegex(NoosphereError, "ambiguous or unknown"):
+                        inspect_journal(db, external_expected_head=head)
+                    self.assertEqual(db.read_bytes(), before)
 
 
 if __name__ == "__main__":
