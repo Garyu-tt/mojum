@@ -151,6 +151,8 @@ def _read_first_event(path, agent_id):
         if has_metadata:
             saved = dict(db.execute("SELECT k,v FROM metadata"))
             if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
+                if saved:
+                    raise NoosphereError("database schema or agent owner does not match")
                 raise NoosphereError("database metadata is missing or does not match")
         elif has_events:
             # A journal with events but no metadata is not a new database.
