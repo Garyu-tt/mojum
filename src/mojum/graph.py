@@ -60,12 +60,19 @@ def _check_json_depth(raw):
             depth -= 1
 
 
+def _reject_nonfinite_constant(value):
+    # Python accepts NaN/Infinity as a json.loads extension, but these are
+    # not JSON numbers and cannot be used in a deterministic graph hash.
+    raise GraphError("Noncanonical graph JSON numeric constant: " + value)
+
+
 def load_graph(path):
     """Read UTF-8 graph JSON without collapsing duplicate keys."""
     try:
         raw = path.read_text(encoding="utf-8")
         _check_json_depth(raw)
-        return json.loads(raw, object_pairs_hook=_unique_json_object)
+        return json.loads(raw, object_pairs_hook=_unique_json_object,
+                          parse_constant=_reject_nonfinite_constant)
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
@@ -152,4 +159,13 @@ def validate(graph):
                 ready.sort()
     if len(order) != len(by_id):
         raise GraphError("Cycle detected: feedback requires explicit scheduler")
+    # Simulation computes an exact UTF-8 canonical JSON graph hash after this
+    # validation. Reject non-JSON Python values, nonfinite floats, cycles,
+    # over-deep objects and lone surrogates here, before SQLite journal birth.
+    # Otherwise json.dumps()/encode() can leak raw exceptions downstream.
+    try:
+        json.dumps(graph, sort_keys=True, ensure_ascii=False,
+                   separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise GraphError("Graph contains noncanonical JSON values") from exc
     return by_id, incoming, order
