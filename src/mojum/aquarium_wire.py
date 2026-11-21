@@ -220,6 +220,8 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
+            if policy == V4_MODE and frames // EPOCH_TICKS != epoch_index:
+                raise NoosphereError("missing durable epoch transition before v4 frame")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
