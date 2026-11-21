@@ -155,6 +155,41 @@ class NoosphereTests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "indexed column visibility"):
             self.store.verify_chain()
 
+    def test_reformatted_stored_wire_fails_chain_even_with_same_hash(self):
+        self.store.append(event(), expected_head=self.store.head())
+        pinned_head = self.store.head()
+        original = self.store._db.execute(
+            "SELECT wire_json FROM events WHERE seq = 1"
+        ).fetchone()[0]
+        reformatted = json.dumps(json.loads(original), indent=2)
+        self.assertNotEqual(original, reformatted)
+        self.assertEqual(json.loads(original), json.loads(reformatted))
+        self.store._db.execute("DROP TRIGGER noosphere_no_update")
+        self.store._db.execute(
+            "UPDATE events SET wire_json = ? WHERE seq = 1", (reformatted,)
+        )
+        self.assertEqual(self.store.head(), pinned_head)
+        with self.assertRaisesRegex(NoosphereError, "noncanonical stored JSON"):
+            self.store.verify_chain(external_expected_head=pinned_head)
+
+    def test_duplicate_json_key_fails_chain_even_if_last_key_wins(self):
+        self.store.append(event(), expected_head=self.store.head())
+        pinned_head = self.store.head()
+        original = self.store._db.execute(
+            "SELECT wire_json FROM events WHERE seq = 1"
+        ).fetchone()[0]
+        # Python json.loads takes the LAST event_id; another parser might
+        # accept the first. A valid hash of the semantic dict cannot tell.
+        ambiguous = '{"event_id":"forged-first-id",' + original[1:]
+        self.assertEqual(json.loads(ambiguous), json.loads(original))
+        self.store._db.execute("DROP TRIGGER noosphere_no_update")
+        self.store._db.execute(
+            "UPDATE events SET wire_json = ? WHERE seq = 1", (ambiguous,)
+        )
+        self.assertEqual(self.store.head(), pinned_head)
+        with self.assertRaisesRegex(NoosphereError, "noncanonical stored JSON"):
+            self.store.verify_chain(external_expected_head=pinned_head)
+
     def test_deleted_row_sequence_detected(self):
         self.store.append(event(), expected_head=self.store.head())
         self.store.append(event("ev2", observed=30, recorded=40), expected_head=self.store.head())
