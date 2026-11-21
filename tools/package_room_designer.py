@@ -16,7 +16,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 HTML = ROOT / "tools" / "room_designer.html"
 JS = ROOT / "tools" / "room_designer_core.js"
+HISTORY_JS = ROOT / "tools" / "room_designer_history.js"
+WALK_JS = ROOT / "tools" / "room_walk_preview.js"
 SCRIPT_TAG = '<script src="./room_designer_core.js"></script>'
+HISTORY_TAG = '<script src="./room_designer_history.js"></script>'
+WALK_TAG = '<script src="./room_walk_preview.js"></script>'
 MAX_SOURCE_BYTES = 1_048_576
 
 
@@ -37,45 +41,35 @@ def _read_small_source(path: Path) -> str:
         raise PackagingError("room designer source is not UTF-8") from exc
 
 
-def standalone_html(*, html_path=HTML, js_path=JS) -> bytes:
-    """Bundle all known adjacent scripts, with no remaining external JS."""
-    import re
-
-    template = Path(html_path)
-    html = _read_small_source(template)
-    scripts = [(SCRIPT_TAG, Path(js_path))]
-    if html.count(SCRIPT_TAG) != 1:
-        raise PackagingError("expected exactly one local classic core script tag")
-
-    # Optional modules landed on the parent editor branch after this child
-    # was created. Packaging only core.js would yield a broken single-file
-    # artifact once the branches were combined.
-    for name in ("room_designer_history.js", "room_walk_preview.js"):
-        tag = '<script src="./' + name + '"></script>'
-        if tag in html:
-            scripts.append((tag, template.parent / name))
-
-    # Never silently publish a "standalone" page retaining another script
-    # dependency (including unknown, duplicated or malformed source tags).
-    external = re.findall(r"<script\b[^>]*\bsrc\b[^>]*>", html, flags=re.I)
-    if sorted(external) != sorted(tag for tag, _ in scripts):
-        raise PackagingError("unexpected or duplicate external room script dependency")
-
-    bundled = html
-    for tag, source in scripts:
-        js = _read_small_source(source)
+def standalone_html(*, html_path=HTML, js_path=JS,
+                    history_path=HISTORY_JS, walk_path=WALK_JS) -> bytes:
+    """Bundle every pinned local classic script; no sibling JS required."""
+    html = _read_small_source(Path(html_path))
+    scripts = (
+        (SCRIPT_TAG, js_path, "MojumRoomDesignerCore"),
+        (HISTORY_TAG, history_path, "MojumRoomHistory"),
+        (WALK_TAG, walk_path, "MojumWalkPreview"),
+    )
+    # Fail closed if the template changes dependencies without updating
+    # the bundler; external scripts would break file:// offline portability.
+    if any(html.count(tag) != 1 for tag, _, _ in scripts):
+        raise PackagingError("expected exactly one pinned local script tag")
+    if html.count('<script src="') != len(scripts):
+        raise PackagingError("unexpected external editor script dependency")
+    for tag, source, global_name in scripts:
+        js = _read_small_source(Path(source))
         if "</script" in js.lower() or "<!--" in js:
             raise PackagingError("embedded JavaScript contains an unsafe HTML delimiter")
-        if tag == SCRIPT_TAG and "MojumRoomDesignerCore" not in js:
+        if global_name not in js:
             raise PackagingError("wrong room editor JavaScript source")
-        # Keep browser execution order identical to the adjacent scripts.
-        bundled = bundled.replace(tag, "<script>\n" + js.rstrip() + "\n</script>", 1)
-    if re.search(r"<script\b[^>]*\bsrc\b[^>]*>", bundled, flags=re.I):
-        raise PackagingError("room editor still requires a sibling script")
-    if len(bundled.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
+        html = html.replace(
+            tag, "<script>\n" + js.rstrip() + "\n</script>", 1
+        )
+    if '<script src="' in html:
+        raise PackagingError("portable editor still requires a sibling script")
+    if len(html.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
         raise PackagingError("single file exceeds bounded portable HTML budget")
-    return bundled.encode("utf-8")
-
+    return html.encode("utf-8")
 
 def write_standalone(destination, *, html_path=HTML, js_path=JS):
     """Publish via durable temp + exclusive hard link; never clobber a file."""
