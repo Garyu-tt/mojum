@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           python tools/package_room_designer.py --out ./room-designer-offline.html
           test -s ./room-designer-offline.html
-          ! grep -q '<script src="./room_designer_core.js"></script>' ./room-designer-offline.html
+          ! grep -Eiq '<script[[:space:]][^>]*src=' ./room-designer-offline.html
       - name: Prove deterministic, exclusive HTML packaging and no journal creation
         env:
           PYTHONDONTWRITEBYTECODE: "1"
