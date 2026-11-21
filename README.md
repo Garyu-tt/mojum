@@ -33,6 +33,8 @@ PYTHONPATH=src python -m mojum.aquarium --db ./dante-goal-free.sqlite3 --ticks 3
 
 The organism proposes its own tiny point-room motions; you must not supply `--dx/--dy` overrides in this mode. To view committed **PRIVATE** synthetic frames locally, append `--watch` (JSONL on stdout). Do not upload the traces, journals or raw checkpoint metadata to public issue trackers.
 
+To validate/preview a point-room draft without creating any SQLite file, use `PYTHONPATH=src python -m mojum.room_input examples/room_simple_mixed.json`. The preview prints the room dimensions, exact original numeric types and initial world revision.
+
 To create a **brand-new** synthetic room with nondefault dimensions and exact int/float geometry using only the CLI (experimental opt-in, never reuse an existing SQLite file):
 
 ```sh
