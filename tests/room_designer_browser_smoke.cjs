@@ -130,7 +130,29 @@ async function main() {
     await evaluate(cdp,"document.querySelector('#walk-reset').click()");
     assert.match(await evaluate(cdp,
       "document.querySelector('#walk-status').textContent"),/Шаги: 0\/512/);
+    // Valid geometry editing and Undo both invalidate and restart the walk,
+    // while preserving the original numeric authoring JSON.
+    await evaluate(cdp,
+      "(function(){const e=document.querySelector('#width');e.value='5.0';"+
+      "e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
+    assert.match(await evaluate(cdp,
+      "document.querySelector('#walk-status').textContent"),/Шаги: 0\/512/);
+    await evaluate(cdp,"document.querySelector('#undo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#output').value"),first.text);
+    // An invalid draft disables walk arrows but cannot trap the operator
+    // in an active preview: Stop remains usable, Undo restores the room.
+    await evaluate(cdp,
+      "(function(){const e=document.querySelector('#width');e.value='invalid';"+
+      "e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#walk-right').disabled"),true);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#walk-toggle').disabled"),false);
     await evaluate(cdp,"document.querySelector('#walk-toggle').click()");
+    await evaluate(cdp,"document.querySelector('#undo').click()");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#output').value"),first.text);
     assert.equal(await evaluate(cdp,
       "document.querySelector('#walk-trail').children.length"),0);
     assert.equal(await evaluate(cdp,
