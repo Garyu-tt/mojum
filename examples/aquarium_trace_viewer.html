@@ -218,8 +218,16 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
       throw new Error("Координаты выходят за границы комнаты");
     }
     const proof = footer.trace_integrity;
-    if (footer.export_status !== undefined && proof === undefined)
-      throw new Error("В экспорте отсутствуют метаданные SHA-256");
+    const VERIFIED_EXPORT_STATUS = "REPLAY_VERIFIED_SYNTHETIC_PRIVATE_NOT_AUTHENTICATED";
+    // A partly stripped modern footer must never enter the legacy bypass,
+    // even if the operator explicitly enables unverified historical traces.
+    const hasModernMetadata = proof !== undefined ||
+      footer.export_status !== undefined || range !== undefined ||
+      footer.trace_room !== undefined;
+    if (hasModernMetadata &&
+        (proof === undefined || footer.export_status !== VERIFIED_EXPORT_STATUS ||
+         range === undefined || footer.trace_room === undefined))
+      throw new Error("Современная запись не содержит полные метаданные SHA-256");
     if (proof !== undefined) {
       if (!proof || proof.schema !== "mojum.aquarium.trace-frames-sha256/1" ||
           !Number.isSafeInteger(proof.byte_length) || proof.byte_length < 0 ||
