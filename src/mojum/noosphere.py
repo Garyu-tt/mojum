@@ -412,9 +412,8 @@ class LocalNoosphere:
         if topic is not None:
             where.append("topic = ?")
             args.append(topic)
-        if source is not None:
-            where.append("json_extract(wire_json, '$.source') = ?")
-            args.append(source)
+        # Filter by source after duplicate-safe decoding. SQLite's
+        # json_extract can otherwise hide an ambiguous row before validation.
         if as_of_recorded_ns is not None:
             where.append("recorded_at_ns <= ?")
             args.append(as_of_recorded_ns)
@@ -434,6 +433,11 @@ class LocalNoosphere:
                         event = _loads_wire(row["wire_json"])
                     except NoosphereError as exc:
                         raise NoosphereError(f"invalid journal JSON: {exc}") from exc
+                    if source is not None:
+                        if type(event) is not dict:
+                            raise NoosphereError("invalid journal JSON event object")
+                        if event.get("source") != source:
+                            continue
                     yield {"seq": row["seq"], "event": event,
                            "event_hash": row["event_hash"]}
         finally:
@@ -459,26 +463,36 @@ class LocalNoosphere:
         if topic is not None:
             where.append("topic = ?")
             args.append(topic)
-        if source is not None:
-            where.append("json_extract(wire_json, '$.source') = ?")
-            args.append(source)
+        # Filter by source after duplicate-safe decoding. SQLite's
+        # json_extract can otherwise hide an ambiguous row before validation.
         if as_of_recorded_ns is not None:
             where.append("recorded_at_ns <= ?")
             args.append(as_of_recorded_ns)
         if valid_at_ns is not None:
             where.append("valid_from_ns <= ? AND (valid_to_ns IS NULL OR valid_to_ns > ?)")
             args.extend((valid_at_ns, valid_at_ns))
-        sql = "SELECT seq,wire_json,event_hash FROM events WHERE " + " AND ".join(where) + " ORDER BY seq LIMIT ?"
-        args.append(limit)
-        rows = self._db.execute(sql, args).fetchall()
+        # The limit is applied after source filtering. Iterate rather than
+        # materializing unbounded candidate rows when a source is requested.
+        sql = "SELECT seq,wire_json,event_hash FROM events WHERE " + " AND ".join(where) + " ORDER BY seq"
+        rows = self._db.execute(sql, args)
         items = []
-        for row in rows:
-            try:
-                event = _loads_wire(row["wire_json"])
-            except NoosphereError as exc:
-                raise NoosphereError(f"invalid journal JSON: {exc}") from exc
-            items.append({"seq": row["seq"], "event": event,
-                          "event_hash": row["event_hash"]})
+        try:
+            for row in rows:
+                try:
+                    event = _loads_wire(row["wire_json"])
+                except NoosphereError as exc:
+                    raise NoosphereError(f"invalid journal JSON: {exc}") from exc
+                if source is not None:
+                    if type(event) is not dict:
+                        raise NoosphereError("invalid journal JSON event object")
+                    if event.get("source") != source:
+                        continue
+                items.append({"seq": row["seq"], "event": event,
+                              "event_hash": row["event_hash"]})
+                if len(items) >= limit:
+                    break
+        finally:
+            rows.close()
         projection = {
             "schema": DATASET_SCHEMA,
             "agent_id": self.agent_id,
