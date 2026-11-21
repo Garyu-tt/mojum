@@ -27,6 +27,14 @@ Example of the complete beginner file:
 
 This describes a 4.5m × 4m room, a rectangular obstacle at (2.0m,1m) with width 0.125m and height 2.0m, and an initial point position (1.25m,2.5m). Draft dimensions are capped at 1000m; both formats are restricted to at most 4096 obstacles and a 1 MiB local file. The start coordinates are normalized to finite binary64 floats while original room dimensions/rectangle numeric types remain distinct. This is the existing deterministic swept-AABB point fixture, not graphics or MuJoCo physical dynamics.
 
+## 0. Check the room without creating any SQLite data
+
+```sh
+PYTHONPATH=src python -m mojum.room_input examples/room_simple_mixed.json
+```
+
+This read-only local-file preflight prints dimensions, original `int`/`float` types, obstacle count, initial coordinates and deterministic initial world revision. A malformed JSON definition exits with a nonzero status and **no SQLite file is created**. The expert hexadecimal form produces the same preview for the same geometry. This preview is not a simulation, Noosphere integrity proof or environmental reality check.
+
 ## 1. Create a new room and run 12 synthetic steps
 
 ```bash
