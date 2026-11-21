@@ -388,6 +388,27 @@ class RetentionTests(unittest.TestCase):
             model.snapshot(),
         )
 
+    def test_rest_streak_after_forced_probe_requires_later_ticks(self):
+        # After the first forced probe at tick 7 the genuine rest streak is
+        # zero. Its old three rests cannot also be a terminal rest streak.
+        model = CellExplorerV5()
+        drive(model, 8)
+        self.assertEqual(model.forced_probes, 1)
+        self.assertEqual(model.rest_streak, 0)
+        good = model.snapshot()
+        self.assertEqual(good["records"]["0:0"]["rest"][0], 3)
+        forged = dict(good, rest_streak=3)
+        with self.assertRaisesRegex(CellV5Error, "impossible v5 forced-probe/rest"):
+            CellExplorerV5.from_snapshot(forged)
+
+        # Three *new* rest decisions after the probe are legitimate.
+        drive(model, 3, start=8)
+        self.assertEqual(model.rest_streak, 3)
+        self.assertEqual(
+            CellExplorerV5.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+
     def test_restore_detaches_from_original_snapshot(self):
         model = CellExplorerV5()
         sense = cue(0)

@@ -171,6 +171,18 @@ class CellExplorerV5:
                 0, (state["updates"] - len(_MOVE_ACTIONS))
                 // (MAX_REST_STREAK + 1)):
             raise CellV5Error("impossible v5 forced-probe history")
+        # Four measured blocks precede the first rest decision, and each
+        # forced probe needs three preceding rests plus the probe itself.
+        # A terminal rest streak must consume *later* ticks, not reuse the
+        # three rests already consumed before an earlier forced probe.
+        if state["forced_probes"] or state["rest_streak"]:
+            required_ticks = (
+                len(_MOVE_ACTIONS)
+                + (MAX_REST_STREAK + 1) * state["forced_probes"]
+                + state["rest_streak"]
+            )
+            if state["updates"] < required_ticks:
+                raise CellV5Error("impossible v5 forced-probe/rest timeline")
         if state["rest_streak"]:
             if not state["last_seen_at"]:
                 raise CellV5Error("rest streak without observations")
