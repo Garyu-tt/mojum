@@ -129,6 +129,18 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     next_tick = range_begin + frames
     has_more = next_tick < total_frames
 
+    # Digest the exact UTF-8 frame lines, including each trailing newline.
+    # This detects accidental JSONL corruption/truncation after safe SQLite
+    # replay. It is NOT a signature and does not authenticate a maliciously
+    # replaced file without an independently trusted digest.
+    frames_wire = b"".join(wire_parts)
+    trace_integrity = {
+        "schema": "mojum.aquarium.trace-frames-sha256/1",
+        "sha256": hashlib.sha256(frames_wire).hexdigest(),
+        "byte_length": len(frames_wire),
+        "frame_count": frames,
+    }
+
     # Viewer recognizes checkpoint schema with stored_events; do not dump
     # internal neural weights or private genotype in the summary footer.
     footer = {
@@ -137,6 +149,7 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
         "tick": snapshot["tick"],
         "journal_head": snapshot["journal_head"],
         "stored_events": count,
+        "trace_integrity": trace_integrity,
         "trace_range": {"start_tick": range_begin, "next_tick": next_tick,
                         "has_more": has_more, "source_total_ticks": total_frames},
         "export_status": "REPLAY_VERIFIED_SYNTHETIC_PRIVATE_NOT_AUTHENTICATED",
