@@ -32,7 +32,11 @@ silently mixed into this epoch wire. `aquarium_wire` reports `local_cell_v4`
 and counts epoch markers separately from frames.
 
 The implementation remains a synthetic point-room controller. The journal is
-still bounded at 100,000 total events, the absolute v4 observation range is
-finite, the SQLite head is a checksum chain rather than authentication, and
-there is no neural brain, camera, MuJoCo body, physical actuation, Android
-daemon, distributed replica, or evidence of consciousness.
+still bounded at 100,000 total events. Because bootstrap and durable epoch
+markers consume that same budget, this Aquarium profile admits at most 99,990
+v4 frames (`1 bootstrap + 99,990 frames + 9 markers`). The underlying typed
+proprioception schema remains a separate finite contract; it is not a promise
+that one Aquarium journal can exceed its event ceiling. The SQLite head is a
+checksum chain rather than authentication, and there is no neural brain,
+camera, MuJoCo body, physical actuation, Android daemon, distributed replica,
+or evidence of consciousness.

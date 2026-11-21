@@ -28,7 +28,7 @@ from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
 from .cell_policy_v3 import CellExplorerV3, SCHEMA as V3_SCHEMA
 from .cell_policy_v4 import CellExplorerV4, SCHEMA as V4_SCHEMA
 from .epoch_sense_v2 import (
-    EPOCH_TICKS, MAX_ABSOLUTE_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
+    EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
     EpochProprioception,
 )
 from .local_cell_sense import Proprioception
@@ -58,6 +58,10 @@ SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 100_000
 MAX_MOTOR_REPLAY_EVENTS = 10_000
+# The 100,000-event journal includes bootstrap and one marker before each
+# later epoch. Nine markers are therefore the largest complete v4 history
+# that fits: 1 + 99,990 frames + 9 markers = 100,000 events.
+MAX_V4_FRAMES = 99_990
 REPLAY_BATCH_SIZE = 128
 V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
@@ -396,7 +400,7 @@ class Aquarium:
         if self.motor_mode != V4_MODE:
             return ticks
         end = self.tick + ticks
-        if end > MAX_ABSOLUTE_TICKS:
+        if end > MAX_V4_FRAMES:
             raise AquariumError(
                 "local_cell_v4 absolute tick budget reached; "
                 "authenticated segmented continuation is not implemented")
@@ -633,7 +637,7 @@ class Aquarium:
         # Do not commit an epoch marker for an invalid external motor request.
         if self.motor_mode == V4_MODE and (dx is not None or dy is not None):
             raise AquariumError("developmental motor play rejects external dx/dy")
-        if self.motor_mode == V4_MODE and self.tick >= MAX_ABSOLUTE_TICKS:
+        if self.motor_mode == V4_MODE and self.tick >= MAX_V4_FRAMES:
             raise AquariumError(
                 "local_cell_v4 absolute tick budget reached; "
                 "authenticated segmented continuation is not implemented")

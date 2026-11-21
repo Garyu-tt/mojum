@@ -8,12 +8,12 @@ from pathlib import Path
 import re
 
 from .aquarium import (
-    EPOCH_EVENT_SCHEMA, MANIFEST_SCHEMA, MAX_REPLAY_EVENTS,
+    EPOCH_EVENT_SCHEMA, MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, MAX_V4_FRAMES,
     SCHEMA as FRAME_SCHEMA,
 )
 from .cell_policy_v4 import LEARNING_SCHEMA as V4_OUTCOME, SCHEMA as V4_SCHEMA
 from .epoch_sense_v2 import (
-    EPOCH_TICKS, MAX_ABSOLUTE_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
+    EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
 )
 from .developmental import SCHEMA as MOTOR_PLAY
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
@@ -208,7 +208,7 @@ def inspect_journal(path, *, external_expected_head=None):
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
             if policy == "local_cell_v4":
-                if frames >= MAX_ABSOLUTE_TICKS:
+                if frames >= MAX_V4_FRAMES:
                     raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
                 if frames // EPOCH_TICKS != epoch_index:
                     raise NoosphereError("missing durable epoch marker before v4 frame")

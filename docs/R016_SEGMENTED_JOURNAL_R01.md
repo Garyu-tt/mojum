@@ -84,8 +84,9 @@ the default dataset does not emit PRIVATE payloads.
 
 This is a data/journal scalability test, **not** 100,001 Aquarium
 motor/sensory frames. The current v4 typed sensor still has
-`MAX_ABSOLUTE_TICKS=99,999`, and old Aquarium explicitly
-uses `LocalNoosphere` with its old 100k-event gate. The new backend
+`MAX_ABSOLUTE_TICKS=99,999`; the current Aquarium v4 profile has an effective
+99,990-frame ceiling because its old `LocalNoosphere` journal also stores the
+bootstrap and epoch markers under the 100k-event gate. The new backend
 is intentionally NOT automatically injected into Aquarium.
 
 ## Non-goals and next integration gates

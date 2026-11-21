@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError, V4_MODE
+from mojum.aquarium import Aquarium, AquariumError, MAX_V4_FRAMES, V4_MODE
 from mojum.aquarium_wire import inspect_journal
 from mojum.cell_policy_v3 import CellExplorerV3
 from mojum.cell_policy_v4 import CellExplorerV4, CellV4Error, SCHEMA as V4_SCHEMA
@@ -102,6 +102,10 @@ class EpochSQLiteTests(unittest.TestCase):
             self.assertEqual(aquarium.required_events_for_steps(0), 0)
             self.assertEqual(aquarium.required_events_for_steps(9_999), 9_999)
             self.assertEqual(aquarium.required_events_for_steps(10_000), 10_001)
+            self.assertEqual(aquarium.required_events_for_steps(MAX_V4_FRAMES),
+                             MAX_V4_FRAMES + 9)
+            with self.assertRaisesRegex(AquariumError, "absolute tick budget"):
+                aquarium.required_events_for_steps(MAX_V4_FRAMES + 1)
 
             with self.assertRaisesRegex(AquariumError, "absolute tick budget"):
                 aquarium.required_events_for_steps(100_000)
