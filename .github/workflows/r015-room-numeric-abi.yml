@@ -1,0 +1,53 @@
+name: Mojum R0.15 exact room numeric ABI QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-room-numeric-abi.yml"
+      - "src/mojum/room_contract.py"
+      - "src/mojum/aquarium.py"
+      - "tests/test_room_numeric_contract.py"
+      - "tests/qa_r015_parent_wire_invariance.py"
+      - "docs/R015_EXACT_ROOM_NUMERIC_BOOTSTRAP.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-geometry:
+    name: exact scalar room bootstrap / SQLite cold replay (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable pre-change parent #135
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 961e9954248dc9fb3a2803a3ab4108c96606ff42
+          path: sources/parent135
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Verify typed room version isolation and exact world revisions
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+          MOJUM_BASELINE135_SOURCE: sources/parent135
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p test_room_numeric_contract.py -v 2>&1 | tee typed-geometry-qa.log
+          python -m unittest discover -s tests -p qa_r015_parent_wire_invariance.py -v 2>&1 | tee -a typed-geometry-qa.log
+          if grep -q 'ResourceWarning: unclosed database' typed-geometry-qa.log; then
+            echo "FAIL: SQLite connection leak" >&2
+            exit 1
+          fi
