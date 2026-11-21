@@ -17,6 +17,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError
+from .noosphere import _read_first_event
 
 MAX_BACKUP_BYTES = 128_000_000
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -132,6 +133,11 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
     """
     source = _source_file(source_db)
     destination = _destination(destination_db)
+    # Export is for a committed journal, never a request to initialize one.
+    # Aquarium auto-bootstraps empty SQLite sources after a writable open.
+    # Inspect the existing source read-only before allowing that side effect.
+    if _read_first_event(source, agent_id) is None:
+        raise ValueError("export requires an existing nonempty Aquarium journal")
     opts = _options(agent_id, neural_mode, room, start, dt_ns)
     with Aquarium(source, seed, graph, **opts) as original:
         before = original.checkpoint()
