@@ -16,7 +16,8 @@ import tempfile
 import unittest
 
 from tools.package_room_designer import (
-    HTML, JS, SCRIPT_TAG, PackagingError, standalone_html, write_standalone,
+    HTML, JS, SCRIPT_TAG, HISTORY_JS, HISTORY_TAG, WALK_JS, WALK_TAG,
+    PackagingError, standalone_html, write_standalone,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,15 +32,23 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
 
     def test_binary_build_matches_literal_source_inlining_and_preserves_privacy(self):
         html = HTML.read_text(encoding="utf-8")
-        js = JS.read_text(encoding="utf-8")
-        self.assertEqual(html.count(SCRIPT_TAG), 1)
+        scripts = (
+            (SCRIPT_TAG, JS, "MojumRoomDesignerCore"),
+            (HISTORY_TAG, HISTORY_JS, "MojumRoomHistory"),
+            (WALK_TAG, WALK_JS, "MojumWalkPreview"),
+        )
         result = standalone_html()
         text = result.decode("utf-8")
-        expected = html.replace(
-            SCRIPT_TAG, "<script>\n" + js.rstrip() + "\n</script>", 1)
+        expected = html
+        for tag, source, symbol in scripts:
+            self.assertEqual(html.count(tag), 1)
+            expected = expected.replace(
+                tag, "<script>\n" + source.read_text(encoding="utf-8").rstrip()
+                + "\n</script>", 1)
+            self.assertNotIn(tag, text)
+            self.assertIn(symbol, text)
         self.assertEqual(text, expected)
-        self.assertNotIn(SCRIPT_TAG, text)
-        self.assertIn("MojumRoomDesignerCore", text)
+        self.assertNotIn('<script src="', text)
         self.assertIn('id="import-file"', text)
         self.assertIn('id="download"', text)
         self.assertIn('mojum.world.point-room-draft/1', text)
@@ -93,6 +102,12 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         good_js = JS.read_text(encoding="utf-8")
         source.write_text(template.replace(SCRIPT_TAG, ""), encoding="utf-8")
         js.write_text(good_js, encoding="utf-8")
+        with self.assertRaisesRegex(PackagingError, "exactly one"):
+            standalone_html(html_path=source, js_path=js)
+        source.write_text(template.replace(HISTORY_TAG, ""), encoding="utf-8")
+        with self.assertRaisesRegex(PackagingError, "exactly one"):
+            standalone_html(html_path=source, js_path=js)
+        source.write_text(template.replace(WALK_TAG, ""), encoding="utf-8")
         with self.assertRaisesRegex(PackagingError, "exactly one"):
             standalone_html(html_path=source, js_path=js)
         source.write_text(template, encoding="utf-8")
