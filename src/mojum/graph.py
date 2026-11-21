@@ -60,6 +60,25 @@ def _check_json_depth(raw):
             depth -= 1
 
 
+def _require_lossless_json(graph):
+    """Fail before hashing when nested v1 data cannot survive a UTF-8 JSON wire.
+
+    Config and notes are intentionally extensible, but neither Python-only
+    values nor unpaired surrogates are valid persisted graph data. Merely
+    hashing with json.dumps could otherwise silently coerce tuples or map
+    keys, or leak a UnicodeEncodeError after structural validation.
+    """
+    try:
+        wire = json.dumps(graph, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"), allow_nan=False)
+        wire.encode("utf-8", errors="strict")
+        decoded = json.loads(wire)
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise GraphError("Graph requires lossless UTF-8 JSON values") from exc
+    if decoded != graph:
+        raise GraphError("Graph requires lossless UTF-8 JSON values")
+
+
 def load_graph(path):
     """Read UTF-8 graph JSON without collapsing duplicate keys."""
     try:
@@ -152,4 +171,7 @@ def validate(graph):
                 ready.sort()
     if len(order) != len(by_id):
         raise GraphError("Cycle detected: feedback requires explicit scheduler")
+    # The exact v1 shape is checked above; reject non-JSON nested content
+    # before callers record the graph revision or open a SQLite journal.
+    _require_lossless_json(graph)
     return by_id, incoming, order
