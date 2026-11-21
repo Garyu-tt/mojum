@@ -227,6 +227,77 @@ class CanonicalToyContactIntegrationTests(unittest.TestCase):
             default.step()
             self.assertEqual(default.sensory_bridge.model.updates, 1)
 
+    def test_motor_wall_masks_near_field_toy_and_prevents_probe_intent(self):
+        # The toy disc is entirely right of the vertical motor-room wall,
+        # but within 30 cm of the agent on the opposite side. The old bridge
+        # incorrectly saw its RGB and requested a synthetic probe through it.
+        scene = ToyScene(toys=(
+            Toy("spectator.hidden", 2.25, 2.0, .10, (250, 1, 3), .97),
+        ))
+        with self.aquarium(start=(1.98, 2.0), sensory_scene=scene) as a:
+            unmasked = scene.sense(a.world)
+            self.assertTrue(unmasked["visible"])
+            self.assertEqual(unmasked["reflectance_rgb"], [250, 1, 3])
+            self.assertEqual(unmasked["range_bucket_10cm"], 2)
+            frame = a.step()
+            contact = frame["toy_contact"]
+            self.assertFalse(contact["observation"]["visible"])
+            self.assertIsNone(contact["observation"]["reflectance_rgb"])
+            self.assertIsNone(contact["observation"]["range_bucket_10cm"])
+            self.assertFalse(contact["probe_intent"]["requested"])
+            self.assertIsNone(contact["measured_contact"])
+            self.assertEqual(a.sensory_bridge.model.updates, 0)
+            self.assertNotIn("spectator.hidden", str(contact))
+            self.assertNotIn("250", str(contact["observation"]))
+
+    def test_unobstructed_further_toy_selected_over_occluded_nearest(self):
+        # The visually nearest toy is behind the wall (0.40 m); the visible
+        # toy is a little farther to the left (0.55 m). The sensor must not
+        # return an invisible nearest object or hide the available one.
+        scene = ToyScene(toys=(
+            Toy("spectator.occluded", 2.25, 2.0, .10, (255, 5, 5), .9),
+            Toy("spectator.visible", 1.30, 2.0, .10, (12, 160, 220), .2),
+        ))
+        with self.aquarium(start=(1.85, 2.0), sensory_scene=scene) as a:
+            self.assertEqual(scene.sense(a.world)["reflectance_rgb"], [255, 5, 5])
+            seen = a.step()["toy_contact"]["observation"]
+            self.assertTrue(seen["visible"])
+            self.assertEqual(seen["reflectance_rgb"], [12, 160, 220])
+            self.assertEqual(seen["range_bucket_10cm"], 5)
+
+    def test_wall_mask_is_manifest_pinned_and_replays_exactly(self):
+        scene = ToyScene(toys=(
+            Toy("spectator.occluded", 2.25, 2.0, .10, (210, 0, 0), .9),
+            Toy("spectator.visible", 1.30, 2.0, .10, (20, 160, 230), .2),
+        ))
+        with self.aquarium(start=(1.85, 2.0), sensory_scene=scene) as first:
+            self.assertEqual(first.manifest["occlusion_schema"],
+                             "mojum.sensor.center-ray-wall-mask/1")
+            for _ in range(8):
+                first.step()
+            previous = first.checkpoint()
+            private = first.store.dataset(include_nonpublic=True)["projection"]["items"]
+            self.assertEqual(private[0]["event"]["payload"]["occlusion_schema"],
+                             first.manifest["occlusion_schema"])
+            self.assertEqual(len(private), 9)
+        with self.aquarium(start=(1.85, 2.0), sensory_scene=scene) as restored:
+            self.assertEqual(restored.checkpoint(), previous)
+            self.assertEqual(restored.store.count(), 9)
+            restored.step()
+            self.assertEqual(restored.store.count(), 10)
+
+    def test_same_toy_visible_without_wall(self):
+        scene = ToyScene(toys=(
+            Toy("spectator.unblocked", 2.25, 2.0, .10, (80, 180, 60), .3),
+        ))
+        with Aquarium(self.second, SEED, GRAPH, room=Room(4, 4),
+                      start=(1.98, 2.0), exploration_mode="goal_free",
+                      sensory_mode="toy_probe", sensory_scene=scene) as a:
+            obs = a.step()["toy_contact"]["observation"]
+            self.assertTrue(obs["visible"])
+            self.assertEqual(obs["reflectance_rgb"], [80, 180, 60])
+            self.assertEqual(a.store.count(), 2)
+
     def test_forged_contact_frame_rejected_without_model_update(self):
         with self.aquarium() as a:
             payload, _ = a.sensory_bridge.evaluate(a.world)
