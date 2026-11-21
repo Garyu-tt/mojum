@@ -205,6 +205,8 @@ class MotorPlayV2:
                 or kind != self.pending
                 or self.observations >= MAX_OBSERVATIONS):
             raise MotorPlayV2Error("invalid, unpaired or stale measured motor outcome")
+        if kind == "rest" and blocked:
+            raise MotorPlayV2Error("rest cannot be blocked in the point-room fixture")
         if kind == "rest" and self.rest_streak >= MAX_CONSECUTIVE_REST:
             raise MotorPlayV2Error("rest streak cap violated by recorded outcome")
         self.samples[kind]["trials"] += 1
