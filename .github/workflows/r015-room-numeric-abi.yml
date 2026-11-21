@@ -44,7 +44,7 @@ jobs:
           PYTHONWARNINGS: always::ResourceWarning
           MOJUM_BASELINE135_SOURCE: sources/parent135
         run: |
-          set -o pipefail
+          set -euo pipefail
           python -m unittest discover -s tests -p test_room_numeric_contract.py -v 2>&1 | tee typed-geometry-qa.log
           python -m unittest discover -s tests -p qa_r015_parent_wire_invariance.py -v 2>&1 | tee -a typed-geometry-qa.log
           if grep -q 'ResourceWarning: unclosed database' typed-geometry-qa.log; then
