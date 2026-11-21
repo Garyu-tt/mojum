@@ -1,6 +1,6 @@
 """Cross-component CPU-first tests; all data are synthetic fixtures."""
 
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 import copy
 import io
 import json
@@ -126,7 +126,7 @@ class AquariumIntegrationTests(unittest.TestCase):
     def test_corrupt_sqlite_event_payload_refused_on_reopen(self):
         with self.aquarium() as q:
             q.step()
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db:
             db.execute("DROP TRIGGER noosphere_no_update")
             db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
         with self.assertRaises(NoosphereError):

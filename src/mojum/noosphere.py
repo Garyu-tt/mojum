@@ -17,8 +17,8 @@ from pathlib import Path
 EVENT_SCHEMA = "mojum.noosphere.event/1"
 STORE_SCHEMA = "mojum.noosphere.sqlite/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
-EMPTY_HEAD = "0" * 64
 _ALLOWED_VISIBILITY = frozenset(("PUBLIC", "PRIVATE", "RESTRICTED"))
+EMPTY_HEAD = "0" * 64
 _MAX_PAYLOAD_BYTES = 128_000
 
 
@@ -105,18 +105,25 @@ class LocalNoosphere:
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.execute("PRAGMA trusted_schema=OFF")
-        self._db.execute("PRAGMA synchronous=FULL")
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA foreign_keys=ON")
-        if os.name == "posix":
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass  # Caller must enforce host filesystem policy.
-        self._setup()
+        # An exception inside __init__ never reaches __exit__/close() of a
+        # context manager. In particular a wrong owner/schema must not leave
+        # an unreachable live sqlite3.Connection for Python 3.13 GC to warn on.
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("PRAGMA trusted_schema=OFF")
+            self._db.execute("PRAGMA synchronous=FULL")
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA foreign_keys=ON")
+            if os.name == "posix":
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass  # Caller must enforce host filesystem policy.
+            self._setup()
+        except BaseException:
+            self._db.close()
+            raise
 
     def close(self):
         self._db.close()

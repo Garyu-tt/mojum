@@ -190,6 +190,8 @@ class Aquarium:
         """Persist an acquired-gene event. Only future/current ticks allowed."""
         if not isinstance(acquired, dict):
             raise AquariumError("acquired change must be an event object")
+        if type(acquired.get("valid_from_tick")) is not int:
+            raise AquariumError("valid_from_tick must be an integer")
         if acquired.get("valid_from_tick", -1) < self.tick:
             raise AquariumError("cannot retroactively change committed frames")
         if acquired.get("recorded_at_ns") != self.tick * self.dt_ns:
@@ -292,6 +294,12 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    # Validate command-line movement before Aquarium can create a bootstrap
+    # journal. Invalid requests must not leave behind a new organism fixture.
+    try:
+        dx, dy = _movement(args.dx), _movement(args.dy)
+    except AquariumError as exc:
+        parser.error(str(exc))
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
@@ -302,7 +310,7 @@ def main():
         if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
-            aquarium.step(dx=args.dx, dy=args.dy)
+            aquarium.step(dx=dx, dy=dy)
         # The checkpoint's final head check also covers the count read here.
         stored_events = aquarium.store.count()
         checkpoint = aquarium.checkpoint()
