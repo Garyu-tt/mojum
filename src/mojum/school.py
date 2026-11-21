@@ -90,7 +90,7 @@ def _validated_catalog_bytes(catalog: Any) -> bytes:
         payload = _canonical_json(catalog)
     except (TypeError, ValueError, RecursionError) as error:
         raise SchoolContractError("school catalog cannot be encoded as UTF-8 JSON") from error
-    if len(payload) > MAX_CATALOG_BYTES + 1:  # Canonical JSON adds a trailing newline.
+    if len(payload) > MAX_CATALOG_BYTES:  # Include the canonical trailing newline in the limit.
         raise SchoolContractError("school catalog exceeds byte limit")
     return payload
 

@@ -115,6 +115,22 @@ class SchoolRunnerTests(unittest.TestCase):
                 with self.assertRaises(SchoolContractError):
                     run_scripted_activity(catalog, "music")
 
+    def test_canonical_json_exact_byte_limit(self):
+        def canonical_bytes(value):
+            return (json.dumps(value, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+
+        catalog = {**self.catalog, "metadata": ""}
+        filler = MAX_CATALOG_BYTES + 1 - len(canonical_bytes(catalog))
+        self.assertGreater(filler, 0)
+        catalog["metadata"] = "x" * filler
+        self.assertEqual(len(canonical_bytes(catalog)), MAX_CATALOG_BYTES + 1)
+        with self.assertRaises(SchoolContractError):
+            validate_catalog(catalog)
+        catalog["metadata"] = catalog["metadata"][:-1]
+        self.assertEqual(len(canonical_bytes(catalog)), MAX_CATALOG_BYTES)
+        self.assertIs(validate_catalog(catalog), catalog)
+
     def test_malformed_structure_and_resource_budgets(self):
         import copy
         edits = []

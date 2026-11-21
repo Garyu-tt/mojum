@@ -5,6 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.genesis import ACQUISITION_SCHEMA
@@ -72,6 +73,8 @@ class AquariumNeuralTests(unittest.TestCase):
                              0, a.genome.revision)
             self.assertEqual(a.tick, 0)
             self.assertEqual(a.learner.updates, 0)
+            with self.assertRaises(AquariumError):
+                a.checkpoint()
         with self.aquarium() as a:
             self.assertEqual(a.tick, 1)
             self.assertEqual(a.learner.updates, 0)
@@ -85,8 +88,25 @@ class AquariumNeuralTests(unittest.TestCase):
             a.step()
             with self.assertRaises(NoosphereError):
                 b.step()
-            self.assertEqual(b.checkpoint()["neural_state"], initial)
+            self.assertEqual(b.learner.snapshot(), initial)
+            with self.assertRaises(AquariumError):
+                b.checkpoint()
             self.assertEqual(b.tick, 0)
+
+    def test_writer_advancing_during_learner_snapshot_invalidates_checkpoint(self):
+        with self.aquarium() as writer, self.aquarium() as reader:
+            snapshot = reader.learner.snapshot
+
+            def snapshot_then_advance():
+                state = snapshot()
+                writer.step()
+                return state
+
+            with patch.object(reader.learner, "snapshot", snapshot_then_advance):
+                with self.assertRaises(AquariumError):
+                    reader.checkpoint()
+            self.assertEqual(reader.tick, 0)
+            self.assertEqual(writer.tick, 1)
 
     def test_invalid_movement_cannot_train_or_commit(self):
         with self.aquarium() as a:
