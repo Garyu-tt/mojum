@@ -151,7 +151,8 @@ def main(argv=None):
     parser.add_argument("--interval-ms", type=int, default=1000,
                         help="wall-clock delay 20..3600000 ms, NOT virtual dt")
     parser.add_argument("--exploration-mode", choices=("goal_free",), default="goal_free")
-    parser.add_argument("--sensory-mode", choices=("toy_probe", "none"),
+    parser.add_argument("--sensory-mode",
+                        choices=("toy_probe", "toy_probe_v2", "none"),
                         default="toy_probe")
     parser.add_argument("--developmental-policy",
                         choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),

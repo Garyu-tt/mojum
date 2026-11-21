@@ -62,12 +62,14 @@ and are not encryption or prevention against total source rollback.
   *additional* event, so the actual event cap is reached earlier than
   the hypothetical 99,999 movement limit. This is a bounded test of
   safe long epochs, **not an infinite organism or circular journal**.
-- `toy_probe` is **explicitly refused for v4**. Its legacy
-  `ContactAssociations` model has a separate ~4k measurement
-  cap and has no compatible versioned long-run retention strategy.
-  v4 is tested with `sensory_mode=none`, while heartbeat
-  interoception remains active. Integrating a new versioned
-  toy-contact retention model is separate future work.
+- The legacy `toy_probe` is **still explicitly refused for v4**.
+  Its `ContactAssociations/1` model caps association history near
+  4,000 measurements. On this distinct stacked experimental branch
+  [PR #136](https://github.com/Garyu-tt/mojum/pull/136), v4 may instead
+  explicitly select the **NEW** `sensory_mode=toy_probe_v2` contract
+  with bounded independent association/2 retention and a distinct
+  contact-bridge/2 schema. The original `sensory_mode=none` remains.
+  No old PRIVATE journal is automatically migrated or reinterpreted.
 - An exact 9999→10000 crossing is tested on real disposable SQLite
   with synthetic point-room, HMAC snapshot and full cold replay.
   The brain remains `UNIMPLEMENTED`; this is not MuJoCo,
