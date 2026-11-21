@@ -48,8 +48,10 @@ and graph, the default room and scripted movement. The journal owner defaults
 to the selected seed's `genome_id`. For an opt-in v4 journal
 with numeric toy contact, pass `--motor-mode local_cell_v4 --sensory-mode toy_probe_v2`
 to both commands. The same rule applies to `--brain-mode`, `--temporal-mode`,
-`--neural-mode`, `--genome` and `--graph` when those settings differ. Use the
-Python API to pass a custom room, clock or toy scene.
+`--neural-mode`, `--genome` and `--graph` when those settings differ. The CLI
+uses the supplied seed's `genome_id` as the journal owner unless you pass
+`--agent-id` explicitly. Use the Python API to pass a custom room, clock or
+toy scene.
 
 A verified copy can be reopened as an **independent forked local simulation**
 using `mojum.aquarium --db ...` with matching settings. That is *not*

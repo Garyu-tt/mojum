@@ -96,7 +96,9 @@ verified = json.loads(subprocess.check_output([
     *cold_copy, "verify", "--db", "backup.sqlite3", "--expected-head", epoch_state["journal_head"],
     "--expected-sha256", backup["db_sha256"], "--expected-tick", "8", *epoch,
 ], text=True))
-assert verified["journal_head"] == backup["journal_head"]
+assert (verified["agent_id"], verified["journal_head"]) == (
+    seed["genome_id"], backup["journal_head"],
+)
 resumed_backup = run("mojum-aquarium", "--db", "backup.sqlite3", "--ticks", "1",
                      "--expected-head", verified["journal_head"], *epoch)
 assert resumed_backup == run("mojum-aquarium", "--db", "epoch.sqlite3", "--ticks", "1", *epoch)
