@@ -11,9 +11,17 @@ This branch preserves **all three** without giving two incompatible persisted im
 | Explicit selector | Wire format | Ability |
 | --- | --- | --- |
 | `legacy` | Existing R0.13 scripted or coarse_v1, unchanged | Original writable behavior |
-| `local_cell_v2` | #115/#125 v2B | Original writable behavior |
+| `local_cell_v2b` | #115/#125 v2B | Creates and resumes v2B journals |
+| `local_cell_v2` | #115/#125 v2B | Resume alias for an existing v2B journal |
 | `local_cell_v3` | #122/#125 v3B | Original writable behavior |
 | `local_cell_v2_a_archive` | Original #112 v2A, pinned `motor_policy` manifest | **Existing DB only, deterministic replay/checkpoint; no append, acquire or new signed cache** |
+
+The mode is a runtime selector. New v2B journals still persist
+`developmental_policy=local_cell_v2` and the v2B state schema
+`mojum.developmental.local-cell/2`. The original #115 runtime can reopen
+those journals. Both v2B selectors check an existing file's bootstrap
+read-only before opening a writer. An original #112 file must be opened
+with the separate archive selector.
 
 No migration, rewriting, silent coercion, renamed historic event or automatic selection. This is an experimental API; **only the owner and independent review can designate the final canonical v2 ABI**.
 

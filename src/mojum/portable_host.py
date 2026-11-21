@@ -19,7 +19,7 @@ import signal
 import threading
 import time
 
-from .aquarium import Aquarium, MAX_REPLAY_EVENTS
+from .aquarium import Aquarium, MAX_REPLAY_EVENTS, WRITABLE_POLICIES
 from .developmental_policy import MAX_EPISODE_TICKS
 
 
@@ -147,9 +147,9 @@ def main(argv=None):
     parser.add_argument("--sensory-mode", choices=("toy_probe", "none"),
                         default="toy_probe")
     parser.add_argument("--developmental-policy",
-                        choices=("legacy", "local_cell_v2", "local_cell_v3"),
+                        choices=WRITABLE_POLICIES,
                         default="legacy",
-                        help="version-pin motor policy in a NEW PRIVATE journal")
+                        help="local_cell_v2b creates v2B journals. local_cell_v2 resumes existing v2B")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
     parser.add_argument("--expected-head",
