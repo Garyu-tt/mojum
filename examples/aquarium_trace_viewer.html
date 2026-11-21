@@ -110,7 +110,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
 <p><code>PYTHONPATH=src python -m mojum.aquarium --db ./dante.sqlite3 --ticks 120</code></p>
 <p><code>PYTHONPATH=src python -m mojum.aquarium_trace_export --db ./dante.sqlite3 --output ./dante.private.jsonl --allow-private-export</code></p>
 <p>Экспортёр из этого PR читает исходную SQLite только для чтения, делает временную согласованную копию и проверяет полный журнал воспроизведением, затем создаёт PRIVATE JSONL без перезаписи существующего файла. Итоговые кадры также можно получить через <code>--watch</code> ветки PR #65, но она ещё не находится в main.</p>
-<p>HTML читает кадры схемы <code>mojum.aquarium.frame/1</code> и пропускает заключительные строки checkpoint. Он не открывает SQLite напрямую и не проверяет подлинность исходного файла.</p>
+<p>HTML читает кадры схемы <code>mojum.aquarium.frame/1</code> и требует завершающий checkpoint. Для новых экспортов он проверяет SHA-256 точных байтов кадров; старый формат без SHA-256 явно помечается как непроверенный. Это обнаруживает случайную порчу, но не доказывает подлинность: злоумышленник может заменить и запись, и контрольную сумму. SQLite напрямую не открывается.</p>
 <p>Секретные события остаются PRIVATE: не прикладывайте файл к публичным issues. Просмотрщик не проверяет подпись, подлинность журнала или SHA-цепочку. Координаты отображаются для стандартной демонстрационной комнаты 4×4 м; ни препятствия, ни истинные свойства объектов не реконструируются. Это просмотр записи, не автономный Данте и не живая миграция.</p>
 </section>
 </main>
@@ -122,6 +122,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
   const canvas = $("room"), ctx = canvas.getContext("2d");
   const controls = ["prev","play","next","start","end","seek"];
   let frames = [], current = 0, interval = null, fileName = "", importVersion = 0;
+  let integrityNote = "";
   const isNum = n => typeof n === "number" && Number.isFinite(n);
   const fmt = n => isNum(n) ? String(Math.round(n * 100) / 100) : "—";
   function status(msg, error) {
@@ -134,7 +135,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     $("play").textContent = "▶ Воспроизвести";
   }
   function reset() {
-    stop(); frames = []; current = 0; fileName = "";
+    stop(); frames = []; current = 0; fileName = ""; integrityNote = "";
     controls.forEach(id => { $(id).disabled = true; });
     $("seek").max = "0"; $("seek").value = "0";
     $("counter").textContent = "Нет записи";
@@ -143,11 +144,12 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     $("events").replaceChildren();
     draw();
   }
-  function parseTrace(raw) {
-    const accepted = [];
-    const lines = raw.split(/\r?\n/);
+  async function parseTrace(raw) {
+    const accepted = [], frameLines = [];
+    const lines = raw.split("\n");
+    let footer = null;
     for (let i = 0; i < lines.length; i++) {
-      const source = lines[i].trim();
+      const original = lines[i], source = original.trim();
       if (!source) continue;
       if (source.length > MAX_LINE) throw new Error("Слишком длинная JSONL-строка " + (i+1));
       let value;
@@ -156,8 +158,15 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
       if (!value || typeof value !== "object" || Array.isArray(value)) {
         throw new Error("Неверная структура строки " + (i+1));
       }
-      if (value.schema === "mojum.aquarium.checkpoint/1" &&
-          Number.isInteger(value.stored_events)) continue;
+      if (footer !== null) throw new Error("Лишние данные после checkpoint");
+      if (value.schema === "mojum.aquarium.checkpoint/1") {
+        if (!Number.isSafeInteger(value.stored_events) ||
+            value.stored_events < accepted.length + 1) {
+          throw new Error("Некорректный checkpoint");
+        }
+        footer = value;
+        continue;
+      }
       if (value.schema !== "mojum.aquarium.frame/1")
         throw new Error("Неподдерживаемая схема в строке " + (i+1));
       const pos = value.world && value.world.position;
@@ -173,10 +182,51 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
       if (accepted.length && value.tick !== accepted[accepted.length-1].tick + 1)
         throw new Error("Пропуск, дублирование или обратный ход тактов");
       accepted.push(value);
+      // Preserve the original bytes; do not reserialize the frame before
+      // checking the exporter-provided SHA-256. The exporter uses LF JSONL.
+      frameLines.push(original + "\n");
       if (accepted.length > MAX_FRAMES) throw new Error("Слишком много кадров");
     }
     if (!accepted.length) throw new Error("Нет ни одного кадра Aquarium");
-    return accepted;
+    if (!footer) throw new Error("Отсутствует завершающий checkpoint; файл неполный");
+    const first = accepted[0].tick, next = accepted[accepted.length-1].tick + 1;
+    const range = footer.trace_range;
+    if (range !== undefined) {
+      if (!range || !Number.isSafeInteger(range.start_tick) ||
+          !Number.isSafeInteger(range.next_tick) ||
+          !Number.isSafeInteger(range.source_total_ticks) ||
+          typeof range.has_more !== "boolean" ||
+          range.start_tick !== first || range.next_tick !== next ||
+          range.source_total_ticks < next ||
+          range.has_more !== (next < range.source_total_ticks)) {
+        throw new Error("Checkpoint не совпадает с диапазоном тактов");
+      }
+    }
+    const proof = footer.trace_integrity;
+    if (proof !== undefined) {
+      if (!proof || proof.schema !== "mojum.aquarium.trace-frames-sha256/1" ||
+          !Number.isSafeInteger(proof.byte_length) || proof.byte_length < 0 ||
+          !Number.isSafeInteger(proof.frame_count) ||
+          proof.frame_count !== accepted.length ||
+          typeof proof.sha256 !== "string" ||
+          !/^[0-9a-f]{64}$/.test(proof.sha256)) {
+        throw new Error("Некорректные метаданные SHA-256");
+      }
+      // No fallback to an unverified state if WebCrypto is unavailable.
+      if (!globalThis.crypto || !globalThis.crypto.subtle ||
+          typeof TextEncoder === "undefined") {
+        throw new Error("Для проверки SHA-256 требуется локальный WebCrypto");
+      }
+      const bytes = new TextEncoder().encode(frameLines.join(""));
+      if (bytes.length !== proof.byte_length)
+        throw new Error("Размер записанных кадров не совпадает с checkpoint");
+      const hash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes));
+      const actual = Array.from(hash, byte => byte.toString(16).padStart(2, "0")).join("");
+      if (actual !== proof.sha256)
+        throw new Error("SHA-256 кадров не совпадает: файл изменён или повреждён");
+      return {frames: accepted, integrity: "SHA-256 кадров совпадает (не подпись)"};
+    }
+    return {frames: accepted, integrity: "Без SHA-256: старый формат, не проверен"};
   }
   function draw() {
     const w = canvas.width, h = canvas.height;
@@ -264,7 +314,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
       right.textContent=String(act)+(frame.world.blocked?" · препятствие":"");
       row.append(left,right);$("events").appendChild(row);
     }
-    status("Локальная запись: "+fileName+" · такты "+frames[0].tick+"–"+frames[frames.length-1].tick,false);
+    status("Локальная запись: "+fileName+" · такты "+frames[0].tick+"–"+frames[frames.length-1].tick+" · "+integrityNote,false);
   }
   function go(index) {
     if(!frames.length)return;
@@ -290,9 +340,9 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     if(!file)return;
     if(file.size>MAX_BYTES){status("Файл больше 24 МБ; отклонён без чтения",true);return;}
     try{
-      const parsed=parseTrace(await file.text());
+      const parsed=await parseTrace(await file.text());
       if(version!==importVersion)return;
-      frames=parsed;fileName=file.name;
+      frames=parsed.frames;fileName=file.name;integrityNote=parsed.integrity;
       controls.forEach(id=>$(id).disabled=false);
       $("seek").max=String(frames.length-1);
       current=0;render();
