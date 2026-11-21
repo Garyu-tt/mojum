@@ -1,0 +1,58 @@
+name: Mojum offline visual room designer acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-room-visual-designer.yml"
+      - "tools/room_designer_core.js"
+      - "tools/room_designer.html"
+      - "tests/room_designer_core.test.cjs"
+      - "tests/test_visual_room_cross_language.py"
+      - "src/mojum/room_input.py"
+      - "src/mojum/room_contract.py"
+      - "examples/room_simple_mixed.json"
+      - "docs/R015_VISUAL_ROOM_DESIGNER.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-room:
+    name: SVG editor JSON -> Python -> SQLite (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Node pure-model and static no-network UI contract
+        run: |
+          set -euo pipefail
+          node --test tests/room_designer_core.test.cjs
+      - name: Real Python custom room + private SQLite acceptance
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p test_visual_room_cross_language.py -v 2>&1 | tee visual-room-qa.log
+          if grep -q 'ResourceWarning: unclosed database' visual-room-qa.log; then
+            echo "FAIL: SQLite connection leak" >&2
+            exit 1
+          fi
+      - name: Original CLI safety regression
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_new_room_json_cli.py -v
