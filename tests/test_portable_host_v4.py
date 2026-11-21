@@ -62,6 +62,8 @@ class EpochHostTests(unittest.TestCase):
             motor_mode = V4_MODE
             motor = object()
             sensory_bridge = None
+            sensory_mode = "none"
+            temporal_mode = "none"
             journal_event_budget = 3
 
             def __init__(self):
