@@ -493,6 +493,37 @@ class TranscriptSummaryTests(unittest.TestCase):
                     summarize_transcript(bad)
 
 
+    def test_summary_rejects_forged_sequence_and_outcome_disagreements(self):
+        transcript = []
+        drive(CellExplorerV5(), 12, transcript=transcript)
+        self.assertEqual(summarize_transcript(transcript)["ticks"], 12)
+
+        def reject(index, side, field, value=None, *, remove=False):
+            changed = deepcopy(transcript)
+            record = changed[index][side]
+            if remove:
+                record.pop(field)
+            else:
+                record[field] = value
+            with self.subTest(index=index, side=side, field=field, value=value):
+                with self.assertRaises(CellV5Error):
+                    summarize_transcript(changed)
+
+        reject(1, 0, "tick", 0)  # duplicate absolute tick
+        reject(1, 0, "tick", 3)  # missing tick
+        reject(1, 0, "tick", True)  # bool is not a clock integer
+        reject(1, 0, "tick", remove=True)  # ambiguous mixed clock profile
+        reject(1, 1, "action", "rest")  # mismatched measured outcome
+        reject(1, 1, "schema", "mojum.developmental.local-cell.outcome/4")
+        reject(1, 1, "total_updates", True)
+        reject(1, 1, "total_updates", 999)
+        reject(1, 1, "forced_probe", True)
+        reject(1, 0, "zone", "25001:0")
+        rest_index = next(i for i, (intent, _) in enumerate(transcript)
+                          if intent["action"] == "rest")
+        reject(rest_index, 0, "forced_probe", True)
+
+
 class V5AquariumVersionGateTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
