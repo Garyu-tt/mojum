@@ -130,7 +130,8 @@ class SummarizeTests(unittest.TestCase):
     def test_scripted_and_unknown_policies_are_rejected(self):
         for bad in ({}, {"schema": "mojum.aquarium.bootstrap/1"},
                     {**manifest(), "motor_mode": "scripted"},
-                    {**manifest(), "motor_policy_schema": "mojum.other/1"}):
+                    {**manifest(), "motor_policy_schema": "mojum.other/1"},
+                    {**manifest(), "motor_policy_schema": "mojum.developmental.motor-play/999"}):
             with self.assertRaises(MobilityAuditError):
                 summarize(bad, [])
 
