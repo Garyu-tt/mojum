@@ -23,17 +23,21 @@ class NeutralProbeTrialTests(unittest.TestCase):
         self.assertEqual(pair, compare(**self.fixture))
         self.assertEqual(pair["schema"], COMPARISON_SCHEMA)
         adaptive, frozen = pair["adaptive"], pair["frozen"]
+        local_cell = pair["local_cell"]
         self.assertEqual(adaptive["ticks"], 120)
         self.assertEqual(frozen["ticks"], 120)
         self.assertIsNone(frozen["learned_state"])
         self.assertEqual(adaptive["learned_state"]["updates"], 120)
-        for index, (a, b) in enumerate(zip(adaptive["trace"], frozen["trace"])):
+        for index, (a, b, c) in enumerate(zip(
+                adaptive["trace"], frozen["trace"], local_cell["trace"])):
             self.assertEqual(a["tick"], index)
             self.assertEqual(b["tick"], index)
+            self.assertEqual(c["tick"], index)
             self.assertEqual(a["heartbeat_pulse"], b["heartbeat_pulse"])
+            self.assertEqual(a["heartbeat_pulse"], c["heartbeat_pulse"])
         self.assertEqual(adaptive["trace"][0]["action"],
                          frozen["trace"][0]["action"])
-        for arm in (adaptive, frozen):
+        for arm in (adaptive, frozen, local_cell):
             self.assertEqual(arm["rest_count"] + arm["attempted_movement_count"],
                              arm["ticks"])
             self.assertLessEqual(arm["successful_movement_count"],
@@ -57,10 +61,17 @@ class NeutralProbeTrialTests(unittest.TestCase):
         self.assertGreater(a["rest_count"], f["rest_count"])
         self.assertTrue(a["stalled_warning"])
         self.assertEqual(pair["interpretation"],
-                         "STALLED_ADAPTIVE_NOT_SUCCESS")
+                         "COARSE_ZONE_STALLED_LOCAL_CELL_MOBILE")
+        local = pair["local_cell"]
+        self.assertFalse(local["stalled_warning"])
+        self.assertLess(local["rest_count"], a["rest_count"])
+        self.assertGreater(local["successful_movement_count"],
+                           a["successful_movement_count"])
+        self.assertEqual(local["learned_state"]["updates"], 120)
+        self.assertLessEqual(local["blocked_count"], f["blocked_count"])
 
     def test_no_explicit_affect_or_privileged_motor_fields(self):
-        for arm in ("adaptive", "frozen"):
+        for arm in ("adaptive", "frozen", "local_cell"):
             data = trial(**self.fixture, mode=arm)
             serialized = json.dumps(data, sort_keys=True, allow_nan=False)
             self.assertEqual(json.loads(serialized), data)
@@ -104,6 +115,8 @@ class NeutralProbeTrialTests(unittest.TestCase):
         self.assertNotIn("learned_state", printed)
         self.assertIn("adaptive_stalled_warning", result)
         self.assertIn("adaptive_rest", result)
+        self.assertIn("local_cell_stalled_warning", result)
+        self.assertIn("local_cell_rest", result)
 
     def test_frozen_arm_does_not_update_hidden_policy(self):
         for length in (1, 5, 64):
