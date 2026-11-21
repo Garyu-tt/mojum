@@ -121,7 +121,7 @@ def load_manifest(path):
         raise CharacterAssetError("character manifest size exceeded")
     try:
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
-    except (UnicodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CharacterAssetError("invalid character manifest JSON") from exc
     return validate_manifest(payload)
 
@@ -171,7 +171,7 @@ def _verify_glb(stream, size):
             raw_json = stream.read(chunk_size)
             try:
                 scene = json.loads(raw_json.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
-            except (UnicodeError, json.JSONDecodeError) as exc:
+            except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise CharacterAssetError("invalid GLB JSON") from exc
             if type(scene) is not dict or type(scene.get("asset")) is not dict or scene["asset"].get("version") != "2.0":
                 raise CharacterAssetError("invalid glTF asset version")
