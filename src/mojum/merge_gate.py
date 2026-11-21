@@ -337,6 +337,18 @@ def evaluate(
                 )
                 continue
 
+            # A reported failure must never be hidden by an inconsistent
+            # PENDING/UNKNOWN status in a partially refreshed check snapshot.
+            # Fail closed on negative terminal conclusions first.
+            if check.conclusion in FAILING_CONCLUSIONS:
+                rejects.append(
+                    GateReason(
+                        "CHECK_FAILED",
+                        f"{check.label} concluded {check.conclusion}",
+                    )
+                )
+                continue
+
             if check.status == "PENDING":
                 defers.append(
                     GateReason(
@@ -362,14 +374,6 @@ def evaluate(
                     GateReason(
                         "CHECK_SKIPPED_UNWAIVED",
                         f"{check.label} was skipped without an explicit waiver",
-                    )
-                )
-                continue
-            if check.conclusion in FAILING_CONCLUSIONS:
-                rejects.append(
-                    GateReason(
-                        "CHECK_FAILED",
-                        f"{check.label} concluded {check.conclusion}",
                     )
                 )
                 continue
