@@ -211,6 +211,16 @@ class VersionedCellV3MemoryTests(unittest.TestCase):
                 "evictions": 1, "forgotten_observations": 1,
                 "records": {}, "last_seen_at": {},
             },
+            # A cell stamped tick 0 can only have been observed at tick 0,
+            # even though the whole snapshot's newest tick is plausible.
+            "cell_measured_more_often_than_ticks": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {
+                    "0:0": {"rest": [5, 0]},
+                    "2500:0": {"rest": [95, 0]},
+                },
+                "last_seen_at": {"0:0": 0, "2500:0": 99},
+            },
         }
         for name, snapshot in forged.items():
             with self.subTest(name=name), self.assertRaises(CellV3Error):
