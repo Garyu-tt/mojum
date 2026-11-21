@@ -162,6 +162,18 @@ class CellExplorerV5:
         # remains at capacity for every later observation.
         if state["evictions"] and len(state["records"]) != MAX_CELLS:
             raise CellV5Error("evicted v5 table cannot be smaller than capacity")
+        # One tick can measure only one cell. Individual count bounds and
+        # unique last_seen stamps do not prevent several cells together from
+        # claiming more observations than the elapsed history permits.
+        # Under LRU, forgotten records predate every still-retained stamp.
+        prefix_observations = state["forgotten_observations"]
+        for last_seen, key in sorted(
+                (tick, key) for key, tick in state["last_seen_at"].items()):
+            prefix_observations += sum(
+                counts[0] for counts in state["records"][key].values())
+            if prefix_observations > last_seen + 1:
+                raise CellV5Error(
+                    "combined v5 cell observations exceed elapsed ticks")
         # A forced probe requires four blocked directions and three rests
         # before its first occurrence (at least 8 measured ticks total).
         # Every later forced probe requires another three rests, because
