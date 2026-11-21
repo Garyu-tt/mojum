@@ -32,8 +32,9 @@ const wire=fs.readFileSync(process.argv[2],"utf8");
 const script=html.match(/<script>([\s\S]*?)<\/script>/);
 if(!script)throw Error("missing viewer script");
 const {TextDecoder,TextEncoder}=require("node:util");
-function openDOM(){
- const registry=new Map();
+function openDOM(allowTimers=false){
+ const registry=new Map(),timers=new Map();
+ let nextTimer=0;
  const make=id=>({
    id,disabled:false,checked:false,value:"0",max:"0",textContent:"",
    children:[],listeners:{},files:[],classList:{toggle(){}},
@@ -60,16 +61,23 @@ function openDOM(){
  const document={
    getElementById:get,
    createElement:()=>make("created"),
-   addEventListener(){},
+   listeners:{},
+   addEventListener(event,fn){this.listeners[event]=fn;},
    hidden:false
  };
  vm.runInNewContext(script[1],{
     document,Number,Math,JSON,Array,String,Promise,Set,
     crypto:require("node:crypto").webcrypto,TextEncoder,TextDecoder,
-    clearInterval(){},setInterval(){throw Error("unexpected timer")},
+    clearInterval(id){timers.delete(id)},
+    setInterval(fn,ms){
+      if(!allowTimers)throw Error("unexpected timer");
+      const id=++nextTimer;timers.set(id,{fn,ms});return id;
+    },
     fetch(){throw Error("forbidden fetch")},
     WebSocket(){throw Error("forbidden websocket")}
  },{timeout:3000});
+ get.timers=timers;
+ get.document=document;
  return get;
 }
 async function attempt(source, allowLegacy=false, size=Buffer.byteLength(source)){
@@ -83,11 +91,58 @@ async function attempt(source, allowLegacy=false, size=Buffer.byteLength(source)
    status:get("status").textContent,
    tick:get("tick").textContent,
    probe:get("probe").textContent,
+   range:get("range").textContent,
+   measured:get("deflection").textContent,
+   updates:get("learned").textContent,
    pred:get("prediction").textContent,
    brain:get("brain").textContent,
    rows:get("events").children.length,
    reusableInput:input.value
  };
+}
+async function controlSequence(source){
+ const get=openDOM(true), input=get("file");
+ input.files=[{name:"verified.synthetic.jsonl",size:Buffer.byteLength(source),
+   arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
+ get("speed").value="1";
+ await input.listeners.change.call(input);
+ const state=()=>({
+   tick:get("tick").textContent,
+   counter:get("counter").textContent,
+   enabled:!get("play").disabled,
+   playing:get("play").textContent.includes("Пауза"),
+   timers:get.timers.size,
+   delay:[...get.timers.values()][0]?.ms??null
+ });
+ const initial=state();
+ get("next").listeners.click();const next=state();
+ get("prev").listeners.click();const prev=state();
+ get("seek").value="2";get("seek").listeners.input();const seek=state();
+ get("start").listeners.click();const start=state();
+ get("end").listeners.click();const end=state();
+ get("play").listeners.click();const replay=state();
+ get("play").listeners.click();const paused=state();
+ get("play").listeners.click();
+ get("speed").value="2";get("speed").listeners.change();
+ const faster=state();
+ [...get.timers.values()][0].fn();const advanced=state();
+ get("seek").value="2";get("seek").listeners.input();const seekStops=state();
+ get("play").listeners.click();
+ [...get.timers.values()][0].fn();
+ [...get.timers.values()][0].fn();
+ const completed=state();
+ get("play").listeners.click();
+ get.document.hidden=true;
+ get.document.listeners.visibilitychange();
+ const hiddenStops=state();
+ get("play").listeners.click();
+ const corrupted=replaceFooter(source, f=>{f.trace_integrity.sha256="0".repeat(64)});
+ input.files=[{name:"invalid.jsonl",size:Buffer.byteLength(corrupted),
+   arrayBuffer:async()=>Uint8Array.from(Buffer.from(corrupted)).buffer}];
+ await input.listeners.change.call(input);
+ const invalid={...state(),status:get("status").textContent};
+ return {initial,next,prev,seek,start,end,replay,paused,faster,
+   advanced,seekStops,completed,hiddenStops,invalid};
 }
 function replaceFooter(source,transform){
  const lines=source.trimEnd().split("\n");
@@ -180,6 +235,17 @@ async function race(source){
  manyRows.push(JSON.stringify({schema:"mojum.aquarium.checkpoint/1",
    stored_events:5002}));
  const manyFrames=await attempt(manyRows.join("\n")+"\n", true);
+ const diagnostic=await attempt(legacyVariant(wire, (f,i)=>{
+   if(i!==0)return;
+   f.developmental=f.developmental||{};
+   f.developmental.observation={...(f.developmental.observation||{}),
+     range_bucket_5cm_ewns:[0,12,5,6]};
+   f.toy_contact=f.toy_contact||{};
+   f.toy_contact.probe_intent={requested:true};
+   f.toy_contact.measured_contact={contact:true,measured_deflection:0.75};
+   f.toy_contact.prediction_before={predicted_deflection:0.5,model_updates:2};
+ }),true);
+ const controls=await controlSequence(wire);
  const raced=await race(legacyVariant(wire, f=>{f.brain.status="current"}));
  const blankLine=await attempt(wire.replace("\n", "\n\n"));
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
@@ -192,6 +258,7 @@ async function race(source){
                                       byteLengthMismatch,afterCheckpoint,
                                       legacyDefault,legacyOptIn,
                                       safe,gap,oversized,longLine,manyFrames,raced,
+                                      diagnostic,controls,
                                       blankLine,whitespaceLine,trailingBlank,
                                       encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
@@ -338,6 +405,38 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertEqual(values["raced"]["tick"], "0")
         self.assertIn("current.jsonl", values["raced"]["status"])
         self.assertEqual(values["raced"]["reusableInput"], "")
+
+        # Exercise real viewer JS with a deterministic fake clock:
+        # no sleeps, network, private files or mocked UI callbacks.
+        controls = values["controls"]
+        self.assertEqual((controls["initial"]["tick"], controls["initial"]["counter"]),
+                         ("0", "1 / 3"))
+        for name, tick in (("next", "1"), ("prev", "0"), ("seek", "2"),
+                           ("start", "0"), ("end", "2")):
+            self.assertEqual(controls[name]["tick"], tick, name)
+        self.assertTrue(controls["replay"]["playing"])
+        self.assertEqual((controls["replay"]["tick"], controls["replay"]["timers"],
+                          controls["replay"]["delay"]), ("0", 1, 400))
+        self.assertFalse(controls["paused"]["playing"])
+        self.assertEqual(controls["paused"]["timers"], 0)
+        self.assertEqual((controls["faster"]["tick"], controls["faster"]["timers"],
+                          controls["faster"]["delay"]), ("0", 1, 200))
+        self.assertEqual(controls["advanced"]["tick"], "1")
+        self.assertEqual(controls["seekStops"]["tick"], "2")
+        self.assertEqual(controls["seekStops"]["timers"], 0)
+        self.assertEqual((controls["completed"]["tick"],
+                          controls["completed"]["timers"]), ("2", 0))
+        self.assertEqual(controls["hiddenStops"]["timers"], 0)
+        self.assertFalse(controls["invalid"]["enabled"])
+        self.assertEqual(controls["invalid"]["timers"], 0)
+        self.assertIn("SHA-256", controls["invalid"]["status"])
+        # Optional ray/numeric display fixture uses explicit legacy opt-in,
+        # so a verified modern SHA-256 frame is never forged.
+        self.assertEqual(values["diagnostic"]["range"], "0 / 12 / 5 / 6 × 5 см")
+        self.assertEqual(values["diagnostic"]["probe"], "Запрошена")
+        self.assertEqual(values["diagnostic"]["measured"], "0.75")
+        self.assertEqual(values["diagnostic"]["pred"], "0.5")
+        self.assertEqual(values["diagnostic"]["updates"], "2")
 
 
 class OfflineViewerRegressionQA(unittest.TestCase):
