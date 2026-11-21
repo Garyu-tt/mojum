@@ -124,3 +124,54 @@ Those are **documentation placeholders**, not existing downloadable assets.
 - Age progress controlled by a developmental clock, not by GUI slider alone.
 - Physical embodiment/MuJoCo, growth dynamics and learning are separate later
   milestones. Changing the avatar must never erase agent history.
+
+
+## Persisted developmental clock and naming (experimental R0.2)
+
+The aquarium now has an **explicit, journaled developmental clock** in whole
+months, initially 72 (6 years) and bounded by 192 (16 years). This clock is
+separate from GENESIS chromosomes, simulation physics ticks, real wall time,
+brain maturity, learning progress and user-facing display names.
+
+```python
+from mojum.aquarium import Aquarium
+
+with Aquarium("dante.sqlite3", seed, graph, neural_mode="disabled") as a:
+    age_6 = a.body_preview(somatic)  # no override: persisted 72 months
+    a.advance_development(6, reason="controlled virtual semester")
+    age_6_and_half = a.body_preview(somatic)  # interpolated 78 months
+    a.assign_human_name(
+        {"schema": "mojum.agent.identity/1",
+         "agent_id": seed["genome_id"],
+         "display_name": "Данте",
+         "assigned_by": "human"},
+        actor_id="local-owner",  # unverified in this offline fixture
+    )
+```
+
+- `body_preview(somatic, age_years=6)` still supports a read-only what-if
+  preview. Without an override, `body_preview(somatic)` uses the committed
+  developmental clock and interpolates shape dimensions between yearly samples.
+  **No GLB mesh morphing or rigged animation is implemented.**
+- `advance_development(months=1..12, reason=...)` appends a
+  `development.advance` event to the existing PRIVATE Noosphere SQLite log,
+  without rewriting genome, frame events, learner, room or identity. Multiple
+  advances can reach age 16; attempts beyond the bound fail closed.
+- `assign_human_name(identity, actor_id=...)` appends one
+  `identity.assigned` event. Both declarations and the actor identifier are
+  caller-supplied and **are not authenticated**; they must be guarded by an
+  authenticated human-facing service before real deployment. Rename and name
+  generation are intentionally unsupported.
+- Reopening the same aquarium replays naming and age milestones alongside
+  frames. Old fixture logs containing only bootstrap, frames and acquisitions
+  remain readable. The bootstrapping manifest and genotype v1 hash are
+  unchanged.
+- No automatic time progression is assumed: an external, controlled
+  developmental scheduler must explicitly advance the clock. This is a
+  chronological *simulation* mechanism, not a calibrated child growth
+  prediction or evidence of mental/physical maturity.
+- No visual-appearance genes, sex/reproductive anatomy, voice maturation or
+  biological puberty model are introduced.
+
+Run new and existing regressions with:
+`PYTHONPATH=src python -m unittest discover -s tests -v`.
