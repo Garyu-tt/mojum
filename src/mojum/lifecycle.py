@@ -179,6 +179,8 @@ class DevelopmentClock:
                     or s["evidence_credit"] > s["observations_total"]
                     or s["evidence_credit"] > p["target_mature"] * p["signals_per_maturation"]
                     or s["post_maturity_observations"] > s["observations_total"]
+                    or (s["mature"] < p["target_mature"] and
+                        s["post_maturity_observations"] != 0)
                     or (s["mature"] == p["target_mature"] and
                         (s["immature"] != 0 or s["evidence_credit"] != 0))):
                 raise LifecycleError(f"inconsistent {region} population")
