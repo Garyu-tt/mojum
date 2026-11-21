@@ -1,28 +1,73 @@
-# Mojum — graph-native embodied simulation
+# Mojum — CPU-first graph-native organism simulator
 
-**Mojum** is the complete Mechanicus simulation platform: **GENESIS** (genome and development) → neural substrate → Dante's body and sensorimotor loop → **MuJoCo** physics → simulated worlds → **Noosphere** memory.
+Mojum aims to combine GENESIS development, a learnable sensorimotor system, Dante's virtual body, simulated worlds, and Noosphere memory. Universal Graph IR is the standalone typed core; Adamantium-node is an optional editor, not a runtime requirement.
 
-Mojum is **not just a physics library or a Node-RED fork**. The universal, portable graph is the system's typed source of truth; Adamantium-node is an *optional visual editor*, not a required runtime dependency.
+## What actually runs on `main` (synthetic alpha)
 
-## Scope
+The checked-in Python stdlib fixture runs **offline on one CPU**. It has a versioned graph, deterministic inherited/acquired GENESIS phenotype, synthetic heartbeat/interoception, a bounded 2D point-room, an explicit **UNIMPLEMENTED** brain placeholder, a small shadow pulse predictor, and a PRIVATE SQLite journal with compare-and-append, replay, and checkpoint metadata. The predictor learns to estimate the synthetic pulse. The default motor mode uses scripted `dx` and `dy`. The opt-in `developmental_fixture` mode uses the outcomes of earlier committed moves to choose later moves within the point-room.
 
-- **GENESIS:** inherited genome, acquired changes, deterministic development, phenotype and reproduction experiments.
-- **Brain & behavior:** learning, internal state, sensorimotor decisions, independent validation of all cognition claims.
-- **Body & interoception:** individual joint definitions, proprioception, heartbeat as a minimal changing internal signal, motor-safety gate.
-- **Physics:** CPU-first coupled dynamics, contacts, gravity, collisions and balance using a separate MuJoCo worker.
-- **Worlds:** an initial virtual room, world perception, external game/VR adapters as isolated capabilities.
-- **Noosphere:** episodic/semantic memory, provenance, privacy, independent replicas and reproducible dataset views.
-- **Universal Graph IR:** nested graphs, typed ports, node notes/roadmap, deterministic execution, versioning and reproducible checkpoints.
-- **Agent orchestration:** distributed, CPU-first, permissioned components without a single compulsory host.
+Release acceptance and the remaining work on the integrated sensorimotor loop are tracked on GitHub. [Acceptance #51](https://github.com/Garyu-tt/mojum/issues/51) · [Sensorimotor integration #55](https://github.com/Garyu-tt/mojum/issues/55)
 
-## Truthful status
+## Run the current aquarium
 
-**R0.1 bootstrapping.** Work is starting from an empty repository. Existing GraphForge R0.1–R0.14 prototypes were developed externally and are **not automatically integrated**. The first PR is intended to establish a *small CPU-only graph interpreter* with a synthetic heartbeat, static world fixture, explicit placeholder brain and in-memory episode sink. It does **not** include a trained brain, Noosphere persistence, calibrated body, or a MuJoCo integration.
+From the repository root, with Python 3.11+ and no third-party dependencies:
 
-## Development
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120 --neural-mode shadow
+```
 
-Five equal peers use an independent 50/50 coin each run: **heads → BUILD**, **tails → independent QA**. When the selected queue is unavailable, use the opposite role immediately. Never approve one's own code. Changes go through focused branches, tests and independently reviewable PRs, with concrete evidence.
+Repeat the command to replay and append 120 more frames to the **same** private local SQLite file. The JSON checkpoint reports `tick`, `stored_events`, `journal_head`, and a status explicitly labelling synthetic shadow learning. A run from a new journal records **121** events (one bootstrap and 120 frames). A second 120-tick run records **241** in total. Use a fresh path for an independent fixture and keep its SQLite records private. For a scripted control with the pulse predictor disabled, start a separate journal with `--neural-mode disabled`. Reopen each journal with its original mode.
 
-Do not copy secrets, infrastructure addresses or private memory into this public repository. Physical actuation is disabled by default, and emergency stops cannot be reset through snapshot restoration.
+If two processes open the same journal, an append by one makes the other process's in-memory state stale. Reopen the journal in that process before taking a checkpoint or writing another frame or GENESIS change.
 
-**License:** pending an explicit owner decision; visibility alone does not grant a license.
+Windows PowerShell:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m mojum.aquarium --db .\dante_fixture.sqlite3 --ticks 120 --neural-mode shadow
+```
+
+### Synthetic motor exploration
+
+Start a separate journal for the opt-in mode and use the same mode to resume it.
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./motor_play_PRIVATE.sqlite3 --ticks 120 --motor-mode developmental_fixture
+PYTHONPATH=src python -m mojum.aquarium --db ./motor_play_PRIVATE.sqlite3 --ticks 30 --motor-mode developmental_fixture
+```
+
+The second command reaches tick 150 with 151 stored events. The policy explores virtual cardinal moves and uses their recorded success or blockage to guide later choices. Use `--dx` and `--dy` with scripted mode. [Motor exploration contract](docs/DEVELOPMENTAL_R013.md)
+
+Run regression tests (Python 3.11–3.13 are the CI target):
+
+```sh
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or MuJoCo. The SQLite checkpoint is a **checksum-only**, non-authenticated local record, not a portable security credential or complete atomic multi-component snapshot. Journal replay is currently capped at 10,000 events; do not run unattended past this budget.
+
+## Run from an installed wheel
+
+With CPython 3.11+ and a locally built Mojum wheel, install into a virtual environment and run from any working directory:
+
+```sh
+python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 120
+mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
+```
+
+Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. The `mojum-aquarium` entry point also accepts `--motor-mode developmental_fixture`. [Offline install instructions](docs/LOCAL_INSTALL_R01.md)
+
+## Architecture and development
+
+- **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
+- **Graph IR:** typed graph execution; independent of optional IDEs.
+- **Interoception / world:** synthetic heartbeat and point-room; no calibrated muscles or physics.
+- **Neural** predicts the synthetic pulse in shadow mode.
+- **Motor exploration** uses a bounded point-room policy when explicitly enabled.
+- **Noosphere:** local PRIVATE SQLite event journal, replay and bounded dataset projections; no authenticated distributed continuity.
+- **Future work** includes integrated neural motor learning, a coupled MuJoCo body, and privacy-preserving distributed replicas.
+
+Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
+
+**License:** undecided; repository visibility does not grant a license.
