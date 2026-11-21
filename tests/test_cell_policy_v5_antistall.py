@@ -8,13 +8,15 @@ it rests on 1 of every 5 fresh cells even when all four moves are untried.
 These tests are purely synthetic and make no claim about real navigation.
 """
 
+from copy import deepcopy
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE, V5_MODE
-from mojum.aquarium_wire import inspect_journal
+from mojum.aquarium_wire import _check_policy_frame, _stored_policy, inspect_journal
+from mojum.noosphere import NoosphereError
 from mojum.cell_policy_v3 import CellExplorerV3
 from mojum.cell_policy_v5 import (
     MAX_CELLS,
@@ -433,6 +435,37 @@ class V5AquariumVersionGateTests(unittest.TestCase):
                 with self.assertRaisesRegex(AquariumError, "mismatch"):
                     self.aquarium(mode=wrong)
         self.assertEqual(self.db.read_bytes(), before)
+
+    def test_v4_sensory_v2_remains_replayable_after_v5_integration(self):
+        # #377 is already shipped; adding v5 must not disable its ABI.
+        path = self.root / "canonical-v4-sensory-v2.sqlite3"
+        kwargs = dict(motor_mode=V4_MODE, sensory_mode="toy_probe_v2",
+                      neural_mode="disabled")
+        with Aquarium(path, SEED, GRAPH, **kwargs) as rover:
+            for _ in range(5):
+                rover.step()
+            expected = rover.checkpoint()
+        self.assertEqual(inspect_journal(path)["format"],
+                         "local_cell_v4+toy_probe_v2")
+        with Aquarium(path, SEED, GRAPH, **kwargs) as resumed:
+            self.assertEqual(resumed.checkpoint(), expected)
+
+    def test_v5_rejects_unpinned_sensory_v2_before_birth(self):
+        path = self.root / "invalid-v5-sensory.sqlite3"
+        with self.assertRaises(AquariumError):
+            Aquarium(path, SEED, GRAPH, motor_mode=V5_MODE,
+                     sensory_mode="toy_probe_v2")
+        self.assertFalse(path.exists())
+
+    def test_v5_epoch_frame_inspection_rejects_forged_clock(self):
+        with self.aquarium() as rover:
+            frame = rover.step()
+            _, contract, temporal, sensory = _stored_policy(rover.manifest)
+        _check_policy_frame(frame, contract, temporal, sensory)
+        forged = deepcopy(frame)
+        forged["developmental"]["observation"]["epoch_tick"] += 1
+        with self.assertRaisesRegex(NoosphereError, "epoch"):
+            _check_policy_frame(forged, contract, temporal, sensory)
 
     def test_existing_v4_journal_cannot_be_relabelled_as_v5(self):
         with self.aquarium(mode=V4_MODE) as rover:
