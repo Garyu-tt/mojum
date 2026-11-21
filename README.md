@@ -16,7 +16,12 @@ verdict for one exact commit and never performs a merge. Pass the snapshot from
 
 ```sh
 PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+  --require 'Mojum R0.3 online-learning aquarium regression' \
+  --require-count 'Mojum R0.3 online-learning aquarium regression=3' \
+  --require 'Mojum motor-gate independent QA' \
+  --require-count 'Mojum motor-gate independent QA=3' \
+  --require 'Mojum mesh contract independent QA' \
+  --require-count 'Mojum mesh contract independent QA=3'
 ```
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
