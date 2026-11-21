@@ -96,6 +96,28 @@ class SpartanTests(unittest.TestCase):
         self.assertEqual(len({j["id"] for j in claimed}), 300)
         self.assertEqual(status(self.db)["states"]["running"], 300)
 
+    def test_worker_requeue_consumes_attempts_and_blocks_at_limit(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        for attempt in range(1, 4):
+            now = 110 + 2 * attempt
+            task = claim(self.db, 1, now, 30)
+            self.assertEqual(task["id"], "a")
+            self.assertEqual(task["attempts"], attempt)
+            self.assertTrue(finish(self.db, 1, "a", "queued", now + 1))
+            expected = "blocked" if attempt == 3 else "queued"
+            self.assertEqual(status(self.db)["states"][expected], 1)
+        self.assertIsNone(claim(self.db, 2, 150, 30))
+        row = self.db.execute("SELECT state, attempts FROM tasks WHERE id='a'").fetchone()
+        self.assertEqual(tuple(row), ("blocked", 3))
+
+    def test_legacy_exhausted_queued_record_is_quarantined(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        # An earlier coordinator revision allowed this persisted state.
+        self.db.execute("UPDATE tasks SET attempts=3 WHERE id='a'")
+        self.assertIsNone(claim(self.db, 1, 110, 30))
+        row = self.db.execute("SELECT state, attempts FROM tasks WHERE id='a'").fetchone()
+        self.assertEqual(tuple(row), ("blocked", 3))
+
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
             enqueue(self.db, [{"id": "x", "scope": "s"}, {"id": "x", "scope": "s"}], 111)
