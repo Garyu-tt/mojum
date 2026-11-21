@@ -554,7 +554,8 @@ class Aquarium:
 
     def _replay(self, external_expected_head, *, detect_sum):
         verified = self.store.verify_chain(
-            external_expected_head=external_expected_head, strict_wire=self._local_cell,
+            external_expected_head=external_expected_head,
+            strict_wire=(self._local_cell or self.brain_mode == "developmental_controller"),
         )
         count = verified["count"]
         if count > MAX_REPLAY_EVENTS:
