@@ -269,6 +269,8 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.code, "CHECK_FAILED")
 
     def test_negative_conclusion_rejects_even_with_inconsistent_status(self):
+        # A partially refreshed CI rollup can contradict itself: an explicit
+        # failure must not become a merely deferred pending check.
         for status in ("IN_PROGRESS", "QUEUED", "WAITING", "bogus"):
             with self.subTest(status=status):
                 checks = self.green() + [

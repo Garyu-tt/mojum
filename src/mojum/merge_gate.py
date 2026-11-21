@@ -351,6 +351,8 @@ def evaluate(
                 )
                 continue
 
+            # A failed conclusion is authoritative even if a partially
+            # refreshed rollup still reports PENDING or an unknown status.
             if check.conclusion in FAILING_CONCLUSIONS:
                 rejects.append(
                     GateReason(
