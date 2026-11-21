@@ -199,6 +199,38 @@ class SpartanTests(unittest.TestCase):
         })
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_nonfinite_payload_is_rejected_before_batch_insert(self):
+        for nonfinite in (float("nan"), float("inf"), -float("inf")):
+            with self.subTest(nonfinite=repr(nonfinite)):
+                with self.assertRaises(ValueError):
+                    enqueue(self.db, [
+                        {"id": "new", "scope": "new-scope"},
+                        {"id": "bad", "scope": "bad-scope",
+                         "payload": {"metric": nonfinite}},
+                    ], 101)
+                self.assertIsNone(
+                    self.db.execute(
+                        "SELECT 1 FROM tasks WHERE id='new'"
+                    ).fetchone()
+                )
+
+    def test_cli_rejects_nonstandard_json_nan_constant(self):
+        task_file = Path(self.tmp.name) / "nonfinite-tasks.json"
+        task_file.write_text(
+            '[{"id":"bad","scope":"s","payload":{"metric":NaN}}]',
+            encoding="utf-8",
+        )
+        with patch.object(sys, "argv", [
+            "spartan_coordinator.py", "--db", self.path,
+            "enqueue", "--json", str(task_file),
+        ]), self.assertRaisesRegex(ValueError, "non-finite JSON"):
+            coordinator.main()
+        self.assertIsNone(
+            self.db.execute(
+                "SELECT 1 FROM tasks WHERE id='bad'"
+            ).fetchone()
+        )
+
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
             enqueue(self.db, [{"id": "x", "scope": "s"}, {"id": "x", "scope": "s"}], 111)

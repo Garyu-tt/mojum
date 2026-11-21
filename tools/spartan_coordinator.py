@@ -13,6 +13,10 @@ MAX_ATTEMPTS = 3
 VALID_STATES = ("queued", "running", "review", "blocked")
 
 
+def _reject_nonfinite_constant(value: str):
+    raise ValueError(f"non-finite JSON constant not allowed: {value}")
+
+
 def connect(path: str) -> sqlite3.Connection:
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
     db.row_factory = sqlite3.Row
@@ -72,14 +76,14 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
         # SQLite converts True to 1, confusing immutable enqueue identity.
         if type(item.get("priority", 0)) is not int:
             raise ValueError("priority must be an integer")
-        if len(json.dumps(item.get("payload", {}))) > 8192:
+        if len(json.dumps(item.get("payload", {}), sort_keys=True, allow_nan=False)) > 8192:
             raise ValueError("payload is too large")
     db.execute("BEGIN IMMEDIATE")
     try:
         before = db.total_changes
         for item in items:
             priority = item.get("priority", 0)
-            payload = json.dumps(item.get("payload", {}), sort_keys=True)
+            payload = json.dumps(item.get("payload", {}), sort_keys=True, allow_nan=False)
             inserted = db.execute(
                 "INSERT OR IGNORE INTO tasks(id, scope, priority, payload, updated_at) "
                 "VALUES(?, ?, ?, ?, ?)",
@@ -263,7 +267,7 @@ def main() -> int:
             result = init(db, args.slots, now)
         elif args.action == "enqueue":
             with open(args.json, encoding="utf-8") as stream:
-                items = json.load(stream)
+                items = json.load(stream, parse_constant=_reject_nonfinite_constant)
             if not isinstance(items, list):
                 raise ValueError("enqueue input must be an array")
             result = enqueue(db, items, now)
