@@ -1,0 +1,44 @@
+name: Mojum R0.14 seeded distribution QA (research only)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r014-seeded-policy-qa.yml"
+      - "tests/test_r014_seeded_distribution.py"
+      - "src/mojum/developmental_policy.py"
+      - "src/mojum/developmental_policy_v2.py"
+      - "src/mojum/world_room.py"
+  push:
+    paths:
+      - ".github/workflows/r014-seeded-policy-qa.yml"
+      - "tests/test_r014_seeded_distribution.py"
+      - "src/mojum/developmental_policy.py"
+      - "src/mojum/developmental_policy_v2.py"
+      - "src/mojum/world_room.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seeded-research-matrix:
+    name: seeded-eval (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate 72 fixture/heartbeat cases and causal policy snapshots
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_r014_seeded_distribution.py -v
+      - name: Publish aggregate diagnostic metrics (synthetic only)
+        env:
+          PYTHONPATH: src
+        run: python tests/test_r014_seeded_distribution.py --report
