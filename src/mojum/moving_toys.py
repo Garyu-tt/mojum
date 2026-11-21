@@ -87,7 +87,10 @@ class MovingToyScene(ToyScene):
 
         def public_key(toy):
             return (
-                math.hypot(state.x - toy.x, state.y - toy.y),
+                # Reflected symmetric trajectories can differ by a few ULPs.
+                # Canonicalize at sub-nanometre precision before observable
+                # geometry tie-breaks, never by spectator-only identity.
+                round(math.hypot(state.x - toy.x, state.y - toy.y), 12),
                 toy.x, toy.y, toy.radius_m, toy.rgb,
             )
 
