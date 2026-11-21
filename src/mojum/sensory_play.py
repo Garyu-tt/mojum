@@ -74,6 +74,11 @@ class ToyScene:
         ids = [t.id for t in toys]
         if len(ids) != len(set(ids)):
             raise CuriosityError("duplicate spectator toy IDs")
+        # Publicly identical toys with differing hidden contact response
+        # cannot be selected independently of tuple order. Fail closed.
+        visible = [(t.x, t.y, t.radius_m, t.rgb) for t in toys]
+        if len(visible) != len(set(visible)):
+            raise CuriosityError("ambiguous observationally identical toys")
         for t in toys:
             if not (t.radius_m < t.x < width - t.radius_m
                     and t.radius_m < t.y < height - t.radius_m):
@@ -235,6 +240,10 @@ class ContactAssociations:
             value = measurement.get("measured_deflection")
             if not _finite(value) or not 0 <= value <= 1 or prediction["cue"] is None:
                 raise CuriosityError("invalid or unsupported contact response")
+            # Keep every learned state loadable by from_snapshot(): refuse the
+            # update (without mutating RAM) instead of producing updates > MAX_EVENTS.
+            if self.updates >= MAX_EVENTS:
+                raise CuriosityError("sensory association update budget reached")
             key = prediction["cue"]
             if key not in self.table:
                 if len(self.table) >= MAX_CUES:

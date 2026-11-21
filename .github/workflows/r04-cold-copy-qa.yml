@@ -1,0 +1,39 @@
+name: Mojum R0.4 cold-copy immutability acceptance
+
+on:
+  push:
+    branches:
+      - qa/cold-copy-verification-no-write-20261121
+  pull_request:
+    paths:
+      - "src/mojum/aquarium_cold_copy.py"
+      - "tests/test_aquarium_cold_copy.py"
+      - "tests/test_cold_copy_verify_no_mutation.py"
+      - ".github/workflows/r04-cold-copy-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cold-copy:
+    name: replay + input immutability (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout the candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Baseline cold-copy replay tests
+        run: PYTHONPATH=src python -B -m unittest discover -s tests -p 'test_aquarium_cold_copy.py' -v
+      - name: Archive nonmutation regression
+        run: PYTHONPATH=src python -B -m unittest discover -s tests -p 'test_cold_copy_verify_no_mutation.py' -v

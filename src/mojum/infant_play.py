@@ -41,7 +41,9 @@ def _finite(value):
 def _cell(state):
     if not _finite(state.x) or not _finite(state.y):
         raise InfantError("invalid position")
-    x, y = int(state.x * 2), int(state.y * 2)
+    # floor, not int(): int() truncates toward zero, so x in (-0.5, 0) would
+    # silently alias into cell 0 instead of failing the bounds check below.
+    x, y = math.floor(state.x * 2), math.floor(state.y * 2)
     if min(x, y) < 0 or max(x, y) >= 10_000:
         raise InfantError("world beyond spatial memory budget")
     return f"{x}:{y}"

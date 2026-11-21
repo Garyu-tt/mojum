@@ -29,7 +29,9 @@ have multiplied peak replay memory (issue #98).
 - The event budget uses a cached committed count updated only after a
   successful bootstrap, replay or CAS append. A stale writer is still rejected
   by the append's expected-head check.
-- `MAX_REPLAY_EVENTS` is now an explicit **100,000** ceiling (still finite).
+- Scripted journals can hold **100,000** events. Goal-free modes retain the
+  existing **10,000**-event budget (bootstrap plus up to 9,999 frames).
+  Bounded private trace segments stream across longer scripted journals.
   `Aquarium.stored_events` exposes the verified/committed count so the CLI does
   not re-scan the journal.
 
@@ -51,7 +53,8 @@ have multiplied peak replay memory (issue #98).
   stale-writer CAS, and the finite-ceiling constant.
 - `tests/stress_streaming_replay.py` (not auto-discovered): builds a real
   synthetic journal above the legacy 10,000-event limit, cold-reopens it with
-  `dataset()` disabled, appends one more frame, and prints counts and timings.
+  `dataset()` disabled, appends one more frame and verifies a two-frame
+  anchored trace export. It prints counts and timings.
   Run with:
 
   ```sh

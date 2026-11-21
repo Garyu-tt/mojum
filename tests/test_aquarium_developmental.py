@@ -1,5 +1,6 @@
 """R0.13 opt-in developmental Aquarium and deterministic crash/replay QA."""
 
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -8,7 +9,9 @@ from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.noosphere import NoosphereError
-from mojum.developmental import MotorPlay, DevelopmentalError, MOVES, SCHEMA
+from mojum.developmental import (
+    MAX_OBSERVATIONS, MOVES, SCHEMA, DevelopmentalError, MotorPlay,
+)
 from mojum.world_room import Room
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,6 +44,32 @@ class MotorPlayUnitTests(unittest.TestCase):
         state["samples"]["east"]["blocked"] = 2
         with self.assertRaises(DevelopmentalError):
             MotorPlay.from_snapshot(state)
+
+    def test_motor_history_has_a_bounded_observation_budget(self):
+        overflow = MotorPlay().snapshot()
+        overflow["observations"] = MAX_OBSERVATIONS + 1
+        before = copy.deepcopy(overflow)
+        with self.assertRaises(DevelopmentalError):
+            MotorPlay.from_snapshot(overflow)
+        self.assertEqual(overflow, before)
+
+        row_overflow = MotorPlay().snapshot()
+        row_overflow["observations"] = MAX_OBSERVATIONS
+        row_overflow["samples"]["east"]["trials"] = MAX_OBSERVATIONS + 1
+        before = copy.deepcopy(row_overflow)
+        with self.assertRaises(DevelopmentalError):
+            MotorPlay.from_snapshot(row_overflow)
+        self.assertEqual(row_overflow, before)
+
+        at_limit = MotorPlay().snapshot()
+        at_limit["observations"] = MAX_OBSERVATIONS
+        at_limit["samples"]["east"]["trials"] = MAX_OBSERVATIONS
+        policy = MotorPlay.from_snapshot(at_limit)
+        with self.assertRaises(DevelopmentalError):
+            policy.choose(MAX_OBSERVATIONS)
+        with self.assertRaises(DevelopmentalError):
+            policy.observe(tick=MAX_OBSERVATIONS, kind="east", blocked=False)
+        self.assertEqual(policy.snapshot(), at_limit)
 
     def test_boundary_has_no_geometry_target_or_future_observation(self):
         policy = MotorPlay()

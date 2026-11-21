@@ -146,11 +146,20 @@ def _read_first_event(path, agent_id):
         tables = {row["name"] for row in db.execute(
             "SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('metadata','events')",
         )}
-        if "metadata" in tables:
+        has_metadata = "metadata" in tables
+        has_events = "events" in tables
+        if has_metadata:
             saved = dict(db.execute("SELECT k,v FROM metadata"))
-            if saved and saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
-                raise NoosphereError("database schema or agent owner does not match")
-        if "events" not in tables:
+            if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
+                if saved:
+                    raise NoosphereError("database schema or agent owner does not match")
+                raise NoosphereError("database metadata is missing or does not match")
+        elif has_events:
+            # A journal with events but no metadata is not a new database.
+            # Refuse it before LocalNoosphere can repair the metadata table
+            # through a writable connection and potentially alter the source.
+            raise NoosphereError("database metadata is missing or does not match")
+        if not has_events:
             return None
         first = db.execute("SELECT wire_json FROM events ORDER BY seq LIMIT 1").fetchone()
         if first is None:
@@ -209,7 +218,7 @@ class LocalNoosphere:
     malicious history rewriting matters. This is NOT an auth or encryption API.
     """
 
-    def __init__(self, db_path, agent_id):
+    def __init__(self, db_path, agent_id, *, read_only=False):
         self.agent_id = _text(agent_id, "agent_id")
         path = Path(db_path)
         if path.is_symlink():
@@ -221,7 +230,13 @@ class LocalNoosphere:
             raise NoosphereError("a persistent SQLite database file is required")
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
-        self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
+        if type(read_only) is not bool:
+            raise NoosphereError("read_only must be boolean")
+        self.read_only = read_only
+        if read_only and not path.is_file():
+            raise NoosphereError("read-only journal must already exist")
+        source = path.absolute().as_uri() + "?mode=ro" if read_only else str(path)
+        self._db = sqlite3.connect(source, uri=read_only, timeout=5.0, isolation_level=None)
         # An exception inside __init__ never reaches __exit__/close() of a
         # context manager. In particular a wrong owner/schema must not leave
         # an unreachable live sqlite3.Connection for Python 3.13 GC to warn on.
@@ -229,15 +244,21 @@ class LocalNoosphere:
             self._db.row_factory = sqlite3.Row
             self._db.execute("PRAGMA busy_timeout=5000")
             self._db.execute("PRAGMA trusted_schema=OFF")
-            self._db.execute("PRAGMA synchronous=FULL")
-            self._db.execute("PRAGMA journal_mode=WAL")
-            self._db.execute("PRAGMA foreign_keys=ON")
-            if os.name == "posix":
-                try:
-                    path.chmod(0o600)
-                except OSError:
-                    pass  # Caller must enforce host filesystem policy.
-            self._setup()
+            if read_only:
+                self._db.execute("PRAGMA query_only=ON")
+                saved = dict(self._db.execute("SELECT k,v FROM metadata"))
+                if saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
+                    raise NoosphereError("read-only journal owner or schema mismatch")
+            else:
+                self._db.execute("PRAGMA synchronous=FULL")
+                self._db.execute("PRAGMA journal_mode=WAL")
+                self._db.execute("PRAGMA foreign_keys=ON")
+                if os.name == "posix":
+                    try:
+                        path.chmod(0o600)
+                    except OSError:
+                        pass  # Caller must enforce host filesystem policy.
+                self._setup()
         except BaseException:
             self._db.close()
             raise
@@ -286,6 +307,8 @@ class LocalNoosphere:
 
     def append(self, event, *, expected_head):
         """Append via CAS. Caller supplies expected previous hash; no retries hidden."""
+        if self.read_only:
+            raise NoosphereError("journal is read-only")
         checked = _validate_event(event, self.agent_id)
         if not isinstance(expected_head, str) or len(expected_head) != 64:
             raise NoosphereError("expected_head must be the observed 64-character hash")
@@ -322,9 +345,10 @@ class LocalNoosphere:
     def count(self):
         return self._db.execute("SELECT count(*) FROM events").fetchone()[0]
 
-    def verify_chain(self, *, external_expected_head=None):
-        """Detect accidental DB corruption. Without an independent anchor this is NOT tamper-proof."""
-        return _verify_chain(self._db, self.agent_id, external_expected_head=external_expected_head)
+    def verify_chain(self, *, external_expected_head=None, strict_wire=False):
+        """Check persisted history and an optional independently recorded head."""
+        return _verify_chain(self._db, self.agent_id, external_expected_head=external_expected_head,
+                             strict_wire=strict_wire or self.read_only)
 
     def iter_events(self, *, topic=None, source=None, as_of_recorded_ns=None,
                     valid_at_ns=None, include_nonpublic=False, batch_size=128):

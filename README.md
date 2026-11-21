@@ -71,6 +71,47 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Bounded foreground host
+
+For a paced, restartable one-device session around the same canonical loop,
+use the bounded foreground host. It commits only real ticks, stops between
+SQLite appends, refuses runs beyond the fixed replay budget, and prints
+metadata rather than PRIVATE frames or learner state:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host --db ./host_PRIVATE.sqlite3 --ticks 20 --interval-ms 50
+```
+
+Repeat with the same path to resume. This is still a synthetic CPU fixture,
+not a neural brain, physical actuator, Android service, or 24/7 guarantee.
+See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
+
+### Replay a committed decision offline
+
+After the six-tick guided run above, export a local trace from the same journal.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium_trace_export --db ./range_guided_PRIVATE.sqlite3 --output ./guided.private.jsonl --motor-mode developmental_fixture --sensory-mode toy_probe --temporal-mode range_guided --allow-private-export
+```
+
+Open [aquarium_trace_viewer.html](examples/aquarium_trace_viewer.html) in your
+browser and select the exported file. At tick 5 the selected move is north.
+The viewer reports a prediction based on one earlier observation and the
+recorded change from range bucket 0 to 1.
+
+Current exports must retain their SHA-256 frame metadata: the viewer rejects
+a modern checkpoint whose proof has been stripped, even if the JSONL frames
+themselves still parse. Only a genuinely older checkpoint without the current
+trace-range marker can be opened through the viewer's explicit legacy
+checkbox, and it remains visibly marked as unverified.
+
+The exporter verifies the complete journal on a temporary SQLite copy. Use the
+same mode flags as the recording. Add `--expected-head SHA256` when verifying
+against a separately recorded journal head. For longer histories, add
+`--start-tick` and `--frame-limit` together to export a particular segment.
+Use a new output filename in a directory with private access. The JSONL is
+plaintext and its checksum detects accidental corruption.
+
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
@@ -91,6 +132,19 @@ mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 
 Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. The `mojum-aquarium` entry point also accepts `--motor-mode developmental_fixture`. [Offline install instructions](docs/LOCAL_INSTALL_R01.md)
 
+To reopen against a separately recorded head, pass the checkpoint's
+`journal_head` as `--expected-head`. The flag requires an existing journal and
+fails with exit status 2 before appending (or creating a file) when the head is
+malformed, missing or does not match the stored chain.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 1 \
+  --expected-head 0123...cdef
+```
+
+The anchor is an independent integrity check for accidental or concurrent
+rewrites; it is not authentication.
+
 ## Identify a journal's stored policy
 
 ```bash
@@ -103,6 +157,39 @@ a separately recorded head. The experimental journals from #112 and #115
 report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
 formats even though the original CLIs used the same mode name. Keep each
 journal with the matching runtime for deterministic replay.
+
+## Audit measured motor mobility
+
+A blocked-move count alone cannot show whether a developmental policy actually
+explored the room. The read-only audit verifies the journal chain and reports
+attempts, successful moves, idle fraction, longest rest streak, distinct
+positions, coverage span and path length, plus versioned rest-collapse and
+revisit-concentration gates:
+
+```bash
+PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
+```
+
+`--expected-head` checks an independently recorded chain head. The command
+never writes to the journal and rejects scripted or noncanonical journals.
+[Audit contract](docs/DEVELOPMENTAL_R013.md)
+
+## Explicit local-cell history compatibility
+
+Use `--motor-mode local_cell_v2b` for a new v2B journal. The historic
+`local_cell_v2` spelling resumes only existing v2B history. The exact
+v2B SQLite schema remains compatible with the original #115 runtime.
+For original #112 history, use `--motor-mode local_cell_v2_a_archive
+--ticks 0` and the original genome, graph, and neural mode. Both profiles
+use the exact built-in point-room and frame-only journals without toy sensing.
+
+To transfer a verified v2A history into a separate new v2B file, use
+`python -m mojum.migration_v2a_v2b` with the original genome and graph,
+an independently recorded `--expected-source-head`, and the explicit
+`--create-new-journal` flag. The transfer compares every frame and the
+learned state, with a limit of 1,000 frames. It refuses an existing
+destination and preserves the source file. Both modes can also produce
+replay-verified PRIVATE JSONL via the offline exporter.
 
 ## Architecture and development
 
@@ -117,3 +204,7 @@ journal with the matching runtime for deterministic replay.
 Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
 
 **License:** undecided; repository visibility does not grant a license.
+
+## Offline trace import safety
+
+The viewer verifies the SHA-256 of frames in modern Aquarium JSONL exports and fails closed if the checksum, export status, room or range metadata is incomplete. Truly older traces without proof metadata are **rejected by default**; a user must explicitly enable the unchecked `legacy` checkbox to view them. Such traces are visibly marked **unverified**, and SHA-256 integrity is not authentication or an authorization to disclose PRIVATE history.

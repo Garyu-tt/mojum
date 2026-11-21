@@ -8,7 +8,8 @@ Not discovered by ``unittest discover`` (filename does not start with
 Builds a synthetic PRIVATE journal with more than the legacy 10,000-event
 limit, cold-reopens it while ``LocalNoosphere.dataset`` is disabled (proving
 replay streams instead of loading the whole projection), appends one more
-frame after full replay, and prints counts and timings only. No frame payload
+frame after full replay, exports an anchored two-frame trace tail, and
+prints counts and timings only. No frame payload
 is printed. This is a synthetic CPU-only fixture, not a claim of endless
 operation or authenticated history.
 """
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from mojum.aquarium import MAX_REPLAY_EVENTS, Aquarium  # noqa: E402
+from mojum.aquarium_trace_export import export_private_trace  # noqa: E402
 from mojum.noosphere import LocalNoosphere  # noqa: E402
 
 
@@ -70,6 +72,21 @@ def main():
                 append_seconds = time.perf_counter() - started
                 assert reopened.tick == expected_tick + 1
                 assert reopened.stored_events == total_events + 1
+                appended_head = reopened.checkpoint()["journal_head"]
+
+            with tempfile.TemporaryDirectory() as output_dir:
+                trace = Path(output_dir) / "tail.jsonl"
+                report = export_private_trace(
+                    db, trace, SEED, GRAPH, allow_private_export=True,
+                    expected_journal_head=appended_head,
+                    start_tick=frames - 1, frame_limit=2,
+                )
+                lines = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+                assert [frame["tick"] for frame in lines[:-1]] == [frames - 1, frames]
+                assert report["journal_head"] == appended_head
+                assert report["event_count"] == total_events + 1
+                assert report["frames"] == 2
+                assert not report["has_more"]
 
         size = db.stat().st_size
         print(json.dumps({
@@ -81,7 +98,8 @@ def main():
             "build_seconds": round(build_seconds, 3),
             "cold_replay_seconds": round(replay_seconds, 3),
             "single_append_seconds": round(append_seconds, 3),
-            "dataset_used_during_replay": False,
+            "dataset_used_during_replay_or_export": False,
+            "trace_tail_frames": report["frames"],
             "ceiling": MAX_REPLAY_EVENTS,
             "note": "synthetic CPU-only fixture; CPU and disk grow linearly with history",
         }, indent=2))
