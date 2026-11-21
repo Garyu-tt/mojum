@@ -1,0 +1,21 @@
+{
+  "schema": "mechanicus.universal-graph/1",
+  "id": "mojum.r01.synthetic-first-loop",
+  "revision": "0.1.0-fixture",
+  "nodes": [
+    {"id":"genome", "kind":"genesis.seed", "config":{"bpm":60}, "notes":{"purpose":"Static inherited genome fixture; not a GENESIS developmental model", "blockers":["acquired genome and differentiation pending"]}},
+    {"id":"heart", "kind":"body.heartbeat", "config":{}, "notes":{"purpose":"Minimal continuously changing internal stimulus (synthetic interoception)"}},
+    {"id":"sense", "kind":"sensory.interoception", "config":{}, "notes":{"purpose":"Route internal pulse to sensory bus"}},
+    {"id":"room", "kind":"world.room", "config":{"light":"dim"}, "notes":{"purpose":"Static room fixture for world adapter contract"}},
+    {"id":"brain", "kind":"brain.placeholder", "config":{}, "notes":{"purpose":"Explicit stub receiving sensory and world frames; not a neural model"}},
+    {"id":"episode", "kind":"memory.episode", "config":{}, "notes":{"purpose":"Ephemeral episode sink; future append-only Noosphere adapter"}}
+  ],
+  "edges": [
+    {"from":{"node":"genome","port":"genome"},"to":{"node":"heart","port":"genome"}},
+    {"from":{"node":"heart","port":"pulse"},"to":{"node":"sense","port":"pulse"}},
+    {"from":{"node":"sense","port":"sensory"},"to":{"node":"brain","port":"sensory"}},
+    {"from":{"node":"room","port":"world"},"to":{"node":"brain","port":"world"}},
+    {"from":{"node":"sense","port":"sensory"},"to":{"node":"episode","port":"sensory"}},
+    {"from":{"node":"brain","port":"observation"},"to":{"node":"episode","port":"observation"}}
+  ]
+}

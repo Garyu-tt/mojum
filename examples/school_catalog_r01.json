@@ -1,0 +1,296 @@
+{
+  "schema": "mojum.school-catalog/1",
+  "revision": "0.1.0-proposal",
+  "status": "CATALOG_ONLY_NOT_EXECUTABLE",
+  "note": "Curriculum proposals, not evidence that a school, teacher, learner, or assessment engine exists in main.",
+  "principles": [
+    "opt_in_exploration",
+    "no_forced_grades_or_punishment",
+    "age_and_capability_adaptive",
+    "cpu_first_simulation",
+    "provenance_and_privacy",
+    "cross_discipline_transfer_must_be_measured"
+  ],
+  "learning_loop": [
+    "observe",
+    "experiment",
+    "make",
+    "revise",
+    "reflect"
+  ],
+  "sections": [
+    {
+      "id": "music",
+      "title": "Музыкальная школа",
+      "skills": [
+        "ритм",
+        "мелодия",
+        "тембр"
+      ],
+      "artifact_types": [
+        "звуковой этюд",
+        "короткая композиция"
+      ],
+      "cross_subject_ids": [
+        "visual_arts",
+        "dance"
+      ],
+      "starter_activity": {
+        "id": "music.starter",
+        "prompt": "Сравнить два ритма, воспроизвести один и придумать свой вариант.",
+        "observation": "Отметить различия ритмов, попытки и собственный выбор."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "visual_arts",
+      "title": "Художественная школа",
+      "skills": [
+        "рисунок",
+        "живопись",
+        "цвет",
+        "композиция"
+      ],
+      "artifact_types": [
+        "набросок",
+        "картина"
+      ],
+      "cross_subject_ids": [
+        "animation",
+        "design",
+        "music"
+      ],
+      "starter_activity": {
+        "id": "visual_arts.starter",
+        "prompt": "Нарисовать один предмет тремя способами и выбрать выразительный.",
+        "observation": "Сохранить варианты, замеченные отличия и объяснение выбора."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "sculpture",
+      "title": "Скульптура и 3D",
+      "skills": [
+        "форма",
+        "объём",
+        "пространство",
+        "материал"
+      ],
+      "artifact_types": [
+        "3D-модель",
+        "виртуальная скульптура"
+      ],
+      "cross_subject_ids": [
+        "visual_arts",
+        "architecture",
+        "craft_making"
+      ],
+      "starter_activity": {
+        "id": "sculpture.starter",
+        "prompt": "Собрать объёмный объект из примитивов и осмотреть с разных сторон.",
+        "observation": "Зафиксировать геометрию, ракурсы и исправления."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "creative_writing",
+      "title": "Литература и сочинительство",
+      "skills": [
+        "история",
+        "метафора",
+        "диалог",
+        "редактура"
+      ],
+      "artifact_types": [
+        "рассказ",
+        "стихотворение"
+      ],
+      "cross_subject_ids": [
+        "theatre",
+        "animation",
+        "music"
+      ],
+      "starter_activity": {
+        "id": "creative_writing.starter",
+        "prompt": "Описать одну сцену глазами двух персонажей.",
+        "observation": "Сравнить точки зрения и изменения после редактирования."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "theatre",
+      "title": "Театр и актёрская игра",
+      "skills": [
+        "выражение",
+        "импровизация",
+        "диалог",
+        "перспектива"
+      ],
+      "artifact_types": [
+        "мини-сцена",
+        "сценарий"
+      ],
+      "cross_subject_ids": [
+        "creative_writing",
+        "music",
+        "dance"
+      ],
+      "starter_activity": {
+        "id": "theatre.starter",
+        "prompt": "Разыграть короткий диалог с двумя разными интонациями.",
+        "observation": "Сохранить варианты исполнения и обратную связь без оценки личности."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "dance",
+      "title": "Танец и пластика",
+      "skills": [
+        "ритм",
+        "пространство",
+        "координация",
+        "последовательность"
+      ],
+      "artifact_types": [
+        "виртуальная хореография",
+        "анимация движения"
+      ],
+      "cross_subject_ids": [
+        "music",
+        "theatre",
+        "animation"
+      ],
+      "starter_activity": {
+        "id": "dance.starter",
+        "prompt": "Собрать безопасную последовательность движений под ритм.",
+        "observation": "Измерить согласованность движений в симуляции, без физических приводов."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "photo_video",
+      "title": "Фото и видеомастерская",
+      "skills": [
+        "кадр",
+        "свет",
+        "ракурс",
+        "монтаж"
+      ],
+      "artifact_types": [
+        "фоторепортаж",
+        "короткий ролик"
+      ],
+      "cross_subject_ids": [
+        "visual_arts",
+        "animation",
+        "creative_writing"
+      ],
+      "starter_activity": {
+        "id": "photo_video.starter",
+        "prompt": "Показать один объект в трёх ракурсах и собрать историю из кадров.",
+        "observation": "Сравнить освещение, композицию и порядок кадров."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "animation",
+      "title": "Мультипликация",
+      "skills": [
+        "ключевые кадры",
+        "тайминг",
+        "движение",
+        "сторителлинг"
+      ],
+      "artifact_types": [
+        "анимированный эпизод",
+        "раскадровка"
+      ],
+      "cross_subject_ids": [
+        "visual_arts",
+        "music",
+        "photo_video"
+      ],
+      "starter_activity": {
+        "id": "animation.starter",
+        "prompt": "Анимировать движение простого персонажа несколькими ключевыми кадрами.",
+        "observation": "Сохранить траекторию, тайминг и итерации правок."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "design",
+      "title": "Дизайн и графика",
+      "skills": [
+        "типографика",
+        "доступность",
+        "композиция",
+        "удобство"
+      ],
+      "artifact_types": [
+        "плакат",
+        "макет интерфейса"
+      ],
+      "cross_subject_ids": [
+        "visual_arts",
+        "architecture",
+        "creative_writing"
+      ],
+      "starter_activity": {
+        "id": "design.starter",
+        "prompt": "Сделать два варианта афиши и проверить читаемость.",
+        "observation": "Сопоставить задачи пользователя и результат проверки."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "craft_making",
+      "title": "Ремёсла и конструирование",
+      "skills": [
+        "сборка",
+        "материалы",
+        "планирование",
+        "прототип"
+      ],
+      "artifact_types": [
+        "виртуальная поделка",
+        "чертёж"
+      ],
+      "cross_subject_ids": [
+        "sculpture",
+        "architecture",
+        "design"
+      ],
+      "starter_activity": {
+        "id": "craft_making.starter",
+        "prompt": "Спроектировать простую вещь из ограниченного набора деталей.",
+        "observation": "Записать замысел, ошибки сборки и изменения конструкции."
+      },
+      "implementation_status": "PLANNED"
+    },
+    {
+      "id": "architecture",
+      "title": "Архитектура и среда",
+      "skills": [
+        "пространство",
+        "масштаб",
+        "эргономика",
+        "планировка"
+      ],
+      "artifact_types": [
+        "макет комнаты",
+        "проект пространства"
+      ],
+      "cross_subject_ids": [
+        "sculpture",
+        "design",
+        "craft_making"
+      ],
+      "starter_activity": {
+        "id": "architecture.starter",
+        "prompt": "Спроектировать небольшую виртуальную комнату для выбранной деятельности.",
+        "observation": "Проверить доступность и удобство перемещения внутри симуляции."
+      },
+      "implementation_status": "PLANNED"
+    }
+  ]
+}
