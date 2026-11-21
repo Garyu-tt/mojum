@@ -14,7 +14,7 @@ from mojum.directional_outcomes import BearingOutcomeMemory, SCHEMA
 from mojum.sensory_play import (
     CuriosityError, DIRECTION_SENSE_SCHEMA, Toy, ToyScene,
 )
-from mojum.temporal_outcomes import TemporalOutcomeError
+from mojum.temporal_outcomes import TemporalOutcomeError, RangeOutcomeMemory
 from mojum.noosphere import NoosphereError
 from mojum.world_room import Room, advance, initial_state
 
@@ -202,6 +202,54 @@ class BearingGuidanceTests(unittest.TestCase):
             Aquarium(self.path, SEED, GRAPH, neural_mode="disabled",
                      exploration_mode="goal_free", sensory_mode="toy_probe",
                      temporal_mode="none")
+
+    def test_snapshot_rejects_visibility_bucket_contradictions(self):
+        # These states individually pass the underlying numeric RangeOutcome
+        # validator, but cannot be created by the directional sensor contract:
+        # a "none" bearing means NO visible object and NO numeric range;
+        # a non-null bearing requires a visible object and a numeric range.
+        for bearing, before_bucket, after_bucket in (
+                ("none", "2", "1"),
+                ("x+", "none", "none"),
+                ("center", "none", "none"),
+                ("x-", "none", "none")):
+            with self.subTest(bearing=bearing, before=before_bucket):
+                histogram = RangeOutcomeMemory()
+                histogram.histograms = {
+                    f"{before_bucket}|x+": {f"{after_bucket}|0": 1},
+                }
+                histogram.updates = 1
+                malformed = {
+                    "schema": SCHEMA, "updates": 1,
+                    "models": {bearing: histogram.snapshot()},
+                }
+                original = copy.deepcopy(malformed)
+                with self.assertRaisesRegex(
+                        TemporalOutcomeError, "contradicts sensor visibility"):
+                    BearingOutcomeMemory.from_snapshot(malformed)
+                self.assertEqual(malformed, original)
+
+    def test_measured_visible_and_invisible_snapshots_still_roundtrip(self):
+        room = Room(4, 4)
+        near = scene("right")
+        empty = ToyScene(toys=())
+        original_world = initial_state(room, 1., 2.)
+        future_world, result = advance(
+            room, original_world, tick=1, dx=.04, dy=0.,
+            expected_revision=original_world.revision,
+        )
+        learned = BearingOutcomeMemory()
+        for fixture in (near, empty):
+            before = fixture.sense_direction(original_world)
+            after = fixture.sense_direction(future_world)
+            learned.observe(before, "x+", after, result["blocked"],
+                            learned.predict(before, "x+"))
+        snapshot = learned.snapshot()
+        self.assertEqual(snapshot["updates"], 2)
+        self.assertEqual(set(snapshot["models"]), {"x+", "none"})
+        self.assertEqual(
+            BearingOutcomeMemory.from_snapshot(snapshot).snapshot(), snapshot,
+        )
 
     def test_cli_two_run_and_invalid_mode_before_sqlite_birth(self):
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
