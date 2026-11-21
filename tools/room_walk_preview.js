@@ -53,22 +53,30 @@
     };
   }
 
+  function validTraceState(room, state) {
+    if (!Number.isInteger(state.blocked) || state.blocked < 0 ||
+        state.blocked > state.tick || !Array.isArray(state.trail) ||
+        state.trail.length !== state.tick + 1) return false;
+    // A for-loop deliberately detects holes in a forged sparse array; .some()
+    // skips those slots. The fixed 512-step budget bounds validation work.
+    for (let i = 0; i < state.trail.length; i++) {
+      const point = state.trail[i];
+      if (!point || typeof point !== "object" ||
+          !valid(room, point.x, point.y)) return false;
+    }
+    const last = state.trail[state.tick];
+    return last.x === state.x && last.y === state.y;
+  }
+
   function step(room, state, dx, dy) {
     if (!state || state.schema !== SCHEMA ||
         !Number.isInteger(state.tick) || state.tick < 0 ||
         state.tick >= MAX_PREVIEW_STEPS) {
       throw new Error("Лимит тестовой прогулки — 512 шагов. Сбросьте прогулку");
     }
-    // A trace is ephemeral, but it must never display a forged collision
-    // count, an oversized history or a malformed path as measured evidence.
-    // All previous points are bounded by the same room as the next step.
-    if (!Number.isInteger(state.blocked) || state.blocked < 0 ||
-        state.blocked > state.tick ||
-        !Array.isArray(state.trail) || state.trail.length !== state.tick + 1 ||
-        state.trail.some(point => !point || typeof point !== "object" ||
-          !valid(room, point.x, point.y)) ||
-        state.trail[state.tick].x !== state.x ||
-        state.trail[state.tick].y !== state.y ||
+    // A trace is ephemeral, but it must never display forged collision
+    // counts, oversized history or an invalid path as measured evidence.
+    if (!validTraceState(room, state) ||
         !Number.isFinite(dx) || !Number.isFinite(dy) ||
         Math.hypot(dx, dy) > 1000 || !valid(room, state.x, state.y)) {
       throw new Error("Некорректный шаг или исходное состояние");
