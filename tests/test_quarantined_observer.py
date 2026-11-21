@@ -3,6 +3,7 @@
 All PRIVATE data is disposable synthetic fixture history. Direct sqlite
 immutable/query_only mode and redacted-by-default summaries are tested.
 """
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -155,9 +156,10 @@ class ImmutableRecoveredAquariumObserverQA(unittest.TestCase):
         recover_pinned_replica(
             self.archive, self.out, self.receipt, self.key,
             independently_pinned_receipt_sha256=receipt["receipt_sha256"],
-            expected_agent_id=OWNER, allow_private_restore=True,
+            expected_agent_id=SEED["genome_id"], allow_private_restore=True,
         )
-        with self.open_observer(receipt["receipt_sha256"]) as observer:
+        with self.open_observer(receipt["receipt_sha256"],
+                                agent=SEED["genome_id"]) as observer:
             quiet = observer.summary()
             self.assertEqual(quiet["journal_events"], 131)
             self.assertNotIn("topic_counts", quiet)
@@ -205,7 +207,7 @@ class ImmutableRecoveredAquariumObserverQA(unittest.TestCase):
         # Dropping an ordinary SQLite trigger is possible to the owner;
         # read-only observer rejects this forged local state despite
         # matching the original event chain and its signed source head.
-        with sqlite3.connect(self.out) as c:
+        with closing(sqlite3.connect(self.out)) as c, c:
             c.execute("DROP TRIGGER recovery_no_event_insert")
         with self.assertRaisesRegex(ObserverError, "lost quarantine triggers"):
             self.open_observer(digest)

@@ -168,7 +168,7 @@ class AtomicSegmentQA(unittest.TestCase):
     def test_tampered_segment_link_and_internal_event_are_detected(self):
         with self.open() as q:
             head = self.fill(q, 0, 129)
-            with sqlite3.connect(self.db) as db:
+            with closing(sqlite3.connect(self.db)) as db, db:
                 with self.assertRaises(sqlite3.IntegrityError):
                     db.execute(
                         "DELETE FROM segments WHERE segment_index = 1"
@@ -180,7 +180,7 @@ class AtomicSegmentQA(unittest.TestCase):
                 )
             with self.assertRaisesRegex(NoosphereError, "mislinked segment"):
                 q.verify_chain(external_expected_head=head)
-            with sqlite3.connect(self.db) as db:
+            with closing(sqlite3.connect(self.db)) as db, db:
                 db.execute(
                     "UPDATE segments SET prior_segment_head = ? "
                     "WHERE segment_index = 1",
