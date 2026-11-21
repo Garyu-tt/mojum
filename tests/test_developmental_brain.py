@@ -1,5 +1,6 @@
 """Acceptance tests for the explicit synthetic controller boundary."""
 
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -70,6 +71,19 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             for _ in range(9):
                 independent.step()
             self.assertEqual(independent.step(), resumed)
+
+    def test_controller_bootstrap_rejects_bool_for_integer_field(self):
+        # Python considers False == 0, but the persisted opt-in contract must
+        # reject JSON type substitution even if other event fields are equal.
+        with self.aquarium() as aquarium:
+            expected = aquarium._record(
+                "aquarium.bootstrap", "aquarium-bootstrap",
+                aquarium.manifest, 0, aquarium.graph_sha256,
+            )
+            forged = copy.deepcopy(expected)
+            forged["observed_at_ns"] = False
+            with self.assertRaises(AquariumError):
+                aquarium._check_bootstrap(forged)
 
     def test_explicit_controller_mode_is_pinned_and_cannot_be_reinterpreted(self):
         with self.aquarium() as aquarium:
