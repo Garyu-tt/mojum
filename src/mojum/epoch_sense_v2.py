@@ -17,6 +17,15 @@ class EpochSenseError(ValueError):
     """Invalid absolute/epoch-proprioceptive causal observation."""
 
 
+def _finite_position(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value) and 0 <= value <= 1000
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 @dataclass(frozen=True)
 class EpochProprioception:
     absolute_tick: int
@@ -36,10 +45,8 @@ class EpochProprioception:
                 or self.epoch_tick != self.absolute_tick % EPOCH_TICKS
                 or type(self.revision) is not str
                 or _REVISION.fullmatch(self.revision) is None
-                or type(self.x) not in (int, float)
-                or type(self.y) not in (int, float)
-                or not math.isfinite(self.x) or not math.isfinite(self.y)
-                or not 0 <= self.x <= 1000 or not 0 <= self.y <= 1000
+                or not _finite_position(self.x)
+                or not _finite_position(self.y)
                 or type(self.pulse) is not bool):
             raise EpochSenseError("invalid absolute/epoch proprioception")
 
