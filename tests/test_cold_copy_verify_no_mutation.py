@@ -4,6 +4,7 @@ The Aquarium constructor auto-bootstraps an empty journal, so a verify API
 must isolate SQLite open/replay side effects from the original archive.
 """
 
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -36,8 +37,10 @@ class ReadOnlyVerifyTests(unittest.TestCase):
     def test_empty_existing_sqlite_is_rejected_without_auto_bootstrap(self):
         # Reproduces the old behavior: Aquarium(path, ...) opened the ORIGINAL
         # archive and appended aquarium.bootstrap before rejecting pinned head.
-        with sqlite3.connect(self.archive):
-            pass
+        with closing(sqlite3.connect(self.archive)) as connection:
+            # A nonempty, valid SQLite file with no Aquarium events.
+            connection.execute("CREATE TABLE fixture_marker (id INTEGER)")
+            connection.commit()
         original = self.archive.read_bytes()
         digest = hashlib.sha256(original).hexdigest()
         with self.assertRaises(ValueError):
