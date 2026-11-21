@@ -43,6 +43,31 @@ class GpuLegionPlanTests(unittest.TestCase):
         self.assertIn("--jinja", report["replicas"][0]["argv"])
         self.assertIn("Pascal", " ".join(report["warnings"]))
 
+    def test_heterogeneous_fleet_maximizes_real_replicas(self):
+        # Greedy pairing 9+9 GiB strands four 3 GiB devices, reporting one.
+        # Two 9+3+3 GiB groups both fit and use disjoint GPU indices.
+        usable = [3072, 3072, 3072, 3072, 9216, 9216]
+        data = {"source": "synthetic", "gpus": [
+            {"index": i, "name": "mixed synthetic GPU", "total_mib": 12288,
+             "free_mib": amount + 256, "compute_cap": "8.6"}
+            for i, amount in enumerate(usable)
+        ]}
+        report = gpu.plan(data, gpu.validate_inventory(data),
+                          model_mib=15360, reserve_mib=256, max_gpus=3)
+        self.assertEqual(report["placement_strategy"], "exact_max_replicas")
+        self.assertEqual(report["estimated_replicas"], 2)
+        self.assertEqual([r["gpu_indices"] for r in report["replicas"]],
+                         [[0, 1, 4], [2, 3, 5]])
+        self.assertEqual(report["unused_gpu_indices"], [])
+        self.assertEqual(report["live_replicas"], 0)
+
+    def test_large_fleet_is_labeled_nonoptimal_heuristic(self):
+        data, devices = p106_inventory(13)
+        report = gpu.plan(data, devices)
+        self.assertEqual(report["placement_strategy"], "bounded_greedy")
+        self.assertEqual(report["estimated_replicas"], 4)
+        self.assertTrue(any("undercount" in warning for warning in report["warnings"]))
+
     def test_no_claim_for_two_small_gpus(self):
         data, devices = p106_inventory(2)
         self.assertEqual(gpu.plan(data, devices)["estimated_replicas"], 0)
