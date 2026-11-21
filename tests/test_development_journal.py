@@ -61,6 +61,10 @@ class DevelopmentClockTests(unittest.TestCase):
                 self.assertEqual(agent.advance_development(6, reason="virtual semester"), 78)
                 self.assertEqual(agent.assign_human_name(IDENTITY, actor_id="owner-human-1"),
                                  IDENTITY)
+                self.assertEqual(agent.checkpoint()["development_months"], 78)
+                self.assertEqual(agent.checkpoint()["display_name"], "Данте")
+                self.assertEqual(agent.checkpoint()["name_provenance"],
+                                 "human_declared_unverified")
                 later = agent.body_preview(SOMATIC)
                 self.assertEqual(later["age_months"], 78)
                 self.assertEqual(later["genome_id"], earlier["genome_id"])
