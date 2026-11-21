@@ -24,7 +24,9 @@ from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
-from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError
+from .noosphere import (
+    EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event,
+)
 from .sensory_bridge import ToyContactBridge, SCHEMA as TOY_CONTACT_SCHEMA, OCCLUSION_SCHEMA
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sim import Simulation, canonical, digest
@@ -190,6 +192,9 @@ class Aquarium:
             })
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
+        first = _read_first_event(db_path, agent_id)
+        if first is not None:
+            self._check_bootstrap(first)
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
@@ -424,6 +429,13 @@ class Aquarium:
         self._committed_head = head
         return self.genome.revision
 
+    def _check_bootstrap(self, first):
+        expected = self._record("aquarium.bootstrap", "aquarium-bootstrap",
+                                self.manifest, 0, self.graph_sha256)
+        if first != expected or (self.sensory_bridge is not None and
+                                 canonical(first) != canonical(expected)):
+            raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
+
     def _replay(self, external_expected_head, *, detect_sum):
         verified = self.store.verify_chain(external_expected_head=external_expected_head)
         count = verified["count"]
@@ -435,12 +447,7 @@ class Aquarium:
             raise AquariumError("bootstrap event missing")
         if len(items) != count or items[-1]["event_hash"] != verified["head"]:
             raise AquariumError("journal changed since verification, reopen the aquarium")
-        first = items[0]["event"]
-        expected = self._record("aquarium.bootstrap", "aquarium-bootstrap",
-                                self.manifest, 0, self.graph_sha256)
-        if first != expected or (self.sensory_bridge is not None and
-                                 canonical(first) != canonical(expected)):
-            raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
+        self._check_bootstrap(items[0]["event"])
         try:
             self._replay_events(items)
         except _FrameMismatch:
