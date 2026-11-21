@@ -1,0 +1,47 @@
+name: GENESIS isolated development clock and main API compatibility
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/genesis-development-clock.yml"
+      - "src/mojum/development_clock.py"
+      - "tests/test_development_clock.py"
+      - "src/mojum/development.py"
+      - "src/mojum/lifecycle.py"
+      - "tests/test_development.py"
+      - "tests/test_lifecycle.py"
+      - "docs/DEVELOPMENT_CLOCK_R01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Exact isolated clock and canonical main development/lifecycle contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/mojum/development.py
+          test -f src/mojum/lifecycle.py
+          test -f src/mojum/development_clock.py
+          test -f tests/test_development.py
+          test -f tests/test_lifecycle.py
+          test -f tests/test_development_clock.py
+          export PYTHONPATH=src
+          python -m unittest discover -s tests -p 'test_development_clock.py' -v
+          python -m unittest discover -s tests -p 'test_development.py' -v
+          python -m unittest discover -s tests -p 'test_lifecycle.py' -v
