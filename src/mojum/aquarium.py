@@ -365,6 +365,7 @@ class Aquarium:
             brain = self.brain.decide(
                 next_motor,
                 tick=self.tick,
+                expected_at_ns=self.tick * self.dt_ns,
                 interoception=sensory,
                 proprioception={
                     "tick": self.world.tick,
