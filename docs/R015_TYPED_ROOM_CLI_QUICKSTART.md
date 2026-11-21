@@ -6,9 +6,26 @@ This is a small **operational CLI**, not a new orchestrator, real MuJoCo body, 3
 
 Before this change, creating a room with nondefault dimensions/obstacles required writing a Python call `Aquarium(room=Room(...), start=(...))`. Afterward the room could be recovered from `room_exact`, but creating it was still programmer-only.
 
-Now there is a deliberately constrained **local JSON input** for a **new synthetic journal**. It uses the exact `mojum.world.room-exact-scalars/1` schema, retaining every original `int` separately from every finite `float.hex()` representation.
+Now there are **two authoring formats** accepted by the same strictly opt-in `--new-room-contract` argument:
 
-The checked-in example [`examples/room_exact_mixed.json`](../examples/room_exact_mixed.json) describes a 4.5m × 4m point-room, a rectangle at x=2.0m, y=1m, width=0.125m, height=2.0m and a start at (1.25m,2.5m). No graphics/MuJoCo collision physics is implied: this is the existing deterministic swept-AABB point fixture.
+- **Simple numeric JSON (recommended):** `mojum.world.point-room-draft/1`, e.g. [`examples/room_simple_mixed.json`](../examples/room_simple_mixed.json). Enter ordinary JSON numbers: `4` remains an original Python `int`, `4.0` remains a binary64 `float`, and `0.125` is converted to its exact binary64 representation internally. No need to hand-write hexadecimal floats.
+- **Expert exact JSON (unchanged):** `mojum.world.room-exact-scalars/1`, e.g. [`examples/room_exact_mixed.json`](../examples/room_exact_mixed.json). Write explicit integer tags and `float.hex()` strings when exact original representation, including signed zero, matters.
+
+**Both formats produce exactly the same `mojum.aquarium.bootstrap/2` persistent event ABI.** The beginner draft schema is input-only and must **never** appear as a journal bootstrap or learned memory event. Old default `bootstrap/1` remains byte-for-byte unchanged.
+
+Example of the complete beginner file:
+
+```json
+{
+  "schema": "mojum.world.point-room-draft/1",
+  "width": 4.5,
+  "height": 4,
+  "obstacles": [[2.0, 1, 0.125, 2.0]],
+  "start": [1.25, 2.5]
+}
+```
+
+This describes a 4.5m × 4m room, a rectangular obstacle at (2.0m,1m) with width 0.125m and height 2.0m, and an initial point position (1.25m,2.5m). Draft dimensions are capped at 1000m; both formats are restricted to at most 4096 obstacles and a 1 MiB local file. The start coordinates are normalized to finite binary64 floats while original room dimensions/rectangle numeric types remain distinct. This is the existing deterministic swept-AABB point fixture, not graphics or MuJoCo physical dynamics.
 
 ## 1. Create a new room and run 12 synthetic steps
 
@@ -18,7 +35,7 @@ PYTHONPATH=src python -m mojum.aquarium \
   --exploration-mode goal_free \
   --developmental-policy local_cell_v2 \
   --room-numeric-contract typed_v1 \
-  --new-room-contract examples/room_exact_mixed.json \
+  --new-room-contract examples/room_simple_mixed.json \
   --ticks 12
 ```
 
@@ -44,13 +61,13 @@ To continue for exactly N steps, supply `--ticks N` **and the current independen
 
 ## Parsing and integrity boundaries
 
-- Accepts **only a local preexisting regular, nonsymlink UTF-8 JSON file** no larger than 1 MiB. Rejects duplicate JSON keys, NaN/Infinity, unknown schema, extra/missing fields, invalid hexadecimal floats, booleans, geometry outside the room, excessive obstacles and invalid start positions.
+- Accepts **only a local preexisting regular, nonsymlink UTF-8 JSON file** no larger than 1 MiB. Rejects duplicate JSON keys, NaN/Infinity, unknown schema, extra/missing fields, invalid hexadecimal floats (expert format), booleans, geometry outside the room, draft dimensions above 1000m, excessive obstacles and invalid start positions. The simple authoring format allows only numbers/arrays, not arbitrary object commands, file references or scripts.
 - `--new-room-contract` requires `--room-numeric-contract typed_v1`; it cannot be mixed with `--resume-typed-room` or historical read-only v2A mode. Invalid input is checked **before** any SQLite journal birth. Existing output is rejected, not rewritten.
 - No optional remote URLs, filesystem traversal from JSON, dynamic imports, model prompting, running arbitrary code from input or private data export.
 - Default paths and default Aquarium behavior without `--new-room-contract` **remain unchanged**. The new option is strictly opt-in.
 
 ## Acceptance tests
 
-Dedicated CPython 3.11, 3.12, 3.13 workflow uses separate subprocesses and real disposable PRIVATE SQLite journals. It checks successful exact-geometry new-room creation and original-number-type manifest, journal event counts, cold read-only zero-tick reopen without the file, explicit continuation with a new head, invalid/ambiguous/oversized JSON fail-closed with no destination file, refusal of existing DB/legacy option/conflicting resume, and empty-frame room creation. It also starts two simultaneous CLI creators of the same target and confirms **exactly one succeeds**, checks final row count, and asserts input/output symlinks never lead to overwriting unrelated private data. Full inherited regression workflows stay required.
+Dedicated CPython 3.11, 3.12, 3.13 workflow uses separate subprocesses and real disposable PRIVATE SQLite journals. It checks successful exact-geometry new-room creation and original-number-type manifest, **byte-for-byte equal SQLite event streams and final checkpoint between simple numeric JSON and expert exact JSON**, journal event counts, cold read-only zero-tick reopen without the file, explicit continuation with a new head, invalid/ambiguous/oversized JSON and unsafe draft values fail-closed with no destination file, refusal of existing DB/legacy option/conflicting resume, and empty-frame room creation. It also starts two simultaneous CLI creators of the same target and confirms **exactly one succeeds**, checks final row count, and asserts input/output symlinks never lead to overwriting unrelated private data. Full inherited regression workflows stay required.
 
 All this remains an isolated **Draft**. Independent review and release approval are required; neither this CLI nor green synthetic tests resolve [#116](https://github.com/Garyu-tt/mojum/issues/116) (old v2A/v2B wire ABI collision). Never run real private agent data through an unreviewed experimental PR.
