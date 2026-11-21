@@ -18,6 +18,7 @@ from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, valida
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as CELL_DEVELOPMENT_SCHEMA
+from .cell_policy_v3 import CellExplorerV3, SCHEMA as CELL_V3_SCHEMA
 from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import (ToyContactBridge, validate_scene,
                              SCHEMA as TOY_CONTACT_SCHEMA,
@@ -88,10 +89,10 @@ class Aquarium:
         # An explicit new policy always starts a *new* pinned journal; never
         # silently reinterpret v1 inherited memory or upgrade on open.
         if type(developmental_policy) is not str or developmental_policy not in (
-                "legacy", "local_cell_v2"):
+                "legacy", "local_cell_v2", "local_cell_v3"):
             raise AquariumError("unknown versioned developmental policy")
         if developmental_policy != "legacy" and exploration_mode != "goal_free":
-            raise AquariumError("local_cell_v2 requires goal_free exploration")
+            raise AquariumError("versioned local-cell requires goal_free exploration")
         if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
             raise AquariumError("sensory_mode must be none or toy_probe")
         if sensory_mode == "toy_probe" and exploration_mode != "goal_free":
@@ -131,7 +132,8 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.explorer = (
-            (CellExplorer() if developmental_policy == "local_cell_v2"
+            (CellExplorerV3() if developmental_policy == "local_cell_v3"
+             else CellExplorer() if developmental_policy == "local_cell_v2"
              else Explorer()) if exploration_mode == "goal_free" else None
         )
         self.sensory_bridge = None
@@ -143,14 +145,15 @@ class Aquarium:
         self.tick = 0
         if self.explorer is not None:
             self.manifest["developmental_schema"] = (
-                CELL_DEVELOPMENT_SCHEMA if developmental_policy == "local_cell_v2"
+                CELL_V3_SCHEMA if developmental_policy == "local_cell_v3"
+                else CELL_DEVELOPMENT_SCHEMA if developmental_policy == "local_cell_v2"
                 else DEVELOPMENT_SCHEMA
             )
             self.manifest["exploration_mode"] = "goal_free"
-            if developmental_policy == "local_cell_v2":
-                # An ADDITIVE key only for new policy/version. Old manifests
-                # remain unchanged and historic journals replay as before.
-                self.manifest["developmental_policy"] = "local_cell_v2"
+            if developmental_policy != "legacy":
+                # ADDITIVE key only for explicitly versioned policies.
+                # Existing v1 manifest is byte-identical. v2 stays exact.
+                self.manifest["developmental_policy"] = developmental_policy
         if self.sensory_bridge is not None:
             self.manifest["sensory_mode"] = "toy_probe"
             self.manifest["sensory_schema"] = SENSE_SCHEMA
@@ -441,7 +444,7 @@ def main():
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
     parser.add_argument("--developmental-policy",
-                        choices=("legacy", "local_cell_v2"), default="legacy",
+                        choices=("legacy", "local_cell_v2", "local_cell_v3"), default="legacy",
                         help="opt-in v2 starts a distinct version-pinned journal")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
@@ -454,7 +457,7 @@ def main():
             args.dx is not None or args.dy is not None):
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
     if args.developmental_policy != "legacy" and args.exploration_mode != "goal_free":
-        parser.error("local_cell_v2 requires --exploration-mode goal_free")
+        parser.error("versioned local-cell requires --exploration-mode goal_free")
     if args.exploration_mode == "scripted":
         # Invalid scripted motion is a CLI error, not an organism birth.
         # Reject NaN, infinite and out-of-budget displacement before SQLite
