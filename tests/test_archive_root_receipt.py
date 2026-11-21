@@ -197,6 +197,17 @@ class VersionedArchiveReceiptQA(unittest.TestCase):
         self.assertNotIn("PRIVATE_SYNTHETIC", copies.stdout)
         self.assertNotIn(str(self.key), copies.stdout)
 
+    def test_signing_key_cannot_be_bundled_inside_plaintext_archive(self):
+        tip = self.generate(130)
+        unsafe_key = self.primary/"leaked-owner-key.bin"
+        create_key_file(unsafe_key)
+        with self.assertRaisesRegex(ReceiptError, "cannot be stored in archive"):
+            sign_owner_receipt(
+                self.primary, self.receipt, unsafe_key,
+                source_events=130, external_expected_source_head=tip,
+            )
+        self.assertFalse(self.receipt.exists())
+
     def test_genesis_only_tail_signing_recovery_and_no_private_payload_in_receipt(self):
         tip = self.generate(7)
         signed = self.sign(tip, count=7)
