@@ -1,6 +1,6 @@
 # R0.2 scripted creative-school fixture (draft)
 
-This isolated offline Python-stdlib component demonstrates two scripted exercises. The inherited R0.1 catalog from draft PR #165 remains CATALOG_ONLY_NOT_EXECUTABLE because the other nine sections, a learner policy, real evaluation, a school UI, and Noosphere integration do not exist. Released main is unchanged until review and merge.
+This isolated offline Python-stdlib component demonstrates two scripted exercises. The R0.1 catalog is now in `main`, but the other nine sections, a learner policy, real evaluation, a school UI, and Noosphere integration do not exist. This CLI is a scripted fixture, not evidence of skill acquisition.
 
 ## Run on one CPU
 
