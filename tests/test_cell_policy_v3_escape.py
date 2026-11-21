@@ -248,6 +248,44 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         ):
             CellExplorerV3Escape.from_snapshot(no_block)
 
+    def test_snapshot_allows_streaks_across_distinct_observed_cells(self):
+        # Public policy observe() accepts independently supplied canonical
+        # proprioception samples. Full streak counts may span cells even
+        # though the most recent tick must still have the right outcome.
+        blocked = CellExplorerV3Escape()
+        for tick in range(2):
+            sense = Proprioception(
+                tick, "0" * 64, (tick + 1) * STEP_METERS, 2.0, True,
+            )
+            intent = blocked.decide(sense)
+            self.assertNotEqual(intent["action"], "rest")
+            blocked.observe(sense, intent, True)
+        blocked_state = blocked.snapshot()
+        self.assertEqual(blocked_state["consecutive_blocked_probes"], 2)
+        self.assertEqual(len(blocked_state["records"]), 2)
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(blocked_state).snapshot(),
+            blocked_state,
+        )
+
+        resting = CellExplorerV3Escape()
+        last_actions = []
+        for tick in range(6):
+            sense = Proprioception(
+                tick, "0" * 64, 1.0 if tick < 5 else 2.0,
+                2.0, tick == 4,
+            )
+            intent = resting.decide(sense)
+            last_actions.append(intent["action"])
+            resting.observe(sense, intent, False)
+        self.assertEqual(last_actions[-2:], ["rest", "rest"])
+        rest_state = resting.snapshot()
+        self.assertEqual(rest_state["consecutive_rests"], 2)
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(rest_state).snapshot(),
+            rest_state,
+        )
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
