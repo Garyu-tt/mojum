@@ -90,13 +90,15 @@ def main():
             assert aquarium.store.verify_chain(
                 external_expected_head=independent_head
             )["head"] == independent_head
-        original_bytes = source.read_bytes()
         with Aquarium(source, SEED, GRAPH, **opts) as cold:
             assert cold.checkpoint() == checkpoint, "native full cold replay must agree"
             assert cold.store.count() == total_events
             assert cold.store.verify_chain(
                 external_expected_head=independent_head
             )["head"] == independent_head
+        # Pin bytes immediately before EXPORT: earlier intentional writable
+        # cold-replay validation is not itself covered by this immutability test.
+        original_bytes = source.read_bytes()
         metadata = export_private_trace(
             source, dest, SEED, GRAPH, allow_private_export=True,
             expected_journal_head=independent_head,
