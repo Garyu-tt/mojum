@@ -314,8 +314,14 @@ def _verify_scripted_export(run: Any) -> None:
          "provenance": provenance, "evidence": evidence[index]}
         for index, phase in enumerate(PHASES)
     ]
-    if events != expected_events or run["feedback"] != evidence[-1]:
-        raise SchoolContractError("scripted events or feedback do not match artifacts")
+    # Python value equality collapses 43.0 and 43 (also True and 1).
+    # Canonical JSON keeps the serialized types distinct and rejects NaN.
+    try:
+        if (_canonical_json(events) != _canonical_json(expected_events)
+                or _canonical_json(run["feedback"]) != _canonical_json(evidence[-1])):
+            raise SchoolContractError("scripted events or feedback do not match artifacts")
+    except (TypeError, ValueError, RecursionError) as error:
+        raise SchoolContractError("invalid scripted JSON evidence") from error
 
 
 def write_fixture(run: dict[str, Any], output_dir: str | Path) -> Path:

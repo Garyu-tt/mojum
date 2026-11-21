@@ -217,6 +217,16 @@ class SchoolRunnerTests(unittest.TestCase):
                     "false provenance": altered(
                         lambda r: r["events"][0]["provenance"].__setitem__(
                             "physical_actuation", True)),
+                    "float event tick": altered(
+                        lambda r: r["events"][1].__setitem__("sim_tick", 43.0)),
+                    "float event metric": altered(
+                        lambda r: r["events"][3]["evidence"].__setitem__(
+                            "measured", float(r["events"][3]["evidence"]["measured"]))),
+                    "float feedback metric": altered(
+                        lambda r: r["feedback"].__setitem__(
+                            "baseline", float(r["feedback"]["baseline"]))),
+                    "nonfinite feedback": altered(
+                        lambda r: r["feedback"].__setitem__("baseline", float("nan"))),
                     "untrusted catalog checksum": altered(
                         lambda r: r["events"][0]["provenance"].__setitem__(
                             "catalog_sha256", "not-a-sha256")),

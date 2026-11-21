@@ -7,6 +7,7 @@ No private journals; ordinary disposable synthetic test fixtures only.
 from __future__ import annotations
 
 import gc
+import tracemalloc
 import sys
 import unittest
 import warnings
@@ -33,6 +34,14 @@ def main() -> int:
     for leaked in sqlite_leaks:
         print("SQLITE_LEAK_AUDIT_FAIL %s:%s %s" %
               (leaked.filename, leaked.lineno, leaked.message), file=sys.stderr)
+        # Python 3.13 attaches the unclosed Connection as warning.source.
+        # Show its allocation traceback when CI enables PYTHONTRACEMALLOC.
+        source = getattr(leaked, "source", None)
+        if source is not None and tracemalloc.is_tracing():
+            allocation = tracemalloc.get_object_traceback(source)
+            if allocation is not None:
+                print("SQLITE_LEAK_ALLOCATION_TRACE\n%s" % allocation,
+                      file=sys.stderr)
     return int(not outcome.wasSuccessful() or bool(sqlite_leaks))
 
 
