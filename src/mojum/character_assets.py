@@ -121,7 +121,7 @@ def load_manifest(path):
         raise CharacterAssetError("character manifest size exceeded")
     try:
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
-    except (UnicodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CharacterAssetError("invalid character manifest JSON") from exc
     return validate_manifest(payload)
 
@@ -154,10 +154,14 @@ def _verify_glb(stream, size):
         raise CharacterAssetError("invalid GLB v2 header/size")
     position = 12
     first = True
+    saw_bin = False
     while position < size:
         if size - position < 8:
             raise CharacterAssetError("truncated GLB chunk header")
-        chunk_size, chunk_type = struct.unpack("<I4s", stream.read(8))
+        chunk_header = stream.read(8)
+        if len(chunk_header) != 8:
+            raise CharacterAssetError("truncated GLB chunk header")
+        chunk_size, chunk_type = struct.unpack("<I4s", chunk_header)
         position += 8
         if chunk_size % 4 or chunk_size > size - position:
             raise CharacterAssetError("invalid GLB chunk size")
@@ -167,13 +171,16 @@ def _verify_glb(stream, size):
             raw_json = stream.read(chunk_size)
             try:
                 scene = json.loads(raw_json.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
-            except (UnicodeError, json.JSONDecodeError) as exc:
+            except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise CharacterAssetError("invalid GLB JSON") from exc
             if type(scene) is not dict or type(scene.get("asset")) is not dict or scene["asset"].get("version") != "2.0":
                 raise CharacterAssetError("invalid glTF asset version")
         elif chunk_type != b"BIN\x00":
             raise CharacterAssetError("unexpected GLB chunk")
+        elif saw_bin:
+            raise CharacterAssetError("duplicate GLB BIN chunk")
         else:
+            saw_bin = True
             stream.seek(chunk_size, 1)
         position += chunk_size
         first = False
