@@ -91,9 +91,11 @@ class ContactAssociationsV2(ContactAssociations):
             or type(data["last_contact_tick"]) is not int
             or not -1 <= data["last_contact_tick"] <= MAX_TICK
             or (data["updates"] == 0) != (data["last_contact_tick"] == -1)
+            or data["updates"] > data["last_contact_tick"] + 1
             or type(data["evictions"]) is not int
             or type(data["forgotten_observations"]) is not int
             or not 0 <= data["evictions"] <= data["forgotten_observations"] <= data["updates"]
+            or data["evictions"] > max(0, data["updates"] - MAX_CUES)
         ):
             raise SensoryV2Error("invalid versioned association envelope")
 
@@ -114,8 +116,13 @@ class ContactAssociationsV2(ContactAssociations):
             stamp = data["last_seen_at"][key]
             if type(stamp) is not int or not 0 <= stamp <= data["last_contact_tick"]:
                 raise SensoryV2Error("invalid remembered contact time")
+            if entry["count"] > stamp + 1:
+                raise SensoryV2Error("impossible per-cue measurement history")
             retained_observations += entry["count"]
             latest_seen = max(latest_seen, stamp)
+
+        if len(set(data["last_seen_at"].values())) != len(data["last_seen_at"]):
+            raise SensoryV2Error("multiple cues cannot be measured on one tick")
 
         if (
             retained_observations + data["forgotten_observations"] != data["updates"]
