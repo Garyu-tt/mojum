@@ -7,6 +7,9 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 
 | #74 case | Current coverage |
 |---|---|
+| verified seek/prev/next/start/end | `test_offline_viewer_controls.py` (actual inline viewer JS with valid modern SHA-256 metadata) |
+| play/pause, speed change, end-of-trace and hidden-tab stop | same (deterministic virtual timers; no wall-clock sleeps) |
+| four 5 cm rays, fallback 10 cm range, numeric contact probe/deflection/prediction | same (rendered DOM telemetry over three modern-format synthetic frames) |
 | tick gap rejected | `test_private_trace_integrity.py` (`gap` in the Node harness) |
 | oversize file rejected without reading | same (`oversized`, 25 MiB) |
 | stale async file-selection race | same (`race`) |
@@ -21,3 +24,5 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 
 Limit-boundary regression cases (64k line, 5000 frames) were added in PR #387 (closed 2026-11-21). See the current `tests/test_private_trace_integrity.py` Node harness for the assertions. This map is an inventory of tests, not evidence of a successful run on the latest `main` SHA.
 The user guide is `docs/REAL_AQUARIUM_TRACE_VIEWER_R01.md`.
+
+The control regression is a Node stdlib VM test over synthetic, correctly hashed JSONL; it does not replace the separate real-SQLite exporter tests or actual Chromium smoke. Its new assertions are pending exact-head CI and independent review until the linked PR is accepted.
