@@ -1,7 +1,8 @@
 """Cross-component CPU-first tests; all data are synthetic fixtures."""
 
+from contextlib import closing, redirect_stdout
 import copy
-from contextlib import closing
+import io
 import json
 import os
 from pathlib import Path
@@ -10,10 +11,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, main
 from mojum.genesis import ACQUISITION_SCHEMA
-from mojum.noosphere import NoosphereError
+from mojum.noosphere import LocalNoosphere, NoosphereError
 from mojum.world_room import Room
 
 
@@ -124,14 +126,10 @@ class AquariumIntegrationTests(unittest.TestCase):
     def test_corrupt_sqlite_event_payload_refused_on_reopen(self):
         with self.aquarium() as q:
             q.step()
-        # sqlite3.Connection.__exit__ commits/rolls back but does NOT close.
-        # Always close corruption-fixture handles deterministically.
         with closing(sqlite3.connect(self.db)) as db:
             with db:
                 db.execute("DROP TRIGGER noosphere_no_update")
                 db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
-        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed database"):
-            db.execute("SELECT 1")
         with self.assertRaises(NoosphereError):
             self.aquarium()
 
@@ -210,14 +208,77 @@ class AquariumIntegrationTests(unittest.TestCase):
             self.assertEqual(q.checkpoint(), before)
 
     def test_two_processes_stale_head_fails_closed(self):
-        with self.aquarium() as q1, self.aquarium() as q2:
-            q1.step()
-            previous = q2.checkpoint()
-            with self.assertRaises(NoosphereError):
-                q2.step()
-            self.assertEqual(q2.tick, previous["tick"])
-            self.assertEqual(q2.world.revision, previous["world_revision"])
-            self.assertEqual(q1.store.count(), 2)
+        with self.aquarium() as stale:
+            previous = stale.checkpoint()
+            output = subprocess.check_output(
+                [sys.executable, "-m", "mojum.aquarium", "--db", str(self.db), "--ticks", "1"],
+                text=True,
+            )
+            with self.assertRaises(AquariumError):
+                stale.checkpoint()
+            with self.assertRaisesRegex(NoosphereError, "stale event head"):
+                stale.step()
+            with self.assertRaisesRegex(NoosphereError, "stale event head"):
+                stale.acquire(gene_event("distinct", 0, 0))
+            self.assertEqual(stale.tick, previous["tick"])
+            self.assertEqual(stale.world.revision, previous["world_revision"])
+            self.assertEqual(stale.genome.revision, previous["genome_revision"])
+            self.assertEqual(stale.store.count(), 2)
+        with self.aquarium(external_expected_head=json.loads(output)["journal_head"]) as resumed:
+            self.assertEqual(resumed.tick, 1)
+            self.assertEqual(resumed.step()["tick"], 1)
+
+    def test_acquisition_invalidates_other_writer_at_the_same_tick(self):
+        with self.aquarium() as writer, self.aquarium() as stale:
+            writer.acquire(gene_event("pulse", 0, 0))
+            expected = writer.checkpoint()
+            with self.assertRaisesRegex(NoosphereError, "stale event head"):
+                stale.step()
+            self.assertEqual(stale.tick, 0)
+            self.assertEqual(writer.store.count(), 2)
+            self.assertEqual(writer.checkpoint(), expected)
+        with self.aquarium() as resumed:
+            self.assertEqual(resumed.checkpoint(), expected)
+            self.assertEqual(resumed.step()["phenotype"]["parameters"]["heartbeat_bpm"], 90)
+
+    def test_anchored_reopen_rejects_write_during_replay(self):
+        for stage in ("verify_chain", "dataset"):
+            with self.subTest(stage=stage), self.aquarium() as writer:
+                anchor = writer.checkpoint()["journal_head"]
+                read = getattr(LocalNoosphere, stage)
+
+                def read_then_advance(store, **kwargs):
+                    result = read(store, **kwargs)
+                    writer.step()
+                    return result
+
+                with patch.object(LocalNoosphere, stage, read_then_advance):
+                    with self.assertRaises(AquariumError):
+                        with self.aquarium(external_expected_head=anchor):
+                            pass
+                expected = writer.checkpoint()
+                with self.aquarium(external_expected_head=expected["journal_head"]) as resumed:
+                    self.assertEqual(resumed.checkpoint(), expected)
+
+    def test_cli_reports_count_for_the_checkpoint_it_sampled(self):
+        with self.aquarium() as writer:
+            expected = writer.checkpoint()
+            checkpoint = Aquarium.checkpoint
+
+            def checkpoint_then_advance(reader):
+                result = checkpoint(reader)
+                writer.step()
+                return result
+
+            argv = ["aquarium", "--db", str(self.db), "--ticks", "0"]
+            output = io.StringIO()
+            with patch.object(Aquarium, "checkpoint", checkpoint_then_advance):
+                with patch.object(sys, "argv", argv), redirect_stdout(output):
+                    main()
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["journal_head"], expected["journal_head"])
+            self.assertEqual((report["tick"], report["stored_events"]), (0, 1))
+            self.assertEqual(writer.store.count(), 2)
 
     def test_chain_anchor_detects_divergent_database(self):
         with self.aquarium() as q:
@@ -240,7 +301,6 @@ class AquariumIntegrationTests(unittest.TestCase):
             self.assertEqual(q.checkpoint()["trust"], "checksum_only_not_authenticated")
 
     def test_event_budget_is_fail_closed_before_appending(self):
-        from unittest.mock import patch
         with patch("mojum.aquarium.MAX_REPLAY_EVENTS", 2):
             with self.aquarium() as q:
                 q.step()  # bootstrap + one frame = exactly two events
