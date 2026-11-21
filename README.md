@@ -36,10 +36,10 @@ The organism proposes its own tiny point-room motions; you must not supply `--dx
 To create a **brand-new** synthetic room with nondefault dimensions and exact int/float geometry using only the CLI (experimental opt-in, never reuse an existing SQLite file):
 
 ```sh
-PYTHONPATH=src python -m mojum.aquarium --db ./custom-room.sqlite3 --exploration-mode goal_free --developmental-policy local_cell_v2 --room-numeric-contract typed_v1 --new-room-contract examples/room_exact_mixed.json --ticks 12
+PYTHONPATH=src python -m mojum.aquarium --db ./custom-room.sqlite3 --exploration-mode goal_free --developmental-policy local_cell_v2 --room-numeric-contract typed_v1 --new-room-contract examples/room_simple_mixed.json --ticks 12
 ```
 
-The command prints a `journal_head` to record independently. To reopen the original room in SQLite-enforced read-only mode, without a Python `Room` definition or additional steps:
+The file uses ordinary numbers and arrays (e.g. width `4.5`, height `4`, obstacles `[[2.0, 1, 0.125, 2.0]]`). The expert typed `float.hex()` form remains supported, and both authoring styles produce the **same** versioned SQLite wire format. The command prints a `journal_head` to record independently. To reopen the original room in SQLite-enforced read-only mode, without a Python `Room` definition or additional steps:
 
 ```sh
 PYTHONPATH=src python -m mojum.aquarium --db ./custom-room.sqlite3 --exploration-mode goal_free --developmental-policy local_cell_v2 --room-numeric-contract typed_v1 --resume-typed-room --expected-journal-head YOUR_INDEPENDENT_64_HEX_HEAD
