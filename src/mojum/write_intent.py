@@ -298,7 +298,6 @@ def _status(row, classification, intent, event_count, journal_head):
             "event_count": row["event_count"], "tick": row["tick"],
         },
         "intent": ({"kind": intent["kind"],
-                    "event_id": intent["event_id"],
                     "expected_head": intent["expected_head"],
                     "expected_tick": intent["expected_tick"]} if intent else None),
         "journal": {"event_count": event_count, "head": journal_head},
