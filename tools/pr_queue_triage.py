@@ -29,6 +29,20 @@ class TriageInputError(ValueError):
     """Invalid input, which must never become positive CI evidence."""
 
 
+def _unique_json_object(pairs):
+    """Refuse duplicate keys at every depth of an untrusted JSON snapshot."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise TriageInputError("duplicate key in snapshot JSON")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json(value):
+    raise TriageInputError("non-finite JSON value in snapshot")
+
+
 def _sha(value):
     return isinstance(value, str) and _SHA.fullmatch(value) is not None
 
@@ -183,7 +197,11 @@ def main(argv=None):
             data = stream.read(MAX_INPUT_BYTES + 1)
         if len(data) > MAX_INPUT_BYTES:
             raise TriageInputError("snapshot exceeds 4 MiB")
-        payload = json.loads(data.decode("utf-8"))
+        payload = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json,
+        )
         report = scan_queue(payload, args.require)
     except (OSError, UnicodeError, ValueError) as exc:
         print(json.dumps({"schema": SCHEMA, "error": str(exc),
