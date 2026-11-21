@@ -30,6 +30,7 @@ from test_segmented_noosphere import OWNER, ZERO, record
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT/"examples/genesis_seed.json").read_text(encoding="utf-8"))
 GRAPH = json.loads((ROOT/"examples/first_loop.json").read_text(encoding="utf-8"))
+AQUARIUM_ACTOR = SEED["genome_id"]
 
 
 class SyntheticProgressReadOnlyQA(unittest.TestCase):
@@ -59,11 +60,11 @@ class SyntheticProgressReadOnlyQA(unittest.TestCase):
         )
         return signed["receipt_sha256"]
 
-    def _observe(self, digest):
+    def _observe(self, digest, *, actor=AQUARIUM_ACTOR):
         return QuarantinedObserver(
             self.recovered, self.receipt, self.key,
             independently_pinned_receipt_sha256=digest,
-            expected_agent_id=OWNER,
+            expected_agent_id=actor,
         )
 
     def _aquarium(self, steps=130, *, toy=False):
@@ -95,7 +96,7 @@ class SyntheticProgressReadOnlyQA(unittest.TestCase):
                 external_expected_source_head=head,
             )
         digest = self._seal_and_recover(
-            actor=OWNER, count=count, head=head,
+            actor=AQUARIUM_ACTOR, count=count, head=head,
         )
         return digest, checkpoint
 
@@ -172,7 +173,7 @@ class SyntheticProgressReadOnlyQA(unittest.TestCase):
             "--receipt-file", str(self.receipt),
             "--key-file", str(self.key),
             "--expected-receipt-sha", digest,
-            "--expected-agent-id", OWNER,
+            "--expected-agent-id", AQUARIUM_ACTOR,
         ]
         def cli(*more):
             return subprocess.run(
@@ -210,7 +211,7 @@ class SyntheticProgressReadOnlyQA(unittest.TestCase):
             capture_live_tail(q, self.archive, include_nonpublic=True,
                               external_expected_source_head=tip)
         digest = self._seal_and_recover(actor=OWNER, count=130, head=tip)
-        with self._observe(digest) as observer:
+        with self._observe(digest, actor=OWNER) as observer:
             with self.assertRaisesRegex(ObserverError, "identifiable canonical Aquarium"):
                 summarize_synthetic_progress(
                     observer, include_private_metrics=True,
