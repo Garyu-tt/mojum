@@ -3,7 +3,6 @@
 All data are synthetic, created under temporary directories, never copied
 from actual user PRIVATE Noosphere or touched on production/Android.
 """
-from contextlib import ExitStack
 import errno
 import json
 import os
@@ -16,7 +15,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.noosphere import NoosphereError
-from mojum.segmented_noosphere import SegmentedNoosphere
+from mojum.segmented_noosphere import SegmentedNoosphere, _restore_lock_path
 from mojum.segment_archive import (
     ArchiveError, export_sealed_segments, names, publish_new,
 )
@@ -245,12 +244,14 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
                 external_expected_head="f" * 64,
             )
         self.assertFalse(self.recovered.exists())
+        self.assertFalse(_restore_lock_path(self.recovered).exists())
         with self.assertRaises(ArchiveError):
             restore_into_new_sqlite(
                 self.archive, self.recovered,
                 external_expected_head="invalid",
             )
         self.assertFalse(self.recovered.exists())
+        self.assertFalse(_restore_lock_path(self.recovered).exists())
 
     def test_interruption_after_data_before_manifest_fails_closed(self):
         self.build(64)
@@ -450,28 +451,82 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
         self.assertFalse(self.recovered.exists())
         self.assertEqual(sidecar.read_bytes(), stale_wal)
 
-    def test_writer_opening_published_restore_keeps_its_committed_event(self):
+    def test_writer_waits_for_restore_publication_lock(self):
         head = self.build(64)
         self.export()
         native_link = os.link
-        appended = []
-        with ExitStack() as opened:
-            def start_writer_after_publish(source, destination):
-                native_link(source, destination)
-                writer = opened.enter_context(
-                    SegmentedNoosphere(destination, OWNER, segment_size=64),
-                )
-                appended.append(writer.append(record(64), expected_head=head))
-                self.assertTrue(destination.with_name(destination.name + "-wal").exists())
+        blocked = []
 
-            with patch("mojum.segment_archive_verify.os.link", start_writer_after_publish):
-                result = restore_into_new_sqlite(
+        def try_writer_after_publish(source, destination):
+            native_link(source, destination)
+            with self.assertRaisesRegex(NoosphereError, "quarantined"):
+                SegmentedNoosphere(destination, OWNER, segment_size=64)
+            blocked.append(True)
+
+        with patch("mojum.segment_archive_verify.os.link", try_writer_after_publish):
+            result = restore_into_new_sqlite(
+                self.archive, self.recovered, external_expected_head=head,
+            )
+        self.assertEqual(result["sealed_head"], head)
+        self.assertEqual(blocked, [True])
+        self.assertFalse(_restore_lock_path(self.recovered).exists())
+
+        with SegmentedNoosphere(self.recovered, OWNER, segment_size=64) as writer:
+            appended = writer.append(record(64), expected_head=head)
+        with SegmentedNoosphere(
+            self.recovered, OWNER, segment_size=64, read_only=True,
+        ) as reader:
+            self.assertEqual(
+                reader.verify_chain(external_expected_head=appended)["count"], 65,
+            )
+
+    def test_sidecar_race_keeps_published_destination_quarantined(self):
+        head = self.build(64)
+        self.export()
+        alternate = self.root / "alternate-race.sqlite3"
+        copy2(self.source, alternate)
+        with SegmentedNoosphere(alternate, OWNER, segment_size=64) as journal:
+            journal.append_many(
+                [record(i) for i in range(64, 70)], expected_head=head,
+            )
+            stale_wal = alternate.with_name(alternate.name + "-wal").read_bytes()
+
+        native_link = os.link
+        sidecar = self.recovered.with_name(self.recovered.name + "-wal")
+
+        def stage_stale_wal_then_publish(source, destination):
+            sidecar.write_bytes(stale_wal)
+            native_link(source, destination)
+
+        with patch(
+            "mojum.segment_archive_verify.os.link", stage_stale_wal_then_publish,
+        ):
+            with self.assertRaisesRegex(ArchiveError, "quarantined"):
+                restore_into_new_sqlite(
                     self.archive, self.recovered, external_expected_head=head,
                 )
-            self.assertEqual(result["sealed_head"], head)
 
-        with SegmentedNoosphere(self.recovered, OWNER, segment_size=64, read_only=True) as reader:
-            self.assertEqual(reader.verify_chain(external_expected_head=appended[0])["count"], 65)
+        self.assertTrue(self.recovered.is_file())
+        self.assertEqual(sidecar.read_bytes(), stale_wal)
+        self.assertTrue(_restore_lock_path(self.recovered).is_file())
+        with self.assertRaisesRegex(NoosphereError, "quarantined"):
+            SegmentedNoosphere(
+                self.recovered, OWNER, segment_size=64, read_only=True,
+            )
+
+    def test_existing_restore_quarantine_is_preserved(self):
+        head = self.build(64)
+        self.export()
+        lock = _restore_lock_path(self.recovered)
+        lock.write_bytes(b"operator-preserved-quarantine")
+
+        with self.assertRaisesRegex(ArchiveError, "publication lock"):
+            restore_into_new_sqlite(
+                self.archive, self.recovered, external_expected_head=head,
+            )
+
+        self.assertFalse(self.recovered.exists())
+        self.assertEqual(lock.read_bytes(), b"operator-preserved-quarantine")
 
     def test_symlink_archive_file_rejected(self):
         self.build(64)

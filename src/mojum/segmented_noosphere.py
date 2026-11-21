@@ -31,6 +31,12 @@ MAX_BATCH = 256
 MAX_SEGMENT_SIZE = 8192
 MIN_SEGMENT_SIZE = 64
 MAX_JOURNAL_EVENTS = 262_144
+RESTORE_LOCK_SUFFIX = ".mojum-restore.lock"
+
+
+def _restore_lock_path(path):
+    path = Path(path)
+    return path.with_name(path.name + RESTORE_LOCK_SUFFIX)
 
 
 def _hash_event(event, *, seq, segment_index, previous):
@@ -64,6 +70,11 @@ class SegmentedNoosphere:
         if (path.is_symlink() or path.is_dir() or not path.name
                 or str(db_path) == ":memory:" or not path.parent.is_dir()):
             raise NoosphereError("segmented database needs an ordinary local file")
+        publication_lock = _restore_lock_path(path)
+        if publication_lock.is_symlink() or publication_lock.exists():
+            raise NoosphereError(
+                "segmented journal restore is in progress or quarantined"
+            )
         preexisting = path.exists()
         if read_only and not path.is_file():
             raise NoosphereError("read-only segmented journal must already exist")

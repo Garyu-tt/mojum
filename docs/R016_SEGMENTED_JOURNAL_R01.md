@@ -83,6 +83,11 @@ Verification and restore use that independent anchor without opening the
 source. Restore publishes a new SQLite file after checking the full
 reconstructed chain. Choose a destination without existing SQLite
 sidecars and wait for restore to finish before opening the destination.
+A no-clobber `NEW_DB.mojum-restore.lock` marker (0600 on POSIX) fences Mojum
+readers and writers during publication. If a sidecar or post-link failure
+races publication, the lock remains as a quarantine marker and Mojum refuses
+to open that destination; preserve it for diagnosis instead of deleting it
+blindly.
 An interrupted export can leave an orphan member. Preserve it for
 diagnosis and retry into a fresh archive directory.
 

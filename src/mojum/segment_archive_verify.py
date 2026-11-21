@@ -18,7 +18,7 @@ import tempfile
 from .noosphere import EMPTY_HEAD, _canonical, _validate_event, NoosphereError
 from .segmented_noosphere import (
     SegmentedNoosphere, _hash_event, MAX_SEGMENT_SIZE, MIN_SEGMENT_SIZE,
-    MAX_BATCH, MAX_JOURNAL_EVENTS,
+    MAX_BATCH, MAX_JOURNAL_EVENTS, _restore_lock_path,
 )
 from .segment_archive import (
     ArchiveError, SCHEMA, MAX_EVENT_LINE_BYTES, private_directory,
@@ -36,6 +36,8 @@ _DATA_RE = re.compile(r"segment-[0-9]{8}\.events\.jsonl\Z", re.ASCII)
 _META_RE = re.compile(r"segment-[0-9]{8}\.manifest\.json\Z", re.ASCII)
 # append_many holds both the input and the checked event copies.
 _RESTORE_BATCH_BYTES = 1024 * 1024
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+_RESTORE_LOCK_MARKER = b"mojum.noosphere.segment-restore-lock/1\n"
 
 
 def _digest(value):
@@ -248,11 +250,80 @@ def verify_sealed_archive(directory, *, external_expected_head):
     }
 
 
-def _require_unused_destination(path):
-    for suffix in ("", "-wal", "-shm", "-journal"):
+def _destination_sidecars(path):
+    occupied = []
+    for suffix in _SQLITE_SIDECAR_SUFFIXES:
         member = path.with_name(path.name + suffix)
         if member.is_symlink() or member.exists():
-            raise ArchiveError("restore requires a new absent SQLite path and no sidecars")
+            occupied.append(member)
+    return occupied
+
+
+def _require_unused_destination(path):
+    if path.is_symlink() or path.exists() or _destination_sidecars(path):
+        raise ArchiveError("restore requires a new absent SQLite path and no sidecars")
+
+
+def _release_destination_lock(lock, descriptor, identity):
+    try:
+        current = os.lstat(lock)
+        if (current.st_dev, current.st_ino) != identity:
+            raise ArchiveError(
+                "restore publication lock changed; destination needs manual quarantine"
+            )
+    except OSError as exc:
+        raise ArchiveError(
+            "restore publication lock disappeared; destination needs manual quarantine"
+        ) from exc
+    finally:
+        os.close(descriptor)
+    try:
+        os.unlink(lock)
+        fsync_directory(lock.parent)
+    except OSError as exc:
+        raise ArchiveError(
+            "cannot release restore publication lock; destination remains quarantined"
+        ) from exc
+
+
+def _acquire_destination_lock(path):
+    lock = _restore_lock_path(path)
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(lock, flags, 0o600)
+    except OSError as exc:
+        raise ArchiveError(
+            "restore requires an absent publication lock; inspect stale quarantine"
+        ) from exc
+    try:
+        written = os.write(descriptor, _RESTORE_LOCK_MARKER)
+        if written != len(_RESTORE_LOCK_MARKER):
+            raise OSError("short restore lock write")
+        os.fsync(descriptor)
+        opened = os.fstat(descriptor)
+        identity = (opened.st_dev, opened.st_ino)
+        fsync_directory(lock.parent)
+        return lock, descriptor, identity
+    except BaseException:
+        try:
+            opened = os.fstat(descriptor)
+            _release_destination_lock(
+                lock, descriptor, (opened.st_dev, opened.st_ino),
+            )
+        except BaseException:
+            pass
+        raise
+
+
+def _same_regular_file(left, right):
+    try:
+        a = os.stat(left, follow_symlinks=False)
+        b = os.stat(right, follow_symlinks=False)
+    except OSError:
+        return False
+    return (stat.S_ISREG(a.st_mode) and stat.S_ISREG(b.st_mode)
+            and (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino))
 
 
 def restore_into_new_sqlite(directory, destination, *, external_expected_head):
@@ -269,65 +340,86 @@ def restore_into_new_sqlite(directory, destination, *, external_expected_head):
     # A plaintext PRIVATE history must not be published into a parent
     # readable by other local users, even when source archive is 0700.
     private_directory(dest.parent)
-    _require_unused_destination(dest)
-    verified = verify_sealed_archive(
-        root, external_expected_head=external_expected_head,
-    )
-    # Keep the scratch DB and any SQLite sidecars in one disposable directory.
-    with tempfile.TemporaryDirectory(
-        prefix=".mojum-segment-restore-", dir=dest.parent,
-    ) as scratch:
-        temp = Path(scratch) / "restore.sqlite3"
-        previous = EMPTY_HEAD
-        with SegmentedNoosphere(
-            temp, verified["agent_id"],
-            segment_size=verified["segment_size"],
-        ) as journal:
-            batch = []
-            batch_bytes = 0
-            for index in range(verified["sealed_segments"]):
-                manifest = read_manifest(root, index)
-                if (manifest["agent_id"] != verified["agent_id"]
-                        or manifest["segment_size"] != verified["segment_size"]):
-                    raise ArchiveError("archive identity changed during restore")
-                for event, line_size in iter_segment_events(
-                    root, manifest, previous, include_line_size=True,
-                ):
-                    if (len(batch) == MAX_BATCH
-                            or batch_bytes + line_size > _RESTORE_BATCH_BYTES):
-                        journal.append_many(batch, expected_head=journal.head())
-                        batch.clear()
-                        batch_bytes = 0
-                    batch.append(event)
-                    batch_bytes += line_size
-                previous = manifest["segment_head"]
-            if batch:
-                journal.append_many(batch, expected_head=journal.head())
-            report = journal.verify_chain(
-                external_expected_head=external_expected_head
-            )
-            if (report["count"] != verified["archived_events"]
-                    or report["segments"] != verified["sealed_segments"]):
-                raise ArchiveError("reconstruction differed from verified prefix")
-            # Materialize all committed WAL pages into the independent
-            # scratch DB before we publish a one-file restored source.
-            wal = journal._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-            if wal is None or wal[0] != 0:
-                raise ArchiveError("restored SQLite WAL checkpoint was blocked")
-        leftover_wal = temp.with_name(temp.name + "-wal")
-        if leftover_wal.is_file() and leftover_wal.stat().st_size:
-            raise ArchiveError("restored SQLite has unapplied WAL pages")
+    lock, lock_descriptor, lock_identity = _acquire_destination_lock(dest)
+    published = False
+    completed = False
+    try:
         _require_unused_destination(dest)
-        try:
-            os.link(temp, dest)
-        except FileExistsError as exc:
-            raise ArchiveError("restore destination appeared; no overwrite") from exc
-        # Once linked, the journal is live and another process may create
-        # its sidecars and commit events. Do not roll back the published path.
-        fsync_directory(dest.parent)
-        return {
-            "schema": SCHEMA, "restored_events": verified["archived_events"],
-            "sealed_segments": verified["sealed_segments"],
-            "sealed_head": verified["sealed_head"],
-            "trust": "recovered-sealed-prefix-without-unarchived-tail",
-        }
+        verified = verify_sealed_archive(
+            root, external_expected_head=external_expected_head,
+        )
+        # Keep the scratch DB and any SQLite sidecars in one disposable directory.
+        with tempfile.TemporaryDirectory(
+            prefix=".mojum-segment-restore-", dir=dest.parent,
+        ) as scratch:
+            temp = Path(scratch) / "restore.sqlite3"
+            previous = EMPTY_HEAD
+            with SegmentedNoosphere(
+                temp, verified["agent_id"],
+                segment_size=verified["segment_size"],
+            ) as journal:
+                batch = []
+                batch_bytes = 0
+                for index in range(verified["sealed_segments"]):
+                    manifest = read_manifest(root, index)
+                    if (manifest["agent_id"] != verified["agent_id"]
+                            or manifest["segment_size"] != verified["segment_size"]):
+                        raise ArchiveError("archive identity changed during restore")
+                    for event, line_size in iter_segment_events(
+                        root, manifest, previous, include_line_size=True,
+                    ):
+                        if (len(batch) == MAX_BATCH
+                                or batch_bytes + line_size > _RESTORE_BATCH_BYTES):
+                            journal.append_many(batch, expected_head=journal.head())
+                            batch.clear()
+                            batch_bytes = 0
+                        batch.append(event)
+                        batch_bytes += line_size
+                    previous = manifest["segment_head"]
+                if batch:
+                    journal.append_many(batch, expected_head=journal.head())
+                report = journal.verify_chain(
+                    external_expected_head=external_expected_head
+                )
+                if (report["count"] != verified["archived_events"]
+                        or report["segments"] != verified["sealed_segments"]):
+                    raise ArchiveError("reconstruction differed from verified prefix")
+                # Materialize all committed WAL pages into the independent
+                # scratch DB before we publish a one-file restored source.
+                wal = journal._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if wal is None or wal[0] != 0:
+                    raise ArchiveError("restored SQLite WAL checkpoint was blocked")
+            leftover_wal = temp.with_name(temp.name + "-wal")
+            if leftover_wal.is_file() and leftover_wal.stat().st_size:
+                raise ArchiveError("restored SQLite has unapplied WAL pages")
+            _require_unused_destination(dest)
+            try:
+                os.link(temp, dest)
+            except FileExistsError as exc:
+                raise ArchiveError("restore destination appeared; no overwrite") from exc
+            except BaseException:
+                # A wrapper or filesystem can report failure after creating
+                # the hard link. Never release the quarantine in that state.
+                published = _same_regular_file(temp, dest)
+                raise
+            published = True
+            fsync_directory(dest.parent)
+            if _destination_sidecars(dest):
+                raise ArchiveError(
+                    "SQLite sidecar appeared during publication; destination quarantined"
+                )
+            completed = True
+            result = {
+                "schema": SCHEMA, "restored_events": verified["archived_events"],
+                "sealed_segments": verified["sealed_segments"],
+                "sealed_head": verified["sealed_head"],
+                "trust": "recovered-sealed-prefix-without-unarchived-tail",
+            }
+    finally:
+        if not published or completed:
+            _release_destination_lock(lock, lock_descriptor, lock_identity)
+        else:
+            # The published path may have been opened or paired with a stale
+            # SQLite sidecar. Keep the marker so Mojum refuses to adopt it.
+            os.close(lock_descriptor)
+    return result
