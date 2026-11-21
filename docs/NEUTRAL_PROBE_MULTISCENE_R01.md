@@ -27,6 +27,36 @@ flag, and SHA-256 of the *synthetic* trace. Aggregate wins/losses/ties
 are **descriptive counts, not an optimization reward**. One arm can
 avoid collisions by stopping; report inactivity alongside contacts.
 
+### Exact first-run outcome / methodological blocker
+
+At first successful exact-head CI run
+[44850012246](https://github.com/Garyu-tt/mojum/actions/runs/44850012246)
+the immutable suite manifest had SHA-256
+`b46a6a156cb250552b8069affc69703e8c48d1643eefe8eddbf5e6d80850283c`.
+Across 10 cases and 1728 ticks **per arm**, the figures were:
+
+| Arm | Blocked | Rest | Successful moves | Stalled scenes |
+| --- | ---: | ---: | ---: | ---: |
+| Canonical coarse-zone | 14 | 566 | 1148 | 2 |
+| Frozen no-learning | 39 | 345 | 1344 | 0 |
+| Research local-cell | 21 | 355 | 1352 | 0 |
+
+Local-cell had fewer blocked attempts than frozen in **2/10** cases and
+exactly equal in **8/10**; it had more successful moves in **2/10**
+and exactly equal in eight. **Only 2/10 scenarios generated ANY collision
+for the frozen arm.** In the other eight, all three arms' trajectories are
+identical, so these scenes say almost nothing about learning. This
+initial benchmark therefore has **LOW_CONTACT_EXPOSURE**, not evidence
+of generalizable learned navigation.
+
+The ten fixtures were frozen after this result. The report now publishes
+the contact-scene count and divergence count alongside aggregate totals.
+The 50% exposure threshold is a declared heuristic for catching weak test
+coverage, **not** a statistical proof or biological criterion.
+Any future contact-rich development stress suite must be explicitly labeled
+as chosen after seeing this baseline, and an independent reviewer should
+provide a truly new evaluation set before release.
+
 ## Run
 
 ```bash
