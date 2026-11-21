@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
-from fnmatch import fnmatchcase
 import json
 from pathlib import Path
 import re
@@ -238,13 +237,10 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     )
 
 
-def _matches(pattern: str, check: CheckOutcome) -> bool:
-    targets = [check.name]
-    if check.workflow:
-        # A workflow name matches every job it produced, so all of that
-        # workflow's checks must pass; "workflow / job" targets one job.
-        targets.extend([check.workflow, f"{check.workflow} / {check.name}"])
-    return any(fnmatchcase(target, pattern) for target in targets)
+def _matches(selector: str, check: CheckOutcome) -> bool:
+    if " / " in selector:
+        return check.workflow is not None and selector == check.label
+    return selector == check.name
 
 
 def evaluate(
@@ -254,7 +250,6 @@ def evaluate(
     expected_base: str = "main",
     required: Sequence[str] = (),
     waivers: Mapping[str, str] | None = None,
-    required_counts: Mapping[str, int] | None = None,
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
 
@@ -262,20 +257,10 @@ def evaluate(
         raise ValueError("expected_head_sha must be 40 or 64 hexadecimal characters")
 
     waivers = dict(waivers or {})
-    required_counts = dict(required_counts or {})
-    for pattern, count in required_counts.items():
-        if (not isinstance(pattern, str) or not pattern.strip()
-                or type(count) is not int or not 1 <= count <= 10000):
-            raise ValueError("required_counts must map nonempty patterns to positive counts")
     rejects: list[GateReason] = []
     defers: list[GateReason] = []
-    patterns = tuple(required)
+    selectors = tuple(required)
     matched_labels: list[str] = []
-    for extra in set(required_counts) - set(patterns):
-        rejects.append(GateReason(
-            "UNKNOWN_INVENTORY_PATTERN",
-            f"count given for non-required pattern {extra!r}",
-        ))
 
     if not expected_head_sha:
         rejects.append(
@@ -326,39 +311,35 @@ def evaluate(
             )
         )
 
-    if not patterns:
+    if not selectors:
         rejects.append(
             GateReason(
                 "NO_REQUIRED_CHECKS",
-                "no required check patterns were supplied; a gate without requirements proves nothing",
+                "no required CI jobs were supplied",
             )
         )
 
-    for pattern in patterns:
-        matches = [check for check in facts.checks if _matches(pattern, check)]
+    for selector in selectors:
+        if not isinstance(selector, str) or not selector.strip():
+            rejects.append(GateReason(
+                "AMBIGUOUS_REQUIRED_PATTERN",
+                f"required job {selector!r} must be a nonempty exact job name or workflow / job label",
+            ))
+            continue
+        matches = [check for check in facts.checks if _matches(selector, check)]
         if not matches:
-            defers.append(
-                GateReason(
+            if any(char in selector for char in "*?[]"):
+                rejects.append(GateReason(
+                    "AMBIGUOUS_REQUIRED_PATTERN",
+                    f"no check named {selector!r}; glob selectors are unsupported",
+                ))
+            else:
+                defers.append(GateReason(
                     "MISSING_REQUIRED_CHECK",
-                    f"no check matched required pattern {pattern!r}",
-                )
-            )
+                    f"no check matched required job {selector!r}",
+                ))
             continue
 
-        # A currently visible workflow/job wildcard is not a complete job
-        # inventory: missing matrix siblings are absent from the rollup.
-        # Require the caller to pin the expected number of DISTINCT jobs.
-        # Exact job labels may be required individually without a count.
-        is_open_set = (
-            any(char in pattern for char in "*?[]")
-            or any(check.workflow == pattern for check in matches)
-        )
-        if is_open_set and pattern not in required_counts:
-            rejects.append(GateReason(
-                "REQUIRED_INVENTORY_MISSING",
-                f"required pattern {pattern!r} needs --require-count PATTERN=N "
-                "or explicit exact job labels",
-            ))
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -401,7 +382,7 @@ def evaluate(
             if check.conclusion in PASSING_CONCLUSIONS:
                 continue
             if check.conclusion in WAIVABLE_CONCLUSIONS:
-                if pattern in waivers:
+                if selector in waivers:
                     continue
                 rejects.append(
                     GateReason(
@@ -417,15 +398,6 @@ def evaluate(
                 )
             )
 
-        if pattern in required_counts:
-            distinct_labels = {check.label for check in matches}
-            if len(distinct_labels) != required_counts[pattern] or len(matches) != len(distinct_labels):
-                defers.append(GateReason(
-                    "REQUIRED_INVENTORY_MISMATCH",
-                    f"{pattern!r} has {len(distinct_labels)} distinct jobs from "
-                    f"{len(matches)} entries; expected {required_counts[pattern]}",
-                ))
-
     reasons = tuple(rejects + defers)
     if rejects:
         verdict, code = REJECT, rejects[0].code
@@ -437,7 +409,7 @@ def evaluate(
         verdict=verdict,
         code=code,
         reasons=reasons,
-        required=patterns,
+        required=selectors,
         matched=tuple(dict.fromkeys(matched_labels)),
     )
 
@@ -491,27 +463,11 @@ class _Parser(argparse.ArgumentParser):
 def _parse_waivers(values: Iterable[str]) -> dict[str, str]:
     waivers: dict[str, str] = {}
     for value in values:
-        pattern, separator, reason = value.partition("=")
-        if not separator or not pattern.strip() or not reason.strip():
-            raise ValueError(f"--waive expects PATTERN=REASON, got {value!r}")
-        waivers[pattern.strip()] = reason.strip()
+        selector, separator, reason = value.partition("=")
+        if not separator or not selector.strip() or not reason.strip():
+            raise ValueError(f"--waive expects JOB=REASON, got {value!r}")
+        waivers[selector.strip()] = reason.strip()
     return waivers
-
-
-def _parse_required_counts(values: Iterable[str]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for value in values:
-        pattern, separator, raw_count = value.rpartition("=")
-        if not separator or not pattern.strip() or not raw_count.isdecimal():
-            raise ValueError(f"--require-count expects PATTERN=N, got {value!r}")
-        count = int(raw_count)
-        if not 1 <= count <= 10000:
-            raise ValueError("--require-count must be in the range 1..10000")
-        pattern = pattern.strip()
-        if pattern in counts:
-            raise ValueError(f"duplicate --require-count for {pattern!r}")
-        counts[pattern] = count
-    return counts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -535,25 +491,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--require",
         action="append",
         default=[],
-        metavar="PATTERN",
+        metavar="JOB",
         help=(
-            "required check name, 'workflow / name', or fnmatch pattern; repeatable. "
-            "All checks matching a pattern must have completed successfully."
+            "exact job name or 'workflow / job' label; repeat for every expected job"
         ),
-    )
-    parser.add_argument(
-        "--require-count",
-        action="append",
-        default=[],
-        metavar="PATTERN=N",
-        help="pin exact number of distinct checks for wildcard/workflow requirements",
     )
     parser.add_argument(
         "--waive",
         action="append",
         default=[],
-        metavar="PATTERN=REASON",
-        help="accept a skipped check matching PATTERN, recording REASON",
+        metavar="JOB=REASON",
+        help="accept a skipped check for the specified JOB, recording REASON",
     )
     parser.add_argument("--gh", default="gh", help="GitHub CLI executable for --pr")
     return parser
@@ -574,7 +522,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         waivers = _parse_waivers(args.waive)
-        required_counts = _parse_required_counts(args.require_count)
         if args.pr is not None:
             snapshot = fetch_snapshot(args.pr, gh=args.gh)
         else:
@@ -586,7 +533,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_base=args.expected_base,
             required=args.require,
             waivers=waivers,
-            required_counts=required_counts,
         )
     except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError) as error:
         _emit(
@@ -615,7 +561,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "required": list(result.required),
             "matched": list(result.matched),
             "waivers": waivers,
-            "required_counts": required_counts,
             "reasons": [reason.as_dict() for reason in result.reasons],
             "merge_performed": False,
         }

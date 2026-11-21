@@ -27,7 +27,7 @@ from mojum.merge_gate import (
 
 HEAD = "a" * 40
 OTHER = "b" * 40
-REQUIRED = ("Aquarium*", "Motor Gate", "Mesh contract")
+REQUIRED = ("Aquarium regression QA / test", "Motor Gate / motor", "Mesh contract / mesh")
 
 
 def run(status="COMPLETED", conclusion="SUCCESS", name="Aquarium QA", workflow=None, head_sha=None):
@@ -64,10 +64,6 @@ def evaluate_checks(checks, **overrides):
     kwargs.setdefault("expected_head_sha", HEAD)
     kwargs.setdefault("expected_base", "main")
     kwargs.setdefault("required", REQUIRED)
-    kwargs.setdefault(
-        "required_counts",
-        {pattern: 1 for pattern in kwargs["required"] if pattern in REQUIRED},
-    )
     parsed = parse_snapshot(
         {
             "headRefOid": HEAD,
@@ -148,7 +144,7 @@ class SnapshotParsingTests(unittest.TestCase):
             {"baseRefName": "main"},
             {"headRefOid": "not-a-sha", "baseRefName": "main"},
             {"headRefOid": HEAD[:7], "baseRefName": "main"},
-            {"headRefOid": HEAD + "\\n", "baseRefName": "main"},
+            {"headRefOid": HEAD + "\n", "baseRefName": "main"},
             {"headRefOid": HEAD + " ", "baseRefName": "main"},
             {"headRefOid": HEAD},
             {"headRefOid": HEAD, "baseRefName": "main", "statusCheckRollup": "nope"},
@@ -170,7 +166,7 @@ class SnapshotParsingTests(unittest.TestCase):
                     parse_snapshot(snapshot)
 
     def test_rejects_padded_or_shortened_check_head_sha(self):
-        for value in (HEAD[:7], HEAD + "\\n", HEAD + " "):
+        for value in (HEAD[:7], HEAD + "\n", HEAD + " "):
             with self.subTest(value=value), self.assertRaises(SnapshotError):
                 parse_snapshot({
                     "headRefOid": HEAD, "baseRefName": "main",
@@ -230,26 +226,32 @@ class GateVerdictTests(unittest.TestCase):
             )
 
     def test_expected_head_must_be_exact_and_unpadded(self):
-        for value in (HEAD[:7], HEAD + "\\n", HEAD + " ", " " + HEAD):
+        for value in (HEAD[:7], HEAD[:39], HEAD + "a", HEAD + "\n", HEAD + " ", "\n" + HEAD):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                evaluate(facts(self.green()), expected_head_sha=value,
-                         required=REQUIRED, required_counts={x: 1 for x in REQUIRED})
+                evaluate(facts(self.green()), expected_head_sha=value, required=REQUIRED)
+
+    def test_full_sha256_head_passes(self):
+        head = "a" * 64
+        result = evaluate_checks(self.green(), head_sha=head, expected_head_sha=head)
+        self.assertEqual(result.verdict, "ready")
 
     def test_pending_check_defers(self):
-        checks = self.green() + [run(status="IN_PROGRESS", conclusion=None, workflow="Mesh contract")]
+        checks = self.green() + [
+            run(name="mesh", status="IN_PROGRESS", conclusion=None, workflow="Mesh contract"),
+        ]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "CHECK_PENDING")
         self.assertEqual(result.exit_code, EXIT_DEFER)
 
     def test_queued_check_defers(self):
-        checks = [run(status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
+        checks = [run(name="test", status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
         checks += self.green()
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "defer")
 
     def test_missing_required_check_defers(self):
-        result = evaluate_checks([run(workflow="Aquarium regression QA")])
+        result = evaluate_checks(self.green()[:1])
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
@@ -258,14 +260,16 @@ class GateVerdictTests(unittest.TestCase):
             "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE", "ERROR",
         ]:
             with self.subTest(conclusion=conclusion):
-                checks = [run(conclusion=conclusion, workflow="Mesh contract")]
+                checks = [run(name="mesh", conclusion=conclusion, workflow="Mesh contract")]
                 result = evaluate_checks(checks)
                 self.assertEqual(result.verdict, "reject")
                 self.assertEqual(result.code, "CHECK_FAILED")
 
     def test_failure_wins_over_pending(self):
-        checks = [run(conclusion="FAILURE", workflow="Mesh contract")]
-        checks += [run(status="QUEUED", conclusion=None, workflow="Aquarium regression QA")]
+        checks = [
+            run(name="mesh", conclusion="FAILURE", workflow="Mesh contract"),
+            run(name="test", status="QUEUED", conclusion=None, workflow="Aquarium regression QA"),
+        ]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
@@ -278,7 +282,7 @@ class GateVerdictTests(unittest.TestCase):
             with self.subTest(status=status):
                 checks = self.green() + [
                     run(
-                        status=status, conclusion="FAILURE",
+                        name="mesh", status=status, conclusion="FAILURE",
                         workflow="Mesh contract",
                     ),
                 ]
@@ -294,14 +298,14 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_SKIPPED_UNWAIVED")
 
-        waived = evaluate_checks(checks, waivers={"Mesh contract": "docs-only change"})
+        waived = evaluate_checks(checks, waivers={"Mesh contract / mesh": "docs-only change"})
         self.assertEqual(waived.verdict, "ready")
 
     def test_waiver_never_masks_a_failure(self):
         checks = [
             run(name="mesh", conclusion="FAILURE", workflow="Mesh contract")
         ]
-        result = evaluate_checks(checks, waivers={"Mesh contract": "flaky"})
+        result = evaluate_checks(checks, waivers={"Mesh contract / mesh": "flaky"})
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
@@ -313,31 +317,33 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "ready")
 
     def test_unknown_conclusion_rejects(self):
-        checks = [run(conclusion="SOMETHING_NEW", workflow="Mesh contract")]
+        checks = [run(name="mesh", conclusion="SOMETHING_NEW", workflow="Mesh contract")]
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_UNKNOWN_CONCLUSION")
 
     def test_unknown_status_defers(self):
-        checks = [run(status="MYSTERY", conclusion=None, workflow="Mesh contract")]
-        result = evaluate_checks(checks)
+        checks = [run(name="mesh", status="MYSTERY", conclusion=None, workflow="Mesh contract")]
+        result = evaluate_checks(checks, required=("Mesh contract / mesh",))
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "CHECK_UNKNOWN_STATUS")
 
     def test_stale_check_head_sha_defers(self):
-        checks = [run(head_sha=OTHER, workflow="Mesh contract")]
-        result = evaluate_checks(checks)
+        checks = [run(name="mesh", head_sha=OTHER, workflow="Mesh contract")]
+        result = evaluate_checks(checks, required=("Mesh contract / mesh",))
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "STALE_CHECK")
 
-    def test_all_checks_matching_a_pattern_must_pass(self):
+    def test_all_explicit_matrix_jobs_must_pass(self):
         checks = [
-            run(name="linux", workflow="Aquarium regression QA"),
-            run(name="windows", conclusion="FAILURE", workflow="Aquarium regression QA"),
-            run(name="motor", workflow="Motor Gate"),
-            run(name="mesh", workflow="Mesh contract"),
+            run(name="aquarium-stdlib (3.11)", workflow="Aquarium QA"),
+            run(name="aquarium-stdlib (3.12)", workflow="Aquarium QA"),
+            run(name="aquarium-stdlib (3.13)", conclusion="FAILURE", workflow="Aquarium QA"),
         ]
-        result = evaluate_checks(checks)
+        required = tuple(f"Aquarium QA / aquarium-stdlib ({version})" for version in (
+            "3.11", "3.12", "3.13",
+        ))
+        result = evaluate_checks(checks, required=required)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
@@ -368,68 +374,43 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "MERGE_STATE_UNKNOWN")
 
-    def test_no_required_patterns_rejects(self):
+    def test_no_required_jobs_rejects(self):
         result = evaluate_checks(self.green(), required=())
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "NO_REQUIRED_CHECKS")
 
-    def test_wildcard_requires_pinned_job_inventory(self):
-        # The rollup can expose one successful Python job before its siblings
-        # register. A generic matching wildcard must not mark it ready.
+    def test_wildcard_cannot_certify_unregistered_matrix_jobs(self):
         checks = [run(name="aquarium-stdlib (3.11)", workflow="Aquarium QA")]
-        without_inventory = evaluate_checks(
-            checks,
-            required=("Aquarium*",),
-            required_counts={},
-        )
-        self.assertEqual(without_inventory.verdict, "reject")
-        self.assertEqual(without_inventory.code, "REQUIRED_INVENTORY_MISSING")
+        result = evaluate_checks(checks, required=("aquarium-stdlib (*)",))
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.code, "AMBIGUOUS_REQUIRED_PATTERN")
 
-        partial = evaluate_checks(
-            checks,
-            required=("Aquarium*",),
-            required_counts={"Aquarium*": 3},
-        )
-        self.assertEqual(partial.verdict, "defer")
-        self.assertEqual(partial.code, "REQUIRED_INVENTORY_MISMATCH")
+    def test_workflow_only_selector_cannot_certify_partial_matrix(self):
+        checks = [run(name="py311", workflow="Aquarium QA")]
+        result = evaluate_checks(checks, required=("Aquarium QA",))
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
-        all_three = checks + [
-            run(name="aquarium-stdlib (3.12)", workflow="Aquarium QA"),
-            run(name="aquarium-stdlib (3.13)", workflow="Aquarium QA"),
-        ]
-        complete = evaluate_checks(
-            all_three, required=("Aquarium*",),
-            required_counts={"Aquarium*": 3},
-        )
+    def test_only_the_expected_matrix_job_can_fill_a_missing_slot(self):
+        required = tuple(f"aquarium-stdlib ({version})" for version in ("3.11", "3.12", "3.13"))
+        for versions in (("3.11",), ("3.11", "3.12", "3.12"), ("3.11", "3.12", "3.14")):
+            with self.subTest(versions=versions):
+                checks = [run(name=f"aquarium-stdlib ({version})") for version in versions]
+                result = evaluate_checks(checks, required=required)
+                self.assertEqual(result.verdict, "defer")
+                self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+        complete = evaluate_checks([run(name=name) for name in required], required=required)
         self.assertEqual(complete.verdict, "ready")
 
-    def test_workflow_name_also_requires_inventory(self):
-        checks = [run(name="py311", workflow="Aquarium QA")]
-        result = evaluate_checks(
-            checks, required=("Aquarium QA",), required_counts={},
-        )
-        self.assertEqual(result.code, "REQUIRED_INVENTORY_MISSING")
-
-    def test_duplicate_job_names_do_not_satisfy_inventory(self):
-        checks = [
-            run(name="py311", workflow="Aquarium QA"),
-            run(name="py311", workflow="Aquarium QA"),
-            run(name="py313", workflow="Aquarium QA"),
-        ]
-        result = evaluate_checks(
-            checks, required=("Aquarium QA",),
-            required_counts={"Aquarium QA": 3},
-        )
-        self.assertEqual(result.verdict, "defer")
-        self.assertEqual(result.code, "REQUIRED_INVENTORY_MISMATCH")
-
     def test_exact_full_label_requirement(self):
-        checks = [run(name="linux", workflow="Aquarium regression QA")]
-        result = evaluate_checks(
-            checks,
-            required=("Aquarium regression QA / linux",),
-        )
-        self.assertEqual(result.verdict, "ready")
+        required = ("Aquarium regression QA / test [linux]",)
+        exact = run(name="test [linux]", workflow="Aquarium regression QA")
+        unrelated = [
+            run(name="test [linux]", workflow="Other workflow"),
+            run(name=required[0], workflow=None),
+        ]
+        self.assertNotEqual(evaluate_checks(unrelated, required=required).verdict, "ready")
+        self.assertEqual(evaluate_checks([exact], required=required).verdict, "ready")
 
 
 class CliTests(unittest.TestCase):
@@ -470,12 +451,9 @@ class CliTests(unittest.TestCase):
         return [
             "--input", str(path),
             "--expected-head-sha", HEAD,
-            "--require", "Aquarium*",
-            "--require", "Motor Gate",
-            "--require", "Mesh contract",
-            "--require-count", "Aquarium*=1",
-            "--require-count", "Motor Gate=1",
-            "--require-count", "Mesh contract=1",
+            "--require", REQUIRED[0],
+            "--require", REQUIRED[1],
+            "--require", REQUIRED[2],
         ]
 
     def test_ready_exit_zero_and_never_merges(self):
@@ -488,7 +466,7 @@ class CliTests(unittest.TestCase):
 
     def test_defer_exit_two(self):
         payload = self.snapshot([
-            run(status="QUEUED", conclusion=None, workflow="Mesh contract"),
+            run(name="mesh", status="QUEUED", conclusion=None, workflow="Mesh contract"),
         ])
         code, result, _ = self.invoke(*self.base_args(self.write(payload)))
         self.assertEqual(code, EXIT_DEFER)
@@ -496,7 +474,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], EXIT_DEFER)
 
     def test_reject_exit_one(self):
-        payload = self.snapshot([run(conclusion="FAILURE", workflow="Mesh contract")])
+        payload = self.snapshot([run(name="mesh", conclusion="FAILURE", workflow="Mesh contract")])
         code, result, _ = self.invoke(
             *self.base_args(self.write(payload))
         )
@@ -511,11 +489,11 @@ class CliTests(unittest.TestCase):
         ]
         args = self.base_args(self.write(self.snapshot(checks))) + [
             "--waive",
-            "Mesh contract=docs-only",
+            "Mesh contract / mesh=docs-only",
         ]
         code, result, _ = self.invoke(*args)
         self.assertEqual(code, EXIT_READY)
-        self.assertEqual(result["waivers"], {"Mesh contract": "docs-only"})
+        self.assertEqual(result["waivers"], {"Mesh contract / mesh": "docs-only"})
 
     def test_stdin_input(self):
         path = self.write(self.snapshot())
@@ -538,7 +516,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, EXIT_REJECT)
         self.assertEqual(result["code"], "INVALID_INPUT")
 
-    def test_broad_requirement_without_inventory_rejects_partial_green(self):
+    def test_wildcard_requirement_rejects_partial_green(self):
         args = [
             "--input", str(self.write(self.snapshot([
                 run(name="aquarium-stdlib (3.11)", workflow="Aquarium regression QA")
@@ -548,15 +526,7 @@ class CliTests(unittest.TestCase):
         ]
         code, result, _ = self.invoke(*args)
         self.assertEqual(code, EXIT_REJECT)
-        self.assertEqual(result["code"], "REQUIRED_INVENTORY_MISSING")
-
-    def test_malformed_inventory_is_invalid_input(self):
-        args = self.base_args(self.write(self.snapshot())) + [
-            "--require-count", "Aquarium*=two",
-        ]
-        code, result, _ = self.invoke(*args)
-        self.assertEqual(code, EXIT_REJECT)
-        self.assertEqual(result["code"], "INVALID_INPUT")
+        self.assertEqual(result["code"], "AMBIGUOUS_REQUIRED_PATTERN")
 
     def test_usage_error_has_distinct_exit_code(self):
         err = io.StringIO()
@@ -578,12 +548,9 @@ class CliTests(unittest.TestCase):
             code, result, _ = self.invoke(
                 "--pr", "419",
                 "--expected-head-sha", HEAD,
-                "--require", "Aquarium*",
-                "--require", "Motor Gate",
-                "--require", "Mesh contract",
-                "--require-count", "Aquarium*=1",
-                "--require-count", "Motor Gate=1",
-                "--require-count", "Mesh contract=1",
+                "--require", REQUIRED[0],
+                "--require", REQUIRED[1],
+                "--require", REQUIRED[2],
             )
         self.assertEqual(code, EXIT_READY)
         self.assertEqual(result["number"], 999)

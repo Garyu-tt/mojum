@@ -15,14 +15,17 @@ verdict for one exact commit and never performs a merge. Pass the snapshot from
 `gh pr view --json ...` with the SHA you intend to merge:
 
 ```sh
+SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require 'Mojum R0.3 online-learning aquarium regression' \
-  --require-count 'Mojum R0.3 online-learning aquarium regression=3' \
-  --require 'Mojum motor-gate independent QA' \
-  --require-count 'Mojum motor-gate independent QA=3' \
-  --require 'Mojum mesh contract independent QA' \
-  --require-count 'Mojum mesh contract independent QA=3'
+  --require 'aquarium-stdlib (3.11)' --require 'aquarium-stdlib (3.12)' \
+  --require 'aquarium-stdlib (3.13)' --require 'motor-gate-stdlib (3.11)' \
+  --require 'motor-gate-stdlib (3.12)' --require 'motor-gate-stdlib (3.13)' \
+  --require 'mesh-stdlib (3.11)' --require 'mesh-stdlib (3.12)' \
+  --require 'mesh-stdlib (3.13)'
 ```
+
+List every required job from the reviewed workflow definitions. A GitHub rollup
+can omit matrix jobs that have yet to register.
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
 See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
