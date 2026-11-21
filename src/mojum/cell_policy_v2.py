@@ -81,11 +81,17 @@ class CellExplorer:
                     or type(actions) is not dict or not actions
                     or not set(actions) <= set(ACTIONS)):
                 raise LocalCellError("invalid 4cm cell key or action set")
-            for counters in actions.values():
+            for action, counters in actions.items():
                 if (type(counters) is not list or len(counters) != 2
                         or any(type(x) is not int for x in counters)
                         or not 1 <= counters[0] <= MAX_EPISODE_TICKS
-                        or not 0 <= counters[1] <= counters[0]):
+                        or not 0 <= counters[1] <= counters[0]
+                        # One collision permanently inhibits this action in
+                        # this cell: it can never accumulate a second block.
+                        or counters[1] > 1
+                        # A zero-displacement rest cannot contact a wall from
+                        # an already validated legal point-room position.
+                        or (action == "rest" and counters[1] != 0)):
                     raise LocalCellError("invalid measured evidence counters")
                 total += counters[0]
         if total != snapshot["updates"]:
@@ -119,6 +125,8 @@ class CellExplorer:
         if type(blocked) is not bool or intent != self.decide(sense):
             raise LocalCellError("stale or fabricated measured motor outcome")
         zone, action = intent["zone"], intent["action"]
+        if action == "rest" and blocked:
+            raise LocalCellError("rest cannot be a blocked motor outcome")
         if zone not in self.records and len(self.records) >= MAX_CELLS:
             raise LocalCellError("local cell evidence capacity exhausted")
         counters = self.records.setdefault(zone, {}).setdefault(action, [0, 0])
