@@ -1,0 +1,31 @@
+name: Mojum optional local-cell v2 SQLite replay QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/aquarium-cell-policy-v2.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/cell_policy_v2.py"
+      - "tests/test_aquarium_cell_policy_v2.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  versioned-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify opt-in v2 and immutable legacy replay
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_aquarium_cell_policy_v2.py -v

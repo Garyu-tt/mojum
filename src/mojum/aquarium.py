@@ -17,6 +17,7 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
+from .cell_policy_v2 import CellExplorer, SCHEMA as CELL_DEVELOPMENT_SCHEMA
 from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import (ToyContactBridge, validate_scene,
                              SCHEMA as TOY_CONTACT_SCHEMA,
@@ -73,6 +74,7 @@ class Aquarium:
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
         exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
+        developmental_policy="legacy",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -82,6 +84,14 @@ class Aquarium:
             raise AquariumError("neural_mode must be shadow or disabled")
         if exploration_mode not in ("scripted", "goal_free"):
             raise AquariumError("exploration_mode must be scripted or goal_free")
+        # The default keeps exact byte-for-byte v1 manifesto and causal replay.
+        # An explicit new policy always starts a *new* pinned journal; never
+        # silently reinterpret v1 inherited memory or upgrade on open.
+        if type(developmental_policy) is not str or developmental_policy not in (
+                "legacy", "local_cell_v2"):
+            raise AquariumError("unknown versioned developmental policy")
+        if developmental_policy != "legacy" and exploration_mode != "goal_free":
+            raise AquariumError("local_cell_v2 requires goal_free exploration")
         if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
             raise AquariumError("sensory_mode must be none or toy_probe")
         if sensory_mode == "toy_probe" and exploration_mode != "goal_free":
@@ -89,6 +99,7 @@ class Aquarium:
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("unused synthetic sensory scene")
         self.exploration_mode = exploration_mode
+        self.developmental_policy = developmental_policy
         self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
@@ -119,7 +130,10 @@ class Aquarium:
         }
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
-        self.explorer = Explorer() if exploration_mode == "goal_free" else None
+        self.explorer = (
+            (CellExplorer() if developmental_policy == "local_cell_v2"
+             else Explorer()) if exploration_mode == "goal_free" else None
+        )
         self.sensory_bridge = None
         if sensory_mode == "toy_probe":
             scene = ToyScene() if sensory_scene is None else sensory_scene
@@ -128,8 +142,15 @@ class Aquarium:
             )
         self.tick = 0
         if self.explorer is not None:
-            self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
+            self.manifest["developmental_schema"] = (
+                CELL_DEVELOPMENT_SCHEMA if developmental_policy == "local_cell_v2"
+                else DEVELOPMENT_SCHEMA
+            )
             self.manifest["exploration_mode"] = "goal_free"
+            if developmental_policy == "local_cell_v2":
+                # An ADDITIVE key only for new policy/version. Old manifests
+                # remain unchanged and historic journals replay as before.
+                self.manifest["developmental_policy"] = "local_cell_v2"
         if self.sensory_bridge is not None:
             self.manifest["sensory_mode"] = "toy_probe"
             self.manifest["sensory_schema"] = SENSE_SCHEMA
@@ -203,7 +224,7 @@ class Aquarium:
                 self.tick, self.world.revision, self.world.x, self.world.y,
                 sensory["heartbeat"]["pulse"],
             )
-            next_explorer = Explorer.from_snapshot(self.explorer.snapshot())
+            next_explorer = type(self.explorer).from_snapshot(self.explorer.snapshot())
             intent = next_explorer.decide(signal)
             dx, dy = intent["dx"], intent["dy"]
         else:
@@ -234,7 +255,7 @@ class Aquarium:
         if next_explorer is not None:
             measured = next_explorer.observe(signal, intent, world_obs["blocked"])
             payload["developmental"] = {
-                "schema": DEVELOPMENT_SCHEMA,
+                "schema": self.manifest["developmental_schema"],
                 "observation": signal.public(),
                 "intent": intent,
                 "learning": measured,
@@ -255,9 +276,10 @@ class Aquarium:
             self.tick, self.world.revision, self.world.x, self.world.y,
             payload["interoception"]["heartbeat"]["pulse"],
         )
-        clone = Explorer.from_snapshot(self.explorer.snapshot())
+        clone = type(self.explorer).from_snapshot(self.explorer.snapshot())
         claimed = payload["developmental"]
-        if (claimed["observation"] != cue.public()
+        if (claimed["schema"] != self.manifest["developmental_schema"]
+                or claimed["observation"] != cue.public()
                 or claimed["intent"] != clone.decide(cue)
                 or claimed["motor_capability"] != "SYNTHETIC_POINT_ROOM_ONLY"):
             raise AquariumError("developmental observation/intent mismatch")
@@ -418,6 +440,9 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
+    parser.add_argument("--developmental-policy",
+                        choices=("legacy", "local_cell_v2"), default="legacy",
+                        help="opt-in v2 starts a distinct version-pinned journal")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
@@ -428,6 +453,8 @@ def main():
     if args.exploration_mode == "goal_free" and (
             args.dx is not None or args.dy is not None):
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
+    if args.developmental_policy != "legacy" and args.exploration_mode != "goal_free":
+        parser.error("local_cell_v2 requires --exploration-mode goal_free")
     if args.exploration_mode == "scripted":
         # Invalid scripted motion is a CLI error, not an organism birth.
         # Reject NaN, infinite and out-of-budget displacement before SQLite
@@ -442,6 +469,7 @@ def main():
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
         sensory_mode=args.sensory_mode,
+        developmental_policy=args.developmental_policy,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
