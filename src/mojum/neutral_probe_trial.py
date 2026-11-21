@@ -20,7 +20,7 @@ from .world_room import Room, advance, initial_state
 SCHEMA = "mojum.research.neutral-probe-trial/1"
 COMPARISON_SCHEMA = "mojum.research.neutral-probe-comparison/1"
 MAX_TICKS = 512
-MODES = ("adaptive", "frozen")
+MODES = ("adaptive", "frozen", "local_cell")
 _DELTAS = {
     "rest": (0.0, 0.0),
     "x+": (STEP_METERS, 0.0),
@@ -34,11 +34,71 @@ class NeutralProbeError(ValueError):
     """Invalid research fixture; no partial experiment is performed."""
 
 
+class LocalCellPlay:
+    """Research-only positional control: local blocked evidence, no reward.
+
+    Unlike the canonical Explorer's half-meter zone, evidence is tied to
+    a single quantized 4 cm own-position cell. The controller has no room
+    geometry, future observations, collision oracle or direct actuator.
+    It can recover from a blocked direction after changing cells.
+    """
+
+    def __init__(self):
+        self.updates = 0
+        self.records = {}
+
+    @staticmethod
+    def _cell(sense):
+        return "%d:%d" % (
+            round(sense.x / STEP_METERS),
+            round(sense.y / STEP_METERS),
+        )
+
+    def decide(self, sense):
+        if type(sense) is not Proprioception or sense.tick != self.updates:
+            raise NeutralProbeError("stale or invalid local-cell sensation")
+        cell = self._cell(sense)
+        history = self.records.get(cell, {})
+        shift = (sense.tick + int(sense.pulse)) % len(ACTIONS)
+        candidates = ACTIONS[shift:] + ACTIONS[:shift]
+        action = next(
+            (name for name in candidates
+             if history.get(name, [0, 0])[1] == 0),
+            "rest",
+        )
+        dx, dy = _DELTAS[action]
+        return {"action": action, "dx": dx, "dy": dy,
+                "cell": cell, "tick": sense.tick,
+                "expected_revision": sense.revision}
+
+    def observe(self, sense, intent, blocked):
+        if type(blocked) is not bool or intent != self.decide(sense):
+            raise NeutralProbeError("local-cell outcome must be measured")
+        cell, action = intent["cell"], intent["action"]
+        if cell not in self.records and len(self.records) >= MAX_TICKS:
+            raise NeutralProbeError("research cell capacity exhausted")
+        counts = self.records.setdefault(cell, {}).setdefault(action, [0, 0])
+        counts[0] += 1
+        counts[1] += int(blocked)
+        self.updates += 1
+
+    def snapshot(self):
+        return {
+            "schema": "mojum.research.local-cell-play/1",
+            "updates": self.updates,
+            "cells": len(self.records),
+            "records": {
+                cell: {action: list(counts) for action, counts in acts.items()}
+                for cell, acts in self.records.items()
+            },
+        }
+
+
 def _validated(room, start, pulses, mode):
     if type(room) is not Room:
         raise NeutralProbeError("canonical Room fixture required")
     if mode not in MODES or type(mode) is not str:
-        raise NeutralProbeError("mode must be adaptive or frozen")
+        raise NeutralProbeError("mode must be adaptive, frozen or local_cell")
     if (type(start) not in (tuple, list) or len(start) != 2
             or any(type(v) not in (int, float) for v in start)):
         raise NeutralProbeError("start must be two finite numeric coordinates")
@@ -64,7 +124,8 @@ def trial(*, room, start, pulses, mode):
     """
     position = _validated(room, start, pulses, mode)
     state = initial_state(room, *position)
-    learner = Explorer() if mode == "adaptive" else None
+    learner = (Explorer() if mode == "adaptive" else
+               LocalCellPlay() if mode == "local_cell" else None)
     trace = []
     blocked_count = 0
     for tick, pulse in enumerate(pulses):
@@ -139,16 +200,23 @@ def compare(*, room, start, pulses):
     _validated(room, start, pulses, "adaptive")
     adaptive = trial(room=room, start=start, pulses=pulses, mode="adaptive")
     frozen = trial(room=room, start=start, pulses=pulses, mode="frozen")
+    local_cell = trial(room=room, start=start, pulses=pulses,
+                       mode="local_cell")
     return {
         "schema": COMPARISON_SCHEMA,
         "classification": "BOUNDED_SYNTHETIC_NEGATIVE_CONTROL",
         "adaptive": adaptive,
         "frozen": frozen,
+        "local_cell": local_cell,
         "blocked_difference_frozen_minus_adaptive":
             frozen["blocked_count"] - adaptive["blocked_count"],
-        "interpretation": ("STALLED_ADAPTIVE_NOT_SUCCESS"
-                           if adaptive["stalled_warning"]
-                           else "MEASURED_FIXTURE_DIFFERENCE_ONLY"),
+        "interpretation": (
+            "COARSE_ZONE_STALLED_LOCAL_CELL_MOBILE"
+            if adaptive["stalled_warning"] and not local_cell["stalled_warning"]
+            else "STALLED_ADAPTIVE_NOT_SUCCESS"
+            if adaptive["stalled_warning"]
+            else "MEASURED_FIXTURE_DIFFERENCE_ONLY"
+        ),
     }
 
 
@@ -177,6 +245,9 @@ def main(argv=None):
             "ticks": args.ticks,
             "adaptive_blocked": result["adaptive"]["blocked_count"],
             "frozen_blocked": result["frozen"]["blocked_count"],
+            "local_cell_blocked": result["local_cell"]["blocked_count"],
+            "local_cell_rest": result["local_cell"]["rest_count"],
+            "local_cell_stalled_warning": result["local_cell"]["stalled_warning"],
             "blocked_difference": result["blocked_difference_frozen_minus_adaptive"],
             "adaptive_rest": result["adaptive"]["rest_count"],
             "frozen_rest": result["frozen"]["rest_count"],
