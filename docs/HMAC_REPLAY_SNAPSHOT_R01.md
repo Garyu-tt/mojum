@@ -22,6 +22,10 @@ encrypt the genome, learned policy, synthetic state or observations.
    independent expected head. Ensure bootstrap, agent/manifest, saved
    prefix sequence/hash, tick and all component schemas match. Validate
    reconstructed state with the original per-component validators.
+   A SHA-256 fingerprint of all installed Mojum Python source files must
+   also match the snapshot's signed runtime identity. Source-code changes
+   require a deliberate full replay and fresh snapshot; the cache cannot
+   silently skip historical calculations under modified algorithms.
 4. The signed prefix is **not simulated again**; only events committed
    after it are processed through the canonical deterministic Aquarium.
    Refuse changed count, stale head or any divergent tail, and preserve CAS
