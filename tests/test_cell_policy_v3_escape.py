@@ -146,6 +146,26 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         fresh = CellExplorerV3Escape.from_snapshot(policy.snapshot())
         self.assertEqual(restored.decide(sense), fresh.decide(sense))
 
+    def test_snapshot_rejects_simultaneous_rest_and_probe_streaks(self):
+        # The real state machine clears one streak whenever it advances the
+        # other. An imported snapshot must reject an impossible combination.
+        policy = CellExplorerV3Escape()
+        sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
+        intent = policy.decide(sense)
+        self.assertEqual(intent["action"], "rest")
+        policy.observe(sense, intent, False)
+        valid = policy.snapshot()
+        self.assertEqual(valid["consecutive_rests"], 1)
+        self.assertEqual(valid["consecutive_blocked_probes"], 0)
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid,
+        )
+        forged = dict(valid, consecutive_blocked_probes=1)
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "rest and probe streaks cannot coexist"
+        ):
+            CellExplorerV3Escape.from_snapshot(forged)
+
     def test_snapshot_rejects_more_cell_measurements_than_elapsed_ticks(self):
         # Global updates and last_tick are coherent. The first cell alone
         # claims five observations despite last being seen on tick zero.
