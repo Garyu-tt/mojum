@@ -79,7 +79,8 @@ window.addEventListener("load", async () => {
       probe: el("probe").textContent,
       measured: el("deflection").textContent,
       prediction: el("prediction").textContent,
-      brain: el("brain").textContent
+      brain: el("brain").textContent,
+      policy: el("policy").textContent
     };
     const canvas=el("room").getBoundingClientRect();
     const viewport={
@@ -294,6 +295,13 @@ def main():
                 assert first["measured"] == "0.75", (policy, mode, "measured touch")
                 assert first["prediction"] == "—", (policy, mode, "blank at birth")
                 assert first["brain"] == "UNIMPLEMENTED", (policy, mode, "not a brain")
+                expected_policy = (
+                    "coarse_v1 · зоны 0,5 м" if policy == "coarse_v1"
+                    else "local_cell_v2 · ячейки 4 см"
+                )
+                assert first["policy"] == expected_policy, (
+                    policy, mode, "actual displayed motor policy", first["policy"]
+                )
                 assert second["tick"] == "1", (policy, mode, "next tick")
                 assert second["prediction"] == "0.75", (policy, mode, "learned prediction")
                 assert second["counter"] == "2 / 2", (policy, mode, "counter")
@@ -316,6 +324,7 @@ def main():
                 assert frame1["toy_contact"]["prediction_before"]["predicted_deflection"] == .75
                 reports.append({
                     "motor_policy": policy,
+                    "displayed_policy": first["policy"],
                     "viewport": mode,
                     "source": "real replay-verified local SQLite + PRIVATE JSONL",
                     "actual_browser": True,
