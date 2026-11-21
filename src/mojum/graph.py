@@ -22,6 +22,10 @@ class GraphError(ValueError):
 def validate(graph):
     if not isinstance(graph, dict) or graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
+    # v1 has exactly one canonical wire layout. Reject unknown top-level
+    # fields instead of silently accepting metadata that the executor ignores.
+    if set(graph) - {"schema", "id", "revision", "nodes", "edges"}:
+        raise GraphError("Unsupported graph v1 field")
     nodes = graph.get("nodes")
     edges = graph.get("edges")
     if not isinstance(nodes, list) or not nodes or not isinstance(edges, list):
@@ -30,7 +34,9 @@ def validate(graph):
         raise GraphError("Graph exceeds safe bootstrap size")
     by_id = {}
     for n in nodes:
-        if not isinstance(n, dict) or not isinstance(n.get("id"), str) or not n["id"]:
+        if not isinstance(n, dict) or set(n) != {"id", "kind", "config", "notes"}:
+            raise GraphError("Unsupported graph v1 node shape")
+        if not isinstance(n["id"], str) or not n["id"]:
             raise GraphError("Every node requires a nonempty string ID")
         if n["id"] in by_id:
             raise GraphError("Duplicate node ID: " + n["id"])
@@ -39,18 +45,23 @@ def validate(graph):
             raise GraphError("Unsupported node kind: " + str(kind))
         if not isinstance(n.get("config"), dict) or not isinstance(n.get("notes"), dict):
             raise GraphError("Every node needs config and notes objects")
-        if not n["notes"].get("purpose"):
-            raise GraphError("Node notes.purpose is required")
+        purpose = n["notes"].get("purpose")
+        if not isinstance(purpose, str) or not purpose.strip():
+            raise GraphError("Node notes.purpose must be nonempty text")
         by_id[n["id"]] = n
     incoming = defaultdict(dict)
     adjacency = defaultdict(set)
     indegree = {name: 0 for name in by_id}
     for e in edges:
-        try:
-            src, dst = e["from"], e["to"]
-            sid, sport, did, dport = src["node"], src["port"], dst["node"], dst["port"]
-        except (TypeError, KeyError):
-            raise GraphError("Malformed edge endpoint") from None
+        # A mixed v1/alternate-v1 record may carry ignored source/target aliases
+        # alongside canonical from/to, so reject any extra or absent wire keys.
+        if not isinstance(e, dict) or set(e) != {"from", "to"}:
+            raise GraphError("Unsupported graph v1 edge shape")
+        src, dst = e["from"], e["to"]
+        if (not isinstance(src, dict) or set(src) != {"node", "port"}
+                or not isinstance(dst, dict) or set(dst) != {"node", "port"}):
+            raise GraphError("Malformed edge endpoint")
+        sid, sport, did, dport = src["node"], src["port"], dst["node"], dst["port"]
         if not all(isinstance(value, str) for value in (sid, sport, did, dport)):
             raise GraphError("Malformed edge endpoint")
         if sid not in by_id or did not in by_id:
