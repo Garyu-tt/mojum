@@ -1,5 +1,6 @@
 """Developmental R0.9 low-level perception/touch learning; no preload."""
 
+from contextlib import closing
 import copy
 import json
 from html.parser import HTMLParser
@@ -188,6 +189,31 @@ class SensoryCuriosityTests(unittest.TestCase):
             self.assertEqual(b.model.snapshot(), old["association_model"])
             self.assertEqual(b.rng, old["rng"])
             self.assertEqual(b.tick, old["tick"])
+
+    def test_existing_uninitialized_sqlite_is_never_bootstrapped_or_repaired(self):
+        for kind in ("empty_file", "foreign_tables", "events_without_metadata",
+                     "events_with_empty_metadata"):
+            with self.subTest(kind=kind):
+                candidate = self.path.with_name(kind + ".sqlite3")
+                if kind == "empty_file":
+                    candidate.touch()
+                else:
+                    with closing(sqlite3.connect(candidate)) as db:
+                        if kind == "foreign_tables":
+                            db.execute("CREATE TABLE foreign_data (value TEXT)")
+                            db.execute("INSERT INTO foreign_data VALUES ('must-survive')")
+                        else:
+                            db.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY, wire_json TEXT)")
+                            db.execute("INSERT INTO events VALUES (1, '{}')")
+                            if kind == "events_with_empty_metadata":
+                                db.execute("CREATE TABLE metadata (k TEXT PRIMARY KEY, v TEXT)")
+                        db.commit()
+                before = candidate.read_bytes()
+                with self.assertRaises(ValueError):
+                    SensoryPlay(candidate, GRAPH)
+                self.assertEqual(candidate.read_bytes(), before)
+                self.assertFalse(Path(str(candidate) + "-wal").exists())
+                self.assertFalse(Path(str(candidate) + "-shm").exists())
 
     def test_changing_scene_or_seed_must_not_reinterpret_existing_memory(self):
         with self.open() as baby:
