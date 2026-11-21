@@ -123,6 +123,24 @@ async function main() {
     assert.equal(await evaluate(cdp,
       "document.querySelector('#obstacles').children.length"),2);
 
+    // Real Chromium Ctrl+Z / Ctrl+Y keyboard delivery, outside text inputs.
+    const pressCtrl = async (code, key, virtualKey) => {
+      await cdp.call("Input.dispatchKeyEvent", {
+        type:"keyDown",code,key,windowsVirtualKeyCode:virtualKey,
+        nativeVirtualKeyCode:virtualKey,modifiers:2,
+      });
+      await cdp.call("Input.dispatchKeyEvent", {
+        type:"keyUp",code,key,windowsVirtualKeyCode:virtualKey,
+        nativeVirtualKeyCode:virtualKey,modifiers:2,
+      });
+    };
+    await pressCtrl("KeyZ","z",90);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#obstacles').children.length"),1);
+    await pressCtrl("KeyY","y",89);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#obstacles').children.length"),2);
+
     // Text inputs must preserve the original numeric token 4.0.
     await evaluate(cdp,
       "(function(){const e=document.querySelector('#height');e.value='4.0';" +
