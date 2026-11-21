@@ -18,6 +18,8 @@ PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120
 
 Repeat the command to replay and append 120 more frames to the **same** private local SQLite file. The JSON checkpoint reports `tick`, `stored_events`, `journal_head`, and a status explicitly labelling synthetic shadow learning. On a new DB, 120 ticks should produce **121** events (one bootstrap + 120 frames); a second 120-tick run should produce **241**. Use a fresh path for an independent organism fixture; do not publish the SQLite file, as it contains PRIVATE synthetic event records. For a no-learning control, use a **different DB path** and `--neural-mode disabled`; the mode is pinned in the bootstrap and cannot silently change on reopen.
 
+If two processes open the same journal, an append by one makes the other process's in-memory state stale. Reopen the journal in that process before taking a checkpoint or writing another frame or GENESIS change.
+
 Windows PowerShell:
 
 ```powershell
