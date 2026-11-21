@@ -150,6 +150,29 @@ def compile_body(genesis_phenotype, chromosome, age_years):
     }
 
 
+
+def compile_body_at_month(genesis_phenotype, chromosome, age_months):
+    """Read-only, integer-only interpolated body projection for ages 6..16.
+
+    The calendar is a separate state, not a chromosome; this interpolates only
+    synthetic dimensional keyframes. No topology, rig, animations, skills,
+    memories, personality or reproductive anatomy are inferred.
+    """
+    _int(age_months, "age_months", AGE_MIN * 12, AGE_MAX * 12)
+    floor_year, residual = divmod(age_months, 12)
+    lower = compile_body(genesis_phenotype, chromosome, floor_year)
+    upper = compile_body(genesis_phenotype, chromosome,
+                         min(AGE_MAX, floor_year + 1))
+    result = dict(lower)
+    result["dimensions"] = {
+        key: value + _round_div(
+            (upper["dimensions"][key] - value) * residual, 12)
+        for key, value in lower["dimensions"].items()
+    }
+    result["age_months"] = age_months
+    return result
+
+
 def validate_human_name(identity, genome_id=None):
     """Names are assigned externally by a human; never encoded in chromosomes."""
     _keys(identity, {"schema", "agent_id", "display_name", "assigned_by"}, "identity")
