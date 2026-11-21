@@ -57,6 +57,9 @@ from .world_room import (
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 100_000
+# One genesis event + 99,990 frames + nine durable epoch markers = 100,000.
+# The sense type allows later absolute ticks, but this source cannot store them.
+MAX_V4_FRAMES = 99_990
 MAX_MOTOR_REPLAY_EVENTS = 10_000
 REPLAY_BATCH_SIZE = 128
 V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
@@ -393,6 +396,8 @@ class Aquarium:
         if not self._v4_epoch:
             return ticks
         end = self.tick + ticks
+        if end > MAX_V4_FRAMES:
+            raise AquariumError("v4 source event budget exhausted at 99,990 frames")
         if end > MAX_ABSOLUTE_TICKS:
             raise AquariumError("v4 absolute tick budget exhausted")
         markers = (max(0, (end - 1) // EPOCH_TICKS - self.epoch_index)
