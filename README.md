@@ -16,8 +16,15 @@ verdict for one exact commit and never performs a merge. Pass the snapshot from
 
 ```sh
 PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+  --require 'aquarium-stdlib (3.11)' --require 'aquarium-stdlib (3.12)' \
+  --require 'aquarium-stdlib (3.13)' \
+  --require 'motor-gate-stdlib (3.11)' --require 'motor-gate-stdlib (3.12)' \
+  --require 'motor-gate-stdlib (3.13)' \
+  --require 'mesh-stdlib (3.11)' --require 'mesh-stdlib (3.12)' \
+  --require 'mesh-stdlib (3.13)'
 ```
+
+Each `--require` names an **exact** job. Enumerate all expected jobs, including every matrix version, plus any additional required workflows for the PR; wildcards or workflow names are not sufficient.
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
 See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
