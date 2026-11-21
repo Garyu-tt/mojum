@@ -176,6 +176,23 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
 
+    def test_snapshot_rejects_impossible_observations_at_early_cell_tick(self):
+        # Globally plausible 100 updates, but a cell last observed at tick 0
+        # could not have received five measurements by then.
+        forged = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "last_tick": 99, "updates": 100,
+            "records": {
+                "0:0": {"rest": [5, 0]},
+                "2500:0": {"rest": [95, 0]},
+            },
+            "last_seen_at": {"0:0": 0, "2500:0": 99},
+            "evictions": 0, "forgotten_observations": 0,
+            "consecutive_rests": 0, "consecutive_blocked_probes": 0,
+        }
+        with self.assertRaisesRegex(CellV3EscapeError, "elapsed ticks"):
+            CellExplorerV3Escape.from_snapshot(forged)
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
