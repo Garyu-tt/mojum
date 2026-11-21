@@ -25,6 +25,7 @@ from .sensory_play import (
 MODEL_SCHEMA_V2 = "mojum.sensory-curiosity.association/2-windowed"
 WINDOW = 64
 MAX_UPDATES_V2 = 10**9
+MAX_CONTACT_TICK = 2**63 - 1
 
 
 class ContactAssociationsV2(ContactAssociations):
@@ -32,23 +33,29 @@ class ContactAssociationsV2(ContactAssociations):
         super().__init__()
         self.evicted_cues = 0
         self.evicted_observations = 0
+        self.last_contact_tick = -1
 
     def snapshot(self):
         return {
             "schema": MODEL_SCHEMA_V2, "table": copy.deepcopy(self.table),
             "updates": self.updates, "evicted_cues": self.evicted_cues,
             "evicted_observations": self.evicted_observations,
+            "last_contact_tick": self.last_contact_tick,
         }
 
     @classmethod
     def from_snapshot(cls, snapshot):
         if (not isinstance(snapshot, dict)
                 or set(snapshot) != {"schema", "table", "updates", "evicted_cues",
-                                     "evicted_observations"}
+                                     "evicted_observations", "last_contact_tick"}
                 or snapshot["schema"] != MODEL_SCHEMA_V2
                 or any(type(snapshot[k]) is not int or snapshot[k] < 0
                        for k in ("updates", "evicted_cues", "evicted_observations"))
                 or snapshot["updates"] > MAX_UPDATES_V2
+                or type(snapshot["last_contact_tick"]) is not int
+                or not -1 <= snapshot["last_contact_tick"] <= MAX_CONTACT_TICK
+                or (snapshot["updates"] == 0) != (snapshot["last_contact_tick"] == -1)
+                or snapshot["updates"] > snapshot["last_contact_tick"] + 1
                 or not isinstance(snapshot["table"], dict)
                 or len(snapshot["table"]) > MAX_CUES):
             raise CuriosityError("invalid developmental model snapshot")
@@ -105,6 +112,7 @@ class ContactAssociationsV2(ContactAssociations):
         m.updates = snapshot["updates"]
         m.evicted_cues = snapshot["evicted_cues"]
         m.evicted_observations = snapshot["evicted_observations"]
+        m.last_contact_tick = snapshot["last_contact_tick"]
         return m
 
     def learn(self, sensor, measurement, prediction):
@@ -129,8 +137,9 @@ class ContactAssociationsV2(ContactAssociations):
         value = measurement.get("measured_deflection")
         if not _finite(value) or not 0 <= value <= 1 or prediction["cue"] is None:
             raise CuriosityError("invalid or unsupported contact response")
-        if self.updates >= MAX_UPDATES_V2:
-            raise CuriosityError("sensory association update budget reached")
+        if (self.updates >= MAX_UPDATES_V2
+                or not self.last_contact_tick < measurement["source_tick"] <= MAX_CONTACT_TICK):
+            raise CuriosityError("stale or exhausted measured contact")
         key = prediction["cue"]
         if key not in self.table and len(self.table) >= MAX_CUES:
             victim = min(self.table, key=lambda k: (self.table[k]["last_update"], k))
@@ -143,6 +152,7 @@ class ContactAssociationsV2(ContactAssociations):
         entry["mean_deflection"] += (value - entry["mean_deflection"]) / entry["count"]
         entry["mean_deflection"] = min(1.0, max(0.0, entry["mean_deflection"]))
         self.updates += 1
+        self.last_contact_tick = measurement["source_tick"]
         entry["last_update"] = self.updates
         return {
             "learned": True, "observed_deflection": value,
