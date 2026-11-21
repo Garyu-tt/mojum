@@ -286,6 +286,22 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         empty = CellExplorerV3Escape().snapshot()
         self.assertEqual(CellExplorerV3Escape.from_snapshot(empty).snapshot(), empty)
 
+    def test_repeated_blocked_probes_survive_snapshot_restore(self):
+        # Escape deliberately re-probes directions already known to block.
+        # Strict snapshot validation must retain those legitimate outcomes.
+        room, start = sealed_cell()
+        policy = CellExplorerV3Escape()
+        _tick_room(policy, room, start, 40)
+        snapshot = policy.snapshot()
+        self.assertTrue(any(
+            blocked > 1
+            for actions in snapshot["records"].values()
+            for _, blocked in actions.values()
+        ))
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot,
+        )
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
