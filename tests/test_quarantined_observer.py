@@ -21,10 +21,14 @@ from mojum.archive_root_receipt import sign_owner_receipt
 from mojum.verified_snapshot import create_key_file
 from mojum.verified_replica_restore import recover_pinned_replica
 from mojum.quarantined_observer import QuarantinedObserver, ObserverError
+from mojum.aquarium import Aquarium
+from mojum.world_room import Room
 from test_segmented_noosphere import OWNER, ZERO, record
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SEED = json.loads((ROOT/"examples/genesis_seed.json").read_text(encoding="utf-8"))
+GRAPH = json.loads((ROOT/"examples/first_loop.json").read_text(encoding="utf-8"))
 
 
 class ImmutableRecoveredAquariumObserverQA(unittest.TestCase):
@@ -118,6 +122,54 @@ class ImmutableRecoveredAquariumObserverQA(unittest.TestCase):
             for wrong in (-1, 65, True, "13"):
                 with self.assertRaises(ObserverError):
                     q.summary(include_private_metadata=True, max_recent=wrong)
+        self.assertFalse(Path(str(self.out)+"-wal").exists())
+
+    def test_real_130_frame_aquarium_observed_as_event_counts_without_payload(self):
+        opts = dict(
+            room=Room(.16, .16), start=(.16, .16),
+            exploration_mode="goal_free", neural_mode="disabled",
+            sensory_mode="none", developmental_policy="local_cell_v4",
+            journal_backend="segmented", journal_segment_size=64,
+        )
+        with Aquarium(self.db, SEED, GRAPH, **opts) as live:
+            for _ in range(130):
+                live.step()
+            original = live.checkpoint()
+            head = original["journal_head"]
+            self.assertEqual(live.store.count(), 131)
+            export_sealed_segments(
+                live.store, self.archive, include_nonpublic=True,
+                external_expected_head=head,
+            )
+            capture_live_tail(
+                live.store, self.archive, include_nonpublic=True,
+                external_expected_source_head=head,
+            )
+        receipt = sign_owner_receipt(
+            self.archive, self.receipt, self.key,
+            source_events=131, external_expected_source_head=head,
+        )
+        recover_pinned_replica(
+            self.archive, self.out, self.receipt, self.key,
+            independently_pinned_receipt_sha256=receipt["receipt_sha256"],
+            expected_agent_id=OWNER, allow_private_restore=True,
+        )
+        with self.open_observer(receipt["receipt_sha256"]) as observer:
+            quiet = observer.summary()
+            self.assertEqual(quiet["journal_events"], 131)
+            self.assertNotIn("topic_counts", quiet)
+            seen = observer.summary(
+                include_private_metadata=True, max_recent=4,
+            )
+            self.assertEqual(seen["topic_counts"]["aquarium.bootstrap"], 1)
+            self.assertEqual(seen["topic_counts"]["aquarium.frame"], 130)
+            self.assertEqual(sum(seen["topic_counts"].values()), 131)
+            self.assertEqual(seen["recent_records"][0]["seq"], 131)
+            self.assertEqual(seen["recent_records"][0]["topic"], "aquarium.frame")
+            self.assertNotIn("payload", json.dumps(seen))
+            self.assertEqual(seen["source_head"], original["journal_head"])
+            with self.assertRaises(ObserverError):
+                observer.append(record(131), expected_head=head)
         self.assertFalse(Path(str(self.out)+"-wal").exists())
 
     def test_wrong_owner_secret_or_receipt_sha_refused(self):
