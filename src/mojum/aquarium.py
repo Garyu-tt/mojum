@@ -655,6 +655,10 @@ class Aquarium:
     def step(self, *, dx=None, dy=None):
         if self._read_only:
             raise AquariumError("Aquarium journal is read-only")
+        # Reject invalid caller input before a v4 boundary marker can modify
+        # the persistent journal or the in-memory epoch/CAS state.
+        if self._epoch_v4 and (dx is not None or dy is not None):
+            raise AquariumError("developmental motor play rejects external dx/dy")
         if self._committed_count + self.required_events_for_steps(1) > self.journal_event_budget:
             raise AquariumError(
                 f"journal event budget reached ({self.journal_event_budget:,}); "
