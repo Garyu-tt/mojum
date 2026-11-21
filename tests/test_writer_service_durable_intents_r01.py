@@ -228,7 +228,7 @@ class DurableIntentWriterServiceTests(unittest.TestCase):
         self.launch()
         for cmd in (
             self.step_msg(1, "bad"),
-            self.step_msg(1, 1e309),
+            self.step_msg(1, 1000000.0),
             {"op": "acquire", "expected_generation": 1,
              "event": acquired(0)},
             self.step_msg(99, .01),
