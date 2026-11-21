@@ -6,7 +6,9 @@ delete a user's old PRIVATE Noosphere journal.
 from contextlib import closing
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import stat
 import sqlite3
 import tempfile
 import unittest
@@ -48,6 +50,27 @@ class AtomicSegmentQA(unittest.TestCase):
 
     def open(self, segment_size=64):
         return SegmentedNoosphere(self.db, OWNER, segment_size=segment_size)
+
+    def test_private_path_is_owner_only_before_sqlite_connect(self):
+        if os.name != "posix":
+            self.skipTest("POSIX permission bits required")
+        actual_connect = sqlite3.connect
+        checked = []
+
+        def connect_after_permission_check(database, *args, **kwargs):
+            if str(database) == str(self.db):
+                # Check the moment SQLite first opens the path, not merely
+                # chmod-after-connection end state.
+                self.assertTrue(self.db.is_file())
+                self.assertEqual(stat.S_IMODE(self.db.stat().st_mode), 0o600)
+                checked.append(str(database))
+            return actual_connect(database, *args, **kwargs)
+
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=connect_after_permission_check):
+            with self.open() as store:
+                self.assertEqual(store.count(), 0)
+        self.assertEqual(checked, [str(self.db)])
 
     def fill(self, store, start, end, *, batch_size=71):
         tip = store.head()
