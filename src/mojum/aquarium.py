@@ -365,6 +365,12 @@ class Aquarium:
             "neural_mode": self.neural_mode,
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
             "manifest_sha256": digest(self.manifest),
+            "development_months": self.development_months,
+            "development_years_floor": self.development_months // 12,
+            "display_name": (self.identity["display_name"]
+                             if self.identity is not None else None),
+            "name_provenance": ("human_declared_unverified"
+                                if self.identity is not None else "not_assigned"),
             "trust": "checksum_only_not_authenticated",
         }
 
