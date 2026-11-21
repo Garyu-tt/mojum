@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from mojum.aquarium import Aquarium
-from mojum.sensory_play import Toy, ToyScene
+from mojum.sensory_play import CuriosityError, Toy, ToyScene
 from mojum.world_room import Room, initial_state
 
 
@@ -31,6 +31,17 @@ def labeled_scene(swap_names=False, reverse_order=False):
 
 
 class SpectatorIdentityIndependenceQA(unittest.TestCase):
+    def test_identical_observable_toys_different_hidden_response_fail_closed(self):
+        # If all public tie-break fields are identical, Python min() falls
+        # back to tuple iteration order and changes an otherwise hidden probe.
+        # The scene must reject that ambiguity before creating a journal.
+        left = Toy("spectator.alpha", 1.75, 2.0, .24, (220, 80, 30), .10)
+        right = Toy("spectator.zeta", 1.75, 2.0, .24, (220, 80, 30), .90)
+        for toys in ((left, right), (right, left)):
+            with self.subTest(names=[t.id for t in toys]):
+                with self.assertRaisesRegex(CuriosityError, "ambiguous observationally identical"):
+                    ToyScene(width=4.0, height=4.0, toys=toys)
+
     def test_numeric_perception_independent_of_spectator_renaming(self):
         room = Room(4.0, 4.0)
         start = initial_state(room, 2.0, 2.0)
