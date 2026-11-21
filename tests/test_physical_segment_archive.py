@@ -3,9 +3,11 @@
 All data are synthetic, created under temporary directories, never copied
 from actual user PRIVATE Noosphere or touched on production/Android.
 """
+import json
 import os
 from pathlib import Path
-import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -213,6 +215,58 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
                 export_sealed_segments(
                     log, self.archive, include_nonpublic=True,
                 )
+
+    def test_real_offline_cli_export_verify_restore_no_private_stdout(self):
+        # Explicit CLI proof: no external connector and no live user data.
+        source_head = self.build(64)
+        env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
+        root = Path(__file__).resolve().parents[1]
+
+        def call(*arguments):
+            return subprocess.run(
+                [sys.executable, "-m", "mojum.segment_archive_cli",
+                 *map(str, arguments)],
+                cwd=root, env=env, capture_output=True, text=True,
+                timeout=20,
+            )
+
+        base = (
+            "export", "--db", self.source,
+            "--agent-id", OWNER, "--segment-size", "64",
+            "--archive-dir", self.archive,
+            "--expected-source-head", source_head,
+        )
+        denied = call(*base)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertEqual(list(self.archive.iterdir()), [])
+        allowed = call(*base, "--include-private")
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        summary = json.loads(allowed.stdout)
+        self.assertEqual(summary["archived_events"], 64)
+        self.assertNotIn("PRIVATE_SYNTHETIC", allowed.stdout)
+        sealed_head = summary["sealed_head"]
+        self.assertEqual(sealed_head, source_head)
+        self.source.rename(self.root / "synthetic-source-offline.sqlite3")
+        verify = call(
+            "verify", "--archive-dir", self.archive,
+            "--expected-sealed-head", sealed_head,
+        )
+        self.assertEqual(verify.returncode, 0, verify.stderr)
+        self.assertEqual(json.loads(verify.stdout)["archived_events"], 64)
+        restore = call(
+            "restore", "--archive-dir", self.archive,
+            "--new-db", self.recovered,
+            "--expected-sealed-head", sealed_head,
+        )
+        self.assertEqual(restore.returncode, 0, restore.stderr)
+        self.assertEqual(json.loads(restore.stdout)["restored_events"], 64)
+        self.assertNotIn(str(self.recovered), restore.stdout)
+        with SegmentedNoosphere(
+            self.recovered, OWNER, segment_size=64,
+        ) as q:
+            self.assertEqual(
+                q.verify_chain(external_expected_head=sealed_head)["count"], 64,
+            )
 
     def test_symlink_archive_file_rejected(self):
         self.build(64)
