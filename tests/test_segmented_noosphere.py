@@ -251,6 +251,29 @@ class AtomicSegmentQA(unittest.TestCase):
         with LocalNoosphere(legacy_db, OWNER) as legacy:
             self.assertEqual(legacy.verify_chain(), saved)
 
+    def test_existing_journal_missing_core_table_refuses_reopen(self):
+        """A damaged existing store must not be silently rebuilt as empty."""
+        with self.open() as journal:
+            original_head = journal.append(record(0), expected_head=ZERO)
+            self.assertEqual(journal.verify_chain()["head"], original_head)
+
+        # Simulate physical schema loss on a disposable PRIVATE fixture.
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute("DROP TABLE segmented_events")
+
+        with self.assertRaisesRegex(NoosphereError, "missing core tables"):
+            self.open()
+
+        # The failed open must not recreate the vanished events table.
+        with closing(sqlite3.connect(self.db)) as db:
+            tables = {
+                name for (name,) in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        self.assertNotIn("segmented_events", tables)
+        self.assertIn("segments", tables)
+
     def test_limits_and_invalid_batch_leave_no_partial_rows(self):
         with self.assertRaises(NoosphereError):
             SegmentedNoosphere(self.db, OWNER, segment_size=True)
