@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p test_sensory_v2_epoch.py -v
-      - name: Old toy bridge and exact v4 epoch replay regressions
+      - name: Original HMAC/legacy sensory replay regressions
         env:
           PYTHONPATH: src
-        run: python -m unittest discover -s tests -p test_sensory_bridge.py -v
+        run: python -m unittest discover -s tests -p test_verified_replay_snapshot.py -v
