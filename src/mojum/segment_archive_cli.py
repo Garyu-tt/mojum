@@ -18,6 +18,9 @@ from .archive_root_receipt import (
     ReceiptError, sign_owner_receipt, verify_owner_receipt,
     verify_two_archive_copies,
 )
+from .archive_device_transfer import (
+    TransferError, copy_pinned_archive_to_device,
+)
 from .segmented_noosphere import SegmentedNoosphere
 from .noosphere import NoosphereError
 
@@ -80,6 +83,16 @@ def main(argv=None):
     pair.add_argument("--receipt-file", type=Path, required=True)
     pair.add_argument("--key-file", type=Path, required=True)
     pair.add_argument("--expected-receipt-sha", required=True)
+    transport = sub.add_parser(
+        "copy-device",
+        help="copy one owner-verified PRIVATE checkpoint to another VFS device",
+    )
+    transport.add_argument("--source-archive", type=Path, required=True)
+    transport.add_argument("--destination-archive", type=Path, required=True)
+    transport.add_argument("--receipt-file", type=Path, required=True)
+    transport.add_argument("--key-file", type=Path, required=True)
+    transport.add_argument("--expected-receipt-sha", required=True)
+    transport.add_argument("--include-private", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -136,13 +149,22 @@ def main(argv=None):
                 args.receipt_file, args.key_file,
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
             )
-        else:
+        elif args.operation == "verify-copies":
             status = verify_two_archive_copies(
                 args.archive_dir_a, args.archive_dir_b,
                 args.receipt_file, args.key_file,
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
             )
-    except (ArchiveError, NoosphereError, ReceiptError) as exc:
+        else:
+            if not args.include_private:
+                parser.error("PRIVATE cross-device copy requires --include-private")
+            status = copy_pinned_archive_to_device(
+                args.source_archive, args.destination_archive,
+                args.receipt_file, args.key_file,
+                independently_pinned_receipt_sha256=args.expected_receipt_sha,
+                include_nonpublic=True,
+            )
+    except (ArchiveError, NoosphereError, ReceiptError, TransferError) as exc:
         parser.error(str(exc))
     # Do not expose PRIVATE data or even absolute source/destination paths.
     status.pop("restored_path", None)

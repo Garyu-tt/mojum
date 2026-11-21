@@ -1,0 +1,36 @@
+name: Mojum R0.20 owner-verified offline cross-device archive transfer
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r020-offline-archive-transfer.yml"
+      - "src/mojum/archive_device_transfer.py"
+      - "src/mojum/segment_archive_cli.py"
+      - "tests/test_archive_device_transfer.py"
+      - "docs/R020_OFFLINE_ARCHIVE_TRANSFER.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-vfs-custody:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Real distinct Linux VFS /tmp -> /dev/shm CLI where available; simulated failover unit QA
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_archive_device_transfer.py -v
+      - name: Parent pinned HMAC owner-root and two-copy tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_archive_root_receipt.py -v
