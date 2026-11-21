@@ -85,6 +85,21 @@ class SegmentedNoosphere:
                 raise NoosphereError(
                     "wrong owner/schema/segment size; old journal unchanged"
                 )
+        # Create PRIVATE files with owner-only mode *before* SQLite opens
+        # them. sqlite3.connect normally creates mode 0666 & umask; applying
+        # chmod after WAL setup permits a temporary read-exposure window.
+        if not preexisting and os.name == "posix":
+            flags = os.O_CREAT | os.O_EXCL | os.O_RDWR
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            try:
+                descriptor = os.open(path, flags, 0o600)
+            except OSError as exc:
+                raise NoosphereError(
+                    "cannot securely create new owner-only segmented journal"
+                ) from exc
+            else:
+                os.close(descriptor)
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         try:
@@ -93,11 +108,6 @@ class SegmentedNoosphere:
             self._db.execute("PRAGMA synchronous=FULL")
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA foreign_keys=ON")
-            if os.name == "posix" and not preexisting:
-                try:
-                    path.chmod(0o600)
-                except OSError:
-                    pass  # Not a replacement for owner filesystem policy.
             # Never change permissions on an existing legacy path while
             # diagnosing an incompatible schema. No automatic migration.
             self._setup()
