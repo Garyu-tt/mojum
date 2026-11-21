@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError, V4_MODE
 from mojum.aquarium_cold_copy import export_cold_copy, verify_cold_copy
+from mojum.aquarium_wire import inspect_journal
 from mojum.genesis import ACQUISITION_SCHEMA
 
 
@@ -50,6 +51,8 @@ class ColdAquariumCopyTests(unittest.TestCase):
             self.assertEqual(exported["journal_head"], baseline["journal_head"])
             self.assertEqual(exported["tick"], baseline["tick"])
             self.assertEqual(exported["event_count"], 10)
+            inspected = inspect_journal(self.exported, external_expected_head=exported["journal_head"])
+            self.assertEqual(inspected["events"], exported["event_count"])
             self.assertEqual(self._verify(exported)["tick"], 9)
             # A second isolated process may resume the verified copy. This
             # does NOT mean both databases form a replicated organism.
@@ -141,10 +144,10 @@ class ColdAquariumCopyTests(unittest.TestCase):
         self.assertEqual(self._verify(first)["journal_head"], first["journal_head"])
         self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
 
-    def test_export_rejects_existing_destination_wal_sidecars(self):
+    def test_export_rejects_existing_destination_sqlite_sidecars(self):
         with Aquarium(self.source, SEED, GRAPH) as child:
             child.step()
-        for suffix in ("-wal", "-shm"):
+        for suffix in ("-wal", "-shm", "-journal"):
             with self.subTest(suffix=suffix):
                 sidecar = self.exported.with_name(self.exported.name + suffix)
                 sidecar.write_bytes(b"existing sidecar")

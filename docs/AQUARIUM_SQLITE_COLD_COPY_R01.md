@@ -64,9 +64,9 @@ coordinated replication: writing to two forks creates divergent histories.
   then checks its deterministic Aquarium checkpoint against that recorded head.
   Concurrent source commits may be included in the consistent backup; the
   output identifies that exact snapshot by head, tick and SHA-256.
-- Verifies the standalone `.sqlite3` has no required WAL sidecar, computes a
-  SHA-256 of the final file and fsyncs the data file. Publishes via hard link
-  to a **new** filename only, never replacing an existing path.
+- Finalizes the standalone `.sqlite3` in SQLite's rollback journal mode so
+  read-only inspection leaves the file ready for verification. Computes a
+  SHA-256 of the final file, fsyncs it, and publishes via hard link to a new path.
 - Import verification requires an expected journal head and owning organism ID;
   expected byte SHA and virtual tick are recommended additional gates.
 - Source file must exist and be a regular non-symlink file; database pages are

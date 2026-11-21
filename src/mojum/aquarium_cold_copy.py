@@ -25,7 +25,7 @@ from .noosphere import _read_first_event
 
 MAX_BACKUP_BYTES = 128_000_000
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
-_WAL_SIDECARS = ("-wal", "-shm")
+_SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 
 
 def _source_file(path):
@@ -53,7 +53,7 @@ def _destination(path):
         raise ValueError("destination requires an existing trusted local parent")
     if os.path.lexists(dest):
         raise FileExistsError("checkpoint destination already exists")
-    if any(os.path.lexists(str(dest) + suffix) for suffix in _WAL_SIDECARS):
+    if any(os.path.lexists(str(dest) + suffix) for suffix in _SQLITE_SIDECARS):
         raise FileExistsError("checkpoint destination has existing SQLite sidecars")
     return dest
 
@@ -118,8 +118,8 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
         raise ValueError("expected organism ID required")
     # Verification must not open an untrusted input through writable Aquarium:
     # an empty SQLite database would otherwise receive a bootstrap event.
-    # A cold-copy artifact is self-contained; never silently ignore WAL pages.
-    if any(os.path.lexists(str(source) + suffix) for suffix in _WAL_SIDECARS):
+    # A cold-copy artifact is self-contained, including any journal state.
+    if any(os.path.lexists(str(source) + suffix) for suffix in _SQLITE_SIDECARS):
         raise ValueError("cold-copy verification requires a self-contained SQLite file")
     checksum = _sha256(source)
     if expected_sha256 is not None and checksum != expected_sha256:
@@ -216,16 +216,20 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
             if before["journal_head"] != copied_head:
                 raise AquariumError("copied journal differs from committed source head")
             count = reopened.store.count()
-        # Reopening in WAL mode must not leave any unexported sidecars.
-        if any(os.path.exists(temporary + suffix) for suffix in _WAL_SIDECARS):
-            raise AquariumError("unexported SQLite backup WAL sidecar")
+        # Publish a standalone file that SQLite can inspect without creating
+        # WAL sidecars. Only the staged backup changes journal mode.
+        with closing(sqlite3.connect(temporary)) as copied:
+            if copied.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+                raise AquariumError("cannot finalize standalone SQLite backup")
+        if any(os.path.lexists(temporary + suffix) for suffix in _SQLITE_SIDECARS):
+            raise AquariumError("unexported SQLite backup sidecar")
         checksum = _sha256(temporary)
         with open(temporary, "r+b") as stream:
             os.fsync(stream.fileno())
         # Publish the validated artifact under a new name, never clobbering.
         os.link(temporary, destination)
     finally:
-        for suffix in ("", *_WAL_SIDECARS):
+        for suffix in ("", *_SQLITE_SIDECARS):
             try:
                 os.unlink(temporary + suffix)
             except FileNotFoundError:
