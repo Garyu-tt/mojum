@@ -176,6 +176,24 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
 
+    def test_rejects_cell_observations_exceeding_last_seen_tick(self):
+        # Globally plausible (100 updates through tick 99), but a cell
+        # last seen at tick 0 cannot have five measured outcomes.
+        forged = CellExplorerV3Escape().snapshot()
+        forged.update({
+            "last_tick": 99,
+            "updates": 100,
+            "records": {
+                "0:0": {"rest": [5, 0]},
+                "2500:0": {"rest": [95, 0]},
+            },
+            "last_seen_at": {"0:0": 0, "2500:0": 99},
+        })
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "more escape cell observations than elapsed ticks",
+        ):
+            CellExplorerV3Escape.from_snapshot(forged)
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
