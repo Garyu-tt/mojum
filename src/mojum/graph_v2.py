@@ -41,11 +41,19 @@ def upgrade_v1(graph, *, labels=None):
     visibility is PRIVATE; overrides are explicit, not inferred from kind.
     """
     original = _json_copy(graph)
-    validate_v1(original)
-    if "origin" in original or any(
-        "visibility" in node or "ports" in node for node in original["nodes"]
+    # Check reserved migration metadata before the stricter v1 validator.
+    # Guard malformed inputs so they still fail as GraphError in validate_v1.
+    if isinstance(original, dict) and (
+        "origin" in original or (
+            isinstance(original.get("nodes"), list) and any(
+                isinstance(node, dict) and (
+                    "visibility" in node or "ports" in node
+                ) for node in original["nodes"]
+            )
+        )
     ):
         raise GraphError("v1 graph already contains reserved v2 metadata")
+    validate_v1(original)
     if labels is None:
         labels = {}
     if not isinstance(labels, dict):
