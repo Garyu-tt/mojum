@@ -18,7 +18,7 @@ import tempfile
 
 from .aquarium import Aquarium, AquariumError
 from .noosphere import STORE_SCHEMA, _open_readonly
-from .noosphere import _read_first_event
+from .noosphere import STORE_SCHEMA, _read_first_event
 
 MAX_BACKUP_BYTES = 128_000_000
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -160,6 +160,18 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
     # Inspect the existing source read-only before allowing that side effect.
     if _read_first_event(source, agent_id) is None:
         raise ValueError("export requires an existing nonempty Aquarium journal")
+    # A pre-existing events chain is not sufficient: older Noosphere versions
+    # silently recreate an empty/missing metadata table on writable open.
+    # Reject that condition before Aquarium can alter the source archive.
+    try:
+        with closing(sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
+                                     uri=True, timeout=5.0)) as probe:
+            probe.execute("PRAGMA query_only=ON")
+            saved = dict(probe.execute("SELECT k,v FROM metadata"))
+    except sqlite3.Error as exc:
+        raise ValueError("source journal metadata missing or unreadable") from exc
+    if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
+        raise ValueError("source journal metadata missing or mismatched")
     opts = _options(agent_id, neural_mode, room, start, dt_ns)
     _require_existing_source_journal(source, agent_id)
     with Aquarium(source, seed, graph, **opts) as original:
