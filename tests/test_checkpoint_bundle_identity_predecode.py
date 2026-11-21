@@ -56,6 +56,18 @@ class CheckpointIdentityPredecodeTests(unittest.TestCase):
             unpack(forged, expected_revision=7,
                    expected_organism_id="dante-1")
 
+    def test_loads_verifies_five_components_exactly_once(self):
+        import mojum.checkpoint_bundle as module
+        wire = dumps(self.bundle)
+        with patch.object(module, "_decode", wraps=module._decode) as decode:
+            self.assertEqual(
+                loads(wire, expected_revision=7,
+                      expected_organism_id="dante-1"), self.bundle)
+            self.assertEqual(decode.call_count, 5)
+        # A redundant validation pass must not be required for strict JSON.
+        with self.assertRaisesRegex(ValueError, "noncanonical"):
+            loads(wire + " ")
+
     def test_missing_manifest_with_expected_identity_fails_cleanly(self):
         malformed = dict(self.bundle, manifest=None)
         with patch("mojum.checkpoint_bundle._decode",
