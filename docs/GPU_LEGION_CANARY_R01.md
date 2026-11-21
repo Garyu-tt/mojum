@@ -24,6 +24,14 @@ and disables proxy configuration. No generated text is stored or printed.
 Response JSON is bounded to 64 KiB. At most 8 endpoints, 64 total requests
 and 16 concurrent HTTP calls are permitted. Failure means exit code 2.
 
+`peak_overlapping_http_calls` counts measured attempt intervals, including
+HTTP errors, failed response validation and timeouts. Those failures must not
+make concurrent load invisible. The separate
+`peak_overlapping_successful_http_calls` preserves the successful-only count.
+Both are client-side call intervals, **not** evidence that GPU kernels ran
+simultaneously; pre-request Python scheduling can also contribute to the
+interval around a failed call.
+
 The report contains model **self-reported** names and token usage, response
 latency and peak overlapping HTTP request intervals. Even 2 overlapping calls
 do NOT prove GPU kernel overlap, two separately loaded model processes,
