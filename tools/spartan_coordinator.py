@@ -254,29 +254,32 @@ def main() -> int:
     args = parser.parse_args()
     Path(args.db).parent.mkdir(parents=True, exist_ok=True)
     db = connect(args.db)
-    create_schema(db)
-    now = int(time.time())
-    if args.action == "init":
-        result = init(db, args.slots, now)
-    elif args.action == "enqueue":
-        with open(args.json, encoding="utf-8") as stream:
-            items = json.load(stream)
-        if not isinstance(items, list):
-            raise ValueError("enqueue input must be an array")
-        result = enqueue(db, items, now)
-    elif args.action == "claim":
-        result = claim(db, args.worker, now, args.ttl)
-    elif args.action == "heartbeat":
-        result = {"renewed": heartbeat(db, args.worker, args.task, now, args.ttl,
-                                       attempt=args.attempt)}
-    elif args.action == "finish":
-        result = {"updated": finish(db, args.worker, args.task, args.result, now,
-                                    args.artifact, attempt=args.attempt)}
-    else:
-        result = status(db)
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    try:
+        create_schema(db)
+        now = int(time.time())
+        if args.action == "init":
+            result = init(db, args.slots, now)
+        elif args.action == "enqueue":
+            with open(args.json, encoding="utf-8") as stream:
+                items = json.load(stream)
+            if not isinstance(items, list):
+                raise ValueError("enqueue input must be an array")
+            result = enqueue(db, items, now)
+        elif args.action == "claim":
+            result = claim(db, args.worker, now, args.ttl)
+        elif args.action == "heartbeat":
+            result = {"renewed": heartbeat(db, args.worker, args.task, now, args.ttl,
+                                           attempt=args.attempt)}
+        elif args.action == "finish":
+            result = {"updated": finish(db, args.worker, args.task, args.result, now,
+                                        args.artifact, attempt=args.attempt)}
+        else:
+            result = status(db)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
 
+    finally:
+        db.close()
 
 if __name__ == "__main__":
     raise SystemExit(main())
