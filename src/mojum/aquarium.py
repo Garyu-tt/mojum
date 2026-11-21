@@ -18,6 +18,7 @@ from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, valida
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as CELL_V2_SCHEMA
+from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as ARCHIVED_V2A_SCHEMA
 from .cell_policy_v3 import CellExplorerV3, SCHEMA as CELL_V3_SCHEMA
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import (ToyContactBridge, validate_scene,
@@ -36,6 +37,7 @@ from .verified_snapshot import (
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 100_000  # Still bounded; full replay is CPU-linear.
+ARCHIVE_MODE = "local_cell_v2_a_archive"  # Identifies #112 ABI; never creates a new journal.
 _OMITTED_MOVEMENT = object()  # Distinguish omitted dx/dy from explicit None.
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
@@ -91,7 +93,7 @@ class Aquarium:
         if exploration_mode not in ("scripted", "goal_free"):
             raise AquariumError("exploration_mode must be scripted or goal_free")
         if type(developmental_policy) is not str or developmental_policy not in (
-                "legacy", "local_cell_v2", "local_cell_v3"):
+                "legacy", "local_cell_v2", "local_cell_v3", ARCHIVE_MODE):
             raise AquariumError("unknown versioned developmental policy")
         if developmental_policy != "legacy" and exploration_mode != "goal_free":
             raise AquariumError("versioned local-cell requires goal_free exploration")
@@ -103,6 +105,12 @@ class Aquarium:
             raise AquariumError("unused synthetic sensory scene")
         if (replay_snapshot_file is None) != (replay_snapshot_key_file is None):
             raise AquariumError("replay snapshot file and key file must be supplied together")
+        self._read_only_archive = developmental_policy == ARCHIVE_MODE
+        if self._read_only_archive:
+            if not Path(db_path).is_file():
+                raise AquariumError("v2A archive mode requires existing SQLite history")
+            if replay_snapshot_file is not None:
+                raise AquariumError("v2A archive cannot use or save an HMAC replay cache")
         self._snapshot_file = replay_snapshot_file
         self._snapshot_key_file = replay_snapshot_key_file
         signed_state = None
@@ -150,6 +158,7 @@ class Aquarium:
         self.explorer = (
             (CellExplorerV3() if developmental_policy == "local_cell_v3"
              else CellExplorer() if developmental_policy == "local_cell_v2"
+             else ArchivedV2AExplorer() if self._read_only_archive
              else Explorer()) if exploration_mode == "goal_free" else None
         )
         self.sensory_bridge = None
@@ -163,10 +172,16 @@ class Aquarium:
             self.manifest["developmental_schema"] = (
                 CELL_V3_SCHEMA if developmental_policy == "local_cell_v3"
                 else CELL_V2_SCHEMA if developmental_policy == "local_cell_v2"
+                else ARCHIVED_V2A_SCHEMA if self._read_only_archive
                 else DEVELOPMENT_SCHEMA
             )
             self.manifest["exploration_mode"] = "goal_free"
-            if developmental_policy != "legacy":
+            if self._read_only_archive:
+                # Recognize the EXISTING #112 bootstrap literally, without
+                # claiming its wire ABI is the #115/#125 v2 implementation.
+                self.manifest["motor_policy"] = "local_cell_v2"
+                self.manifest["motor_policy_schema"] = ARCHIVED_V2A_SCHEMA
+            elif developmental_policy != "legacy":
                 # Explicit new journal only; original bootstrap is unchanged.
                 self.manifest["developmental_policy"] = developmental_policy
         if self.sensory_bridge is not None:
@@ -179,12 +194,15 @@ class Aquarium:
             # private journals must fail closed rather than silently replay
             # historical sensory frames under a different physical model.
             self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
-        self.store = LocalNoosphere(db_path, agent_id)
+        self.store = LocalNoosphere(
+            db_path, agent_id, read_only=self._read_only_archive)
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
         self._committed_head = None
         self._committed_event_count = self.store.count()
         try:
+            if self._read_only_archive and self._committed_event_count == 0:
+                raise AquariumError("archived v2A journal requires a bootstrap")
             if self._committed_event_count == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head, signed_state=signed_state)
@@ -315,6 +333,8 @@ class Aquarium:
             self.sensory_bridge.adopt(self.world, payload["toy_contact"])
 
     def step(self, *, dx=_OMITTED_MOVEMENT, dy=_OMITTED_MOVEMENT):
+        if self._read_only_archive:
+            raise AquariumError("archived v2A journal is strictly read-only")
         if self.explorer is not None:
             # Explicit None is an external command, not an omission.
             if dx is not _OMITTED_MOVEMENT or dy is not _OMITTED_MOVEMENT:
@@ -337,6 +357,8 @@ class Aquarium:
 
     def acquire(self, acquired):
         """Persist an acquired-gene event. Only future/current ticks allowed."""
+        if self._read_only_archive:
+            raise AquariumError("archived v2A journal is strictly read-only")
         if not isinstance(acquired, dict):
             raise AquariumError("acquired change must be an event object")
         if acquired.get("valid_from_tick", -1) < self.tick:
@@ -454,6 +476,8 @@ class Aquarium:
         Snapshot is a speed cache, not the journal. At save time a full SQLite
         hash-chain verification pins the current head/count before publication.
         """
+        if self._read_only_archive:
+            raise AquariumError("archived v2A journal cannot create a replay snapshot")
         if self._snapshot_file is None:
             raise SnapshotError("replay cache not enabled for this Aquarium")
         checkpoint = self.checkpoint()
@@ -601,13 +625,15 @@ def main():
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
     parser.add_argument("--developmental-policy",
-                        choices=("legacy", "local_cell_v2", "local_cell_v3"),
+                        choices=("legacy", "local_cell_v2", "local_cell_v3", ARCHIVE_MODE),
                         default="legacy", help="new explicit policy-pinned SQLite journal")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    if args.developmental_policy == ARCHIVE_MODE and args.ticks != 0:
+        parser.error("archived v2A policy permits --ticks 0 only; no appended frames")
     # Reject a forbidden external movement before opening/bootstrapping SQLite.
     # A failed CLI invocation must not create a new organism or journal.
     if args.exploration_mode == "goal_free" and (
