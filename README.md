@@ -17,7 +17,9 @@ read-only GitHub calls:
 
 ```sh
 SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
-PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA"
+BASE=$(gh api 'repos/{owner}/{repo}/git/ref/heads/main' --jq .object.sha)
+PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 \
+  --expected-head-sha "$SHA" --expected-base-sha "$BASE"
 ```
 
 For `main`, the gate always requires the nine Aquarium, Motor Gate, and Mesh

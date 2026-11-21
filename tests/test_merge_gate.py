@@ -74,14 +74,14 @@ def evaluate_checks(checks, **overrides):
     fact_overrides = {k: v for k, v in overrides.items() if k in fact_fields}
     kwargs = {k: v for k, v in overrides.items() if k not in fact_fields}
     kwargs.setdefault("expected_head_sha", HEAD)
-    kwargs.setdefault("expected_base", fact_overrides.get("base_ref", "release"))
     kwargs.setdefault("expected_base_sha", BASE)
+    kwargs.setdefault("expected_base", fact_overrides.get("base_ref", "release"))
     kwargs.setdefault("required", REQUIRED)
     parsed = parse_snapshot(
         {
             "headRefOid": HEAD,
-            "baseRefName": "main",
             "baseRefOid": BASE,
+            "baseRefName": "main",
             "currentBaseRefOid": BASE,
             "checks": list(checks),
         }
@@ -94,8 +94,8 @@ class SnapshotParsingTests(unittest.TestCase):
         snapshot = {
             "number": 415,
             "headRefOid": HEAD,
-            "baseRefName": "main",
             "baseRefOid": BASE,
+            "baseRefName": "main",
             "currentBaseRefOid": BASE,
             "headRefName": "feature/x",
             "isDraft": False,
@@ -209,6 +209,12 @@ class SnapshotParsingTests(unittest.TestCase):
                 "baseRefName": "main",
                 "baseRefOid": BASE,
                 "base_sha": OLD_BASE,
+            })
+        with self.assertRaisesRegex(SnapshotError, "conflicting aliases"):
+            parse_snapshot({
+                "headRefOid": HEAD,
+                "baseRefName": "main",
+                "base_ref": "release",
             })
 
     def test_snapshot_accepts_full_sha256_object_id(self):
@@ -617,8 +623,8 @@ class CliTests(unittest.TestCase):
         return {
             "number": 419,
             "headRefOid": HEAD,
-            "baseRefName": "release",
             "baseRefOid": BASE,
+            "baseRefName": "release",
             "currentBaseRefOid": BASE,
             "isDraft": False,
             "mergeable": "MERGEABLE",
@@ -647,8 +653,8 @@ class CliTests(unittest.TestCase):
         return [
             "--input", str(path),
             "--expected-head-sha", HEAD,
-            "--expected-base", "release",
             "--expected-base-sha", BASE,
+            "--expected-base", "release",
             "--require", "Aquarium regression QA / test",
             "--require", "Motor Gate / motor",
             "--require", "Mesh contract / mesh",
@@ -682,6 +688,7 @@ class CliTests(unittest.TestCase):
         snapshot["baseRefName"] = "main"
         code, payload, _ = self.invoke(
             "--input", str(self.write(snapshot)), "--expected-head-sha", HEAD,
+            "--expected-base-sha", BASE,
         )
         self.assertEqual(code, EXIT_DEFER)
         self.assertEqual(payload["code"], "MISSING_REQUIRED_CHECK")
@@ -775,6 +782,7 @@ class CliTests(unittest.TestCase):
             code, result, _ = self.invoke(
                 "--pr", "419",
                 "--expected-head-sha", HEAD,
+                "--expected-base-sha", BASE,
                 "--expected-base", "release",
                 "--require", "Aquarium regression QA / test",
                 "--require", "Motor Gate / motor",
@@ -817,13 +825,41 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["code"], "INVALID_INPUT")
         self.assertIn("head changed", result["error"])
 
+    def test_pr_mode_rejects_base_retarget_between_queries(self):
+        view = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(self.snapshot()), stderr=""
+        )
+        pull = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps({
+                "number": 419,
+                "head": {"sha": HEAD},
+                "base": {
+                    "ref": "main",
+                    "sha": BASE,
+                    "repo": {"full_name": "Garyu-tt/mojum"},
+                },
+            }), stderr="",
+        )
+        with mock.patch(
+            "mojum.merge_gate.subprocess.run", side_effect=[view, pull]
+        ):
+            code, result, _ = self.invoke(
+                "--pr", "419", "--expected-head-sha", HEAD,
+                "--expected-base-sha", BASE, "--expected-base", "release",
+                "--require", "x",
+            )
+        self.assertEqual(code, EXIT_REJECT)
+        self.assertEqual(result["code"], "INVALID_INPUT")
+        self.assertIn("base changed", result["error"])
+
     def test_pr_mode_failure_is_invalid_input(self):
         completed = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="not found"
         )
         with mock.patch("mojum.merge_gate.subprocess.run", return_value=completed):
             code, result, _ = self.invoke(
-                "--pr", "1", "--expected-head-sha", HEAD, "--require", "x"
+                "--pr", "1", "--expected-head-sha", HEAD,
+                "--expected-base-sha", BASE, "--require", "x"
             )
         self.assertEqual(code, EXIT_REJECT)
         self.assertEqual(result["code"], "INVALID_INPUT")

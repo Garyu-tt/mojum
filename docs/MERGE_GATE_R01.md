@@ -1,9 +1,10 @@
 # Exact-head CI merge gate (R0.1)
 
 `mojum.merge_gate` is an offline, deterministic guard for PR acceptance
-(issue #415). It answers one question: **may this exact commit be merged right
-now, given the CI evidence for that commit?** It never merges, never pushes,
-never calls a write endpoint, and needs no third-party packages.
+(issue #415). It answers one question: **may this exact head be merged onto
+this exact current base, given the CI evidence for that head?** It never
+merges, never pushes, never calls a write endpoint, and needs no third-party
+packages.
 
 The merge API is not proof that PR-triggered workflows finished. The gate reads
 a snapshot, checks the recorded head SHA against the SHA the caller intends to
@@ -62,7 +63,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
 
 ## Offline usage
 
-Snapshot a PR to JSON, then evaluate it without network access:
+Supply a snapshot containing both `headRefOid` and `baseRefOid`, then evaluate
+it without network access:
 
 ```sh
 PR=419
@@ -87,7 +89,7 @@ second value instead. Missing base evidence fails closed.
 
 ```json
 {"schema":"mojum.merge-gate.v1","verdict":"defer","code":"CHECK_PENDING",
- "exit_code":2,"head_sha":"...","expected_head_sha":"...","reasons":[...],
+ "exit_code":2,"head_sha":"...","base_sha":"...","reasons":[...],
  "merge_performed":false}
 ```
 
@@ -106,8 +108,9 @@ Include additional applicable jobs with `--require`.
 
 ```sh
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+BASE=$(gh api 'repos/{owner}/{repo}/git/ref/heads/main' --jq .object.sha)
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --pr "$PR" --expected-head-sha "$SHA"
+  --pr "$PR" --expected-head-sha "$SHA" --expected-base-sha "$BASE"
 ```
 
 Treat a `ready` result as a prerequisite for the
@@ -127,6 +130,9 @@ enforce the requirements at merge time.
   still move after a client-side read, so re-run immediately before merging
   with `--match-head-commit`; only a repository ruleset closes that server-side
   race completely.
+- Offline mode trusts the supplied `baseRefOid`; generate it from a read-only
+  current-ref query and re-run immediately before merging with
+  `--match-head-commit`.
 - `gh pr view` reports the rollup GitHub considers current. A rollup entry with
   an explicit `headSha` different from the PR head is treated as stale, but
   entries without `headSha` are trusted to belong to the rollup's head.

@@ -2,8 +2,8 @@
 
 The merge endpoint is not proof that the PR-triggered workflows finished, and
 parallel automation can poll a stale rollup. This module turns a *snapshot* of
-a pull request plus the SHA the caller intends to merge into a deterministic
-verdict:
+a pull request plus the head and base SHAs the caller accepted into a
+deterministic verdict:
 
 * ``ready``  -- every required check completed successfully for that exact
   head SHA, the PR's recorded base is still the current target commit, and
@@ -15,8 +15,9 @@ verdict:
 
 The module never calls a merge endpoint and never mutates a repository. A
 caller is expected to run it immediately before merging and to pass the same
-SHA to ``gh pr merge --match-head-commit`` so a last-second push cannot slip
-past the verdict.
+head SHA to ``gh pr merge --match-head-commit`` so a last-second push cannot
+slip past the verdict. Repository protection is still required to close the
+equivalent last-second base movement race.
 
 Inputs are the JSON produced by ``gh pr view --json ...`` (camelCase) and a
 small snake_case fixture schema used by the tests. No third-party packages and
@@ -166,6 +167,21 @@ def _read_oid(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
     return oid
 
 
+def _read_ref(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
+    ref = None
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise SnapshotError(f"{label} must be a nonblank string")
+        value = value.strip()
+        if ref is not None and ref != value:
+            raise SnapshotError(f"{label} has conflicting aliases")
+        ref = value
+    return ref
+
+
 def _parse_check(raw: object, index: int) -> CheckOutcome:
     if not isinstance(raw, Mapping):
         raise SnapshotError(f"check[{index}] must be an object")
@@ -231,7 +247,7 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if head_sha is None:
         raise SnapshotError("snapshot has no head SHA")
 
-    base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
+    base_ref = _read_ref(raw, "snapshot base ref", "baseRefName", "base_ref", "baseRef")
     if not base_ref:
         raise SnapshotError("snapshot has no base ref")
     base_sha = _read_oid(raw, "snapshot base SHA", "baseRefOid", "base_sha", "baseSha")
@@ -533,7 +549,7 @@ def evaluate(
     )
 
 
-def _run_gh_json(command: list[str], *, label: str) -> dict[str, object]:
+def _run_gh_json(command: Sequence[str], *, label: str) -> dict[str, object]:
     """Run one read-only ``gh`` query and require an object response."""
 
     try:
