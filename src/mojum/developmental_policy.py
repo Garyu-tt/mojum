@@ -108,16 +108,25 @@ class Explorer:
     def _zone(sense):
         return f"{int(sense.x * 2)}:{int(sense.y * 2)}"
 
-    def decide(self, sense):
+    def decide(self, sense, *, avoid_actions=()):
         if type(sense) is not Proprioception or sense.tick != self.last_tick + 1:
             raise DevelopmentError("stale or unexpected proprioception tick")
+        if (type(avoid_actions) is not tuple
+                or any(type(a) is not str or a not in ACTIONS or a == "rest"
+                       for a in avoid_actions)
+                or len(set(avoid_actions)) != len(avoid_actions)):
+            raise DevelopmentError("invalid synthetic advisory actions")
         zone = self._zone(sense)
         stored = self.records.get(zone, {})
         # Rotating innate motor play, not a goal-seeking planner. Only learned
         # blocked outcomes inhibit actions in that position neighborhood.
         shift = (sense.tick + int(sense.pulse)) % len(ACTIONS)
         choices = ACTIONS[shift:] + ACTIONS[:shift]
-        action = next((a for a in choices if stored.get(a, [0, 0])[1] == 0), "rest")
+        action = next(
+            (a for a in choices
+             if stored.get(a, [0, 0])[1] == 0 and a not in avoid_actions),
+            "rest",
+        )
         delta = {"rest": (0., 0.), "x+": (STEP_METERS, 0.),
                  "x-": (-STEP_METERS, 0.), "y+": (0., STEP_METERS),
                  "y-": (0., -STEP_METERS)}
@@ -126,8 +135,9 @@ class Explorer:
                 "expected_revision": sense.revision, "tick": sense.tick,
                 "zone": zone, "source": "bounded_goal_free_motor_play"}
 
-    def observe(self, sense, intent, blocked):
-        if type(blocked) is not bool or intent != self.decide(sense):
+    def observe(self, sense, intent, blocked, *, avoid_actions=()):
+        if type(blocked) is not bool or intent != self.decide(
+                sense, avoid_actions=avoid_actions):
             raise DevelopmentError("forged or stale measured motor outcome")
         zone, action = intent["zone"], intent["action"]
         if zone not in self.records and len(self.records) >= MAX_ZONES:
