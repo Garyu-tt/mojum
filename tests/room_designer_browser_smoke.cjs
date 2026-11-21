@@ -161,6 +161,26 @@ async function main() {
       "JSON.parse(document.querySelector('#output').value).start[0]");
     assert.ok(moved>pos.start,"Real SVG pointer drag must change start JSON");
 
+    // Capture a non-private visual acceptance artifact at a phone-like
+    // viewport. Nothing in this synthetic demo originates from a user DB.
+    await cdp.call("Emulation.setDeviceMetricsOverride", {
+      width: 393, height: 852, deviceScaleFactor: 2, mobile: true,
+    });
+    await sleep(180);
+    const capture = await cdp.call("Page.captureScreenshot",{
+      format: "png", captureBeyondViewport: true,
+    });
+    const folder = path.resolve(__dirname, "../ui-qa-artifacts");
+    fs.mkdirSync(folder, {recursive:true});
+    const screenshot = path.join(folder, "room-designer-mobile.png");
+    fs.writeFileSync(screenshot, Buffer.from(capture.data,"base64"));
+    assert.ok(fs.statSync(screenshot).size>10000,
+      "Actual browser screenshot must be nonempty");
+    const responsive = await evaluate(cdp,
+      "getComputedStyle(document.querySelector('.columns')).gridTemplateColumns");
+    assert.equal(responsive.trim().split(" ").length,1,
+      "Phone-width editor must stack its main columns");
+
     console.log("PASS: offline file:// Chrome editor loaded; add, decimal input, invalid " +
       "export block, reset, keyboard arrow and actual SVG pointer drag work");
   } catch (error) {
