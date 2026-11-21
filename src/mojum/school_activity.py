@@ -60,14 +60,40 @@ def load_catalog(path):
     return validate_catalog(document)
 
 
+def _validate_catalog_wire_budget(document):
+    """Enforce the same bounded UTF-8 JSON contract on in-memory catalogs.
+
+    Iterative encoding stops at the byte limit instead of allocating an
+    unbounded serialized copy of caller-provided extra metadata.
+    """
+    try:
+        encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":"), allow_nan=False)
+        size = 0
+        for fragment in encoder.iterencode(document):
+            size += len(fragment.encode("utf-8", errors="strict"))
+            if size > MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+    except SchoolError:
+        raise
+    except (TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as exc:
+        raise SchoolError("invalid catalog JSON encoding") from exc
+
+
 def _nonempty(value, *, limit=160):
-    return isinstance(value, str) and 0 < len(value.strip()) <= limit and not any(ord(c) < 32 for c in value)
+    # Prevent unpaired surrogates and control characters from crossing the
+    # event/catalog boundary as strings that cannot be encoded or audited.
+    return (type(value) is str and 0 < len(value) <= limit
+            and bool(value.strip())
+            and not any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f
+                        or 0xd800 <= ord(c) <= 0xdfff for c in value))
 
 
 def validate_catalog(document):
     """Validate the R0.1 sections without redefining their PLANNED status."""
     if not isinstance(document, dict) or document.get("schema") != CATALOG_SCHEMA:
         raise SchoolError("unknown school catalog schema")
+    _validate_catalog_wire_budget(document)
     if document.get("learning_loop") != list(PHASES):
         raise SchoolError("invalid learning loop")
     sections = document.get("sections")
