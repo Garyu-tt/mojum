@@ -159,6 +159,30 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual(resumed.tick, 2)
             self.assertEqual(resumed.checkpoint()["journal_head"], checkpoint["journal_head"])
 
+    def test_wire_rejects_noncanonical_frame_envelope_with_valid_hash_chain(self):
+        # Metadata-only inspection must not accept a frame whose event ID or
+        # recorded logical time is inconsistent with the canonical v4 replay.
+        for label, event_id, observed_at_ns in (
+            ("wrong-id", "forged-frame-000", 0),
+            ("wrong-time", "frame-000000000000", 1),
+        ):
+            with self.subTest(label=label):
+                path = self.db.with_name(f"{label}.sqlite3")
+                with Aquarium(
+                    path, SEED, GRAPH, motor_mode=V4_MODE, neural_mode="disabled"
+                ) as aquarium:
+                    frame = deepcopy(aquarium._calculate_frame(None, None)[0])
+                    forged = aquarium._record(
+                        "aquarium.frame", event_id, frame,
+                        observed_at_ns, aquarium.genome.revision,
+                    )
+                    aquarium.store.append(
+                        forged, expected_head=aquarium.store.head(),
+                    )
+                    self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+                with self.assertRaisesRegex(NoosphereError, "noncanonical v4 frame envelope"):
+                    inspect_journal(path)
+
     def test_wire_rejects_premature_epoch_marker_with_valid_hash_chain(self):
         """Read-only inspection must enforce the boundary, not just SHA-256."""
         with self.open() as aquarium:
