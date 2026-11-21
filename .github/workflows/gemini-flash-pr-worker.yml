@@ -28,7 +28,20 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Check whether Gemini API key is configured
+        id: api_key
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'GEMINI_API_KEY is not configured; safe no-op (no CLI install or model call).'
+          fi
+
       - name: Inspect open work without exposing a write token
+        if: steps.api_key.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -36,9 +49,11 @@ jobs:
           gh pr list --state open --limit 40 --json number,title,isDraft,headRefName > "$RUNNER_TEMP/open_prs.json"
 
       - name: Install pinned Gemini CLI
+        if: steps.api_key.outputs.configured == 'true'
         run: npm install --global @google/gemini-cli@0.68.0
 
       - name: Suggest one bounded change using Flash-Lite
+        if: steps.api_key.outputs.configured == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
@@ -46,10 +61,6 @@ jobs:
           CI: 'true'
         run: |
           set -euo pipefail
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo 'GEMINI_API_KEY repository secret not set: no model call or PR.' >&2
-            exit 1
-          fi
           # Gemini workspace settings override the HOME-level tool denylist.
           # Fail closed rather than let a future trusted checkout restore
           # shell/network/MCP access while the model API key is in scope.
@@ -88,6 +99,7 @@ jobs:
             --prompt "$(cat "$RUNNER_TEMP/worker-prompt.txt")"
 
       - name: Validate bounded patch
+        if: steps.api_key.outputs.configured == 'true'
         id: patch
         shell: bash
         run: |
