@@ -130,6 +130,14 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual((aquarium.tick, aquarium.epoch_index), (EPOCH_TICKS, 0))
             self.assertEqual(aquarium.store.count(), EPOCH_TICKS + 1)
             before = aquarium.checkpoint()
+            for args in ({"dx": 0.0}, {"dy": 0.0}, {"dx": "invalid"}):
+                with self.subTest(args=args):
+                    with self.assertRaisesRegex(
+                        AquariumError, "rejects external dx/dy"
+                    ):
+                        aquarium.step(**args)
+                    self.assertEqual(aquarium.checkpoint(), before)
+                    self.assertEqual(aquarium.store.count(), EPOCH_TICKS + 1)
             with patch.object(
                 aquarium, "_calculate_frame", side_effect=RuntimeError("boundary frame")
             ):
