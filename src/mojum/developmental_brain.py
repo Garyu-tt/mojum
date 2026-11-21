@@ -45,13 +45,13 @@ def _revision(value, field):
     return value
 
 
-def _interoception(value, *, expected_at_ns):
-    if (type(expected_at_ns) is not int or expected_at_ns < 0
+def _interoception(value, *, expected_time_ns):
+    if (type(expected_time_ns) is not int or expected_time_ns < 0
             or not isinstance(value, dict)
             or set(value) != {"kind", "heartbeat", "observed_at_ns"}
             or value["kind"] != "interoception"
             or type(value["observed_at_ns"]) is not int
-            or value["observed_at_ns"] != expected_at_ns):
+            or value["observed_at_ns"] != expected_time_ns):
         raise DevelopmentalBrainError("invalid interoception input")
     heartbeat = value["heartbeat"]
     if (not isinstance(heartbeat, dict)
@@ -142,12 +142,17 @@ class DevelopmentalBrain:
 
     def decide(
         self, motor: MotorPlay, *, tick, interoception, proprioception,
-        expected_at_ns, near_field=None, avoid=(), prefer=(),
+        near_field=None, avoid=(), prefer=(), dt_ns=10_000_000,
+        expected_at_ns=None,
     ):
-        if type(tick) is not int or tick < 0 or type(motor) is not MotorPlay:
+        if (type(tick) is not int or tick < 0 or type(motor) is not MotorPlay
+                or type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
             raise DevelopmentalBrainError("invalid controller clock or policy")
+        expected_time_ns = tick * dt_ns if expected_at_ns is None else expected_at_ns
+        if (type(expected_time_ns) is not int or expected_time_ns != tick * dt_ns):
+            raise DevelopmentalBrainError("invalid current virtual time")
         current_interoception = _interoception(
-            interoception, expected_at_ns=expected_at_ns,
+            interoception, expected_time_ns=expected_time_ns,
         )
         current_proprioception = _proprioception(proprioception, tick)
         current_near_field = _near_field(
