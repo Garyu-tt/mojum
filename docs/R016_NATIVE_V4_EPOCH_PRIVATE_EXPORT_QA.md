@@ -112,3 +112,40 @@ head also needs separate trusted storage to prevent total rollback.
   original PR #116 incompatible writable v2 ABI gate stays red.
 - PR #140's other releases and source ancestors still require
   independent acceptance; do not auto-promote them because QA passes.
+
+
+## Additional R0.16 parent compatibility regression discovered
+
+While checking #140's exact baseline, the original Aquarium and v4
+epoch integration suites were **RED** (runs 44855942810 and
+44855942775). Three existing budget tests monkeypatched the legacy
+`MAX_REPLAY_EVENTS` downward, but #140 captured a static
+`self.journal_limit` on constructor and then used that cache
+for admission, replay and portable-host preflight. The tests reported
+`AssertionError: ...Error not raised`. This is a real legacy safety
+compatibility defect, not merely an obsolete test.
+
+The daughter branch implements `Aquarium._effective_journal_limit()`
+and uses it for append, pre-epoch admission and cold-replay bounds.
+Legacy mode uses the **minimum** of original selected bound and the
+current fail-closed legacy `MAX_REPLAY_EVENTS`, including dynamically
+tightened budget settings. The explicit segmented source continues
+to use its own separate journal limit; the older constant must not
+silently defeat the opted-in higher backend capacity. The portable
+host uses both the actual Aquarium effective limit and its own
+legacy preflight limit. No policy/motor/sensor/SQLite wire schema
+changes.
+
+Dedicated `test_r016_legacy_budget_compat.py` covers: already-open
+legacy writer refuses a newly tightened journal limit without appending;
+cold replay refuses an already over-limit source; portable host refuses
+the entire session before any step; and segmented v4 can still run
+under artificial tiny legacy test constants. The original preexisting
+`test_streaming_journal_replay.py`,
+`test_portable_host.py` and `test_epoch_v4.py` regressions must also
+return green on the exact child HEAD before any acceptance.
+
+This compatibility change does not assert that owner-controlled
+configuration can safely modify quotas in production at runtime;
+it restores the prior testable fail-closed behavior and preserves
+the default legacy format and separate segmented source.
