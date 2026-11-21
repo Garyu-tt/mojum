@@ -54,6 +54,15 @@ class V2Test(unittest.TestCase):
         with self.assertRaises(CuriosityError):
             ContactAssociations.from_snapshot(ContactAssociationsV2().snapshot())
 
+    def test_duplicate_last_update_rejected(self):
+        m = ContactAssociationsV2()
+        feed(m, 0, (1, 1, 1), 0.5)
+        feed(m, 1, (2, 2, 2), 0.5)
+        snapshot = m.snapshot()
+        snapshot["table"]["2:2:2"]["last_update"] = snapshot["table"]["1:1:1"]["last_update"]
+        with self.assertRaisesRegex(CuriosityError, "duplicate association update"):
+            ContactAssociationsV2.from_snapshot(snapshot)
+
     def test_tampered_accounting_rejected(self):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
