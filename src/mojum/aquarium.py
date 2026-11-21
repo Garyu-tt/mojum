@@ -26,6 +26,13 @@ from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
 from .cell_policy_v3 import CellExplorerV3, SCHEMA as V3_SCHEMA
+from .cell_policy_v4 import CellExplorerV4, SCHEMA as V4_SCHEMA
+from .epoch_sense_v2 import (
+    EPOCH_TICKS,
+    EpochProprioception,
+    MAX_ABSOLUTE_TICKS,
+    SCHEMA as EPOCH_SENSE_SCHEMA,
+)
 from .local_cell_sense import Proprioception
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
@@ -58,7 +65,12 @@ V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
 V3_MODE = "local_cell_v3"
-MOTOR_MODES = ("scripted", "developmental_fixture", V2B_MODE, V3_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE)
+V4_MODE = "local_cell_v4"
+EPOCH_EVENT_SCHEMA = "mojum.aquarium.epoch-transition/1"
+MOTOR_MODES = (
+    "scripted", "developmental_fixture", V2B_MODE, V3_MODE, V4_MODE,
+    V2B_WIRE_MODE, V2A_ARCHIVE_MODE,
+)
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
     "world.room", "brain.placeholder", "memory.episode",
@@ -150,8 +162,9 @@ class Aquarium:
         if type(read_only) is not bool:
             raise AquariumError("read_only must be boolean")
         self._archive_v2a = motor_mode == V2A_ARCHIVE_MODE
+        self._epoch_v4 = motor_mode == V4_MODE
         self._read_only = self._archive_v2a or read_only
-        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE)
+        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE, V4_MODE)
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
@@ -227,8 +240,15 @@ class Aquarium:
                 self.manifest["motor_policy"] = "local_cell_v2"
                 self.manifest["motor_policy_schema"] = V2A_SCHEMA
             else:
-                self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
-                self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE
+                if self._epoch_v4:
+                    self.manifest["developmental_schema"] = V4_SCHEMA
+                    self.manifest["developmental_policy"] = V4_MODE
+                    self.manifest["epoch_transition_schema"] = EPOCH_EVENT_SCHEMA
+                    self.manifest["epoch_ticks"] = EPOCH_TICKS
+                    self.manifest["proprioception_schema"] = EPOCH_SENSE_SCHEMA
+                else:
+                    self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
+                    self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE
         elif self.motor is not None:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
@@ -292,6 +312,8 @@ class Aquarium:
             self.motor = MotorPlay()
         elif self._archive_v2a:
             self.motor = ArchivedV2AExplorer()
+        elif self._epoch_v4:
+            self.motor = CellExplorerV4()
         elif self.motor_mode == V3_MODE:
             self.motor = CellExplorerV3()
         elif self._local_cell:
@@ -310,6 +332,7 @@ class Aquarium:
         except ValueError as exc:
             raise AquariumError("invalid room start coordinates") from exc
         self.tick = 0
+        self.epoch_index = 0
         self.development_months = 72  # separate, non-senescent synthetic developmental calendar
         self.identity = None  # human-declared, never inferred from genes
 
@@ -331,7 +354,10 @@ class Aquarium:
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
         if self._read_only:
             raise AquariumError("Aquarium journal is read-only")
-        if self._local_cell and topic not in {"aquarium.bootstrap", "aquarium.frame"}:
+        allowed = {"aquarium.bootstrap", "aquarium.frame"}
+        if self._epoch_v4:
+            allowed.add("aquarium.epoch")
+        if self._local_cell and topic not in allowed:
             raise AquariumError("local-cell compatibility journals contain only frames")
         # The committed count is cached after bootstrap/replay/CAS append so a
         # long history does not pay a global SQLite count scan per frame. A
@@ -354,9 +380,76 @@ class Aquarium:
     @property
     def journal_event_budget(self):
         """Event ceiling for this journal and its pinned motor wire."""
+        if self._epoch_v4:
+            return MAX_REPLAY_EVENTS
         if self.motor is not None:
             return min(MAX_REPLAY_EVENTS, MAX_MOTOR_REPLAY_EVENTS)
         return MAX_REPLAY_EVENTS
+
+    def required_events_for_steps(self, ticks):
+        """Return the bounded journal admissions for a prospective run.
+
+        Epoch v4 writes one explicit marker at each absolute-tick boundary;
+        all older modes retain their one-frame-per-tick accounting.
+        """
+        if type(ticks) is not int or ticks < 0:
+            raise AquariumError("steps must be a nonnegative integer")
+        if not self._epoch_v4:
+            return ticks
+        end = self.tick + ticks
+        if end > MAX_ABSOLUTE_TICKS:
+            raise AquariumError("local_cell_v4 absolute-tick budget exhausted")
+        markers = (max(0, (end - 1) // EPOCH_TICKS - self.epoch_index)
+                   if ticks else 0)
+        return ticks + markers
+
+    def _epoch_event(self, index):
+        """Build the canonical durable marker for one epoch boundary."""
+        return self._record(
+            "aquarium.epoch", f"epoch-{index:08d}",
+            {
+                "schema": EPOCH_EVENT_SCHEMA,
+                "absolute_tick": self.tick,
+                "epoch_index": index,
+                "previous_epoch_index": index - 1,
+                "epoch_tick": 0,
+                "source": "explicit_bounded_epoch_rollover_without_reset",
+            },
+            self.tick * self.dt_ns,
+            self.genome.revision,
+        )
+
+    def _commit_pending_epoch(self):
+        if not self._epoch_v4:
+            return
+        expected_index = self.tick // EPOCH_TICKS
+        if expected_index == self.epoch_index:
+            return
+        if (self.tick <= 0 or self.tick % EPOCH_TICKS != 0
+                or expected_index != self.epoch_index + 1):
+            raise AquariumError("noncanonical epoch boundary state")
+        marker = self._epoch_event(expected_index)
+        head = self._append_record(
+            marker["topic"], marker["event_id"], marker["payload"],
+            marker["observed_at_ns"], marker["source_revision"],
+        )
+        # Adopt only after the SQLite CAS succeeds.  If the process stops
+        # after the append, replay sees this marker and reconstructs the same
+        # half-step before the next frame.
+        self.epoch_index = expected_index
+        self._committed_head = head
+
+    def _motor_sense(self, pulse):
+        if self._epoch_v4:
+            if self.epoch_index != self.tick // EPOCH_TICKS:
+                raise AquariumError("missing committed epoch boundary")
+            return EpochProprioception(
+                self.tick, self.epoch_index, self.tick % EPOCH_TICKS,
+                self.world.revision, self.world.x, self.world.y, pulse,
+            )
+        return Proprioception(
+            self.tick, self.world.revision, self.world.x, self.world.y, pulse,
+        )
 
     def _calculate(self, dx, dy):
         """Preserve the existing three-value scripted fixture test contract."""
@@ -404,8 +497,7 @@ class Aquarium:
         output = runtime.step()
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         if self._local_cell:
-            sense = Proprioception(self.tick, self.world.revision, self.world.x, self.world.y,
-                                   sensory["heartbeat"]["pulse"])
+            sense = self._motor_sense(sensory["heartbeat"]["pulse"])
             intent = next_motor.decide(sense)
             dx, dy = intent["dx"], intent["dy"]
         graph_brain = output[self.kind_ids["brain.placeholder"]]["observation"]
@@ -552,6 +644,9 @@ class Aquarium:
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
+        if self._committed_count + self.required_events_for_steps(1) > self.journal_event_budget:
+            raise AquariumError("requested step exceeds remaining journal event budget")
+        self._commit_pending_epoch()
         frame = self._calculate_frame(dx, dy)
         payload, next_world, next_learner, next_motor, next_contact, next_range = frame
         head = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
@@ -644,9 +739,21 @@ class Aquarium:
             raise AquariumError("unexpected journal ownership or visibility")
         if event["observed_at_ns"] != self.tick * self.dt_ns:
             raise AquariumError("unsynchronized event time")
-        if self._local_cell and event["topic"] != "aquarium.frame":
+        allowed_local_topics = {"aquarium.frame"}
+        if self._epoch_v4:
+            allowed_local_topics.add("aquarium.epoch")
+        if self._local_cell and event["topic"] not in allowed_local_topics:
             raise AquariumError("local-cell compatibility journals contain only frames")
-        if event["topic"] == "development.advance":
+        if event["topic"] == "aquarium.epoch":
+            payload = event["payload"]
+            expected_index = self.tick // EPOCH_TICKS
+            if (not self._epoch_v4
+                    or self.tick <= 0 or self.tick % EPOCH_TICKS != 0
+                    or self.epoch_index + 1 != expected_index
+                    or event != self._epoch_event(expected_index)):
+                raise AquariumError("invalid epoch boundary or forged transition")
+            self.epoch_index = expected_index
+        elif event["topic"] == "development.advance":
             payload = event["payload"]
             if not isinstance(payload, dict) or set(payload) != {
                 "schema", "from_months", "to_months", "reason"
@@ -695,6 +802,8 @@ class Aquarium:
                 raise AquariumError("noncanonical acquired event envelope")
             self.genome = next_ledger
         elif event["topic"] == "aquarium.frame":
+            if self._epoch_v4 and self.epoch_index != self.tick // EPOCH_TICKS:
+                raise AquariumError("replay frame missing epoch transition")
             if event["event_id"] != f"frame-{self.tick:012d}":
                 raise AquariumError("frame identifier discontinuity")
             move = event["payload"].get("movement_request")
@@ -725,7 +834,8 @@ class Aquarium:
 
     def checkpoint(self):
         state = {
-            "schema": "mojum.aquarium.checkpoint/1",
+            "schema": ("mojum.aquarium.checkpoint/2"
+                       if self._epoch_v4 else "mojum.aquarium.checkpoint/1"),
             "agent_id": self.agent_id, "tick": self.tick,
             "sim_time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
@@ -744,6 +854,9 @@ class Aquarium:
         }
         if self._local_cell:
             state["developmental_state"] = self.motor.snapshot()
+            if self._epoch_v4:
+                state["epoch_index"] = self.epoch_index
+                state["epoch_tick"] = self.tick % EPOCH_TICKS
         elif self.motor is not None:
             state["motor_mode"] = self.motor_mode
             state["motor_state"] = self.motor.snapshot()
@@ -839,7 +952,11 @@ def main():
     with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
-        if aquarium.stored_events + args.ticks > aquarium.journal_event_budget:
+        try:
+            required = aquarium.required_events_for_steps(args.ticks)
+        except AquariumError as exc:
+            parser.error(str(exc))
+        if aquarium.stored_events + required > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=dx, dy=dy)
