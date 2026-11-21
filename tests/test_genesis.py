@@ -164,5 +164,40 @@ class GenesisContractTests(unittest.TestCase):
             l.append(event("overflow", recorded=400), l.revision)
 
 
+    def test_invalid_unicode_seed_fields_rejected(self):
+        for field in ("genome_id", "revision"):
+            for invalid in ("\ud800", "prefix\udfff"):
+                with self.subTest(field=field, invalid=ascii(invalid)):
+                    seed = copy.deepcopy(SEED)
+                    seed[field] = invalid
+                    with self.assertRaisesRegex(GenesisError, "valid UTF-8"):
+                        GenomeLedger(seed)
+
+    def test_invalid_unicode_acquisition_is_atomic(self):
+        for field in ("event_id", "source", "evidence"):
+            with self.subTest(field=field):
+                ledger = GenomeLedger(SEED)
+                before = ledger.revision
+                invalid = event()
+                invalid[field] = "prefix\ud800"
+                with self.assertRaisesRegex(GenesisError, "valid UTF-8"):
+                    ledger.append(invalid, before)
+                self.assertEqual(ledger.revision, before)
+                self.assertEqual(ledger.snapshot()["events"], [])
+
+    def test_canonical_json_rejects_nested_surrogates_but_keeps_unicode(self):
+        import hashlib
+        from mojum.genesis import canonical, sha256
+
+        with self.assertRaisesRegex(GenesisError, "canonical UTF-8 JSON"):
+            canonical({"nested": ["valid", "\ud800"]})
+        with self.assertRaisesRegex(GenesisError, "canonical UTF-8 JSON"):
+            sha256({"\udfff": "invalid key"})
+        valid = {"name": "Данте", "emoji": "🐈", "lesson": "音楽"}
+        expected = json.dumps(valid, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        self.assertEqual(canonical(valid), expected)
+        self.assertEqual(sha256(valid), hashlib.sha256(expected.encode("utf-8")).hexdigest())
+
+
 if __name__ == "__main__":
     unittest.main()

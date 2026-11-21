@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 
@@ -194,6 +195,80 @@ class NoosphereTests(unittest.TestCase):
             self.assertEqual(self.store.count(), 1)
         finally:
             other.close()
+
+    def test_non_utf8_events_fail_closed_without_mutating_journal(self):
+        bad = "\ud800"
+        for field in ("event_id", "topic", "source", "source_revision",
+                      "payload_value", "payload_key"):
+            with self.subTest(field=field):
+                malformed = event()
+                if field == "payload_value":
+                    malformed["payload"] = {"nested": [{"value": bad}]}
+                elif field == "payload_key":
+                    malformed["payload"] = {bad: "value"}
+                else:
+                    malformed[field] = bad
+                original_head = self.store.head()
+                with self.assertRaises(NoosphereError):
+                    self.store.append(malformed, expected_head=original_head)
+                self.assertEqual(self.store.head(), original_head)
+                self.assertEqual(self.store.count(), 0)
+        # A failed validation must not poison the next legitimate append.
+        self.store.append(event(), expected_head=self.store.head())
+        self.assertEqual(self.store.verify_chain()["count"], 1)
+
+    def test_non_utf8_owner_and_filters_fail_with_contract_error(self):
+        bad = "\ud800"
+        invalid_db = Path(self.tmp.name) / "bad-owner.sqlite"
+        with self.assertRaisesRegex(NoosphereError, "valid UTF-8"):
+            LocalNoosphere(invalid_db, bad)
+        self.assertFalse(invalid_db.exists())
+        self.store.append(event(), expected_head=self.store.head())
+        for kwargs in ({"topic": bad}, {"source": bad}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(NoosphereError, "valid UTF-8"):
+                    self.store.dataset(**kwargs)
+        self.assertEqual(self.store.verify_chain()["count"], 1)
+
+    def test_unpaired_surrogate_in_persisted_json_rejected_on_replay(self):
+        self.store.append(event(), expected_head=self.store.head())
+        damaged = event()
+        damaged["payload"] = {"value": "\ud800"}
+        # json.loads accepts escaped lone surrogates. Replay must refuse them
+        # as NoosphereError rather than propagating UnicodeEncodeError.
+        wire = json.dumps(damaged, ensure_ascii=True, sort_keys=True)
+        self.store._db.execute("DROP TRIGGER noosphere_no_update")
+        self.store._db.execute(
+            "UPDATE events SET wire_json = ? WHERE seq = 1", (wire,)
+        )
+        with self.assertRaisesRegex(NoosphereError, "invalid event at row 1"):
+            self.store.verify_chain()
+
+    def test_utf8_cyrillic_and_emoji_roundtrip_across_cold_reopen(self):
+        good = event("урок-🎨", topic="рисование",
+                     payload={"набросок": "цветной 🎨"})
+        anchor = self.store.append(good, expected_head=self.store.head())
+        self.assertEqual(self.store.verify_chain(external_expected_head=anchor)["count"], 1)
+        self.store.close()
+        self.store = LocalNoosphere(self.path, "dante-synthetic")
+        self.assertEqual(self.store.verify_chain(external_expected_head=anchor)["count"], 1)
+        self.assertEqual(
+            self.store.dataset(include_nonpublic=True)["projection"]["items"][0]["event"],
+            good,
+        )
+
+    def test_json_encoder_recursion_failure_is_atomic_contract_error(self):
+        # A fixed nesting depth is not a portable recursion failure on
+        # Python 3.11-3.13. Inject the encoder exception deterministically.
+        before = (self.store.head(), self.store.count())
+        with patch("mojum.noosphere.json.dumps",
+                   side_effect=RecursionError("synthetic JSON depth exhaustion")):
+            with self.assertRaisesRegex(NoosphereError, "canonical UTF-8 JSON"):
+                self.store.append(event(), expected_head=before[0])
+        self.assertEqual((self.store.head(), self.store.count()), before)
+        self.assertEqual(self.store.verify_chain()["count"], 0)
+        self.store.append(event(), expected_head=before[0])
+        self.assertEqual(self.store.verify_chain()["count"], 1)
 
     def test_oversize_event_rejected(self):
         huge = event(payload={"x": "0" * 200_000})

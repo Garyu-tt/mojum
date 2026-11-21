@@ -12,6 +12,8 @@ import math
 
 
 SCHEMA = "mojum.neural.delayed-pulse/1"
+# Old journals use the host's float sum without recording which algorithm it used.
+NATIVE_PULSE_SUM = "ordered" if sum((1e16, 1.0, -1e16)) == 0.0 else "compensated"
 
 
 class NeuralError(ValueError):
@@ -36,6 +38,26 @@ def _clamp(value, low, high):
     return min(high, max(low, value))
 
 
+def _ordered_sum(terms):
+    total = 0.0
+    for term in terms:
+        total += term
+    return total
+
+
+def _compensated_sum(terms):
+    # Neumaier summation for the predictor's three bounded, finite products.
+    total = correction = 0.0
+    for term in terms:
+        new_total = total + term
+        if abs(total) >= abs(term):
+            correction += (total - new_total) + term
+        else:
+            correction += (term - new_total) + total
+        total = new_total
+    return total + correction
+
+
 class PulsePredictor:
     """One-step delayed online LMS learner in a bounded 3-feature space.
 
@@ -44,9 +66,12 @@ class PulsePredictor:
     The learner never emits actuation commands.
     """
 
-    def __init__(self, learning_rate=0.10):
+    def __init__(self, learning_rate=0.10, *, summation=NATIVE_PULSE_SUM):
         if not _finite(learning_rate) or not (0.0 < learning_rate <= 0.5):
             raise NeuralError("invalid learning rate")
+        if summation not in ("ordered", "compensated"):
+            raise NeuralError("unsupported pulse summation")
+        self._sum = _ordered_sum if summation == "ordered" else _compensated_sum
         self._rate = float(learning_rate)
         self._weights = [0.5, 0.0, 0.0]
         self._pending = None
@@ -70,13 +95,14 @@ class PulsePredictor:
         }
 
     @classmethod
-    def from_snapshot(cls, state):
+    def from_snapshot(cls, state, *, summation=NATIVE_PULSE_SUM):
+        """Restore v1 weights using the caller's summation rule; v1 omits it."""
         if not isinstance(state, dict) or set(state) != {
             "schema", "learning_rate", "weights", "pending_features",
             "updates", "loss_sum", "last_observed_at_ns",
         } or state["schema"] != SCHEMA:
             raise NeuralError("incompatible neural snapshot")
-        inst = cls(state["learning_rate"])
+        inst = cls(state["learning_rate"], summation=summation)
         weights = state["weights"]
         pending = state["pending_features"]
         updates = state["updates"]
@@ -103,7 +129,7 @@ class PulsePredictor:
         return inst
 
     def _estimate(self, features):
-        return _clamp(sum(w * x for w, x in zip(self._weights, features)), 0.0, 1.0)
+        return _clamp(self._sum(w * x for w, x in zip(self._weights, features)), 0.0, 1.0)
 
     def observe(self, sensory):
         if not isinstance(sensory, dict) or sensory.get("kind") != "interoception":

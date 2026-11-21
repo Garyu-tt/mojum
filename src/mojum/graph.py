@@ -1,6 +1,7 @@
 """Typed graph contract validator: no dynamically executable user code."""
 
 from collections import defaultdict
+import json
 
 SCHEMA = "mechanicus.universal-graph/1"
 
@@ -19,9 +20,30 @@ class GraphError(ValueError):
     pass
 
 
+def _unique_json_object(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise GraphError(f"Duplicate graph JSON key: {key!r}")
+        obj[key] = value
+    return obj
+
+
+def load_graph(path):
+    """Read UTF-8 graph JSON without collapsing duplicate keys."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GraphError("Malformed graph JSON") from exc
+
+
 def validate(graph):
     if not isinstance(graph, dict) or graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
+    # v1 has exactly one canonical wire layout. Reject unknown top-level
+    # fields instead of silently accepting metadata that the executor ignores.
+    if set(graph) - {"schema", "id", "revision", "nodes", "edges"}:
+        raise GraphError("Unsupported graph v1 field")
     nodes = graph.get("nodes")
     edges = graph.get("edges")
     if not isinstance(nodes, list) or not nodes or not isinstance(edges, list):
@@ -30,26 +52,36 @@ def validate(graph):
         raise GraphError("Graph exceeds safe bootstrap size")
     by_id = {}
     for n in nodes:
-        if not isinstance(n, dict) or not isinstance(n.get("id"), str) or not n["id"]:
+        if not isinstance(n, dict) or set(n) != {"id", "kind", "config", "notes"}:
+            raise GraphError("Unsupported graph v1 node shape")
+        if not isinstance(n["id"], str) or not n["id"]:
             raise GraphError("Every node requires a nonempty string ID")
         if n["id"] in by_id:
             raise GraphError("Duplicate node ID: " + n["id"])
-        if n.get("kind") not in PORTS:
-            raise GraphError("Unsupported node kind: " + str(n.get("kind")))
+        kind = n.get("kind")
+        if not isinstance(kind, str) or kind not in PORTS:
+            raise GraphError("Unsupported node kind: " + str(kind))
         if not isinstance(n.get("config"), dict) or not isinstance(n.get("notes"), dict):
             raise GraphError("Every node needs config and notes objects")
-        if not n["notes"].get("purpose"):
-            raise GraphError("Node notes.purpose is required")
+        purpose = n["notes"].get("purpose")
+        if not isinstance(purpose, str) or not purpose.strip():
+            raise GraphError("Node notes.purpose must be nonempty text")
         by_id[n["id"]] = n
     incoming = defaultdict(dict)
     adjacency = defaultdict(set)
     indegree = {name: 0 for name in by_id}
     for e in edges:
-        try:
-            src, dst = e["from"], e["to"]
-            sid, sport, did, dport = src["node"], src["port"], dst["node"], dst["port"]
-        except (TypeError, KeyError):
-            raise GraphError("Malformed edge endpoint") from None
+        # A mixed v1/alternate-v1 record may carry ignored source/target aliases
+        # alongside canonical from/to, so reject any extra or absent wire keys.
+        if not isinstance(e, dict) or set(e) != {"from", "to"}:
+            raise GraphError("Unsupported graph v1 edge shape")
+        src, dst = e["from"], e["to"]
+        if (not isinstance(src, dict) or set(src) != {"node", "port"}
+                or not isinstance(dst, dict) or set(dst) != {"node", "port"}):
+            raise GraphError("Malformed edge endpoint")
+        sid, sport, did, dport = src["node"], src["port"], dst["node"], dst["port"]
+        if not all(isinstance(value, str) for value in (sid, sport, did, dport)):
+            raise GraphError("Malformed edge endpoint")
         if sid not in by_id or did not in by_id:
             raise GraphError("Edge references absent node")
         if sport not in PORTS[by_id[sid]["kind"]][1] or dport not in PORTS[by_id[did]["kind"]][0]:

@@ -66,18 +66,52 @@ class Simulation:
         return {"state": state, "sha256": digest(state)}
 
     def restore(self, snapshot):
-        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("state"), dict):
+        """Cold-restore only episodes that the pinned graph can reproduce.
+
+        The checksum detects accidental changes, not forgery. Deterministic
+        replay also catches internally inconsistent checksum-rewritten histories.
+        Validate everything before changing the live clock or episode list.
+        """
+        if (not isinstance(snapshot, dict) or set(snapshot) != {"state", "sha256"}
+                or not isinstance(snapshot["state"], dict)):
             raise GraphError("Invalid snapshot")
         state = snapshot["state"]
-        if snapshot.get("sha256") != digest(state):
+        if set(state) != {"schema", "graph_sha256", "tick", "dt_ns", "episodes"}:
+            raise GraphError("Invalid snapshot state shape")
+        try:
+            matches_checksum = (type(snapshot["sha256"]) is str
+                                and snapshot["sha256"] == digest(state))
+        except (TypeError, ValueError, OverflowError, UnicodeError) as exc:
+            raise GraphError("Snapshot contains noncanonical JSON") from exc
+        if not matches_checksum:
             raise GraphError("Snapshot checksum mismatch")
-        if state.get("schema") != "mojum.sim-checkpoint/0.1" or state.get("graph_sha256") != self.graph_hash or state.get("dt_ns") != self.dt_ns:
+        if (state["schema"] != "mojum.sim-checkpoint/0.1"
+                or state["graph_sha256"] != self.graph_hash
+                or state["dt_ns"] != self.dt_ns):
             raise GraphError("Snapshot version, graph or dt mismatch")
-        tick = state.get("tick")
-        episodes = state.get("episodes")
-        if type(tick) is not int or tick < 0 or not isinstance(episodes, list) or len(episodes) != tick:
+        tick, episodes = state["tick"], state["episodes"]
+        if (type(tick) is not int or tick < 0
+                or not isinstance(episodes, list) or len(episodes) != tick):
             raise GraphError("Inconsistent snapshot state")
-        if any(not isinstance(e, dict) or e.get("tick") != i or e.get("observed_at_ns") != i * self.dt_ns for i, e in enumerate(episodes)):
-            raise GraphError("Inconsistent episode sequence")
+        # A matching SHA-256 is not evidence that the episode payload came
+        # from this graph. Re-run the deterministic graph from tick zero.
+        replay = Simulation(self.graph, dt_ns=self.dt_ns)
+        for i, episode in enumerate(episodes):
+            if (not isinstance(episode, dict)
+                    or type(episode.get("tick")) is not int
+                    or episode["tick"] != i
+                    or type(episode.get("observed_at_ns")) is not int
+                    or episode["observed_at_ns"] != i * self.dt_ns):
+                raise GraphError("Inconsistent episode sequence")
+            replay.step()
+            # Compare canonical JSON rather than Python dict equality so that
+            # a forged False is never interchangeable with integer zero.
+            try:
+                actual = canonical(episode)
+                expected = canonical(replay.episodes[-1])
+            except (TypeError, ValueError, OverflowError, UnicodeError) as exc:
+                raise GraphError("Snapshot contains noncanonical episode JSON") from exc
+            if actual != expected:
+                raise GraphError("Snapshot episode differs from deterministic replay")
         self.tick = tick
         self.episodes = copy.deepcopy(episodes)

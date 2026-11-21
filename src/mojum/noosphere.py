@@ -18,7 +18,7 @@ EVENT_SCHEMA = "mojum.noosphere.event/1"
 STORE_SCHEMA = "mojum.noosphere.sqlite/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
 _ALLOWED_VISIBILITY = frozenset(("PUBLIC", "PRIVATE", "RESTRICTED"))
-_ZERO = "0" * 64
+EMPTY_HEAD = "0" * 64
 _MAX_PAYLOAD_BYTES = 128_000
 
 
@@ -29,6 +29,12 @@ class NoosphereError(ValueError):
 def _text(value, field, max_length=256):
     if not isinstance(value, str) or not value.strip() or len(value) > max_length:
         raise NoosphereError(f"{field} requires a nonempty string of <= {max_length} characters")
+    # Python str permits isolated UTF-16 surrogate code points, but our
+    # persisted JSON / SQLite contract requires canonical UTF-8 throughout.
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise NoosphereError(f"{field} must be valid UTF-8") from exc
     return value
 
 
@@ -38,11 +44,37 @@ def _integer(value, field, minimum=0, maximum=2**63 - 1):
     return value
 
 
+_MAX_JSON_DEPTH = 256
+
+
+def _check_json_depth(value):
+    """Bound JSON container nesting without recursion or an extra deep copy."""
+    frames = [(iter((value,)), 0)]
+    while frames:
+        items, parent_depth = frames[-1]
+        try:
+            item = next(items)
+        except StopIteration:
+            frames.pop()
+            continue
+        if isinstance(item, (dict, list, tuple)):
+            depth = parent_depth + 1
+            if depth > _MAX_JSON_DEPTH:
+                raise NoosphereError("event JSON nesting limit exceeded")
+            children = item.values() if isinstance(item, dict) else item
+            frames.append((iter(children), depth))
+
+
 def _canonical(value):
+    _check_json_depth(value)
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise NoosphereError("event must contain canonical JSON") from exc
+        wire = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        # json.dumps(ensure_ascii=False) can return an unpaired surrogate.
+        # Reject it before hashing or touching the durable SQLite journal.
+        wire.encode("utf-8")
+        return wire
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise NoosphereError("event must contain canonical UTF-8 JSON") from exc
 
 
 def _sha(value):
@@ -105,18 +137,25 @@ class LocalNoosphere:
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.execute("PRAGMA trusted_schema=OFF")
-        self._db.execute("PRAGMA synchronous=FULL")
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA foreign_keys=ON")
-        if os.name == "posix":
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass  # Caller must enforce host filesystem policy.
-        self._setup()
+        # An exception inside __init__ never reaches __exit__/close() of a
+        # context manager. In particular a wrong owner/schema must not leave
+        # an unreachable live sqlite3.Connection for Python 3.13 GC to warn on.
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("PRAGMA trusted_schema=OFF")
+            self._db.execute("PRAGMA synchronous=FULL")
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA foreign_keys=ON")
+            if os.name == "posix":
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass  # Caller must enforce host filesystem policy.
+            self._setup()
+        except BaseException:
+            self._db.close()
+            raise
 
     def close(self):
         self._db.close()
@@ -168,7 +207,7 @@ class LocalNoosphere:
         self._db.execute("BEGIN IMMEDIATE")
         try:
             row = self._db.execute("SELECT seq,event_hash,recorded_at_ns FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-            previous = row["event_hash"] if row else _ZERO
+            previous = row["event_hash"] if row else EMPTY_HEAD
             if expected_head != previous:
                 raise NoosphereError("stale event head: CAS failed")
             if row and checked["recorded_at_ns"] < row["recorded_at_ns"]:
@@ -193,14 +232,14 @@ class LocalNoosphere:
 
     def head(self):
         row = self._db.execute("SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-        return row["event_hash"] if row else _ZERO
+        return row["event_hash"] if row else EMPTY_HEAD
 
     def count(self):
         return self._db.execute("SELECT count(*) FROM events").fetchone()[0]
 
     def verify_chain(self, *, external_expected_head=None):
         """Detect accidental DB corruption. Without an independent anchor this is NOT tamper-proof."""
-        prev = _ZERO
+        prev = EMPTY_HEAD
         last_recorded = -1
         expected_seq = 1
         sql = ("SELECT seq,event_id,agent_id,topic,visibility,observed_at_ns,"
