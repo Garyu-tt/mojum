@@ -18,6 +18,7 @@ on:
       - "src/mojum/room_contract.py"
       - "examples/room_simple_mixed.json"
       - "docs/R015_VISUAL_ROOM_DESIGNER.md"
+      - "docs/R015_OFFLINE_WALK_PREVIEW.md"
   workflow_dispatch:
 
 permissions:
