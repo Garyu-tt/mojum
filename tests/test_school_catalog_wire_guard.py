@@ -45,6 +45,20 @@ class SchoolCatalogWireGuardTests(unittest.TestCase):
         with self.assertRaises(SchoolError):
             validate_catalog(catalog)
 
+    def test_lossy_python_collections_cannot_pass_as_json_metadata(self):
+        # json.JSONEncoder accepts tuples and numeric mapping keys, but
+        # decoding those forms changes their meaning.  A byte limit alone
+        # must not authorize a catalog that would change after persistence.
+        for value in ((1, 2), {1: "numeric-key"},
+                      {"nested": (1, 2)}, {True: "boolean-key"}):
+            with self.subTest(value=repr(value)):
+                catalog = copy.deepcopy(self.catalog)
+                catalog["extension"] = value
+                with self.assertRaisesRegex(SchoolError, "round-trip"):
+                    validate_catalog(catalog)
+                with self.assertRaisesRegex(SchoolError, "round-trip"):
+                    run_activity(catalog, "music.starter", script())
+
     def test_exact_canonical_utf8_budget_and_one_byte_over(self):
         catalog = copy.deepcopy(self.catalog)
         catalog["extension"] = ""
