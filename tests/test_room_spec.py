@@ -148,6 +148,26 @@ class ShapeErrorTests(unittest.TestCase):
         raw = b'{"width":NaN,"height":4,"obstacles":[],"start":[1,1]}'
         self.assertIn("non-finite JSON number", errors_of(raw)[0])
 
+    def test_extreme_json_exponents_are_rejected_without_decimal_overflow(self):
+        # These are legal JSON number spellings but cannot be used safely
+        # for finite CPU-bounded geometry calculations.
+        for exponent in (b"1e999999999", b"1e-999999999"):
+            with self.subTest(exponent=exponent):
+                raw = (b'{"width":' + exponent
+                       + b',"height":4,"obstacles":[],"start":[1,1]}')
+                self.assertEqual(
+                    errors_of(raw),
+                    ("width exceeds supported numeric magnitude",),
+                )
+
+    def test_extreme_obstacle_exponent_is_rejected(self):
+        raw = (b'{"width":4,"height":4,'
+               b'"obstacles":[[0,0,1e999999999,1]],"start":[1,1]}')
+        self.assertIn(
+            "obstacles[0][2] exceeds supported numeric magnitude",
+            errors_of(raw),
+        )
+
     def test_invalid_json_is_rejected(self):
         self.assertIn("not valid JSON", errors_of(b"{")[0])
 
