@@ -14,7 +14,7 @@ This workflow is staged as a pull request. Scheduled execution starts only after
 - The model step gets the model API key only, and no GitHub write credentials.
 - Gemini CLI v0.68.0 is pinned and restricts tools to read and edit files. No shell or web-fetch tools.
 - Agent patches are bounded by path allowlist, size, symlink checks and `git diff --check`.
-- Tests run in a separate step without the model key. A separate job with write-scoped `GITHUB_TOKEN` replays the verified artifact into a new branch and opens a **draft PR**.
+- Tests run in a **different job on a fresh runner**, not merely in another step of the Gemini-key job. A credential-free runner applies the bounded candidate patch and runs the full suite; only a successful test job exports the `verified-change` artifact. A third, write-scoped job replays precisely that tested artifact and opens a **draft PR**.
 - Issue/PR text and repository content are untrusted. No private Noosphere data or credentials are supplied.
 
 ## Known limitations
