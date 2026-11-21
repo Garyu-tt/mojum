@@ -138,6 +138,7 @@ class CellExplorerV3Escape:
             if (type(last_seen) is not int
                     or not 0 <= last_seen <= state["last_tick"]):
                 raise CellV3EscapeError("invalid last observed escape cell tick")
+            cell_observations = 0
             for action, counts in actions.items():
                 if (type(counts) is not list or len(counts) != 2
                         or any(type(v) is not int for v in counts)
@@ -148,13 +149,31 @@ class CellExplorerV3Escape:
                 # again, so blocked counts above one are legitimate here.
                 if action == "rest" and counts[1]:
                     raise CellV3EscapeError("impossible blocked rest history")
-                observed_live += counts[0]
+                cell_observations += counts[0]
+            # One measured action per tick, including deterministic re-probes.
+            # A cell cannot contain more observations than its own last tick.
+            if cell_observations > last_seen + 1:
+                raise CellV3EscapeError("more escape observations than elapsed ticks")
+            observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV3EscapeError("escape lost or double-counted observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:
             raise CellV3EscapeError("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
+        if state["updates"] and not state["records"]:
+            raise CellV3EscapeError("escape updates without a retained cell")
+        # One cell is observed per tick. The newest retained stamp must
+        # match the current tick; eviction cannot shrink the full 512 table.
+        stamps = list(state["last_seen_at"].values())
+        if len(set(stamps)) != len(stamps):
+            raise CellV3EscapeError("multiple escape cells observed on one tick")
+        if state["updates"] and max(stamps) != state["last_tick"]:
+            raise CellV3EscapeError("latest escape cell observation does not match tick")
+        if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
+            raise CellV3EscapeError("impossible escape eviction history")
+        if state["evictions"] and len(state["records"]) != MAX_CELLS:
+            raise CellV3EscapeError("escape retention shrank after eviction")
 
         model = cls()
         model.last_tick = state["last_tick"]
