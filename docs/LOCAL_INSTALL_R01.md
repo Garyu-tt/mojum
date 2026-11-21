@@ -46,6 +46,18 @@ The second invocation resumes the same deterministic PRIVATE journal and yields 
 
 `mojum-fixture --ticks 10` runs the bundled graph as a short-lived demonstration. Pass a graph path as the first argument to run your own. The persistent aquarium also accepts explicit `--genome` and `--graph` paths.
 
+To let the 2D fixture choose movements using its prior outcomes, use a separate journal and specify the same motor mode each time you reopen it.
+
+```sh
+mojum-aquarium --db ./motor-play.sqlite3 --motor-mode developmental_fixture --ticks 120
+```
+
+### Moving a shadow journal between Python versions
+
+The v1 pulse predictor stores exact floating-point predictions in the journal. CPython 3.11 and 3.12 can round their sum differently. On open, the Aquarium first checks the full journal using the local summation rule. If a frame differs, it tries the other historical rule from the original genome and world state. A single rule must reproduce every committed frame before the Aquarium can append. Existing event bytes and anchors stay valid.
+
+A very short history can match both rules. In that case `auto` continues with the local rule. To preserve the source's future predictions when moving such a history, pass `--pulse-sum ordered` for a standard CPython 3.11 source or `--pulse-sum compensated` for a standard CPython 3.12/3.13 source. Use the same explicit choice from birth when comparing independent runs across interpreters. [Python 3.12 summation change](https://docs.python.org/3.12/library/functions.html#sum)
+
 ## Isolated test
 
 The full stdlib suite remains:

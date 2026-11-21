@@ -16,7 +16,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
-from .neural import PulsePredictor
+from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .graph import validate as validate_graph
 from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError
@@ -37,6 +37,10 @@ KINDS = (
 
 class AquariumError(ValueError):
     """Nonrecoverable mismatch, invalid command or unsupported fixture."""
+
+
+class _FrameMismatch(AquariumError):
+    """A recorded frame differs from the result of deterministic replay."""
 
 
 def _start_coordinate(value):
@@ -82,7 +86,7 @@ class Aquarium:
     def __init__(
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
-        external_expected_head=None, neural_mode="shadow", motor_mode="scripted",
+        external_expected_head=None, neural_mode="shadow", motor_mode="scripted", pulse_sum="auto",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -92,10 +96,12 @@ class Aquarium:
             raise AquariumError("neural_mode must be shadow or disabled")
         if motor_mode not in ("scripted", "developmental_fixture"):
             raise AquariumError("motor_mode must be scripted or developmental_fixture")
+        if pulse_sum not in ("auto", "ordered", "compensated"):
+            raise AquariumError("pulse_sum must be auto, ordered or compensated")
+        if pulse_sum != "auto" and neural_mode == "disabled":
+            raise AquariumError("explicit pulse summation requires shadow mode")
         self.motor_mode = motor_mode
-        self.motor = MotorPlay() if motor_mode == "developmental_fixture" else None
         self.neural_mode = neural_mode
-        self.learner = PulsePredictor() if neural_mode == "shadow" else None
         self.dt_ns = dt_ns
         self.agent_id = agent_id
         self.seed = validate_seed(seed)
@@ -115,6 +121,7 @@ class Aquarium:
             self.start = (_start_coordinate(start[0]), _start_coordinate(start[1]))
         except AquariumError as exc:
             raise AquariumError("invalid room start coordinates") from exc
+        self._reset_replay_state(NATIVE_PULSE_SUM if pulse_sum == "auto" else pulse_sum)
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
@@ -128,25 +135,30 @@ class Aquarium:
         if self.motor is not None:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
-        self.genome = GenomeLedger(self.seed)
-        try:
-            self.world = initial_state(self.room, *self.start)
-        except ValueError as exc:
-            raise AquariumError("invalid room start coordinates") from exc
-        self.tick = 0
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
-            self._replay(external_expected_head)
+            self._replay(external_expected_head, detect_sum=pulse_sum == "auto" and self.learner is not None)
         except BaseException:
             self.store.close()
             raise
 
     def close(self):
         self.store.close()
+
+    def _reset_replay_state(self, pulse_sum):
+        self._pulse_sum = pulse_sum
+        self.learner = PulsePredictor(summation=pulse_sum) if self.neural_mode == "shadow" else None
+        self.motor = MotorPlay() if self.motor_mode == "developmental_fixture" else None
+        self.genome = GenomeLedger(self.seed)
+        try:
+            self.world = initial_state(self.room, *self.start)
+        except ValueError as exc:
+            raise AquariumError("invalid room start coordinates") from exc
+        self.tick = 0
 
     def __enter__(self):
         return self
@@ -204,7 +216,7 @@ class Aquarium:
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         # Calculate against a copy. The predictor is committed only *after*
         # the SQLite append succeeds, and replay derives identical weights.
-        next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot())
+        next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot(), summation=self._pulse_sum)
                         if self.learner is not None else None)
         learning = next_learner.observe(sensory) if next_learner is not None else None
         if brain.get("status") != "UNIMPLEMENTED" or brain.get("action") is not None:
@@ -266,7 +278,7 @@ class Aquarium:
         self._committed_head = head
         return self.genome.revision
 
-    def _replay(self, external_expected_head):
+    def _replay(self, external_expected_head, *, detect_sum):
         verified = self.store.verify_chain(external_expected_head=external_expected_head)
         count = verified["count"]
         if count > MAX_REPLAY_EVENTS:
@@ -281,6 +293,20 @@ class Aquarium:
         if first != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
                                  0, self.graph_sha256):
             raise AquariumError("aquarium seed, room, graph or clock mismatch")
+        try:
+            self._replay_events(items)
+        except _FrameMismatch:
+            if not detect_sum:
+                raise
+            # A single arithmetic rule must reproduce the entire verified history.
+            other_sum = "ordered" if self._pulse_sum == "compensated" else "compensated"
+            self._reset_replay_state(other_sum)
+            self._replay_events(items)
+        if self.store.head() != verified["head"]:
+            raise AquariumError("journal advanced during replay, reopen the aquarium")
+        self._committed_head = verified["head"]
+
+    def _replay_events(self, items):
         for entry in items[1:]:
             event = entry["event"]
             if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
@@ -322,16 +348,13 @@ class Aquarium:
                     )
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
-                    raise AquariumError("non-deterministic or mismatched committed frame")
+                    raise _FrameMismatch("non-deterministic or mismatched committed frame")
                 self.world = next_world
                 self.learner = next_learner
                 self.motor = next_motor
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
-        if self.store.head() != verified["head"]:
-            raise AquariumError("journal advanced during replay, reopen the aquarium")
-        self._committed_head = verified["head"]
 
     def checkpoint(self):
         state = {
@@ -366,7 +389,11 @@ def main():
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--motor-mode", choices=("scripted", "developmental_fixture"),
                         default="scripted")
+    parser.add_argument("--pulse-sum", choices=("auto", "ordered", "compensated"), default="auto",
+                        help="shadow predictor arithmetic for an untagged journal (default: detect on replay)")
     args = parser.parse_args()
+    if args.neural_mode == "disabled" and args.pulse_sum != "auto":
+        parser.error("--pulse-sum requires shadow mode")
     if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
         parser.error("developmental motor play does not accept --dx/--dy")
     if not 0 <= args.ticks <= 1000:
@@ -387,7 +414,7 @@ def main():
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
-        neural_mode=args.neural_mode, motor_mode=args.motor_mode,
+        neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
     ) as aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
