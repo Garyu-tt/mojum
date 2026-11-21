@@ -53,6 +53,15 @@ class ContactAssociationsV2(ContactAssociations):
         seen_last_updates = set()
         if (snapshot["evicted_cues"] > snapshot["evicted_observations"]):
             raise CuriosityError("inconsistent eviction accounting")
+        # Every accepted contact leaves its newest cue in the live table.
+        # An eviction requires 128 previously populated distinct live cues;
+        # each subsequent eviction also requires another new observation.
+        if snapshot["updates"] > 0 and not snapshot["table"]:
+            raise CuriosityError("updates without a retained cue")
+        if snapshot["evicted_cues"] > max(0, snapshot["updates"] - MAX_CUES):
+            raise CuriosityError("eviction before cue capacity was reached")
+        if snapshot["evicted_cues"] and len(snapshot["table"]) != MAX_CUES:
+            raise CuriosityError("evicted cues without a full retained table")
         if snapshot["updates"] and not snapshot["table"]:
             raise CuriosityError("learned observations without retained cues")
         # Before the first eviction, all MAX_CUES slots must be populated.
@@ -85,6 +94,9 @@ class ContactAssociationsV2(ContactAssociations):
             total += entry["total"]
         if total != snapshot["updates"]:
             raise CuriosityError("inconsistent association count")
+        # Last accepted update is never immediately evicted: its cue is live.
+        if snapshot["updates"] and max(seen_last_updates) != snapshot["updates"]:
+            raise CuriosityError("latest retained cue does not match update count")
         # The most recent measured cue is always retained, including after
         # eviction, and has a unique monotonically increasing update number.
         if snapshot["updates"] and snapshot["updates"] not in seen_last_updates:
