@@ -74,6 +74,12 @@ class SegmentedNoosphere:
                 # both successful and exception paths (Python 3.13 warns).
                 with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as probe:
                     actual = dict(probe.execute("SELECT k,v FROM metadata"))
+                    core_tables = {
+                        name for (name,) in probe.execute(
+                            "SELECT name FROM sqlite_master WHERE type = 'table' "
+                            "AND name IN ('segments', 'segmented_events')"
+                        )
+                    }
             except (sqlite3.Error, ValueError, TypeError) as exc:
                 raise NoosphereError(
                     "existing journal has no readable segmented manifest"
@@ -84,6 +90,12 @@ class SegmentedNoosphere:
             }:
                 raise NoosphereError(
                     "wrong owner/schema/segment size; old journal unchanged"
+                )
+            # Do not recreate missing historical tables on a corrupt store:
+            # CREATE TABLE IF NOT EXISTS is appropriate only for a *new* DB.
+            if core_tables != {"segments", "segmented_events"}:
+                raise NoosphereError(
+                    "existing segmented journal is missing core tables"
                 )
             if os.name == "posix" and path.stat().st_mode & 0o077:
                 raise NoosphereError(
