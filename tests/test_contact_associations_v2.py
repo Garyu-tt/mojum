@@ -91,7 +91,7 @@ class V2Test(unittest.TestCase):
         del premature["table"]["1:1:1"]
         premature["evicted_cues"] = 1
         premature["evicted_observations"] = 2
-        with self.assertRaisesRegex(CuriosityError, "eviction before cue capacity"):
+        with self.assertRaisesRegex(CuriosityError, "impossible eviction history"):
             ContactAssociationsV2.from_snapshot(premature)
         erased = m.snapshot()
         erased["table"] = {}
