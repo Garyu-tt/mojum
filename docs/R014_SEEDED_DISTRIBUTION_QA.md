@@ -85,3 +85,38 @@ Independent unknown rooms/device telemetry and separate human review remain
 necessary. No main/parent/VM/Android device changes are authorized.
 Do not close #106 (rest collapse), #55 (integrated learning), or #51
 (organism release). Keep all PRs as review-only unless owner approves.
+
+
+## First generated-distribution results (after freezing the generator)
+
+Initial green 3.11/3.12/3.13 seeded CI run 44851766401
+reported the same fixture hash on the three interpreters:
+
+    3371da882a06b7bb5b03b966887d9378a9656f5ef756de45f7dcbc143e1df20e
+
+This hash was **pinned after** the first run to detect later accidental
+generator changes. It was not independently preregistered before running
+this experiment. Reusing/tuning against it destroys any pretence that it
+is an unseen independent evaluation.
+
+Of 72 simulated 160-tick case/heartbeat combinations, **64** experienced
+at least one measured block in at least one of the three controls. Raw
+aggregate counts in 11,520 attempted-or-rest ticks per arm:
+
+| Policy | Movement attempts | Blocked | Successful | Rest | Stalled trials |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| coarse_v1 | 5376 | 238 | 5138 | 6144 | 32 |
+| frozen | 9191 | 760 | 8431 | 2329 | 0 |
+| local_cell_v2 | 9102 | 376 | 8726 | 2418 | 0 |
+
+Local-cell successful-movement count versus frozen: **44 trials with more,
+28 tied, 0 with fewer**, on the published seed and fixed toy-world rules.
+The report keeps the list of all worse-case IDs; there were none in this
+first sample under its specified indicators. Never infer that no
+counterexamples can exist beyond these generated geometries.
+
+These results are evidence of the deterministic synthetic fixture's
+behavior, not a validated route-planning ability. Lower collision counts
+may reflect different action choices rather than a universally good
+control law; the policy still lacks a neural brain, object concepts,
+generalization proof, broad physical world and independent reviewers.
