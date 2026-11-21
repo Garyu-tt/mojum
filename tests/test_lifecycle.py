@@ -69,6 +69,18 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(copy_s.profile["organism_id"], "dante-fixture-001")
         self.assertEqual(copy_s.tick, 14)
 
+    def test_identity_and_profile_not_publicly_mutable(self):
+        s = self.make()
+        exposed = s.profile
+        exposed["organism_id"] = "intruder"
+        exposed["regions"]["cortex"]["initial_mature"] = 0
+        self.assertEqual(s.profile["organism_id"], "dante-fixture-001")
+        self.assertEqual(s.region("cortex")["initial_mature"], 20)
+        with self.assertRaises(AttributeError):
+            s.tick = 123
+        with self.assertRaises(AttributeError):
+            s.profile = exposed
+
     def test_detect_tamper_and_disallow_age_policy_migration(self):
         s = self.make()
         s.advance(4, expected_revision=s.revision)
