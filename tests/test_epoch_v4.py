@@ -205,6 +205,13 @@ class V4EpochJournalIntegrationQA(unittest.TestCase):
         with self.open() as restart:
             self.assertEqual(restart.checkpoint(), after_marker)
             self.assertEqual(restart.epoch_index, 1)
+            # A signed cache created while a boundary is committed but its
+            # first motor frame is still pending must restore that exact
+            # half-step without assuming the frame was already replayed.
+            restart.save_replay_snapshot()
+        with self.open() as restart:
+            self.assertEqual(restart.checkpoint(), after_marker)
+            self.assertEqual(restart.epoch_index, 1)
             first = restart.step()
             self.assertEqual(first["tick"], EPOCH_TICKS)
             self.assertEqual(first["time_ns"],
@@ -235,8 +242,10 @@ class V4EpochJournalIntegrationQA(unittest.TestCase):
         with self.open() as signed:
             self.assertEqual(signed.checkpoint(), expected)
             self.assertEqual(signed.store.count(), EPOCH_TICKS + 53)
-            self.assertEqual(load_snapshot(self.sidecar, self.key)["epoch_index"],
-                             1)
+            signed_state = load_snapshot(self.sidecar, self.key)
+            self.assertEqual(signed_state["schema"],
+                             "mojum.aquarium.replay-state/2")
+            self.assertEqual(signed_state["epoch_index"], 1)
         # Full cold replay scans and re-executes all >10k stored events,
         # providing an independent oracle against the signed fast path.
         with self.open(signed=False) as fully_replayed:
