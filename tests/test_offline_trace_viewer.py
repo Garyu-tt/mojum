@@ -101,9 +101,10 @@ const frame=(tick,blocked)=>({
   world:{position:[1.20,2.10],blocked},
   interoception:{heartbeat:{pulse:true,phase_milli:100}},
   developmental:{
+    schema:"mojum.developmental.explorer/1",
     observation:{range_bucket_5cm_ewns:[0,12,5,6]},
     intent:{action:"x-"},
-    learning:{total_updates:tick+1}
+    learning:{schema:"mojum.developmental.explorer/1",total_updates:tick+1}
   },
   brain:{status:"UNIMPLEMENTED"},
   toy_contact:{
@@ -130,6 +131,7 @@ const frame=(tick,blocked)=>({
     deflection:get("deflection").textContent,
     prediction:get("prediction").textContent,
     updates:get("learned").textContent,
+    policy:get("policy").textContent,
     disabled:get("play").disabled
   };
   get("seek").value="1";
@@ -183,7 +185,7 @@ class OfflineTraceViewerTests(unittest.TestCase):
         for required in ("file", "room", "seek", "play", "prev", "next",
                          "tick", "position", "pulse", "action", "blocked",
                          "range", "probe", "deflection", "prediction",
-                         "learned", "brain", "events", "status"):
+                         "learned", "policy", "brain", "events", "status"):
             self.assertIn(required, parsed.ids)
         self.assertEqual(parsed.external_scripts, [])
         self.assertIn("connect-src 'none'", parsed.csp)
@@ -212,6 +214,7 @@ class OfflineTraceViewerTests(unittest.TestCase):
         self.assertEqual(first["deflection"], "0.75")
         self.assertEqual(first["prediction"], "0.5")
         self.assertEqual(first["updates"], "2")
+        self.assertEqual(first["policy"], "coarse_v1 · зоны 0,5 м")
         self.assertFalse(first["disabled"])
         next_ = result["secondState"]
         self.assertEqual(next_["counter"], "2 / 2")
