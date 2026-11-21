@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 import tempfile
 import unittest
@@ -94,7 +95,7 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
 
         with self.aquarium() as writer:
             writer.step()
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db:
             row = db.execute(
                 "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.frame'"
             ).fetchone()
