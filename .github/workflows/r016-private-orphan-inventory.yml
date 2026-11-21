@@ -1,0 +1,42 @@
+name: Mojum R0.16 PRIVATE trace orphan read-only incident QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r016-private-orphan-inventory.yml"
+      - "src/mojum/private_trace_orphans.py"
+      - "tests/test_r016_private_orphan_inventory.py"
+  push:
+    paths:
+      - ".github/workflows/r016-private-orphan-inventory.yml"
+      - "src/mojum/private_trace_orphans.py"
+      - "tests/test_r016_private_orphan_inventory.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mojum-r016-orphan-readonly-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  read-only-inventory:
+    name: orphan-audit (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Read-only incident inventory with real synthetic SQLite/JSONL fixtures
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_r016_private_orphan_inventory.py -v

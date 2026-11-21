@@ -53,6 +53,32 @@ def _destination(path):
     return dest
 
 
+def _fsync_published_directory(directory):
+    """Durably request POSIX namespace publication after file fsync+link.
+
+    Called only AFTER the new link is published and the private stage path
+    has been unlinked. A failure leaves a complete but durability-uncertain
+    final file in place: callers must reconcile, never silently retry-overwrite.
+
+    No claim of actual electrical power-cut safety, controller caches, flash
+    translation guarantees, remote filesystems or Windows directory sync.
+    """
+    if os.name != "posix":
+        # No portable directory fsync equivalent is implemented here.
+        return False
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(str(directory), flags)
+    try:
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("expected a trusted output directory for fsync")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return True
+
+
 def _limit_source_pages(source):
     pages = source.execute("PRAGMA page_count").fetchone()[0]
     bytes_per_page = source.execute("PRAGMA page_size").fetchone()[0]
@@ -83,13 +109,14 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     snapshot = aquarium.checkpoint()
     count = aquarium.store.count()
     # A valid bootstrapped source is mandatory. No synthetic data generation.
-    if not 1 <= count <= MAX_REPLAY_EVENTS:
+    if not 1 <= count <= aquarium.journal_limit:
         raise AquariumError("invalid number of committed journal events")
 
     wire_parts = []
     total = 0
     total_frames = 0
     frames = 0
+    epoch_boundaries = []
     events_seen = 0
     last_event_hash = None
     range_begin = 0 if start_tick is None else start_tick
@@ -100,6 +127,23 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
             raise AquariumError("incomplete committed journal stream")
         last_event_hash = row["event_hash"]
         event = row["event"]
+        if event["topic"] == "aquarium.epoch":
+            if aquarium.developmental_policy != "local_cell_v4":
+                raise AquariumError("epoch event in non-v4 journal")
+            marker = event["payload"]
+            tick = marker.get("absolute_tick")
+            if (type(tick) is not int or tick <= 0
+                    or marker.get("schema") != "mojum.aquarium.epoch-transition/1"
+                    or marker.get("epoch_index") != tick // 9999
+                    or tick % 9999 != 0):
+                raise AquariumError("invalid replayed epoch marker")
+            if tick >= range_begin and (range_end is None or tick < range_end):
+                epoch_boundaries.append({
+                    "schema": marker["schema"],
+                    "absolute_tick": tick,
+                    "epoch_index": marker["epoch_index"],
+                })
+            continue
         if event["topic"] != "aquarium.frame":
             continue
         if event["visibility"] != "PRIVATE":
@@ -148,7 +192,7 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
     # Viewer recognizes checkpoint schema with stored_events; do not dump
     # internal neural weights or private genotype in the summary footer.
     footer = {
-        "schema": "mojum.aquarium.checkpoint/1",
+        "schema": snapshot["schema"],
         "agent_id": snapshot["agent_id"],
         "tick": snapshot["tick"],
         "journal_head": snapshot["journal_head"],
@@ -158,6 +202,27 @@ def _render_private_frames(aquarium, *, start_tick=None, frame_limit=None):
                         "has_more": has_more, "source_total_ticks": total_frames},
         "export_status": "REPLAY_VERIFIED_SYNTHETIC_PRIVATE_NOT_AUTHENTICATED",
     }
+    if aquarium.developmental_policy == "local_cell_v4":
+        # Only public-format version identity and actual boundary receipts.
+        # Never place the source's developmental/sensory model state here.
+        if snapshot["schema"] != "mojum.aquarium.checkpoint/2":
+            raise AquariumError("v4 checkpoint must be version /2")
+        if snapshot["tick"] != total_frames:
+            raise AquariumError("v4 frame count differs from canonical clock")
+        footer.update({
+            "epoch_index": snapshot["epoch_index"],
+            "epoch_tick": snapshot["epoch_tick"],
+            "policy_schema": snapshot["developmental_state"]["schema"],
+            "epoch_boundaries": epoch_boundaries,
+        })
+        if footer["policy_schema"] != "mojum.developmental.local-cell/4":
+            raise AquariumError("v4 checkpoint policy wire mismatch")
+        expected_markers = [
+            tick for tick in range(range_begin, next_tick)
+            if tick > 0 and tick % 9999 == 0
+        ]
+        if [m["absolute_tick"] for m in epoch_boundaries] != expected_markers:
+            raise AquariumError("missing or duplicate committed epoch marker")
     encoded_footer = (json.dumps(footer, sort_keys=True, ensure_ascii=False,
                                  allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8")
     total += len(encoded_footer)
@@ -175,7 +240,9 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
                          room=None, start=(1.0, 2.0),
                          exploration_mode="scripted", sensory_mode="none",
                          sensory_scene=None, dt_ns=10_000_000,
-                         start_tick=None, frame_limit=None):
+                         start_tick=None, frame_limit=None,
+                         developmental_policy="legacy",
+                         journal_backend="legacy", journal_segment_size=4096):
     """Export real verified SQLite events only to a fresh, mode-0600 local file.
 
     All integrity checks happen on a consistent temporary SQLite snapshot,
@@ -189,11 +256,22 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
             type(expected_journal_head) is not str
             or _HEAD.fullmatch(expected_journal_head) is None):
         raise ValueError("independent journal head must be lowercase 64-digit SHA-256")
+    if type(developmental_policy) is not str or developmental_policy not in (
+            "legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"):
+        raise ValueError("unknown explicit developmental policy")
+    if type(journal_backend) is not str or journal_backend not in ("legacy", "segmented"):
+        raise ValueError("unknown explicit source journal backend")
+    if type(journal_segment_size) is not int or not 64 <= journal_segment_size <= 8192:
+        raise ValueError("segment size must be an integer in 64..8192")
+    if journal_backend == "segmented" and developmental_policy != "local_cell_v4":
+        raise ValueError("segmented trace requires explicit local_cell_v4 mode")
+    if developmental_policy == "local_cell_v4" and expected_journal_head is None:
+        raise ValueError("v4 private export requires an independent journal head")
     if (start_tick is None) != (frame_limit is None):
         raise ValueError("start_tick and frame_limit must be supplied together")
     if start_tick is not None:
-        if type(start_tick) is not int or not 0 <= start_tick < MAX_REPLAY_EVENTS:
-            raise ValueError("start_tick must be an integer in 0..99999")
+        if type(start_tick) is not int or not 0 <= start_tick < 99999:
+            raise ValueError("start_tick must be an integer in 0..99998")
         if type(frame_limit) is not int or not 1 <= frame_limit <= MAX_FRAMES:
             raise ValueError("frame_limit must be an integer in 1..5000")
     source = _source(source_db)
@@ -206,7 +284,10 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     options = {"agent_id": agent_id, "neural_mode": neural_mode,
                "exploration_mode": exploration_mode, "sensory_mode": sensory_mode,
                "sensory_scene": sensory_scene, "room": room,
-               "start": start, "dt_ns": dt_ns}
+               "start": start, "dt_ns": dt_ns,
+               "developmental_policy": developmental_policy,
+               "journal_backend": journal_backend,
+               "journal_segment_size": journal_segment_size}
 
     # Staging is never published and is automatically removed on errors.
     with tempfile.TemporaryDirectory(prefix="mojum-trace-stage-") as scratch:
@@ -214,7 +295,8 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
         _stage_sqlite(source, staged)
         with closing(sqlite3.connect(str(staged))) as snapshot_db:
             try:
-                n = snapshot_db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+                table = "segmented_events" if journal_backend == "segmented" else "events"
+                n = snapshot_db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
             except sqlite3.DatabaseError as exc:
                 raise ValueError("source has no usable Noosphere event journal") from exc
             if n == 0:
@@ -234,16 +316,30 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     )
     try:
         with os.fdopen(fd, "wb") as stream:
+            # The temp inode is 0600 from mkstemp. Reinforce that promise
+            # on its OWN open descriptor *before* flushing inode metadata;
+            # changing mode after file fsync would leave new permissions
+            # outside that explicit durability boundary.
+            if os.name == "posix":
+                os.fchmod(stream.fileno(), 0o600)
+            else:
+                os.chmod(stage_out, 0o600)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(stage_out, 0o600)
         os.link(stage_out, dest)  # EEXIST rather than overwrite; same FS.
     finally:
         try:
             os.unlink(stage_out)
         except FileNotFoundError:
             pass
+
+    # File fsync alone is not enough to request persistence of the directory
+    # entry. Sync AFTER the stage unlink so successful POSIX publication
+    # includes both the new hard-link and removal of its PRIVATE temp name.
+    # If this fails, the final file MAY ALREADY EXIST. Propagate failure;
+    # do not claim success, delete/overwrite the output, or hide the error.
+    _fsync_published_directory(dest.parent)
 
     return {
         "schema": SCHEMA,
@@ -274,8 +370,14 @@ def main():
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
                         default="scripted")
-    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
+    parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                         default="none")
+    parser.add_argument("--developmental-policy",
+                        choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
+                        default="legacy")
+    parser.add_argument("--journal-backend", choices=("legacy", "segmented"),
+                        default="legacy")
+    parser.add_argument("--journal-segment-size", type=int, default=4096)
     parser.add_argument("--expected-head", default=None)
     parser.add_argument("--start-tick", type=int)
     parser.add_argument("--frame-limit", type=int)
@@ -291,6 +393,9 @@ def main():
         expected_journal_head=args.expected_head,
         allow_private_export=args.allow_private_export,
         start_tick=args.start_tick, frame_limit=args.frame_limit,
+        developmental_policy=args.developmental_policy,
+        journal_backend=args.journal_backend,
+        journal_segment_size=args.journal_segment_size,
     )
     print(json.dumps(meta, sort_keys=True, ensure_ascii=False, allow_nan=False))
 
