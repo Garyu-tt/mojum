@@ -71,6 +71,21 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Bounded foreground host
+
+For a paced, restartable one-device session around the same canonical loop,
+use the bounded foreground host. It commits only real ticks, stops between
+SQLite appends, refuses runs beyond the fixed replay budget, and prints
+metadata rather than PRIVATE frames or learner state:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host --db ./host_PRIVATE.sqlite3 --ticks 20 --interval-ms 50
+```
+
+Repeat with the same path to resume. This is still a synthetic CPU fixture,
+not a neural brain, physical actuator, Android service, or 24/7 guarantee.
+See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
+
 ### Replay a committed decision offline
 
 After the six-tick guided run above, export a local trace from the same journal.
@@ -158,6 +173,23 @@ PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
 `--expected-head` checks an independently recorded chain head. The command
 never writes to the journal and rejects scripted or noncanonical journals.
 [Audit contract](docs/DEVELOPMENTAL_R013.md)
+
+## Explicit local-cell history compatibility
+
+Use `--motor-mode local_cell_v2b` for a new v2B journal. The historic
+`local_cell_v2` spelling resumes only existing v2B history. The exact
+v2B SQLite schema remains compatible with the original #115 runtime.
+For original #112 history, use `--motor-mode local_cell_v2_a_archive
+--ticks 0` and the original genome, graph, and neural mode. Both profiles
+use the exact built-in point-room and frame-only journals without toy sensing.
+
+To transfer a verified v2A history into a separate new v2B file, use
+`python -m mojum.migration_v2a_v2b` with the original genome and graph,
+an independently recorded `--expected-source-head`, and the explicit
+`--create-new-journal` flag. The transfer compares every frame and the
+learned state, with a limit of 1,000 frames. It refuses an existing
+destination and preserves the source file. Both modes can also produce
+replay-verified PRIVATE JSONL via the offline exporter.
 
 ## Architecture and development
 
