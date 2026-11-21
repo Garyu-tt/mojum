@@ -215,6 +215,29 @@ class EpochJournalV4Tests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "epoch"):
             inspect_journal(self.db)
 
+    def test_wire_inspector_rejects_boolean_observation_ticks_with_valid_hash_chain(self):
+        # A hash-valid event must not be reported as a v4 frame when bools
+        # impersonate exact integer fields (False == 0 in Python).
+        for field in ("absolute_tick", "epoch_index", "epoch_tick"):
+            with self.subTest(field=field):
+                path = self.db.with_name(f"bool-observation-{field}.sqlite3")
+                with Aquarium(
+                    path, SEED, GRAPH,
+                    motor_mode=V4_MODE, neural_mode="disabled",
+                ) as aquarium:
+                    frame = deepcopy(aquarium._calculate_frame(None, None)[0])
+                    frame["developmental"]["observation"][field] = False
+                    forged = aquarium._record(
+                        "aquarium.frame", "frame-000000000000",
+                        frame, 0, aquarium.genome.revision,
+                    )
+                    aquarium.store.append(
+                        forged, expected_head=aquarium.checkpoint()["journal_head"],
+                    )
+                    self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+                with self.assertRaisesRegex(NoosphereError, "epoch schema"):
+                    inspect_journal(path)
+
     def test_epoch_marker_rejects_bool_int_aliases_on_replay(self):
         # Python True == 1 and False == 0, but the durable schema
         # requires exact JSON integer types, never boolean aliases.
