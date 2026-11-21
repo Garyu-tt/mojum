@@ -53,6 +53,13 @@ jobs:
             exit 1
           fi
           node tests/room_designer_browser_smoke.cjs
+      - name: Attach genuine non-private phone-width UI screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-designer-mobile-${{ matrix.python-version }}
+          path: ui-qa-artifacts/room-designer-mobile.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Real Python custom room + private SQLite acceptance
         env:
           PYTHONPATH: src
