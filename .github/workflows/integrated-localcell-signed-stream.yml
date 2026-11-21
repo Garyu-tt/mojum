@@ -11,6 +11,8 @@ on:
       - "src/mojum/noosphere.py"
       - "tests/test_localcell_signed_stream.py"
       - "tests/test_aquarium_cell_policy_v3.py"
+      - "src/mojum/portable_host.py"
+      - "tests/test_localcell_portable_host.py"
   workflow_dispatch:
 
 permissions:
@@ -37,3 +39,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p test_localcell_signed_stream.py -v
+      - name: Exercise offline portable host v3 and episode capacity guard
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_localcell_portable_host.py -v
