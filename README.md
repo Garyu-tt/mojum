@@ -91,6 +91,10 @@ against a separately recorded journal head. For longer histories, add
 Use a new output filename in a directory with private access. The JSONL is
 plaintext and its checksum detects accidental corruption.
 
+The offline viewer rejects old unverified JSONL by default. To inspect a truly
+legacy trace without SHA-256, explicitly enable the unchecked legacy checkbox;
+partly stripped modern trace metadata is always rejected.
+
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
