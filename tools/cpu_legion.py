@@ -129,13 +129,13 @@ def run_one(db_path, worker, root, out, url, model, timeout):
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(diff)
             if not queue.finish(db, worker, task["id"], "review", int(time.time()),
-                                str(out / name)):
+                                str(out / name), attempt=task["attempts"]):
                 raise ValueError("lease expired before review")
             return {"worker": worker, "state": "review", "task": task["id"],
                     "patch": str(out / name), "sha256": digest, "base_sha": sha}
         except Exception as exc:
             queue.finish(db, worker, task["id"], "blocked", int(time.time()),
-                         str(exc)[:480])
+                         str(exc)[:480], attempt=task["attempts"])
             return {"worker": worker, "state": "blocked", "reason": str(exc)[:200]}
     finally:
         db.close()
