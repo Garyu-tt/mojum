@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools" / "pr_queue_triage.py"
 spec = importlib.util.spec_from_file_location("pr_queue_triage", SOURCE)
@@ -176,6 +177,25 @@ class QueueTriageTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertFalse(json.loads(out.getvalue())["merge_authorized"])
 
+
+    def test_cli_handles_recursive_json_decoder_failure(self):
+        # A small encoded input can exhaust JSON nesting limits before triage.
+        # The CLI must return its documented structured refusal, not traceback.
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "deep.json"
+            filename.write_text('[' * 12000 + '0' + ']' * 12000, encoding="utf-8")
+            import contextlib
+            import io
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), mock.patch.object(
+                triage.json, "loads", side_effect=RecursionError("too deep")
+            ):
+                code = triage.main(["--input", str(filename), "--require", JOBS[0]])
+            self.assertEqual(code, 2)
+            payload = json.loads(out.getvalue())
+            self.assertIn("too deep", payload["error"])
+            self.assertFalse(payload["merge_authorized"])
+            self.assertFalse(payload["merge_performed"])
 
 if __name__ == "__main__":
     unittest.main()
