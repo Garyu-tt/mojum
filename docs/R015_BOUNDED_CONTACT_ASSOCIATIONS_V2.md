@@ -74,6 +74,23 @@ PYTHONPATH=src python -m unittest discover -s tests \
   -p test_sensory_v2_epoch.py -v
 ```
 
+Portable CPU foreground-host reproduction (a *different* new journal):
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db /private/path/NEW-portable-synthetic.sqlite3 \
+  --ticks 120 --interval-ms 1000 \
+  --developmental-policy local_cell_v4 --sensory-mode toy_probe_v2
+```
+
+The integration QA also executes **two separate portable-host
+subprocesses** with the same new PRIVATE SQLite journal and owner-only
+HMAC replay cache, checking that the second advances the original
+organism instead of creating a replacement. This is only a
+CPython/Termux-compatible *foreground* test, not Android power-state
+or daemon validation. The host publishes metadata only, never contact
+or neural details to stdout.
+
 ## Open limits
 
 - Only synthetic software: no real camera, tactile surface, MuJoCo,
