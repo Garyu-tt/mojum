@@ -6,6 +6,7 @@ on:
       - ".github/workflows/neutral-probe-control.yml"
       - "src/mojum/neutral_probe_trial.py"
       - "tests/test_neutral_probe_trial.py"
+      - "tests/test_neutral_probe_heldout.py"
       - "src/mojum/developmental_policy.py"
       - "src/mojum/world_room.py"
   workflow_dispatch:
@@ -30,6 +31,14 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p test_neutral_probe_trial.py -v
+      - name: Held-out scenes, pulse regimes and no-oracle QA
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_neutral_probe_heldout.py -v
+      - name: Print predetermined held-out matrix (metadata only)
+        env:
+          PYTHONPATH: src
+        run: python tests/test_neutral_probe_heldout.py --report
       - name: Inspect bounded synthetic CLI summary
         env:
           PYTHONPATH: src
