@@ -72,7 +72,9 @@ class TwinStudyTests(unittest.TestCase):
         early = compare(first, tick=3)
         later = compare(first, tick=4)
         self.assertEqual(early["gene_delta_left_minus_right"]["heartbeat_bpm"], 0)
+        self.assertEqual(early["subjects"][0]["acquired_count"], 0)
         self.assertEqual(later["gene_delta_left_minus_right"]["heartbeat_bpm"], 8)
+        self.assertEqual(later["subjects"][0]["acquired_count"], 1)
         self.assertEqual(later["subjects"][1]["acquired_count"], 0)
 
     def test_meeting_is_marker_not_memory_merge(self):
