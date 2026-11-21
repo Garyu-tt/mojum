@@ -60,6 +60,27 @@ class ColdAquariumCopyTests(unittest.TestCase):
             source.step(dx=0.0)
             self.assertEqual(source.tick, 10)
 
+    def test_export_only_replays_private_backup_never_source(self):
+        with Aquarium(self.source, SEED, GRAPH) as writer:
+            for _ in range(3):
+                writer.step(dx=0.01)
+            expected = writer.checkpoint()
+            original_bytes = self.source.read_bytes()
+            real_aquarium = Aquarium
+
+            def reject_writable_source(path, *args, **kwargs):
+                if Path(path) == self.source:
+                    raise AssertionError("export opened original journal as writable Aquarium")
+                return real_aquarium(path, *args, **kwargs)
+
+            with patch("mojum.aquarium_cold_copy.Aquarium",
+                       side_effect=reject_writable_source):
+                exported = self._export()
+            self.assertEqual(exported["journal_head"], expected["journal_head"])
+            self.assertEqual(exported["tick"], expected["tick"])
+            self.assertEqual(self.source.read_bytes(), original_bytes)
+            self.assertEqual(self._verify(exported)["tick"], expected["tick"])
+
     def test_acquired_genome_and_shadow_neural_state_replay(self):
         with Aquarium(self.source, SEED, GRAPH) as child:
             child.step(dx=0)
