@@ -34,6 +34,8 @@ The SQLite journal is authoritative for committed synthetic events. Reopening th
 7. CPU and Python standard library are the supported baseline. GPU, GUI, Node.js, remote networking and MuJoCo are not prerequisites for the current sample.
 8. Synthetic heartbeat, a trained pulse predictor, virtual movement and scripted school tasks are **not** evidence of consciousness, general intelligence or anatomical realism.
 
+The local `mojum-aquarium` and `mojum-fixture` commands are also available from the optional offline wheel, with bundled synthetic fixtures; see [local installation](LOCAL_INSTALL_R01.md). A local wheel is not a mobile release or a distributed organism host.
+
 ## Interfaces planned, not yet connected end-to-end
 
 Future boundaries include `mechanicus.body/1` (rig and DOFs), `mechanicus.physics/1` (MuJoCo state and contacts), `mechanicus.neural/1` (sensory learning and safe intentions), `mechanicus.world/1` (external environments), and `mechanicus.simulation-snapshot/1` (atomic revision-consistent state). These are **planned contracts**, not APIs that can currently be assumed operational in released `main`. Experimental PRs are not shipped features until independently reviewed and merged.
