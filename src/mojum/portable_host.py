@@ -272,5 +272,10 @@ def main(argv=None):
     return status
 
 
-if __name__ == "__main__":
+def cli():
+    """Run the console command without returning status metadata to sys.exit."""
     main()
+
+
+if __name__ == "__main__":
+    cli()

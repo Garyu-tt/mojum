@@ -139,6 +139,11 @@ class CellExplorerV4:
         # so a full table plus E evictions requires MAX_CELLS + E updates.
         if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
             raise CellV4Error("impossible v4 eviction history")
+        # Eviction only happens when a new cell arrives at a full table, and
+        # the retained table never shrinks afterwards. A history that claims
+        # an eviction while retaining fewer than MAX_CELLS is unreachable.
+        if state["evictions"] and len(state["records"]) != MAX_CELLS:
+            raise CellV4Error("impossible v4 eviction history")
 
         model = cls()
         model.last_tick = state["last_tick"]
