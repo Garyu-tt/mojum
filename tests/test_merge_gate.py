@@ -249,6 +249,18 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
+    def test_negative_conclusion_rejects_even_with_inconsistent_status(self):
+        # A partially refreshed CI rollup can contradict itself: an explicit
+        # failure must not become a merely deferred pending check.
+        for status in ("IN_PROGRESS", "QUEUED", "WAITING", "bogus"):
+            with self.subTest(status=status):
+                checks = self.green() + [
+                    run(status=status, conclusion="FAILURE", workflow="Mesh contract"),
+                ]
+                result = evaluate_checks(checks)
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_FAILED")
+
     def test_skipped_check_requires_a_waiver(self):
         checks = self.green()[:2] + [
             run(name="mesh", conclusion="SKIPPED", workflow="Mesh contract")
