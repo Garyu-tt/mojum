@@ -33,6 +33,8 @@ The existing [#123](https://github.com/Garyu-tt/mojum/pull/123) harness is exten
 
 The CI creates **temporary, synthetic SQLite events only**. The runner verifies legacy interoperability, distinct v2 self-reopen, distinct v3 self-reopen, exact JSON+full hash-chain+external-head checks on actual journals, rejection of duplicate-key/noncanonical tampered copies, and rejection of mixed/unknown ABI manifests. Only the v2 cross-reopen release gate remains **deliberately red** until #116 has an approved and tested protocol. The 3 diagnostic matrix jobs must not be mistaken for release approval.
 
+The runner additionally creates **three new 120-tick synthetic journals** (one per pinned policy version), normalizes only the stored action/delta, measured collision flag and own point-room position, and compares SHA-256 fingerprints of these fixed trajectories. Identical fingerprints mean *only* that their action/outcome sequences coincide **for this exact pre-eviction, synthetic default room and pulse sequence**. It neither implies equivalent learning on unseen environments nor makes their distinct persisted ABI interchangeable.
+
 ## Future integration contract
 
 A consumer may use the scanner as a **preflight** to determine an exact-format handler with explicit permission. It may not reinterpret a journal under another `local_cell_v2`, rewrite existing PRIVATE events, or change default legacy replay. A cross-version migration, if authorized, must be a separate versioned process with preserved source journal, cryptographically grounded provenance where applicable, independent tests, rollback and security review. Real Android, MuJoCo, neural brain, GPU and distributed failover are not assessed here.
