@@ -59,6 +59,47 @@ def measured(tick, value=0.4, contact=True):
 
 
 class ContactAssociationsV2Tests(unittest.TestCase):
+    def test_snapshot_rejects_impossible_temporal_evidence(self):
+        # At most one measured contact per tick. A new cue cannot be evicted
+        # until 128 distinct cues have already been measured.
+        common = {
+            "schema": SCHEMA, "last_contact_tick": 0,
+            "evictions": 0, "forgotten_observations": 0,
+        }
+        forged = {
+            "too_many_at_birth": {
+                **common, "updates": 3999,
+                "table": {"42:90:174": {"count": 3999, "mean_deflection": 0.4}},
+                "last_seen_at": {"42:90:174": 0},
+            },
+            "premature_eviction": {
+                **common, "updates": 2, "last_contact_tick": 1,
+                "evictions": 1, "forgotten_observations": 1,
+                "table": {"42:90:174": {"count": 1, "mean_deflection": 0.4}},
+                "last_seen_at": {"42:90:174": 1},
+            },
+            "two_cues_on_one_tick": {
+                **common, "updates": 2, "last_contact_tick": 1,
+                "table": {
+                    "42:90:174": {"count": 1, "mean_deflection": 0.4},
+                    "10:20:30": {"count": 1, "mean_deflection": 0.5},
+                },
+                "last_seen_at": {"42:90:174": 1, "10:20:30": 1},
+            },
+            "per_cue_time_travel": {
+                **common, "updates": 4, "last_contact_tick": 3,
+                "table": {
+                    "42:90:174": {"count": 3, "mean_deflection": 0.4},
+                    "10:20:30": {"count": 1, "mean_deflection": 0.5},
+                },
+                "last_seen_at": {"42:90:174": 0, "10:20:30": 3},
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name):
+                with self.assertRaises(SensoryV2Error):
+                    ContactAssociationsV2.from_snapshot(snapshot)
+
     def test_4001_measured_updates_remain_loadable_and_v1_is_rejected(self):
         model = ContactAssociationsV2()
         for tick in range(4001):
