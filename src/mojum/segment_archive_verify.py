@@ -239,6 +239,9 @@ def restore_into_new_sqlite(directory, destination, *, external_expected_head):
     if (dest.exists() or dest.is_symlink() or not dest.parent.is_dir()
             or dest.parent.is_symlink()):
         raise ArchiveError("restore requires a new absent local SQLite path")
+    # A plaintext PRIVATE history must not be published into a parent
+    # readable by other local users, even when source archive is 0700.
+    private_directory(dest.parent)
     verified = verify_sealed_archive(
         root, external_expected_head=external_expected_head,
     )
