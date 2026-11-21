@@ -97,6 +97,7 @@ class CheckOutcome:
     conclusion: str | None = None
     workflow: str | None = None
     head_sha: str | None = None
+    has_explicit_run_status: bool = True
 
     @property
     def label(self) -> str:
@@ -147,6 +148,20 @@ def _text(raw: Mapping[str, object], *keys: str) -> str | None:
     return None
 
 
+def _read_oid(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
+    oid = None
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or _SHA_RE.fullmatch(value) is None:
+            raise SnapshotError(f"{label} must be a full hexadecimal Git object ID")
+        if oid is not None and oid.lower() != value.lower():
+            raise SnapshotError(f"{label} has conflicting aliases")
+        oid = value
+    return oid
+
+
 def _parse_check(raw: object, index: int) -> CheckOutcome:
     if not isinstance(raw, Mapping):
         raise SnapshotError(f"check[{index}] must be an object")
@@ -156,13 +171,11 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         raise SnapshotError(f"check[{index}] has no name or context")
 
     workflow = _text(raw, "workflowName", "workflow")
-    head_sha = raw.get("headSha", raw.get("head_sha"))
-    if head_sha is not None and (
-        not isinstance(head_sha, str) or _SHA_RE.fullmatch(head_sha) is None
-    ):
-        raise SnapshotError(f"check[{index}] head SHA must be a full hexadecimal Git object ID")
-    typename = raw.get("__typename")
+    head_sha = _read_oid(raw, f"check[{index}] head SHA", "headSha", "head_sha")
     status_raw = _text(raw, "status")
+    has_explicit_run_status = (
+        status_raw is not None and raw.get("__typename") in (None, "CheckRun")
+    )
     conclusion_raw = _text(raw, "conclusion")
     state_raw = _text(raw, "state")
 
@@ -200,6 +213,7 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         conclusion=conclusion,
         workflow=workflow,
         head_sha=head_sha,
+        has_explicit_run_status=has_explicit_run_status,
     )
 
 
@@ -209,11 +223,9 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if not isinstance(raw, Mapping):
         raise SnapshotError("snapshot must be a JSON object")
 
-    head_sha = raw.get("headRefOid", raw.get("head_sha", raw.get("headSha")))
+    head_sha = _read_oid(raw, "snapshot head SHA", "headRefOid", "head_sha", "headSha")
     if head_sha is None:
         raise SnapshotError("snapshot has no head SHA")
-    if not isinstance(head_sha, str) or _SHA_RE.fullmatch(head_sha) is None:
-        raise SnapshotError("snapshot head SHA must be a full hexadecimal Git object ID")
 
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
     if not base_ref:
@@ -358,6 +370,7 @@ def evaluate(
             )
             continue
 
+        core_job = pattern in main_jobs
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -396,7 +409,15 @@ def evaluate(
                     )
                 )
                 continue
-            if pattern in main_jobs and check.conclusion != "SUCCESS":
+            if core_job and not check.has_explicit_run_status:
+                defers.append(
+                    GateReason(
+                        "REQUIRED_RUN_STATUS_MISSING",
+                        f"{check.label} lacks an explicit workflow job status",
+                    )
+                )
+                continue
+            if core_job and check.conclusion != "SUCCESS":
                 rejects.append(
                     GateReason(
                         "CHECK_NOT_SUCCESS",
@@ -420,6 +441,14 @@ def evaluate(
                 GateReason(
                     "CHECK_UNKNOWN_CONCLUSION",
                     f"{check.label} has an unrecognized conclusion {check.conclusion!r}",
+                )
+            )
+
+        if core_job and len(matches) > 1:
+            defers.append(
+                GateReason(
+                    "AMBIGUOUS_REQUIRED_CHECK",
+                    f"multiple entries matched required job {pattern!r}",
                 )
             )
 

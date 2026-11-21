@@ -478,6 +478,32 @@ class MainMatrixTests(unittest.TestCase):
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
+    def test_main_job_requires_explicit_workflow_run_completion(self):
+        for override in ({"status": None}, {"__typename": "StatusContext"}):
+            with self.subTest(override=override):
+                checks = self.green()
+                checks[0].update(override)
+                result = evaluate_checks(checks, base_ref="main", required=())
+                self.assertEqual(result.verdict, "defer")
+                self.assertEqual(result.code, "REQUIRED_RUN_STATUS_MISSING")
+
+    def test_duplicate_main_job_defers(self):
+        checks = self.green()
+        result = evaluate_checks([*checks, checks[0]], base_ref="main", required=())
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "AMBIGUOUS_REQUIRED_CHECK")
+
+    def test_null_check_head_alias_does_not_hide_stale_head(self):
+        checks = self.green()
+        checks[0].update(headSha=None, head_sha=OTHER)
+        result = evaluate_checks(checks, base_ref="main", required=())
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "STALE_CHECK")
+
+        checks[0]["headSha"] = HEAD
+        with self.assertRaisesRegex(SnapshotError, "conflicting aliases"):
+            evaluate_checks(checks, base_ref="main", required=())
+
     def test_main_jobs_require_success_even_with_waiver(self):
         for conclusion in ("SKIPPED", "NEUTRAL"):
             with self.subTest(conclusion=conclusion):
