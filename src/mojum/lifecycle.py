@@ -83,15 +83,24 @@ class Lifecycle:
     """
 
     def __init__(self, profile):
-        self.profile = validate_profile(profile)
-        self.tick = 0
+        self._profile = validate_profile(profile)
+        self._tick = 0
         self._events = []
         self._counters = {region: {"development": 0, "learning": 0}
-                          for region in self.profile["regions"]}
+                          for region in self._profile["regions"]}
+
+    @property
+    def profile(self):
+        """Return a copy; the organism identity and structural genes are immutable."""
+        return copy.deepcopy(self._profile)
+
+    @property
+    def tick(self):
+        return self._tick
 
     @property
     def revision(self):
-        return _hash({"profile": self.profile, "events": self._events})
+        return _hash({"profile": self._profile, "events": self._events})
 
     def _check_cas(self, expected_revision):
         if type(expected_revision) is not str or expected_revision != self.revision:
@@ -103,10 +112,10 @@ class Lifecycle:
         """Advance virtual time in O(1), without structural age side effects."""
         self._check_cas(expected_revision)
         _integer(ticks, "ticks", MAX_TICKS)
-        if ticks == 0 or self.tick > MAX_TICKS - ticks:
+        if ticks == 0 or self._tick > MAX_TICKS - ticks:
             raise LifecycleError("invalid or overflowing tick increment")
         self._events.append({"kind": "advance", "ticks": ticks})
-        self.tick += ticks
+        self._tick += ticks
         return self.revision
 
     def experience(self, region, *, development_units=0, learning_units=0,
@@ -123,7 +132,7 @@ class Lifecycle:
         if any(counts[k] > MAX_UNITS - inc for k, inc in
                (("development", development_units), ("learning", learning_units))):
             raise LifecycleError("evidence capacity exceeded")
-        event = {"kind": "experience", "at_tick": self.tick, "region": region,
+        event = {"kind": "experience", "at_tick": self._tick, "region": region,
                  "development_units": development_units,
                  "learning_units": learning_units}
         self._events.append(event)
@@ -134,7 +143,7 @@ class Lifecycle:
     def region(self, name):
         if type(name) is not str or name not in self._counters:
             raise LifecycleError("unknown region")
-        cfg = self.profile["regions"][name]
+        cfg = self._profile["regions"][name]
         counts = self._counters[name]
         development = counts["development"]
         learning = counts["learning"]
@@ -158,8 +167,8 @@ class Lifecycle:
         }
 
     def snapshot(self):
-        return {"schema": SNAPSHOT_SCHEMA, "profile": copy.deepcopy(self.profile),
-                "tick": self.tick, "events": copy.deepcopy(self._events),
+        return {"schema": SNAPSHOT_SCHEMA, "profile": copy.deepcopy(self._profile),
+                "tick": self._tick, "events": copy.deepcopy(self._events),
                 "revision": self.revision,
                 "trust": "checksum_only_not_authenticated"}
 
