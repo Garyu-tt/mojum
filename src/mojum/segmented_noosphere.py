@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+from urllib.parse import quote
 
 from .noosphere import (
     DATASET_SCHEMA, EVENT_SCHEMA, NoosphereError, _ZERO,
@@ -60,6 +61,25 @@ class SegmentedNoosphere:
                 or str(db_path) == ":memory:" or not path.parent.is_dir()):
             raise NoosphereError("segmented database needs an ordinary local file")
         preexisting = path.exists()
+        if preexisting:
+            # An old LocalNoosphere database must fail *before* we open it
+            # writable or change its SQLite journal-mode header. Do not
+            # silently prepare migrations or rewrite PRIVATE histories.
+            uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=ro"
+            try:
+                with sqlite3.connect(uri, uri=True, timeout=5.0) as probe:
+                    actual = dict(probe.execute("SELECT k,v FROM metadata"))
+            except (sqlite3.Error, ValueError, TypeError) as exc:
+                raise NoosphereError(
+                    "existing journal has no readable segmented manifest"
+                ) from exc
+            if actual != {
+                "schema": STORE_SCHEMA, "owner": self.agent_id,
+                "segment_size": str(segment_size),
+            }:
+                raise NoosphereError(
+                    "wrong owner/schema/segment size; old journal unchanged"
+                )
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         try:
