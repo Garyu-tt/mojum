@@ -1,0 +1,40 @@
+name: Mojum local-cell v3 bounded-retention and journal QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/aquarium-cell-policy-v3.yml"
+      - "src/mojum/cell_policy_v3.py"
+      - "src/mojum/aquarium.py"
+      - "tests/test_aquarium_cell_policy_v3.py"
+      - "src/mojum/developmental_policy.py"
+      - "src/mojum/noosphere.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bounded-v3-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Strict LRU quota and actual synthetic SQLite replay
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_aquarium_cell_policy_v3.py -v
+      - name: CLI new SQLite v3 specimen with no hardware
+        env:
+          PYTHONPATH: src
+        run: |
+          tempfile="$(mktemp -d)"
+          trap 'rm -rf "$tempfile"' EXIT
+          python -m mojum.aquarium --db "$tempfile/v3.sqlite3" --exploration-mode goal_free --developmental-policy local_cell_v3 --ticks 50
