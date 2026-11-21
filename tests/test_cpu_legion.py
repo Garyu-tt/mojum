@@ -1,8 +1,11 @@
 import subprocess
 import tempfile
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
+from urllib.error import HTTPError
 from pathlib import Path
-from tools.cpu_legion import local_url, parallel_limit, safe_file, task_context, verify
+from tools.cpu_legion import generate, local_url, parallel_limit, safe_file, task_context, verify
 
 class CpuLegionTests(unittest.TestCase):
     def test_only_loopback(self):
@@ -10,9 +13,75 @@ class CpuLegionTests(unittest.TestCase):
         self.assertEqual(local_url(good), good)
         for bad in ("https://api.example.org/v1/chat/completions",
                     "http://1.2.3.4:8080/v1/chat/completions",
+                    "http://localhost:8080/v1/chat/completions",
                     "http://user:pass@127.0.0.1:8080/v1/chat/completions"):
             with self.assertRaises(ValueError):
                 local_url(bad)
+
+    def test_model_redirect_does_not_leave_configured_loopback_endpoint(self):
+        class RedirectingModel(BaseHTTPRequestHandler):
+            followed = False
+
+            def do_POST(self):
+                self.send_response(302)
+                self.send_header(
+                    "Location",
+                    f"http://127.0.0.1:{self.server.server_port}/unexpected",
+                )
+                self.end_headers()
+
+            def do_GET(self):
+                type(self).followed = True
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), RedirectingModel)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            endpoint = (
+                f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+            )
+            with self.assertRaises(HTTPError) as error:
+                generate(endpoint, "fixture", "hello", 2)
+            self.assertEqual(error.exception.code, 302)
+            self.assertFalse(RedirectingModel.followed)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_model_normal_loopback_response_still_works(self):
+        class Model(BaseHTTPRequestHandler):
+            def do_POST(self):
+                import json
+                payload = json.dumps({
+                    "choices": [{"message": {"content": "diff --git"}}],
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Model)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            endpoint = (
+                f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+            )
+            self.assertEqual(generate(endpoint, "fixture", "hello", 2),
+                             "diff --git")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_real_capacity_not_300_fake_models(self):
         self.assertEqual(parallel_limit(300, 16, 32, 8, 10000, 1024), 4)
