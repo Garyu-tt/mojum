@@ -15,6 +15,7 @@ from .aquarium import (
     SCHEMA as FRAME_SCHEMA,
 )
 from .cell_policy_v4 import SCHEMA as V4_SCHEMA
+from .cell_policy_v5 import SCHEMA as V5_SCHEMA
 from .developmental import SCHEMA as MOTOR_PLAY
 from .epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
