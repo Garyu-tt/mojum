@@ -56,6 +56,35 @@ class SpartanTests(unittest.TestCase):
         self.assertIsNone(claim(self.db, 4, 203, 30))
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_manual_requeue_cannot_bypass_three_attempt_limit(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        for attempt in range(1, 4):
+            now = 110 + attempt * 10
+            job = claim(self.db, attempt, now)
+            self.assertEqual(job["attempts"], attempt)
+            self.assertTrue(finish(self.db, attempt, "a", "queued", now + 1))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+        self.assertEqual(status(self.db)["states"]["queued"], 0)
+        self.assertIsNone(claim(self.db, 4, 150))
+
+    def test_expiry_and_manual_requeue_share_retry_budget(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        self.assertEqual(claim(self.db, 1, 110, 30)["attempts"], 1)
+        # Expiration consumes the first attempt; manual requeue consumes second.
+        self.assertEqual(claim(self.db, 2, 141, 30)["attempts"], 2)
+        self.assertTrue(finish(self.db, 2, "a", "queued", 142))
+        self.assertEqual(claim(self.db, 3, 143, 30)["attempts"], 3)
+        self.assertTrue(finish(self.db, 3, "a", "queued", 144))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+        self.assertIsNone(claim(self.db, 4, 145, 30))
+
+    def test_preexisting_exhausted_queued_row_is_quarantined(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        # Guard existing ledgers or malformed imports as well as new transitions.
+        self.db.execute("UPDATE tasks SET attempts=3 WHERE id='a'")
+        self.assertIsNone(claim(self.db, 1, 110))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+
     def test_review_requires_artifact_and_no_self_accept(self):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         claim(self.db, 1, 110)
