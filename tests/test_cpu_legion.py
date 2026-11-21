@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -5,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from urllib.error import HTTPError
 from pathlib import Path
+from unittest.mock import patch
 from tools.cpu_legion import generate, local_url, parallel_limit, safe_file, task_context, verify
 
 class CpuLegionTests(unittest.TestCase):
@@ -82,6 +84,55 @@ class CpuLegionTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_model_request_ignores_environment_http_proxy(self):
+        class Model(BaseHTTPRequestHandler):
+            def do_POST(self):
+                payload = b'{"choices":[{"message":{"content":"direct"}}]}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_):
+                pass
+
+        class Proxy(BaseHTTPRequestHandler):
+            used = False
+
+            def do_POST(self):
+                type(self).used = True
+                self.send_response(502)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        model = HTTPServer(("127.0.0.1", 0), Model)
+        proxy = HTTPServer(("127.0.0.1", 0), Proxy)
+        model_thread = Thread(target=model.serve_forever, daemon=True)
+        proxy_thread = Thread(target=proxy.serve_forever, daemon=True)
+        model_thread.start()
+        proxy_thread.start()
+        try:
+            endpoint = f"http://127.0.0.1:{model.server_port}/v1/chat/completions"
+            proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+            with patch.dict(os.environ, {
+                "http_proxy": proxy_url,
+                "HTTP_PROXY": proxy_url,
+                "no_proxy": "",
+                "NO_PROXY": "",
+            }):
+                self.assertEqual(generate(endpoint, "fixture", "hello", 2),
+                                 "direct")
+            self.assertFalse(Proxy.used)
+        finally:
+            model.shutdown()
+            proxy.shutdown()
+            model.server_close()
+            proxy.server_close()
+            model_thread.join(timeout=2)
+            proxy_thread.join(timeout=2)
 
     def test_real_capacity_not_300_fake_models(self):
         self.assertEqual(parallel_limit(300, 16, 32, 8, 10000, 1024), 4)
