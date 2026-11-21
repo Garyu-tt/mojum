@@ -156,8 +156,14 @@ class CellExplorerV5:
         # remains at capacity for every later observation.
         if state["evictions"] and len(state["records"]) != MAX_CELLS:
             raise CellV5Error("evicted v5 table cannot be smaller than capacity")
-        if state["rest_streak"] and state["updates"] == 0:
-            raise CellV5Error("rest streak without observations")
+        if state["rest_streak"]:
+            if not state["last_seen_at"]:
+                raise CellV5Error("rest streak without observations")
+            # Rest has zero displacement: all consecutive rest decisions
+            # must belong to the most recently observed cell.
+            latest_cell = max(state["last_seen_at"], key=state["last_seen_at"].get)
+            if state["records"][latest_cell].get("rest", [0, 0])[0] < state["rest_streak"]:
+                raise CellV5Error("rest streak exceeds retained rest evidence")
 
         model = cls()
         model.last_tick = state["last_tick"]
