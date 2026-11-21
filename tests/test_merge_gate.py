@@ -64,6 +64,9 @@ def evaluate_checks(checks, **overrides):
     kwargs.setdefault("expected_head_sha", HEAD)
     kwargs.setdefault("expected_base", "main")
     kwargs.setdefault("required", REQUIRED)
+    kwargs.setdefault("expected_counts", {
+        pattern: 1 for pattern in REQUIRED if pattern in kwargs["required"]
+    })
     parsed = parse_snapshot(
         {
             "headRefOid": HEAD,
@@ -304,6 +307,50 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
+    def test_partial_green_matrix_cannot_pass(self):
+        first = [
+            run(name="aquarium-stdlib (3.11)", workflow="Aquarium regression QA"),
+            run(name="motor", workflow="Motor Gate"),
+            run(name="mesh", workflow="Mesh contract"),
+        ]
+        expected = {"Aquarium*": 3, "Motor Gate": 1, "Mesh contract": 1}
+        result = evaluate_checks(first, expected_counts=expected)
+        self.assertEqual((result.verdict, result.code),
+                         ("defer", "REQUIRED_CHECK_COUNT_MISSING"))
+        complete = first + [
+            run(name="aquarium-stdlib (3.12)", workflow="Aquarium regression QA"),
+            run(name="aquarium-stdlib (3.13)", workflow="Aquarium regression QA"),
+        ]
+        self.assertEqual(evaluate_checks(complete, expected_counts=expected).verdict,
+                         "ready")
+
+    def test_wildcard_without_inventory_is_not_ready(self):
+        result = evaluate_checks(self.green(), expected_counts={})
+        self.assertEqual((result.verdict, result.code),
+                         ("defer", "CHECK_INVENTORY_UNSPECIFIED"))
+
+    def test_workflow_literal_without_inventory_is_not_ready(self):
+        result = evaluate_checks(
+            [run(name="linux", workflow="Aquarium regression QA")],
+            required=("Aquarium regression QA",), expected_counts={},
+        )
+        self.assertEqual((result.verdict, result.code),
+                         ("defer", "CHECK_INVENTORY_UNSPECIFIED"))
+
+    def test_duplicate_labels_cannot_fill_matrix(self):
+        first = run(name="aquarium-stdlib (3.11)", workflow="Aquarium regression QA")
+        checks = [first, dict(first)] + self.green()[1:]
+        result = evaluate_checks(
+            checks, expected_counts={"Aquarium*": 2, "Motor Gate": 1, "Mesh contract": 1},
+        )
+        self.assertEqual(result.code, "REQUIRED_CHECK_COUNT_MISSING")
+
+    def test_bad_inventory_counts_are_invalid_input(self):
+        with self.assertRaises(ValueError):
+            evaluate_checks(self.green(), expected_counts={"Aquarium*": True})
+        with self.assertRaises(ValueError):
+            evaluate_checks(self.green(), expected_counts={"other": 3})
+
     def test_draft_pr_defers(self):
         result = evaluate_checks(self.green(), is_draft=True)
         self.assertEqual(result.verdict, "defer")
@@ -386,6 +433,9 @@ class CliTests(unittest.TestCase):
             "--require", "Aquarium*",
             "--require", "Motor Gate",
             "--require", "Mesh contract",
+            "--require-count", "Aquarium*=1",
+            "--require-count", "Motor Gate=1",
+            "--require-count", "Mesh contract=1",
         ]
 
     def test_ready_exit_zero_and_never_merges(self):
@@ -448,6 +498,26 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, EXIT_REJECT)
         self.assertEqual(result["code"], "INVALID_INPUT")
 
+    def test_cli_fails_closed_on_one_green_matrix_job(self):
+        checks = [
+            run(name="aquarium-stdlib (3.11)", workflow="Aquarium regression QA"),
+            run(name="motor", workflow="Motor Gate"),
+            run(name="mesh", workflow="Mesh contract"),
+        ]
+        args = self.base_args(self.write(self.snapshot(checks)))
+        args[args.index("Aquarium*=1")] = "Aquarium*=3"
+        code, result, _ = self.invoke(*args)
+        self.assertEqual(code, EXIT_DEFER)
+        self.assertEqual(result["code"], "REQUIRED_CHECK_COUNT_MISSING")
+
+    def test_invalid_inventory_specification_rejects(self):
+        path = self.write(self.snapshot())
+        code, result, _ = self.invoke(
+            *self.base_args(path), "--require-count", "Aquarium*=0",
+        )
+        self.assertEqual(code, EXIT_REJECT)
+        self.assertEqual(result["code"], "INVALID_INPUT")
+
     def test_usage_error_has_distinct_exit_code(self):
         err = io.StringIO()
         with redirect_stderr(err):
@@ -471,6 +541,9 @@ class CliTests(unittest.TestCase):
                 "--require", "Aquarium*",
                 "--require", "Motor Gate",
                 "--require", "Mesh contract",
+                "--require-count", "Aquarium*=1",
+                "--require-count", "Motor Gate=1",
+                "--require-count", "Mesh contract=1",
             )
         self.assertEqual(code, EXIT_READY)
         self.assertEqual(result["number"], 999)
