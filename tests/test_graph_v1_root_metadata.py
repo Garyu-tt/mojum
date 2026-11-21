@@ -2,6 +2,9 @@
 
 import copy
 import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -51,6 +54,26 @@ class GraphV1RootMetadataTests(unittest.TestCase):
         self.assertIn("episode", sim.step())
         self.assertEqual(digest(graph), before)
         self.assertEqual(FIXTURE["revision"], "0.1.0-fixture")
+
+    def test_missing_root_metadata_cli_fails_before_journal_creation(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            graph_path = Path(temporary) / "invalid-graph.json"
+            db_path = Path(temporary) / "must-not-exist.sqlite"
+            for field in ("id", "revision"):
+                graph = copy.deepcopy(FIXTURE)
+                del graph[field]
+                graph_path.write_text(json.dumps(graph), encoding="utf-8")
+                run = subprocess.run(
+                    [sys.executable, "-m", "mojum.aquarium", "--graph", str(graph_path),
+                     "--db", str(db_path), "--ticks", "1"],
+                    cwd=root, capture_output=True, text=True, check=False,
+                )
+                with self.subTest(field=field):
+                    self.assertEqual(run.returncode, 2, run.stderr)
+                    self.assertIn("root fields", run.stderr)
+                    self.assertFalse(db_path.exists())
+                    self.assertEqual(run.stdout, "")
 
     def test_unknown_top_level_field_still_refused(self):
         graph = copy.deepcopy(FIXTURE)
