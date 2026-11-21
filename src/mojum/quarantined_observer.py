@@ -24,6 +24,7 @@ from .verified_replica_restore import CUSTODY_SCHEMA
 from .noosphere import NoosphereError
 
 SCHEMA = "mojum.noosphere.quarantined-observer/1"
+MAX_TOPIC_BUCKETS = 64
 _CUSTODY_TRIGGERS = frozenset({
     "recovery_no_event_insert", "recovery_no_segment_insert",
     "recovery_no_custody_update", "recovery_no_custody_delete",
@@ -158,11 +159,21 @@ class QuarantinedObserver(SegmentedNoosphere):
             ),
         }
         if include_private_metadata:
+            # A compromised/stress fixture can deliberately use one
+            # unique topic per event. Never return unbounded topic maps.
+            # Deterministic top 64 by event frequency; remaining events
+            # counted separately, not dropped or mislabelled as a topic.
             counts = self._db.execute(
                 "SELECT topic,COUNT(*) AS cnt FROM segmented_events "
-                "GROUP BY topic ORDER BY topic"
+                "GROUP BY topic ORDER BY cnt DESC, topic ASC LIMIT ?",
+                (MAX_TOPIC_BUCKETS + 1,),
             ).fetchall()
-            result["topic_counts"] = {r["topic"]: r["cnt"] for r in counts}
+            selected = counts[:MAX_TOPIC_BUCKETS]
+            result["topic_counts"] = {r["topic"]: r["cnt"] for r in selected}
+            result["other_topics_event_count"] = (
+                check["count"] - sum(r["cnt"] for r in selected)
+            )
+            result["topic_buckets_truncated"] = len(counts) > MAX_TOPIC_BUCKETS
             result["recent_records"] = [
                 {
                     "seq": row["seq"], "topic": row["topic"],
