@@ -27,6 +27,21 @@ def check(condition, message):
         raise AssertionError(message)
 
 
+def assert_pinned_checkout(source: Path, expected_sha: str, marker: str):
+    """Never attribute results to a historical PR without its exact git HEAD."""
+    check((source / marker).is_file(), "missing pinned policy module: " + marker)
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(source), "rev-parse", "--verify", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AssertionError("cannot verify checkout provenance") from exc
+    check(completed.returncode == 0, "source is not a verifiable git checkout")
+    check(completed.stdout.strip() == expected_sha,
+          "checkout HEAD differs from pinned source " + expected_sha)
+
+
 def invoke(source: Path, database: Path, *, kind: str, ticks: int):
     env = os.environ.copy()
     env["PYTHONPATH"] = str((source / "src").resolve())
@@ -173,10 +188,14 @@ def main():
     parser.add_argument("--require-compatible", action="store_true")
     args = parser.parse_args()
     a, b = args.source_a.resolve(), args.source_b.resolve()
-    check((a / "src/mojum/developmental_policy_v2.py").is_file(),
-          "source A is not the pinned #112 implementation")
-    check((b / "src/mojum/cell_policy_v2.py").is_file(),
-          "source B is not the pinned #115 implementation")
+    assert_pinned_checkout(
+        a, "8d2eaf234c09177ae0b92dfef4bb41950529c912",
+        "src/mojum/developmental_policy_v2.py",
+    )
+    assert_pinned_checkout(
+        b, "b755da530634c0d6b8866107e7b4e9e325839175",
+        "src/mojum/cell_policy_v2.py",
+    )
     with tempfile.TemporaryDirectory(prefix="mojum-r014-wire-private-") as tmp:
         scratch = Path(tmp)
         legacy_cross_test(a, b, scratch)
