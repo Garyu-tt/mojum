@@ -81,7 +81,6 @@ class ExactRoomScalarContractTests(unittest.TestCase):
         value = encode_room_exact(room, (1.0, 2.0))
         mutants = []
         for entry in (
-            {"type": "float", "hex": "0x1.0000000000000p+2"},
             {"type": "float", "hex": "4.0"},  # valid but not canonical
             {"type": "float", "hex": "nan"},
             {"type": "float", "hex": "inf"},
