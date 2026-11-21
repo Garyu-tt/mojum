@@ -5,6 +5,7 @@ new opt-in wire without changing the legacy v1/v2/v3 policy contracts.
 """
 from copy import deepcopy
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from mojum.epoch_sense_v2 import (
     MAX_ABSOLUTE_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
 )
 from mojum.local_cell_sense import Proprioception
+from mojum.noosphere import EMPTY_HEAD, NoosphereError, _sha
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -169,6 +171,34 @@ class AquariumEpochV4Tests(unittest.TestCase):
         with self.open() as replayed:
             self.assertEqual(replayed.checkpoint(), final)
             self.assertEqual(replayed.store.count(), EPOCH_TICKS + 53)
+
+        # A rehashed SQLite chain is not sufficient evidence of a valid v4
+        # journal. Remove the required boundary marker from a disposable copy,
+        # close the sequence gap and recompute every event hash. The inspector
+        # must reject the otherwise hash-consistent first epoch-1 frame.
+        missing_marker = Path(self.tmp.name) / "missing_marker.sqlite3"
+        with sqlite3.connect(self.db) as source, sqlite3.connect(missing_marker) as target:
+            source.backup(target)
+        with sqlite3.connect(missing_marker) as db:
+            db.execute("DROP TRIGGER noosphere_no_delete")
+            db.execute("DROP TRIGGER noosphere_no_update")
+            self.assertEqual(db.execute(
+                "DELETE FROM events WHERE topic = 'aquarium.epoch'"
+            ).rowcount, 1)
+            previous = EMPTY_HEAD
+            events = db.execute("SELECT seq, wire_json FROM events ORDER BY seq").fetchall()
+            for new_seq, (old_seq, raw) in enumerate(events, 1):
+                digest = _sha({"previous": previous, "event": json.loads(raw)})
+                # Temporarily negative sequence values avoid primary-key
+                # conflicts while renumbering this disposable journal copy.
+                db.execute(
+                    "UPDATE events SET seq=?, prev_hash=?, event_hash=? WHERE seq=?",
+                    (-new_seq, previous, digest, old_seq),
+                )
+                previous = digest
+            db.execute("UPDATE events SET seq=-seq WHERE seq<0")
+        with self.assertRaisesRegex(NoosphereError, "missing durable v4 epoch marker"):
+            inspect_journal(missing_marker)
 
     def test_v4_absolute_and_journal_caps_fail_closed_without_partial_frame(self):
         with self.open() as aquarium:
