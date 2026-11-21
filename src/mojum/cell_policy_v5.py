@@ -162,6 +162,15 @@ class CellExplorerV5:
         # remains at capacity for every later observation.
         if state["evictions"] and len(state["records"]) != MAX_CELLS:
             raise CellV5Error("evicted v5 table cannot be smaller than capacity")
+        # A forced probe requires four blocked directions and three rests
+        # before its first occurrence (at least 8 measured ticks total).
+        # Every later forced probe requires another three rests, because
+        # taking a non-rest action resets the streak. Earlier evidence may
+        # have been evicted, so enforce this history-independent upper bound.
+        if state["forced_probes"] > max(
+                0, (state["updates"] - len(_MOVE_ACTIONS))
+                // (MAX_REST_STREAK + 1)):
+            raise CellV5Error("impossible v5 forced-probe history")
         if state["rest_streak"]:
             if not state["last_seen_at"]:
                 raise CellV5Error("rest streak without observations")
