@@ -44,8 +44,10 @@ epoch index. Reopen verifies the event and continues exactly
 one first-frame write; no duplicated marker. A stale writer
 cannot claim a checkpoint from a now-changed event head.
 
-The HMAC cached replay state now pins `epoch_index` **only for v4**.
-The original signed-state contract for v1/v2/v3 is unchanged.
+The HMAC cached replay state uses a **new explicit**
+`mojum.aquarium.replay-state/2` for v4 and pins `epoch_index`.
+The original signed `mojum.aquarium.replay-state/1` contract for v1/v2/v3 is unchanged.
+A validly authenticated snapshot with the wrong replay-state version is rejected.
 During v4 restore the signed epoch is checked against the absolute
 tick, the recorded boundary event where applicable, the policy
 snapshot and the checkpoint. The **full** source hash chain is
