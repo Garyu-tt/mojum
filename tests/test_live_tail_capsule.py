@@ -28,7 +28,7 @@ from test_segmented_noosphere import OWNER, ZERO, record
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
-GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8")), GRAPH, SEED
+GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
 
 
 class SyntheticTailArchiveQA(unittest.TestCase):
