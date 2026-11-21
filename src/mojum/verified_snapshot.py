@@ -180,3 +180,20 @@ def create_key_file(key_file):
         if fd is not None:
             os.close(fd)
     return path
+
+def main(argv=None):
+    """Explicit one-off HMAC key provisioning; never generated on boot."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Create one 32-byte PRIVATE local snapshot HMAC key"
+    )
+    parser.add_argument("--create-key", type=Path, required=True,
+                        help="fresh file in an existing owner-private directory")
+    options = parser.parse_args(argv)
+    create_key_file(options.create_key)
+    # No key material, snapshot state or absolute private filename on stdout.
+    print("PRIVATE_32_BYTE_KEY_CREATED_NO_REPLACEMENT")
+
+
+if __name__ == "__main__":
+    main()
