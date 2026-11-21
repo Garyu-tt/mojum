@@ -219,6 +219,20 @@ class RetentionTests(unittest.TestCase):
                 second = CellExplorerV5.from_snapshot(second.snapshot())
         self.assertEqual(first.snapshot(), second.snapshot())
 
+    def test_snapshot_rejects_rest_streak_without_observed_rests(self):
+        model = CellExplorerV5()
+        sense = cue(0)
+        intent = model.decide(sense)
+        self.assertNotEqual(intent["action"], "rest")
+        model.observe(sense, intent, False)
+        forged = model.snapshot()
+        forged["rest_streak"] = 1
+        # All generic counters and accounting still add up, but the final
+        # cell has no measured rest history to support this streak.
+        with self.assertRaisesRegex(CellV5Error, "rest streak exceeds"):
+            CellExplorerV5.from_snapshot(forged)
+        self.assertEqual(model.rest_streak, 0)
+
     def test_snapshot_rejects_forged_or_cross_version_envelopes(self):
         model = CellExplorerV5()
         for tick in range(40):
