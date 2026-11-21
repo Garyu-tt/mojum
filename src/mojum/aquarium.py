@@ -288,7 +288,11 @@ def main():
         parser.error("--ticks must be within 0..1000")
     # Validate command-line movement before Aquarium can create a bootstrap
     # journal. Invalid requests must not leave behind a new organism fixture.
-    if not displacement_within_budget(args.dx, args.dy):
+    try:
+        dx, dy = _movement(args.dx), _movement(args.dy)
+    except AquariumError as exc:
+        parser.error(str(exc))
+    if not displacement_within_budget(dx, dy):
         parser.error(f"movement length must be finite and at most {MAX_DISPLACEMENT_M:g} m")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
@@ -300,7 +304,7 @@ def main():
         if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
-            aquarium.step(dx=args.dx, dy=args.dy)
+            aquarium.step(dx=dx, dy=dy)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (

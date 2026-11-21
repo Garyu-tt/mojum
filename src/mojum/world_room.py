@@ -11,6 +11,7 @@ def displacement_within_budget(dx: float, dy: float) -> bool:
     """Whether the requested step fits the room's Euclidean distance limit."""
     return math.hypot(dx, dy) <= MAX_DISPLACEMENT_M
 
+
 @dataclass(frozen=True)
 class Room:
     width: float
