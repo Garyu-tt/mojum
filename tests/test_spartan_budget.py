@@ -1,5 +1,6 @@
 """Credential-free acceptance tests for bounded Spartan model spending."""
 
+from contextlib import closing
 import sqlite3
 import tempfile
 import threading
@@ -67,7 +68,7 @@ class BudgetLedgerTests(unittest.TestCase):
             self.ledger.record_usage("b", 41, 101)
         with self.assertRaises(BudgetDenied):
             BudgetLedger(self.path, self.caps).reserve("c", "m", 1, 1, now_s=102)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT frozen FROM budget_settings").fetchone(), (1,))
 
     def test_parallel_same_minute_never_oversubscribes(self):
