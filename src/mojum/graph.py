@@ -40,10 +40,19 @@ def load_graph(path):
 def validate(graph):
     if not isinstance(graph, dict) or graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
-    # v1 has exactly one canonical wire layout. Reject unknown top-level
-    # fields instead of silently accepting metadata that the executor ignores.
-    if set(graph) - {"schema", "id", "revision", "nodes", "edges"}:
-        raise GraphError("Unsupported graph v1 field")
+    # V1 graph identity and revision are part of the canonical wire format.
+    # Missing or malformed metadata must fail before Simulation hashes this
+    # object or Aquarium opens its durable SQLite journal.
+    if set(graph) != {"schema", "id", "revision", "nodes", "edges"}:
+        raise GraphError("Graph v1 requires exact root fields")
+    for field in ("id", "revision"):
+        value = graph[field]
+        if type(value) is not str or not value.strip() or len(value) > 256:
+            raise GraphError(f"Graph v1 {field} must be nonempty bounded text")
+        try:
+            value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise GraphError(f"Graph v1 {field} must be valid UTF-8") from exc
     nodes = graph.get("nodes")
     edges = graph.get("edges")
     if not isinstance(nodes, list) or not nodes or not isinstance(edges, list):
