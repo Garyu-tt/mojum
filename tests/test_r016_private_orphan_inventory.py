@@ -207,10 +207,6 @@ source, dest, head, root, mode = sys.argv[1:]
 root = Path(root)
 seed = json.loads((root / "examples/genesis_seed.json").read_text("utf-8"))
 graph = json.loads((root / "examples/first_loop.json").read_text("utf-8"))
-def interrupted_link(src, dst):
-    if mode == "before":
-        os._exit(71)
-    os.link.__wrapped__(src, dst)
 if mode == "before":
     with patch("mojum.aquarium_trace_export.os.link",
                side_effect=lambda src, dst: os._exit(71)):
