@@ -19,8 +19,10 @@ mode; it never reinterprets an existing SQLite journal.
   to pass 4,000 measured contacts while staying within the 10,000-event
   **motor-specific** replay budget for `developmental_fixture`. The global
   Aquarium replay ceiling is 100,000 events, but this sensory mode does not
-  raise the lower motor-mode limit. The runtime remains bounded and finite; it is
-  not an always-on organism.
+  raise the lower motor-mode limit. The canonical `local_cell_v4` motor can
+  also compose with this `/2` sensory mode; that profile uses durable epoch
+  markers and the global 100,000-event ceiling. The runtime remains bounded
+  and finite; it is not an always-on organism.
 - The learner still receives only the numeric near-field cue and measured
   probe response. Toy IDs, softness and full scene geometry remain
   spectator-only. `external_actuator` stays `None`.
@@ -39,6 +41,21 @@ PYTHONPATH=src python -m mojum.aquarium_wire \
 
 PYTHONPATH=src python -m unittest -v \
   tests.test_sensory_associations_v2
+```
+
+The canonical epoch profile uses the same versioned sensory selector with no
+temporal guidance:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium \
+  --db ./v4_sensory_v2_PRIVATE.sqlite3 --ticks 1000 \
+  --motor-mode local_cell_v4 --sensory-mode toy_probe_v2 \
+  --neural-mode disabled
+
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./v4_sensory_v2_PRIVATE.sqlite3 --ticks 1000 --interval-ms 1000 \
+  --motor-mode local_cell_v4 --sensory-mode toy_probe_v2 \
+  --temporal-mode none --neural-mode disabled
 ```
 
 Для ручной проверки перехода через старый потолок без включения долгого
@@ -61,7 +78,9 @@ semantics, a neural brain, or a consciousness claim.
 Opening an existing `toy_probe` journal as `toy_probe_v2` (or the reverse)
 fails before a new frame is appended. The original association schema and its
 historical events are not migrated, compacted, reset, or silently rewritten.
-The global Aquarium replay ceiling is 100,000 events; `toy_probe_v2`
-requires `developmental_fixture` and is subject to its separate 10,000-event
-motor replay ceiling (including bootstrap and other events). Epoch continuation
-and physical segmented archives are separate release gates.
+The global Aquarium replay ceiling is 100,000 events. On
+`developmental_fixture`, `toy_probe_v2` remains subject to the separate
+10,000-event motor replay ceiling (including bootstrap and other events); on
+`local_cell_v4`, explicit epoch markers and the 99,990-frame cap apply. The
+legacy `toy_probe` selector is rejected for v4 rather than silently upgraded.
+Epoch continuation and physical segmented archives are separate release gates.

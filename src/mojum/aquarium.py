@@ -26,6 +26,11 @@ from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
 from .cell_policy_v3 import CellExplorerV3, SCHEMA as V3_SCHEMA
+from .cell_policy_v3_escape import (
+    CellExplorerV3Escape,
+    MAX_CONSECUTIVE_RESTS as V3_ESCAPE_MAX_CONSECUTIVE_RESTS,
+    SCHEMA as V3_ESCAPE_SCHEMA,
+)
 from .cell_policy_v4 import CellExplorerV4, SCHEMA as V4_SCHEMA
 from .cell_policy_v5 import CellExplorerV5, SCHEMA as V5_SCHEMA
 from .epoch_sense_v2 import (
@@ -67,12 +72,13 @@ V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
 V3_MODE = "local_cell_v3"
+V3_ESCAPE_MODE = "local_cell_v3_escape"
 V4_MODE = "local_cell_v4"
 V5_MODE = "local_cell_v5"
 EPOCH_EVENT_SCHEMA = "mojum.aquarium.epoch-transition/1"
 MOTOR_MODES = (
-    "scripted", "developmental_fixture", V2B_MODE, V3_MODE, V4_MODE, V5_MODE,
-    V2B_WIRE_MODE, V2A_ARCHIVE_MODE,
+    "scripted", "developmental_fixture", V2B_MODE, V3_MODE, V3_ESCAPE_MODE,
+    V4_MODE, V5_MODE, V2B_WIRE_MODE, V2A_ARCHIVE_MODE,
 )
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
@@ -167,20 +173,24 @@ class Aquarium:
         self._archive_v2a = motor_mode == V2A_ARCHIVE_MODE
         self._epoch_mode = motor_mode in (V4_MODE, V5_MODE)
         self._read_only = self._archive_v2a or read_only
-        self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE, V4_MODE, V5_MODE)
+        self._local_cell = motor_mode in (
+            V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE, V3_ESCAPE_MODE, V4_MODE, V5_MODE,
+        )
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
             raise AquariumError("explicit pulse summation requires shadow mode")
         if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe", "toy_probe_v2"):
             raise AquariumError("sensory_mode must be none, toy_probe, or toy_probe_v2")
-        if motor_mode in (V4_MODE, V5_MODE) and sensory_mode == "toy_probe":
+        if self._epoch_mode and sensory_mode == "toy_probe":
             raise AquariumError("epoch motor requires sensory_mode none or toy_probe_v2")
         if sensory_mode == "toy_probe" and motor_mode != "developmental_fixture":
             raise AquariumError("toy_probe requires developmental_fixture motor mode")
         if sensory_mode == "toy_probe_v2" and motor_mode not in (
                 "developmental_fixture", V4_MODE):
-            raise AquariumError("toy_probe_v2 requires developmental_fixture or local_cell_v4")
+            raise AquariumError(
+                "toy_probe_v2 requires developmental_fixture or local_cell_v4 motor mode"
+            )
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("sensory_scene requires toy_probe or toy_probe_v2 mode")
         if type(temporal_mode) is not str or temporal_mode not in ("none", "range_guided"):
@@ -257,6 +267,12 @@ class Aquarium:
                     self.manifest["epoch_ticks"] = EPOCH_TICKS
                     self.manifest["proprioception_schema"] = EPOCH_SENSE_SCHEMA
                     self.manifest["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS
+                elif motor_mode == V3_ESCAPE_MODE:
+                    self.manifest["developmental_schema"] = V3_ESCAPE_SCHEMA
+                    self.manifest["developmental_policy"] = V3_ESCAPE_MODE
+                    self.manifest["max_consecutive_rests"] = (
+                        V3_ESCAPE_MAX_CONSECUTIVE_RESTS
+                    )
                 else:
                     self.manifest["developmental_schema"] = V3_SCHEMA if motor_mode == V3_MODE else V2B_SCHEMA
                     self.manifest["developmental_policy"] = V3_MODE if motor_mode == V3_MODE else V2B_WIRE_MODE
@@ -328,6 +344,8 @@ class Aquarium:
                           else CellExplorerV4())
         elif self.motor_mode == V3_MODE:
             self.motor = CellExplorerV3()
+        elif self.motor_mode == V3_ESCAPE_MODE:
+            self.motor = CellExplorerV3Escape()
         elif self._local_cell:
             self.motor = CellExplorer()
         self.brain = DevelopmentalBrain() if self.brain_mode == "developmental_controller" else None
@@ -941,7 +959,10 @@ def main():
         parser.error("--sensory-mode toy_probe requires --motor-mode developmental_fixture")
     if args.sensory_mode == "toy_probe_v2" and args.motor_mode not in (
             "developmental_fixture", V4_MODE):
-        parser.error("--sensory-mode toy_probe_v2 requires developmental_fixture or local_cell_v4")
+        parser.error(
+            "--sensory-mode toy_probe_v2 requires --motor-mode developmental_fixture or "
+            f"{V4_MODE}"
+        )
     if args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
     if not 0 <= args.ticks <= 1000:

@@ -63,10 +63,11 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
-    # Preserve the already-shipped canonical v4 + versioned sensory-v2 ABI.
-    # Legacy toy_probe is incompatible with epoch motors; v5 is sensorless.
+    # The legacy /1 contact table is capped at 4,000 updates and is not a
+    # valid continuation of the v4 long-run contract.  The explicit /2
+    # sensory selector is versioned and may be combined with v4 below.
     if policy_id == "local_cell_v4" and sensory_mode == "toy_probe":
-        raise NoosphereError("local_cell_v4 requires sensory_mode none or toy_probe_v2")
+        raise NoosphereError("local_cell_v4 journals require sensory_mode none or toy_probe_v2")
     if policy_id == "local_cell_v5" and sensory_mode is not None:
         raise NoosphereError("local_cell_v5 journals require sensory_mode none")
     if sensory_mode == "toy_probe_v2":
@@ -185,13 +186,11 @@ def inspect_journal(path, *, external_expected_head=None):
             manifest = event["payload"]
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             dt_ns = manifest.get("dt_ns")
-            # Runtime creation accepts only this bounded virtual-clock interval.
-            # A read-only wire pass must not certify a bootstrap that cold
-            # Aquarium replay rejects for a forged or missing clock period.
+            # Canonical v4 and its versioned sensory composition share the
+            # same strict bootstrap clock contract as runtime Aquarium.
             if policy in _EPOCH_POLICIES and (
                     type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
-                raise NoosphereError(
-                    "invalid %s bootstrap dt_ns" % _epoch_tag(policy))
+                raise NoosphereError("invalid %s bootstrap dt_ns" % _epoch_tag(policy))
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
         elif topic == "aquarium.frame":
@@ -203,20 +202,15 @@ def inspect_journal(path, *, external_expected_head=None):
                         or type(dt_ns) is not int
                         or type(event.get("observed_at_ns")) is not int
                         or event["observed_at_ns"] != frames * dt_ns):
-                    raise NoosphereError(
-                        "noncanonical %s frame envelope" % _epoch_tag(policy))
+                    raise NoosphereError("noncanonical %s frame envelope" % _epoch_tag(policy))
                 if frames // EPOCH_TICKS != epoch_index:
-                    raise NoosphereError(
-                        "missing durable %s epoch marker before frame"
-                        % _epoch_tag(policy))
+                    raise NoosphereError("missing durable %s epoch marker before frame" % _epoch_tag(policy))
                 # The manifest pins max_absolute_ticks.  The event ceiling
                 # normally runs out first, but inspection must fail closed on
                 # a frame at or beyond the pinned cap instead of certifying a
                 # tick the runtime can never write.
                 if frames >= MAX_ABSOLUTE_TICKS:
-                    raise NoosphereError(
-                        "%s frame exceeds the pinned absolute-tick cap"
-                        % _epoch_tag(policy))
+                    raise NoosphereError("%s frame exceeds the pinned absolute-tick cap" % _epoch_tag(policy))
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
@@ -246,10 +240,9 @@ def inspect_journal(path, *, external_expected_head=None):
                 raise NoosphereError("invalid or noncanonical epoch marker")
             epoch_index = expected_index
         elif policy in _EPOCH_POLICIES:
-            # Epoch Aquarium replay accepts only frames and durable markers.
+            # V4 Aquarium replay accepts only frames and durable epoch markers.
             # A valid SQLite hash chain is not proof of a valid motor-wire ABI.
-            raise NoosphereError(
-                "unsupported local-cell %s journal topic" % _epoch_tag(policy))
+            raise NoosphereError("unsupported local-cell %s journal topic" % _epoch_tag(policy))
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 

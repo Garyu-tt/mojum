@@ -87,6 +87,61 @@ class EpochSenseV4Tests(unittest.TestCase):
                 with self.assertRaises(CellV4Error):
                     CellExplorerV4.from_snapshot(bad)
 
+    def test_v4_snapshot_rejects_impossible_tick_and_eviction_history(self):
+        model = CellExplorerV4()
+        for tick in range(2):
+            cue = self.sense(tick)
+            model.observe(cue, model.decide(cue), False)
+        self.assertEqual(
+            CellExplorerV4.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+        common = {
+            "schema": V4_SCHEMA, "cell_size_m": .04,
+            "last_epoch_index": 0, "evictions": 0,
+            "forgotten_observations": 0,
+        }
+        # One observation per absolute tick: live cells cannot share a
+        # last-seen tick and the newest stamp must be the current tick.
+        forged = {
+            "two_cells_on_one_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {
+                    "4:4": {"rest": [1, 0]}, "5:4": {"rest": [1, 0]},
+                },
+                "last_seen_at": {"4:4": 1, "5:4": 1},
+            },
+            "newest_stamp_before_last_tick": {
+                **common, "last_tick": 2, "updates": 3,
+                "records": {"4:4": {"rest": [3, 0]}},
+                "last_seen_at": {"4:4": 1},
+            },
+            "eviction_before_table_full": {
+                **common, "last_tick": 1, "updates": 2,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {"5:4": {"rest": [1, 0]}},
+                "last_seen_at": {"5:4": 1},
+            },
+            "learned_but_no_retained_cell": {
+                **common, "last_tick": 0, "updates": 1,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {}, "last_seen_at": {},
+            },
+            # A cell stamped absolute tick 0 can only have been observed at
+            # tick 0, even though the snapshot's newest tick is plausible.
+            "cell_measured_more_often_than_ticks": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {
+                    "0:0": {"rest": [5, 0]},
+                    "2500:0": {"rest": [95, 0]},
+                },
+                "last_seen_at": {"0:0": 0, "2500:0": 99},
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name), self.assertRaises(CellV4Error):
+                CellExplorerV4.from_snapshot(snapshot)
+
     def test_blocked_rest_is_rejected_before_policy_mutation(self):
         model = CellExplorerV4()
         cue = self.sense(0)
@@ -142,18 +197,18 @@ class EpochJournalV4Tests(unittest.TestCase):
         with self.assertRaisesRegex(AquariumError, "contain only frames"):
             self.open()
 
-    def test_wire_rejects_v4_sensory_bootstrap_alias(self):
-        # The production runtime forbids sensory bridges for v4. A forged
-        # manifest must not rewrite its inspector policy ID or skip epoch gates.
+    def test_wire_rejects_v4_legacy_sensory_bootstrap_alias(self):
+        # The legacy /1 association cap is not a valid v4 continuation. The
+        # separately versioned /2 selector is exercised by sensory QA.
         from mojum.aquarium_wire import _stored_policy
 
         with self.open() as aquarium:
             manifest = deepcopy(aquarium.manifest)
-        for sensory in ("toy_probe", "toy_probe_v2"):
+        for sensory in ("toy_probe",):
             with self.subTest(sensory=sensory):
                 bogus = deepcopy(manifest)
                 bogus["sensory_mode"] = sensory
-                with self.assertRaisesRegex(NoosphereError, "require sensory_mode none"):
+                with self.assertRaisesRegex(NoosphereError, "none or toy_probe_v2"):
                     _stored_policy(bogus)
 
     def test_wire_pins_v4_absolute_tick_cap_in_bootstrap(self):

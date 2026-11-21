@@ -146,6 +146,34 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         fresh = CellExplorerV3Escape.from_snapshot(policy.snapshot())
         self.assertEqual(restored.decide(sense), fresh.decide(sense))
 
+    def test_snapshot_rejects_more_cell_measurements_than_elapsed_ticks(self):
+        # Global updates and last_tick are coherent. The first cell alone
+        # claims five observations despite last being seen on tick zero.
+        valid = CellExplorerV3Escape().snapshot()
+        valid.update({
+            "last_tick": 99,
+            "updates": 100,
+            "records": {
+                "0:0": {"rest": [1, 0]},
+                "2500:0": {"rest": [99, 0]},
+            },
+            "last_seen_at": {"0:0": 0, "2500:0": 99},
+        })
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid,
+        )
+        forged = {
+            **valid,
+            "records": {
+                "0:0": {"rest": [5, 0]},
+                "2500:0": {"rest": [95, 0]},
+            },
+        }
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "more escape cell observations than elapsed ticks"
+        ):
+            CellExplorerV3Escape.from_snapshot(forged)
+
     def test_tampered_escape_snapshot_is_rejected(self):
         room, start = sealed_cell()
         policy = CellExplorerV3Escape()
@@ -190,6 +218,19 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             policy.decide(stale)
         with self.assertRaises(CellV3EscapeError):
             policy.decide(object())
+
+    def test_rest_cannot_be_recorded_as_blocked(self):
+        policy = CellExplorerV3Escape()
+        sense = Proprioception(0, "a" * 64, 1.0, 2.0, False)
+        intent = policy.decide(sense)
+        self.assertEqual(intent["action"], "rest")
+        before = policy.snapshot()
+        with self.assertRaisesRegex(CellV3EscapeError, "rest cannot be a blocked"):
+            policy.observe(sense, intent, True)
+        self.assertEqual(policy.snapshot(), before)
+        learned = policy.observe(sense, intent, False)
+        self.assertEqual(learned["action"], "rest")
+        self.assertEqual(policy.snapshot()["records"][intent["zone"]]["rest"], [1, 0])
 
     def test_learning_record_is_versioned_and_honest(self):
         room, start = sealed_cell()

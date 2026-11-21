@@ -101,6 +101,7 @@ class CellExplorerV3:
             if (type(last_seen) is not int
                     or not 0 <= last_seen <= state["last_tick"]):
                 raise CellV3Error("invalid last observed cell tick")
+            cell_observations = 0
             for action, counts in actions.items():
                 if (type(counts) is not list or len(counts) != 2
                         or any(type(v) is not int for v in counts)
@@ -109,13 +110,31 @@ class CellExplorerV3:
                     raise CellV3Error("invalid v3 measured counters")
                 if counts[1] > 1 or (action == "rest" and counts[1]):
                     raise CellV3Error("impossible blocked motor history")
-                observed_live += counts[0]
+                cell_observations += counts[0]
+            # A cell can be observed at most once per tick, and ticks start
+            # at 0, so it cannot hold more observations than elapsed ticks.
+            if cell_observations > last_seen + 1:
+                raise CellV3Error("more v3 cell observations than elapsed ticks")
+            observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV3Error("v3 lost or double-counted learned observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:
             raise CellV3Error("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3Error("unobserved stored cells")
+        if state["updates"] and not state["records"]:
+            raise CellV3Error("learned observations without a retained cell")
+        # One observation per tick, so two live cells cannot share a
+        # last-seen tick and the newest stamp must be the current tick.
+        stamps = list(state["last_seen_at"].values())
+        if len(set(stamps)) != len(stamps):
+            raise CellV3Error("multiple v3 cells observed on one tick")
+        if state["updates"] and max(stamps) != state["last_tick"]:
+            raise CellV3Error("latest v3 cell observation does not match tick")
+        # Every eviction needs at least one observation of a distinct cell,
+        # so a full table plus E evictions requires MAX_CELLS + E updates.
+        if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
+            raise CellV3Error("impossible v3 eviction history")
 
         model = cls()
         model.last_tick = state["last_tick"]

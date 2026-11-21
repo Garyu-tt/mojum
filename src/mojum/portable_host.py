@@ -54,11 +54,14 @@ def _require_sensorimotor_fixture(aquarium):
     if getattr(aquarium, "motor", None) is None:
         raise PortableHostError("developmental motor controller is unavailable")
     if motor_mode == V4_MODE:
-        if (getattr(aquarium, "sensory_mode", None) != "none"
-                or getattr(aquarium, "sensory_bridge", None) is not None
+        sensory_mode = getattr(aquarium, "sensory_mode", None)
+        bridge = getattr(aquarium, "sensory_bridge", None)
+        if (sensory_mode not in ("none", "toy_probe_v2")
+                or (sensory_mode == "none") != (bridge is None)
                 or getattr(aquarium, "temporal_mode", None) != "none"):
             raise PortableHostError(
-                "local_cell_v4 portable host requires sensory_mode=none and temporal_mode=none"
+                "local_cell_v4 portable host requires sensory_mode=none or toy_probe_v2, "
+                "with temporal_mode=none"
             )
         return
     if getattr(aquarium, "sensory_bridge", None) is None:
@@ -182,7 +185,7 @@ def main(argv=None):
                         help="opt-in synthetic motor policy")
     parser.add_argument("--sensory-mode", choices=("toy_probe", "toy_probe_v2", "none"),
                         default="toy_probe",
-                        help="synthetic sensory policy; v4 requires none")
+                        help="synthetic sensory policy; v4 accepts none or toy_probe_v2")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
@@ -195,9 +198,11 @@ def main(argv=None):
     except PortableHostError as exc:
         parser.error(str(exc))
     if args.motor_mode == V4_MODE:
-        if args.sensory_mode != "none" or args.temporal_mode != "none":
+        if (args.sensory_mode not in ("none", "toy_probe_v2")
+                or args.temporal_mode != "none"):
             parser.error(
-                "local_cell_v4 requires --sensory-mode none and --temporal-mode none"
+                "local_cell_v4 requires --sensory-mode none or toy_probe_v2 and "
+                "--temporal-mode none"
             )
         if args.brain_mode != "placeholder":
             parser.error("local_cell_v4 requires --brain-mode placeholder")

@@ -19,5 +19,5 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 | metadata-only footer | `::test_guided_cli_exports_...` (footer excludes `temporal_range_state`) and footer checks in the integrity test |
 | real Chrome | `tests/smoke_real_chromium_viewer.py`, `tests/smoke_r09_chromium_viewer.py` |
 
-Remaining limit-boundary cases (64k line, 5000 frames) are in draft PR #387.
+Limit-boundary regression cases (64k line, 5000 frames) were added in PR #387 (closed 2026-11-21). See the current `tests/test_private_trace_integrity.py` Node harness for the assertions. This map is an inventory of tests, not evidence of a successful run on the latest `main` SHA.
 The user guide is `docs/REAL_AQUARIUM_TRACE_VIEWER_R01.md`.

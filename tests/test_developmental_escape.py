@@ -106,7 +106,7 @@ class ZonedEscapeLocalityTests(unittest.TestCase):
 
     def test_hints_are_bounded_and_validated(self):
         policy = ZonedEscapePlay()
-        for hints in (("oracle",), ("east", "east"), ("east",) * 5, "east", (1,)):
+        for hints in (("oracle",), ("east", "east"), ("east",) * 5, "east", (1,), ({"invalid": 1},)):
             with self.assertRaises(EscapePolicyError):
                 policy.choose(0, POSITION, avoid=hints)
         with self.assertRaises(EscapePolicyError):
@@ -191,6 +191,7 @@ class ZonedEscapeStateTests(unittest.TestCase):
             ("observations", -1),
             ("observations", True),
             ("rest_streak", -1),
+            ("rest_streak", MAX_CONSECUTIVE_RESTS + 1),
             ("evicted_trials", -1),
         ):
             bad = copy.deepcopy(good)
@@ -224,6 +225,32 @@ class ZonedEscapeStateTests(unittest.TestCase):
         self.assertEqual(state["evicted_trials"], 2)
         restored = ZonedEscapePlay.from_snapshot(state)
         self.assertEqual(restored.snapshot(), state)
+
+    def test_observe_cannot_bypass_rest_cap_or_mutate_rejected_state(self):
+        policy = ZonedEscapePlay()
+        for tick in range(MAX_CONSECUTIVE_RESTS):
+            policy.observe(tick=tick, position=POSITION, kind="rest", blocked=False)
+        before = policy.snapshot()
+        with self.assertRaisesRegex(EscapePolicyError, "rest streak cap"):
+            policy.observe(tick=MAX_CONSECUTIVE_RESTS, position=POSITION,
+                           kind="rest", blocked=False)
+        self.assertEqual(policy.snapshot(), before)
+        policy.observe(tick=MAX_CONSECUTIVE_RESTS, position=POSITION,
+                       kind="east", blocked=False)
+        self.assertEqual(policy.rest_streak, 0)
+        policy.observe(tick=MAX_CONSECUTIVE_RESTS + 1, position=POSITION,
+                       kind="rest", blocked=False)
+        self.assertEqual(policy.rest_streak, 1)
+
+    def test_rest_snapshot_rejects_inconsistent_observations(self):
+        policy = ZonedEscapePlay()
+        policy.observe(tick=0, position=POSITION, kind="rest", blocked=False)
+        state = policy.snapshot()
+        for change in ({"blocked": 1}, {"trials": 0}):
+            bad = copy.deepcopy(state)
+            bad["rest"].update(change)
+            with self.assertRaises(EscapePolicyError):
+                ZonedEscapePlay.from_snapshot(bad)
 
     def test_observation_budget_is_enforced_on_both_sides(self):
         state = ZonedEscapePlay().snapshot()

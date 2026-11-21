@@ -344,5 +344,45 @@ class CliTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 2)
 
 
+
+class NumericWireRegressionTests(unittest.TestCase):
+    def test_start_tokens_preserved_as_written(self):
+        raw = (
+            b'{"width":4,"height":4,"obstacles":[],"start":[1e0,2.00]}'
+        )
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.summary["start"], ["1e0", "2.00"])
+
+    def test_huge_finite_decimals_fail_closed_without_arithmetic_overflow(self):
+        raw = b'{"width":1e999999,"height":1e999999,"obstacles":[],"start":[1,2]}'
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("finite room coordinate" in error for error in report.errors))
+        self.assertIsNone(report.summary)
+
+    def test_nonzero_underflow_cannot_disappear_as_zero_coordinate(self):
+        raw = b'{"width":4,"height":4,"obstacles":[],"start":[1e-999,2]}'
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("finite room coordinate" in error for error in report.errors))
+
+    def test_oversized_number_token_is_rejected(self):
+        from mojum.room_spec import MAX_NUMBER_TOKEN_CHARS
+        token = "0." + "0" * MAX_NUMBER_TOKEN_CHARS + "1"
+        raw = (
+            '{"width":4,"height":4,"obstacles":[],"start":[' + token + ',2]}'
+        ).encode()
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("number-token length limit" in error for error in report.errors))
+
+    def test_finite_scientific_spelling_remains_usable(self):
+        raw = b'{"width":4e0,"height":4,"obstacles":[],"start":[1e-2,2.0]}'
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.summary["start"], ["1e-2", "2.0"])
+
+
 if __name__ == "__main__":
     unittest.main()
