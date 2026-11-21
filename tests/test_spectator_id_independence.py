@@ -71,11 +71,11 @@ class SpectatorIdentityIndependenceQA(unittest.TestCase):
             a_path = Path(temp) / "one.sqlite3"
             b_path = Path(temp) / "two.sqlite3"
             with Aquarium(a_path, SEED, GRAPH, room=Room(4, 4),
-                          start=(2.0, 2.0), exploration_mode="goal_free",
+                          start=(2.0, 2.0), motor_mode="developmental_fixture",
                           sensory_mode="toy_probe", sensory_scene=labeled_scene(),
                           neural_mode="disabled") as a, Aquarium(
                           b_path, SEED, GRAPH, room=Room(4, 4),
-                          start=(2.0, 2.0), exploration_mode="goal_free",
+                          start=(2.0, 2.0), motor_mode="developmental_fixture",
                           sensory_mode="toy_probe",
                           sensory_scene=labeled_scene(swap_names=True),
                           neural_mode="disabled") as b:
@@ -85,9 +85,9 @@ class SpectatorIdentityIndependenceQA(unittest.TestCase):
                     frame_a, frame_b = a.step(), b.step()
                     self.assertEqual(frame_a, frame_b)
                     self.assertNotIn("spectator.", json.dumps(frame_a))
-                self.assertEqual(a.sensory_bridge.model.snapshot(),
-                                 b.sensory_bridge.model.snapshot())
-                self.assertEqual(a.explorer.snapshot(), b.explorer.snapshot())
+                self.assertEqual(a.contact_model.snapshot(),
+                                 b.contact_model.snapshot())
+                self.assertEqual(a.motor.snapshot(), b.motor.snapshot())
                 self.assertEqual(a.store.count(), b.store.count())
                 # Private experiment manifests differ (correct provenance),
                 # but the agent's experience remains causally identical.
