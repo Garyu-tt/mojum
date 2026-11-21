@@ -1,9 +1,13 @@
 """Acceptance tests for the explicit synthetic controller boundary."""
 
+import copy
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.developmental_brain import (
@@ -71,6 +75,18 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
                 independent.step()
             self.assertEqual(independent.step(), resumed)
 
+    def test_controller_bootstrap_rejects_bool_for_integer_field(self):
+        # False == 0 in Python, but is a different persisted JSON scalar.
+        with self.aquarium() as aquarium:
+            expected = aquarium._record(
+                "aquarium.bootstrap", "aquarium-bootstrap",
+                aquarium.manifest, 0, aquarium.graph_sha256,
+            )
+            forged = copy.deepcopy(expected)
+            forged["observed_at_ns"] = False
+            with self.assertRaises(AquariumError):
+                aquarium._check_bootstrap(forged)
+
     def test_explicit_controller_mode_is_pinned_and_cannot_be_reinterpreted(self):
         with self.aquarium() as aquarium:
             aquarium.step()
@@ -86,6 +102,62 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             with self.assertRaises(AquariumError):
                 aquarium.step(dx=0.0)
             self.assertEqual(aquarium.checkpoint(), before)
+
+    def test_privileged_graph_brain_rejected_even_with_controller_enabled(self):
+        """The synthetic adapter must never hide a privileged graph output."""
+        from mojum.sim import Simulation
+
+        with self.aquarium() as aquarium:
+            checkpoint = aquarium.checkpoint()
+            row_count = aquarium.store.count()
+            real_step = Simulation.step
+
+            for field, value in (
+                ("status", "ACTIVE"),
+                ("action", {"kind": "unsafe_external_override"}),
+            ):
+                with self.subTest(field=field):
+                    def forged_output(sim):
+                        output = real_step(sim)
+                        output[aquarium.kind_ids["brain.placeholder"]]["observation"][field] = value
+                        return output
+
+                    with patch.object(Simulation, "step", forged_output):
+                        with self.assertRaisesRegex(
+                            AquariumError, "unexpected privileged brain behavior"
+                        ):
+                            aquarium.step()
+
+                    self.assertEqual(aquarium.checkpoint(), checkpoint)
+                    self.assertEqual(aquarium.store.count(), row_count)
+
+    def test_replay_rejects_bool_as_integer_after_rehashed_local_journal(self):
+        """A forged numeric zero is not an acceptable false safety flag."""
+        from mojum.noosphere import _canonical, _sha
+
+        with self.aquarium() as writer:
+            writer.step()
+        with closing(sqlite3.connect(self.db)) as db:
+            row = db.execute(
+                "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.frame'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            seq, wire, previous = row
+            event = json.loads(wire)
+            self.assertIs(event["payload"]["brain"]["safety"]["real_actuation"], False)
+            event["payload"]["brain"]["safety"]["real_actuation"] = 0
+            self.assertEqual(event["payload"]["brain"]["safety"]["real_actuation"], False)
+            # This disposable corruption fixture deliberately bypasses the
+            # append-only trigger; production journals retain that protection.
+            db.execute("DROP TRIGGER noosphere_no_update")
+            db.execute(
+                "UPDATE events SET wire_json=?,event_hash=? WHERE seq=?",
+                (_canonical(event), _sha({"previous": previous, "event": event}), seq),
+            )
+            db.commit()
+        with self.assertRaisesRegex(AquariumError, "mismatched committed frame"):
+            with self.aquarium():
+                pass
 
     def test_direct_contract_rejects_future_stale_and_foreign_sensor_cues(self):
         brain = DevelopmentalBrain()
@@ -130,6 +202,42 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
         )
         self.assertEqual(accepted["input"]["near_field"], cue)
         self.assertEqual(motor.snapshot(), original)
+
+
+    def test_future_or_stale_heartbeat_timestamp_is_rejected_without_mutation(self):
+        brain, motor = DevelopmentalBrain(), MotorPlay()
+        heartbeat = {
+            "kind": "interoception",
+            "heartbeat": {
+                "beat_index": 0, "phase_milli": 0,
+                "pulse": True, "synthetic": True,
+            },
+            "observed_at_ns": 0,
+        }
+        before = motor.snapshot()
+        for tick, observed_ns in ((0, 1), (0, 10_000_000),
+                                  (1, 0), (1, 20_000_000)):
+            with self.subTest(tick=tick, observed_ns=observed_ns):
+                proprio = {
+                    "tick": tick, "position": [1.0, 2.0],
+                    "world_revision": "a" * 64,
+                }
+                with self.assertRaises(DevelopmentalBrainError):
+                    brain.decide(
+                        motor, tick=tick,
+                        interoception={**heartbeat, "observed_at_ns": observed_ns},
+                        proprioception=proprio, dt_ns=10_000_000,
+                    )
+                self.assertEqual(motor.snapshot(), before)
+
+    def test_controller_uses_configured_virtual_dt_for_current_heartbeat(self):
+        with self.aquarium(dt_ns=20_000_000) as aquarium:
+            aquarium.step()
+            frame = aquarium.step()
+            self.assertEqual(
+                frame["brain"]["input"]["interoception"]["observed_at_ns"],
+                20_000_000,
+            )
 
     def test_direct_contract_rejects_hidden_sensor_metadata(self):
         brain = DevelopmentalBrain()
