@@ -294,6 +294,7 @@ class ExportCrashAndPublicationQA(unittest.TestCase):
         # Python 3.13 surfaces a real ResourceWarning because the SQLite
         # Connection.__exit__ is transaction handling, NOT connection close.
         from mojum.noosphere import NoosphereError
+        from mojum.segmented_noosphere import SegmentedNoosphere
 
         original_connect = sqlite3.connect
         tracked = []
@@ -323,16 +324,17 @@ class ExportCrashAndPublicationQA(unittest.TestCase):
             with Aquarium(self.db, SEED, GRAPH, **opts) as cold:
                 self.assertEqual(cold.store.count(), 6)
                 self.assertEqual(cold.checkpoint()["journal_head"], self.head)
-            # Owner/schema failure is checked before opening a writer; the
-            # preflight probe must close immediately even when it raises.
-            for override in (
-                {"journal_segment_size": 128},
-                {"agent_id": "wrong-fixture-owner"},
+            # Test the STORE preflight directly: Aquarium would reject a
+            # wrong agent ID earlier at its genome guard, skipping the
+            # connection and thus never exercising the leak path.
+            for agent_id, size in (
+                ("dante-fixture-001", 128),
+                ("wrong-fixture-owner", 64),
             ):
-                with self.subTest(failure=override):
+                with self.subTest(agent_id=agent_id, size=size):
                     with self.assertRaises(NoosphereError):
-                        Aquarium(
-                            self.db, SEED, GRAPH, **{**opts, **override}
+                        SegmentedNoosphere(
+                            self.db, agent_id, segment_size=size
                         )
         self.assertGreaterEqual(len(tracked), 4, tracked)
         for idx, connection in enumerate(tracked):
