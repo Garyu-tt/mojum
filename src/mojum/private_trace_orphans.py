@@ -180,8 +180,10 @@ def _internally_consistent(data, expected_head):
                         or learning["epoch_tick"] != offset
                         or type(learning.get("total_updates")) is not int
                         or learning["total_updates"] != tick + 1
-                        or type(observation.get("heartbeat_pulse")) not in (int, float)
-                        or type(heartbeat.get("pulse")) not in (int, float)
+                        # Native EpochProprioception and interoception
+                        # encode a heartbeat *event* as strict bool, not BPM.
+                        or type(observation.get("heartbeat_pulse")) is not bool
+                        or type(heartbeat.get("pulse")) is not bool
                         or observation.get("heartbeat_pulse") != heartbeat.get("pulse")):
                     raise ValueError("incoherent v4 epoch/sense/motor/learning frame")
         elif "policy_schema" in footer:
