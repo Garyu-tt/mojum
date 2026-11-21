@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 
+from .world_room import Room, initial_state
+
 REPORT_SCHEMA = "mojum.room-spec-report/1"
 MAX_INPUT_BYTES = 256 * 1024
 MAX_OBSTACLES = 4096
@@ -34,6 +36,9 @@ REQUIRED_KEYS = frozenset(("width", "height", "obstacles", "start"))
 _NUMBER = re.compile(
     r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\Z", re.ASCII
 )
+# Integer tokens keep integer spelling in the runtime room manifest; every
+# other validated token becomes a Python float.
+_INTEGER = re.compile(r"-?(?:0|[1-9][0-9]*)\Z", re.ASCII)
 
 
 class RoomSpecError(ValueError):
@@ -276,6 +281,49 @@ def validate_room_bytes(raw: bytes):
     except RoomSpecError as exc:
         return RoomReport((str(exc),), (), None)
     return validate_room_document(document)
+
+
+def _runtime_number(token):
+    """Convert an already-validated JSON number token to a runtime scalar."""
+    return int(token) if _INTEGER.fullmatch(token) is not None else float(token)
+
+
+def build_runtime_room(document):
+    """Validate a parsed room document and build the CPU point-room runtime.
+
+    Returns ``(Room, start)``. Integer tokens stay integers so the persisted
+    room manifest distinguishes them from ``4.0`` exactly as the existing
+    built-in room does; fraction and exponent tokens become Python floats.
+    Geometry that validates in exact decimal arithmetic but cannot be
+    represented exactly by the float runtime is rejected here, before any
+    journal exists.
+    """
+    report = validate_room_document(document)
+    if not report.valid:
+        raise RoomSpecError("; ".join(report.errors))
+    width = _runtime_number(document["width"])
+    height = _runtime_number(document["height"])
+    obstacles = tuple(
+        tuple(_runtime_number(token) for token in rect)
+        for rect in document["obstacles"]
+    )
+    start = tuple(_runtime_number(token) for token in document["start"])
+    try:
+        room = Room(width, height, obstacles)
+        initial_state(room, start[0], start[1])
+    except ValueError as exc:
+        raise RoomSpecError(
+            "room geometry is not representable by the CPU point-room runtime: %s"
+            % (exc,)
+        ) from exc
+    return room, start
+
+
+def load_runtime_room(raw: bytes):
+    """Parse, strictly validate and build a runtime room from draft bytes."""
+    if type(raw) is not bytes:
+        raise RoomSpecError("room document must be supplied as bytes")
+    return build_runtime_room(_parse(raw))
 
 
 def _text_report(report):

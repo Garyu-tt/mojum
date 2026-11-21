@@ -28,7 +28,26 @@ client-side guard; repository rulesets remain authoritative.
 
 Open [the local SVG editor](tools/room_designer.html) with its three adjacent JavaScript files to draw a synthetic 2D point-room, move the start marker and rectangles, preserve exact decimal tokens, save/reopen JSON and preview up to 512 collision-only steps. Undo/Redo and a bounded 64-snapshot history work without a server. For a **single portable HTML file**, use `python tools/package_room_designer.py --out room-designer-offline.html`. See [editor limitations](docs/R015_VISUAL_ROOM_DESIGNER.md).
 
-**Input-only, offline authoring at this stage:** the typed-room JSON CLI required to create a custom Aquarium SQLite journal has not been merged into `main`; this editor does not claim runtime integration, MuJoCo or real physical contact.
+**Input-only, offline authoring:** the editor still does not claim MuJoCo or real
+physical contact. A validated draft can now open a **new** PRIVATE fixture
+journal with `--room-spec` (see below); it cannot reinterpret an existing
+journal and is rejected by the local-cell compatibility motor modes.
+
+### Open a fixture journal from a typed-room draft
+
+`mojum.room_spec` validates the designer JSON losslessly and can build the CPU
+point-room runtime from it. The same validation runs again before any journal
+file is created, so a malformed or unrepresentable draft fails without leaving
+SQLite behind:
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./custom_room_PRIVATE.sqlite3 \
+  --room-spec ./my_room.json --ticks 10 --neural-mode disabled
+```
+
+Reopen with the **same** draft to replay and continue; `--room-spec` is not
+accepted together with the local-cell compatibility motor modes, whose room and
+start are pinned for byte-exact replay of earlier journals.
 
 ## Run the current aquarium
 

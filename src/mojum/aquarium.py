@@ -41,6 +41,7 @@ from .epoch_sense_v2 import (
 from .local_cell_sense import Proprioception
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
+from .room_spec import RoomSpecError, load_runtime_room
 from .noosphere import (
     EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event,
 )
@@ -930,6 +931,9 @@ def main():
                         help="guide virtual movement from measured range transitions")
     parser.add_argument("--pulse-sum", choices=("auto", "ordered", "compensated"), default="auto",
                         help="shadow predictor arithmetic for an untagged journal (default: detect on replay)")
+    parser.add_argument("--room-spec", type=Path, metavar="JSON",
+                        help="validated typed-room draft for a new PRIVATE journal; "
+                             "not supported by local-cell motor modes")
     parser.add_argument("--expected-head", metavar="SHA256",
                         help="independent journal head to require before appending; "
                              "needs an existing journal")
@@ -975,6 +979,22 @@ def main():
         # The internal controller selects each action from committed history.
         dx, dy = None, None
     seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    # Resolve an optional typed-room draft before any SQLite file can be born.
+    room, start = None, None
+    if args.room_spec is not None:
+        if args.motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE,
+                               V3_ESCAPE_MODE, V4_MODE, V2B_WIRE_MODE):
+            parser.error(
+                "--room-spec is not supported by local-cell compatibility motor modes"
+            )
+        try:
+            raw_room = args.room_spec.read_bytes()
+        except OSError as exc:
+            parser.error("cannot read --room-spec: %s" % (exc.strerror,))
+        try:
+            room, start = load_runtime_room(raw_room)
+        except RoomSpecError as exc:
+            parser.error(str(exc))
     try:
         graph = load_graph(args.graph)
         validate_graph(graph)  # Fail before opening a new SQLite journal.
@@ -983,6 +1003,7 @@ def main():
     try:
         aquarium = Aquarium(
             args.db, seed, graph, agent_id=seed["genome_id"],
+            room=room, start=(1.0, 2.0) if start is None else start,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
             brain_mode=args.brain_mode,
