@@ -60,7 +60,7 @@ class AnchoredTypedRoomResumeTests(unittest.TestCase):
         with Aquarium(
                 self.db, SEED, GRAPH, room=ROOM, start=START,
                 exploration_mode="goal_free",
-                developmental_policy="local_cell_v2",
+                developmental_policy="local_cell_v2b",
                 room_numeric_contract="typed_v1" if typed else "legacy") as q:
             for _ in range(ticks):
                 q.step()
