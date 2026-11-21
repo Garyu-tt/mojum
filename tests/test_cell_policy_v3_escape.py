@@ -266,6 +266,28 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         empty = CellExplorerV3Escape().snapshot()
         self.assertEqual(CellExplorerV3Escape.from_snapshot(empty).snapshot(), empty)
 
+    def test_snapshot_rejects_aggregate_causal_overcommit(self):
+        # Each cell individually passes count <= last_seen + 1, each
+        # timestamp is unique and the latest is current; nevertheless,
+        # 8 observations cannot fit into the first five ticks (0..4).
+        forged = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "last_tick": 9, "updates": 10,
+            "records": {
+                "0:0": {"x+": [4, 0]},
+                "1:0": {"x+": [4, 0]},
+                "2:0": {"x+": [2, 0]},
+            },
+            "last_seen_at": {"0:0": 3, "1:0": 4, "2:0": 9},
+            "evictions": 0, "forgotten_observations": 0,
+            "consecutive_rests": 0, "consecutive_blocked_probes": 0,
+        }
+        with self.assertRaisesRegex(
+            CellV3EscapeError,
+            "escape retained observations exceed elapsed tick prefix",
+        ):
+            CellExplorerV3Escape.from_snapshot(forged)
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
