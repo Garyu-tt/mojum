@@ -67,6 +67,34 @@ class V2Test(unittest.TestCase):
         with self.assertRaises(CuriosityError):
             ContactAssociations.from_snapshot(ContactAssociationsV2().snapshot())
 
+    def test_impossible_retention_history_rejected(self):
+        m = ContactAssociationsV2()
+        feed(m, 0, (1, 1, 1), 0.5)
+        feed(m, 1, (2, 2, 2), 0.5)
+        early = m.snapshot()
+        early["table"].pop("1:1:1")
+        early["evicted_cues"] = 1
+        early["evicted_observations"] = 1
+        with self.assertRaises(CuriosityError):
+            ContactAssociationsV2.from_snapshot(early)
+        empty = m.snapshot()
+        empty["table"] = {}
+        empty["evicted_cues"] = 1
+        empty["evicted_observations"] = 2
+        with self.assertRaises(CuriosityError):
+            ContactAssociationsV2.from_snapshot(empty)
+
+    def test_stale_latest_stamp_rejected(self):
+        m = ContactAssociationsV2()
+        feed(m, 0, (1, 1, 1), 0.5)
+        feed(m, 1, (2, 2, 2), 0.5)
+        feed(m, 2, (1, 1, 1), 0.5)
+        forged = m.snapshot()
+        forged["table"]["1:1:1"]["last_update"] = 2
+        forged["table"]["2:2:2"]["last_update"] = 1
+        with self.assertRaises(CuriosityError):
+            ContactAssociationsV2.from_snapshot(forged)
+
     def test_duplicate_last_update_rejected(self):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
