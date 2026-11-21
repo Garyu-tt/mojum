@@ -98,14 +98,17 @@ class DecisionLadderTests(unittest.TestCase):
         policy.observe(tick=12, kind="rest", blocked=False)
 
     def test_blocked_rest_cannot_poison_measured_history(self):
-        raw = MotorPlayV2().snapshot()
-        raw["pending"] = "rest"
-        policy = MotorPlayV2.from_snapshot(raw)
+        live = MotorPlayV2()
+        for tick in range(12):
+            choice = live.choose(tick)
+            live.observe(tick=tick, kind=choice["kind"], blocked=False)
+        self.assertEqual(live.choose(12)["kind"], "rest")
+        policy = MotorPlayV2.from_snapshot(live.snapshot())
         before = policy.snapshot()
         with self.assertRaisesRegex(MotorPlayV2Error, "rest cannot be blocked"):
-            policy.observe(tick=0, kind="rest", blocked=True)
+            policy.observe(tick=12, kind="rest", blocked=True)
         self.assertEqual(policy.snapshot(), before)
-        policy.observe(tick=0, kind="rest", blocked=False)
+        policy.observe(tick=12, kind="rest", blocked=False)
         self.assertEqual(policy.rest_streak, 1)
         tampered = policy.snapshot()
         tampered["samples"]["rest"]["blocked"] = 1
@@ -131,6 +134,13 @@ class SnapshotContractTests(unittest.TestCase):
             intent = policy.choose(tick)
             policy.observe(tick=tick, kind=intent["kind"], blocked=tick % 2 == 0)
         return policy.snapshot()
+
+    def test_forged_pending_action_is_rejected(self):
+        raw = MotorPlayV2().snapshot()
+        raw["pending"] = "rest"
+        # The first policy decision is an initial east probe, never rest.
+        with self.assertRaisesRegex(MotorPlayV2Error, "pending action"):
+            MotorPlayV2.from_snapshot(raw)
 
     def test_round_trip_preserves_decisions(self):
         raw = self._valid_raw()
