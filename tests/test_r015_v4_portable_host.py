@@ -65,6 +65,7 @@ class EpochV4PortableHostTests(unittest.TestCase):
                           one["journal_events"]), (0, 3, 4))
         self.assertEqual((one["motor_mode"], one["sensory_mode"]),
                          (V4_MODE, "none"))
+        self.assertEqual(one["schema"], "mojum.portable-host.run/3")
         self.assertNotIn("movement_request", initial.stdout)
         self.assertNotIn("genome", initial.stdout)
         with self.open_v4() as aquarium:
@@ -80,6 +81,20 @@ class EpochV4PortableHostTests(unittest.TestCase):
             self.assertEqual(aquarium.tick, 6)
             self.assertEqual(aquarium.checkpoint()["journal_head"],
                              two["journal_head"])
+
+    def test_default_host_stdout_contract_is_unchanged(self):
+        # Do not silently extend the stable run/2 metadata contract.
+        cmd = [sys.executable, "-m", "mojum.portable_host",
+               "--db", str(self.db), "--ticks", "2",
+               "--interval-ms", "20", "--neural-mode", "disabled"]
+        run = subprocess.run(cmd, cwd=ROOT, env=self.env,
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        status = json.loads(run.stdout)
+        self.assertEqual(status["schema"], "mojum.portable-host.run/2")
+        self.assertNotIn("motor_mode", status)
+        self.assertNotIn("sensory_mode", status)
+        self.assertEqual(status["journal_events"], 3)
 
     def test_v4_host_reserves_epoch_marker_budget_before_any_step(self):
         with self.open_v4() as aquarium:
