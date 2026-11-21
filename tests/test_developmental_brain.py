@@ -1,6 +1,7 @@
 """Acceptance tests for the explicit synthetic controller boundary."""
 
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -86,6 +87,31 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             with self.assertRaises(AquariumError):
                 aquarium.step(dx=0.0)
             self.assertEqual(aquarium.checkpoint(), before)
+
+    def test_replay_rejects_bool_as_integer_after_rehashed_local_journal(self):
+        """A forged numeric zero is not an acceptable false safety flag."""
+        from mojum.noosphere import _canonical, _sha
+
+        with self.aquarium() as writer:
+            writer.step()
+        with sqlite3.connect(self.db) as db:
+            row = db.execute(
+                "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.frame'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            seq, wire, previous = row
+            event = json.loads(wire)
+            self.assertIs(event["payload"]["brain"]["safety"]["real_actuation"], False)
+            event["payload"]["brain"]["safety"]["real_actuation"] = 0
+            self.assertEqual(event["payload"]["brain"]["safety"]["real_actuation"], False)
+            db.execute(
+                "UPDATE events SET wire_json=?,event_hash=? WHERE seq=?",
+                (_canonical(event), _sha({"previous": previous, "event": event}), seq),
+            )
+            db.commit()
+        with self.assertRaisesRegex(AquariumError, "mismatched committed frame"):
+            with self.aquarium():
+                pass
 
     def test_direct_contract_rejects_future_stale_and_foreign_sensor_cues(self):
         brain = DevelopmentalBrain()
