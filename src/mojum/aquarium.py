@@ -750,6 +750,10 @@ class Aquarium:
             if (not self._epoch_v4
                     or self.tick <= 0 or self.tick % EPOCH_TICKS != 0
                     or self.epoch_index + 1 != expected_index
+                    or type(payload) is not dict
+                    or any(type(payload.get(field)) is not int for field in (
+                        "absolute_tick", "epoch_index",
+                        "previous_epoch_index", "epoch_tick"))
                     or event != self._epoch_event(expected_index)):
                 raise AquariumError("invalid epoch boundary or forged transition")
             self.epoch_index = expected_index
