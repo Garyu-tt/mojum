@@ -1,7 +1,12 @@
 name: Mojum mesh contract independent QA
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   mesh-stdlib:
     runs-on: ubuntu-latest
