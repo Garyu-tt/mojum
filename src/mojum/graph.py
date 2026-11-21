@@ -152,4 +152,16 @@ def validate(graph):
                 ready.sort()
     if len(order) != len(by_id):
         raise GraphError("Cycle detected: feedback requires explicit scheduler")
+    # Validation is the boundary before consumers hash the graph as canonical
+    # UTF-8 JSON. Python's decoder accepts escaped lone surrogates, NaN and
+    # other values that the on-wire canonical encoder cannot represent.
+    # Fail with GraphError now, not UnicodeEncodeError/ValueError after a
+    # Simulation or Aquarium has started using the graph.
+    try:
+        json.dumps(
+            graph, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise GraphError("Graph v1 contains noncanonical UTF-8 JSON") from exc
     return by_id, incoming, order
