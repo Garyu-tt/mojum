@@ -68,7 +68,7 @@ class PortableVersionedHostQA(unittest.TestCase):
         self.assertNotEqual(b["journal_head"], a["journal_head"])
         with Aquarium(
             self.db, SEED, GRAPH, exploration_mode="goal_free",
-            developmental_policy="local_cell_v3",
+            sensory_mode="toy_probe", developmental_policy="local_cell_v3",
             replay_snapshot_file=self.snapshot,
             replay_snapshot_key_file=self.key,
         ) as q:
@@ -86,7 +86,7 @@ class PortableVersionedHostQA(unittest.TestCase):
         self.assertEqual(invalid.stdout, "")
         with Aquarium(
             self.db, SEED, GRAPH, exploration_mode="goal_free",
-            developmental_policy="local_cell_v3",
+            sensory_mode="toy_probe", developmental_policy="local_cell_v3",
             replay_snapshot_file=self.snapshot,
             replay_snapshot_key_file=self.key,
         ) as q:
