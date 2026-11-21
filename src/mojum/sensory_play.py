@@ -18,7 +18,7 @@ from pathlib import Path
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere
 from .sim import Simulation, digest
-from .world_room import Room, advance, initial_state
+from .world_room import Room, _segment_hits_rect, advance, initial_state
 
 
 SCHEMA = "mojum.sensory-curiosity.frame/1"
@@ -99,13 +99,20 @@ class ToyScene:
             "spectator_only_toy_identity_and_softness": True,
         }
 
-    def _nearest(self, state):
-        # Ties must be settled by observable scene geometry/reflectance, not
-        # arbitrary *spectator-only* names or hidden softness. Otherwise just
-        # renaming two equidistant toys changes the agent's numeric sensor and
-        # the measured probe response, violating the no-oracle contract.
+    def _nearest(self, state, occluding_obstacles=()):
+        # A bounded center ray blocked by a solid room AABB cannot expose a
+        # toy's numeric appearance/response. This is a coarse 2D visibility
+        # fixture, not optical ray tracing or a physical contact model.
+        # Ties use public geometry/reflectance, never hidden toy IDs/softness.
+        available = (
+            t for t in self.toys
+            if not any(
+                _segment_hits_rect(state.x, state.y, t.x, t.y, rect)
+                for rect in occluding_obstacles
+            )
+        )
         return min(
-            self.toys,
+            available,
             key=lambda t: (
                 math.hypot(state.x - t.x, state.y - t.y),
                 t.x, t.y, t.radius_m, t.rgb,
@@ -113,9 +120,9 @@ class ToyScene:
             default=None,
         )
 
-    def sense(self, state):
-        """Crude synthetic near-field reflectance, not an image or object name."""
-        t = self._nearest(state)
+    def sense(self, state, *, occluding_obstacles=()):
+        """Numeric near-field cue, with optional canonical solid-wall masking."""
+        t = self._nearest(state, occluding_obstacles)
         distance = math.hypot(state.x - t.x, state.y - t.y) if t else math.inf
         visible = t is not None and distance <= 0.6
         # Deliberately quantized, noisy-world claims are out of scope.
@@ -127,11 +134,12 @@ class ToyScene:
             "source": "synthetic_local_proximity_not_camera",
         }
 
-    def probe(self, state, sensor):
-        """One bounded virtual touch; return measurement, not hidden material."""
-        if (not isinstance(sensor, dict) or sensor != self.sense(state)):
+    def probe(self, state, sensor, *, occluding_obstacles=()):
+        """One bounded virtual touch; respect the same wall mask as sensing."""
+        if (not isinstance(sensor, dict) or sensor != self.sense(
+                state, occluding_obstacles=occluding_obstacles)):
             raise CuriosityError("stale or forged near-field frame")
-        t = self._nearest(state)
+        t = self._nearest(state, occluding_obstacles)
         distance = math.hypot(state.x - t.x, state.y - t.y) if t else math.inf
         contact = bool(sensor["visible"] and distance <= t.radius_m + 0.08)
         return {
