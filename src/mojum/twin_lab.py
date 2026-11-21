@@ -5,6 +5,7 @@ import argparse
 import copy
 import json
 import math
+import os
 from pathlib import Path
 
 from .aquarium import Aquarium, AquariumError, KINDS, MAX_REPLAY_EVENTS, _movement
@@ -45,6 +46,32 @@ def _new_path(path):
     return path
 
 
+def _reserve_new_path(path):
+    """Reserve a fresh journal name atomically; never open an existing path."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError as exc:
+        raise AquariumError("refusing an existing or symlinked journal") from exc
+    except OSError as exc:
+        raise AquariumError("cannot exclusively reserve a new twin journal") from exc
+    try:
+        stat = os.fstat(fd)
+        return stat.st_dev, stat.st_ino
+    finally:
+        os.close(fd)
+
+
+def _undo_reservation(path, identity):
+    """Undo only our empty reservation if the second exclusive create failed."""
+    try:
+        stat = path.lstat()
+        if (stat.st_dev, stat.st_ino) == identity and path.is_file():
+            path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _summary(a):
     return {"agent_id": a.agent_id, "tick": a.tick,
             "position_m": [a.world.x, a.world.y],
@@ -67,6 +94,18 @@ def create_pair(left_db, right_db, left_id, right_id, template, graph):
     left_db, right_db = _new_path(left_db), _new_path(right_db)
     if left_db.resolve(strict=False) == right_db.resolve(strict=False):
         raise AquariumError("twins cannot share the same SQLite file")
+    # SQLite normally opens existing files. Reserve BOTH names with O_EXCL
+    # first so a competing creator cannot insert a journal after preflight.
+    # This is not a cross-file transaction or protection from a hostile
+    # process with the same account's write permissions.
+    reserved = []
+    try:
+        for path in (left_db, right_db):
+            reserved.append((path, _reserve_new_path(path)))
+    except BaseException:
+        for path, identity in reversed(reserved):
+            _undo_reservation(path, identity)
+        raise
     with Aquarium(left_db, left_seed, graph, agent_id=left_id) as left:
         with Aquarium(right_db, right_seed, graph, agent_id=right_id) as right:
             return {
