@@ -107,11 +107,13 @@ class CellExplorerV4:
             if (type(last_seen) is not int
                     or not 0 <= last_seen <= state["last_tick"]):
                 raise CellV4Error("invalid last observed cell tick")
-            for counts in actions.values():
+            for action, counts in actions.items():
                 if (type(counts) is not list or len(counts) != 2
                         or any(type(v) is not int for v in counts)
                         or not 1 <= counts[0] <= MAX_ABSOLUTE_TICKS
-                        or not 0 <= counts[1] <= counts[0]):
+                        or not 0 <= counts[1] <= counts[0]
+                        or counts[1] > 1
+                        or (action == "rest" and counts[1] != 0)):
                     raise CellV4Error("invalid v4 measured counters")
                 observed_live += counts[0]
         if observed_live + state["forgotten_observations"] != state["updates"]:
