@@ -78,6 +78,22 @@ class AtomicSegmentQA(unittest.TestCase):
                 self.assertEqual(store.head(), ZERO)
         self.assertEqual(seen, [True])
 
+    def test_world_readable_existing_journal_is_refused_without_rewrite(self):
+        if os.name != "posix":
+            self.skipTest("POSIX permission regression")
+        with self.open() as source:
+            head = source.append(record(0), expected_head=ZERO)
+        self.db.chmod(0o644)
+        try:
+            before = self.db.read_bytes()
+            with self.assertRaisesRegex(NoosphereError, "owner-only"):
+                self.open()
+            self.assertEqual(self.db.read_bytes(), before)
+        finally:
+            self.db.chmod(0o600)
+        with self.open() as source:
+            self.assertEqual(source.verify_chain()["head"], head)
+
     def test_195_real_events_split_four_immutable_linked_boundaries(self):
         with self.open() as q:
             final = self.fill(q, 0, 195)
