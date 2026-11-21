@@ -12,7 +12,9 @@ the next frame replays the same half-step, without resetting the motor model or
 the world clock. The v4 policy keeps the v3-style bounded 512-cell retention
 contract and records eviction accounting under a new `/4` schema.
 
-Run it only with the built-in point room and `sensory_mode=none`:
+Run it only with the built-in point room. The legacy `toy_probe` bridge is
+not compatible with this epoch ABI; the explicitly versioned `toy_probe_v2`
+bridge is an opt-in companion profile:
 
 ```sh
 PYTHONPATH=src python -m mojum.aquarium \
@@ -32,6 +34,26 @@ PYTHONPATH=src python -m mojum.portable_host \
 
 Its stdout is metadata-only; it preflights frame plus epoch-marker admissions
 and leaves the PRIVATE SQLite journal as the only state owner.
+
+For a bounded numeric contact-retention run in the same v4 journal, select
+`toy_probe_v2` and keep temporal guidance disabled:
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium \
+  --db ./local_cell_v4_sensory_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 \
+  --sensory-mode toy_probe_v2 --neural-mode disabled
+
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_sensory_PRIVATE.sqlite3 --ticks 20 --interval-ms 50 \
+  --motor-mode local_cell_v4 --sensory-mode toy_probe_v2 \
+  --temporal-mode none --neural-mode disabled
+```
+
+This uses the existing numeric synthetic near-field fixture and a separate
+`association/2` learner with bounded retention. It is a versioned replay
+compatibility path, not camera input, physical contact, a neural brain, or
+evidence of consciousness.
 
 Repeat the bounded command to continue the same private journal. The current
 contract allows at most 99,990 frames so the nine epoch markers and bootstrap

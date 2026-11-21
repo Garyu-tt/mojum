@@ -18,9 +18,9 @@ mode; it never reinterprets an existing SQLite journal.
 - A two-tick synthetic re-probe cadence permits a small contact-rich fixture
   to pass 4,000 measured contacts while staying within the 10,000-event
   **motor-specific** replay budget for `developmental_fixture`. The global
-  Aquarium replay ceiling is 100,000 events, but this sensory mode does not
-  raise the lower motor-mode limit. The runtime remains bounded and finite; it is
-  not an always-on organism.
+  Aquarium replay ceiling is 100,000 events; `local_cell_v4` uses that global
+  bounded budget together with its explicit epoch marker. Both runtimes remain
+  bounded and finite; neither is an always-on organism.
 - The learner still receives only the numeric near-field cue and measured
   probe response. Toy IDs, softness and full scene geometry remain
   spectator-only. `external_actuator` stays `None`.
@@ -61,7 +61,10 @@ semantics, a neural brain, or a consciousness claim.
 Opening an existing `toy_probe` journal as `toy_probe_v2` (or the reverse)
 fails before a new frame is appended. The original association schema and its
 historical events are not migrated, compacted, reset, or silently rewritten.
-The global Aquarium replay ceiling is 100,000 events; `toy_probe_v2`
-requires `developmental_fixture` and is subject to its separate 10,000-event
-motor replay ceiling (including bootstrap and other events). Epoch continuation
-and physical segmented archives are separate release gates.
+The global Aquarium replay ceiling is 100,000 events. `toy_probe_v2` remains
+compatible with the existing `developmental_fixture` journal and is also
+allowed with the separately versioned `local_cell_v4` epoch wire. The latter
+must use the built-in v4 room/start contract and `temporal_mode=none`; the
+unversioned `toy_probe` bridge is rejected. Physical segmented archives,
+authenticated snapshot continuation, and independent release acceptance are
+separate gates.

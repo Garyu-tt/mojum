@@ -85,10 +85,11 @@ class PortableHostTests(unittest.TestCase):
             temporal_mode="range_guided", **options,
         )
 
-    def open_v4_aquarium(self):
+    def open_v4_aquarium(self, **options):
         return Aquarium(
             self.db, SEED, GRAPH,
             motor_mode=V4_MODE, neural_mode="shadow",
+            **options,
         )
 
     def test_clock_paces_without_backlog_or_busy_loop(self):
@@ -176,6 +177,22 @@ class PortableHostTests(unittest.TestCase):
             self.assertEqual(committed, 2)
             self.assertEqual((aquarium.motor_mode, aquarium.sensory_mode),
                              (V4_MODE, "none"))
+            self.assertEqual((aquarium.tick, aquarium.store.count()), (2, 3))
+
+    def test_v4_host_accepts_versioned_sensory_bounded_run(self):
+        fake = Clock()
+        with self.open_v4_aquarium(sensory_mode="toy_probe_v2") as aquarium:
+            committed = run_paced(
+                aquarium, ticks=2, interval_ms=20,
+                stop_event=threading.Event(),
+                monotonic=fake.read, wait=fake.sleep,
+            )
+            self.assertEqual(committed, 2)
+            self.assertEqual(
+                (aquarium.motor_mode, aquarium.sensory_mode),
+                (V4_MODE, "toy_probe_v2"),
+            )
+            self.assertGreaterEqual(aquarium.contact_model.updates, 1)
             self.assertEqual((aquarium.tick, aquarium.store.count()), (2, 3))
 
     def test_v4_host_accounts_for_epoch_markers_before_writing(self):
@@ -322,6 +339,22 @@ class PortableHostTests(unittest.TestCase):
         resumed = json.loads(second.stdout)
         self.assertEqual((resumed["start_tick"], resumed["end_tick"]), (4, 8))
         self.assertEqual(resumed["journal_events"], 9)
+
+    def test_real_cli_can_start_opt_in_v4_versioned_sensory_host(self):
+        options = (
+            "--motor-mode", V4_MODE,
+            "--sensory-mode", "toy_probe_v2",
+            "--temporal-mode", "none",
+        )
+        first = self.invoke(*options)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        result = json.loads(first.stdout)
+        self.assertEqual(result["motor_mode"], V4_MODE)
+        self.assertEqual(result["sensory_mode"], "toy_probe_v2")
+        self.assertEqual((result["end_tick"], result["journal_events"]), (4, 5))
+        self.assertNotIn("measured_deflection", first.stdout)
+        with self.open_v4_aquarium(sensory_mode="toy_probe_v2") as aquarium:
+            self.assertEqual((aquarium.tick, aquarium.store.count()), (4, 5))
 
     def test_v4_cli_rejects_implicit_sensory_or_temporal_modes_before_birth(self):
         for options in (

@@ -104,11 +104,12 @@ class EpochJournalV4Tests(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.db = Path(scratch.name) / "v4-private.sqlite3"
 
-    def open(self):
+    def open(self, **options):
         return Aquarium(
             self.db, SEED, GRAPH,
             motor_mode=V4_MODE,
             neural_mode="disabled",
+            **options,
         )
 
     def test_preflight_counts_epoch_marker_without_partial_write(self):
@@ -142,19 +143,28 @@ class EpochJournalV4Tests(unittest.TestCase):
         with self.assertRaisesRegex(AquariumError, "contain only frames"):
             self.open()
 
-    def test_wire_rejects_v4_sensory_bootstrap_alias(self):
-        # The production runtime forbids sensory bridges for v4. A forged
-        # manifest must not rewrite its inspector policy ID or skip epoch gates.
+    def test_wire_rejects_v4_legacy_sensory_bootstrap_alias(self):
+        # The unversioned bridge cannot be attached to the v4 epoch wire. A
+        # forged manifest must not rewrite its inspector policy ID or skip
+        # epoch gates.
         from mojum.aquarium_wire import _stored_policy
 
         with self.open() as aquarium:
             manifest = deepcopy(aquarium.manifest)
-        for sensory in ("toy_probe", "toy_probe_v2"):
-            with self.subTest(sensory=sensory):
-                bogus = deepcopy(manifest)
-                bogus["sensory_mode"] = sensory
-                with self.assertRaisesRegex(NoosphereError, "require sensory_mode none"):
-                    _stored_policy(bogus)
+        bogus = deepcopy(manifest)
+        bogus["sensory_mode"] = "toy_probe"
+        with self.assertRaisesRegex(NoosphereError, "sensory_mode none or toy_probe_v2"):
+            _stored_policy(bogus)
+
+    def test_wire_accepts_v4_versioned_sensory_bootstrap(self):
+        with self.open(sensory_mode="toy_probe_v2") as aquarium:
+            aquarium.step()
+            head = aquarium.checkpoint()["journal_head"]
+        wire = inspect_journal(self.db, external_expected_head=head)
+        self.assertEqual(wire["format"], "local_cell_v4+toy_probe_v2")
+        self.assertEqual(wire["state_schema"], "mojum.developmental.local-cell/4")
+        self.assertEqual(wire["sensory_schema"], "mojum.sensory-curiosity.association/2")
+        self.assertEqual(wire["epoch_ticks"], EPOCH_TICKS)
 
     def test_wire_pins_v4_absolute_tick_cap_in_bootstrap(self):
         from mojum.aquarium_wire import _stored_policy

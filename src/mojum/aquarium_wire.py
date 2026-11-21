@@ -88,12 +88,16 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
-    # V4 cannot be paired with a sensory bridge. Besides rejecting an
-    # impossible runtime manifest, this preserves the exact v4 policy ID
-    # used for strict epoch-marker and frame-topic inspection below.
-    if policy_id == "local_cell_v4" and sensory_mode is not None:
-        raise NoosphereError("local_cell_v4 journals require sensory_mode none")
+    # The unversioned toy bridge is not compatible with the v4 epoch wire.
+    # The explicitly versioned bridge is, and gets a distinct policy ID so a
+    # v4 sensory journal cannot be reinterpreted as a sensorless history.
+    if policy_id == "local_cell_v4" and sensory_mode not in (None, "toy_probe_v2"):
+        raise NoosphereError(
+            "local_cell_v4 journals require sensory_mode none or toy_probe_v2"
+        )
     if sensory_mode == "toy_probe_v2":
+        if policy_id not in ("motor_play_v1", "local_cell_v4"):
+            raise NoosphereError("ambiguous or unknown stored sensory policy")
         if {
             "sensory_mode": sensory_mode,
             "sensory_schema": manifest.get("sensory_schema"),
@@ -221,7 +225,8 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
-            if policy == "local_cell_v4":
+            base_policy = policy.split("+", 1)[0]
+            if base_policy == "local_cell_v4":
                 if (event["event_id"] != f"frame-{frames:012d}"
                         or type(dt_ns) is not int
                         or type(event.get("observed_at_ns")) is not int
@@ -232,7 +237,7 @@ def inspect_journal(path, *, external_expected_head=None):
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
-            if policy != "local_cell_v4":
+            if policy.split("+", 1)[0] != "local_cell_v4":
                 raise NoosphereError("epoch marker is not allowed by stored policy")
             payload = event["payload"]
             expected_index = epoch_index + 1
@@ -257,7 +262,7 @@ def inspect_journal(path, *, external_expected_head=None):
                     or event["observed_at_ns"] != frames * dt_ns):
                 raise NoosphereError("invalid or noncanonical epoch marker")
             epoch_index = expected_index
-        elif policy == "local_cell_v4":
+        elif policy.split("+", 1)[0] == "local_cell_v4":
             # V4 Aquarium replay accepts only frames and durable epoch markers.
             # A valid SQLite hash chain is not proof of a valid motor-wire ABI.
             raise NoosphereError("unsupported local-cell v4 journal topic")
@@ -289,7 +294,7 @@ def inspect_journal(path, *, external_expected_head=None):
     }
     if sensory_mode == "toy_probe_v2":
         result["sensory_schema"] = SENSORY_MODEL_V2
-    if policy == "local_cell_v4":
+    if policy.split("+", 1)[0] == "local_cell_v4":
         result["epoch_schema"] = EPOCH_SENSE_SCHEMA
         result["epoch_ticks"] = EPOCH_TICKS
         result["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS

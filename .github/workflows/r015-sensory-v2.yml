@@ -1,0 +1,45 @@
+name: Mojum R0.15 versioned v4 sensory replay QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-sensory-v2.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/aquarium_wire.py"
+      - "src/mojum/portable_host.py"
+      - "src/mojum/sensory_associations_v2.py"
+      - "src/mojum/sensory_bridge_v2.py"
+      - "tests/test_aquarium_epoch_v4.py"
+      - "tests/test_portable_host.py"
+      - "tests/test_sensory_associations_v2.py"
+      - "tests/test_sensory_v2_epoch.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  long-run-sensory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Real 10050-tick v4 SQLite with more than 4000 measured contacts
+        env:
+          PYTHONPATH: src
+          MOJUM_SENSORY_V2_STRESS: "1"
+        run: python -m unittest discover -s tests -p test_sensory_v2_epoch.py -v
+      - name: Existing versioned association and v4 compatibility regressions
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p test_sensory_associations_v2.py -v
+          python -m unittest discover -s tests -p test_aquarium_epoch_v4.py -v
+          python -m unittest discover -s tests -p test_portable_host.py -v

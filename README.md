@@ -122,11 +122,25 @@ Repeat with the same path to resume. This is still a synthetic CPU fixture,
 not a neural brain, physical actuator, Android service, or 24/7 guarantee.
 See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
 
+The same host can pace the opt-in `local_cell_v4` policy. The default v4
+profile is sensorless; the separately versioned `toy_probe_v2` profile is also
+available, while legacy `toy_probe` remains incompatible with the v4 epoch
+wire. Both use the versioned epoch marker at tick 9,999 and account for that
+marker before writing so the 100,000-event bound is never crossed:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_host_PRIVATE.sqlite3 --ticks 20 --interval-ms 50 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none
+```
+
 For a separately versioned contact-association retention experiment, use a
 fresh journal with `--sensory-mode toy_probe_v2`. It keeps the original
 `toy_probe` wire contract unchanged, bounds live numeric associations to 128
 cue records with deterministic eviction, and records forgotten evidence in
-the PRIVATE checkpoint. See [the R0.15 contract](docs/SENSORY_ASSOCIATIONS_V2_R015.md).
+the PRIVATE checkpoint. It can run with either the existing developmental
+fixture or the versioned v4 epoch motor; the latter is covered by an opt-in
+10,050-tick SQLite/cold-replay stress check. See [the R0.15 contract](docs/SENSORY_ASSOCIATIONS_V2_R015.md).
 
 ### Replay a committed decision offline
 
