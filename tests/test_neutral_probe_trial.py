@@ -33,6 +33,12 @@ class NeutralProbeTrialTests(unittest.TestCase):
             self.assertEqual(a["heartbeat_pulse"], b["heartbeat_pulse"])
         self.assertEqual(adaptive["trace"][0]["action"],
                          frozen["trace"][0]["action"])
+        for arm in (adaptive, frozen):
+            self.assertEqual(arm["rest_count"] + arm["attempted_movement_count"],
+                             arm["ticks"])
+            self.assertLessEqual(arm["successful_movement_count"],
+                                 arm["attempted_movement_count"])
+            self.assertGreaterEqual(arm["unique_positions_1um"], 1)
 
     def test_adaptive_changes_actions_from_actual_observed_contacts(self):
         pair = compare(**self.fixture)
@@ -45,6 +51,13 @@ class NeutralProbeTrialTests(unittest.TestCase):
         # policy is allowed to change after actual blocked outcomes.
         self.assertTrue(any(x["action"] != y["action"]
                             for x, y in zip(a["trace"], f["trace"])))
+        # A known coarse-zone learner defect: suppressing every action
+        # makes it stand still. The instrument MUST call that out instead
+        # of praising its low collision rate as successful intelligence.
+        self.assertGreater(a["rest_count"], f["rest_count"])
+        self.assertTrue(a["stalled_warning"])
+        self.assertEqual(pair["interpretation"],
+                         "STALLED_ADAPTIVE_NOT_SUCCESS")
 
     def test_no_explicit_affect_or_privileged_motor_fields(self):
         for arm in ("adaptive", "frozen"):
@@ -89,6 +102,8 @@ class NeutralProbeTrialTests(unittest.TestCase):
         self.assertLess(len(printed), 512)
         self.assertNotIn("position_xy", printed)
         self.assertNotIn("learned_state", printed)
+        self.assertIn("adaptive_stalled_warning", result)
+        self.assertIn("adaptive_rest", result)
 
     def test_frozen_arm_does_not_update_hidden_policy(self):
         for length in (1, 5, 64):
