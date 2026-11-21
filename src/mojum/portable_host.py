@@ -18,7 +18,7 @@ import signal
 import threading
 import time
 
-from .aquarium import Aquarium, AquariumError
+from .aquarium import Aquarium, AquariumError, V4_MODE
 from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
@@ -45,14 +45,17 @@ def validate_plan(ticks, interval_ms):
 
 def _require_sensorimotor_fixture(aquarium):
     """Reject accidental use with the scripted or shadow-only Aquarium."""
-    if getattr(aquarium, "motor_mode", None) != "developmental_fixture":
+    motor_mode = getattr(aquarium, "motor_mode", None)
+    if motor_mode not in ("developmental_fixture", V4_MODE):
         raise PortableHostError(
-            "portable host requires motor_mode=developmental_fixture"
+            "portable host requires a supported internal motor mode"
         )
     if getattr(aquarium, "motor", None) is None:
         raise PortableHostError("developmental motor controller is unavailable")
-    if getattr(aquarium, "sensory_bridge", None) is None:
+    if motor_mode != V4_MODE and getattr(aquarium, "sensory_bridge", None) is None:
         raise PortableHostError("portable host requires sensory_mode=toy_probe")
+    if motor_mode == V4_MODE and getattr(aquarium, "sensory_bridge", None) is not None:
+        raise PortableHostError("v4 epoch host requires sensory_mode=none")
 
 
 @contextmanager
@@ -95,9 +98,19 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     if not callable(getattr(stop_event, "wait", None)):
         raise PortableHostError("stop_event must support wait(timeout)")
     _require_sensorimotor_fixture(aquarium)
-    if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
+    is_v4 = getattr(aquarium, "motor_mode", None) == V4_MODE
+    if is_v4:
+        try:
+            events_needed = aquarium.required_events_for_steps(ticks)
+        except AquariumError as exc:
+            raise PortableHostError(str(exc)) from exc
+        event_budget = getattr(aquarium, "journal_event_budget", MAX_REPLAY_EVENTS)
+    else:
+        events_needed = ticks
+        event_budget = MAX_REPLAY_EVENTS
+    if aquarium.store.count() + events_needed > event_budget:
         raise PortableHostError(
-            f"requested ticks exceed fixed {MAX_REPLAY_EVENTS}-event replay budget; "
+            f"requested ticks exceed fixed {event_budget}-event replay budget; "
             "use a smaller bounded run"
         )
 
@@ -154,6 +167,12 @@ def main(argv=None):
     parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
                         default="placeholder",
                         help="opt-in synthetic controller; placeholder is the legacy default")
+    parser.add_argument("--motor-mode", choices=("developmental_fixture", V4_MODE),
+                        default="developmental_fixture",
+                        help="opt-in synthetic motor policy")
+    parser.add_argument("--sensory-mode", choices=("toy_probe", "none"),
+                        default="toy_probe",
+                        help="synthetic sensory policy; v4 requires none")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
@@ -165,6 +184,10 @@ def main(argv=None):
         seed, graph = _load_inputs(args.genome, args.graph)
     except PortableHostError as exc:
         parser.error(str(exc))
+    if args.motor_mode == V4_MODE and args.sensory_mode != "none":
+        parser.error("local_cell_v4 requires --sensory-mode none")
+    if args.motor_mode == V4_MODE and args.temporal_mode != "none":
+        parser.error("local_cell_v4 requires --temporal-mode none")
 
     stopped = threading.Event()
     started = time.monotonic()
@@ -173,9 +196,9 @@ def main(argv=None):
             with Aquarium(
                 args.db, seed, graph,
                 neural_mode=args.neural_mode,
-                motor_mode="developmental_fixture",
+                motor_mode=args.motor_mode,
                 brain_mode=args.brain_mode,
-                sensory_mode="toy_probe",
+                sensory_mode=args.sensory_mode,
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
             ) as aquarium:
@@ -196,6 +219,8 @@ def main(argv=None):
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
                     "brain_mode": args.brain_mode,
+                    "motor_mode": aquarium.motor_mode,
+                    "sensory_mode": aquarium.sensory_mode,
                     "temporal_mode": args.temporal_mode,
                     "wall_elapsed_seconds": round(time.monotonic() - started, 3),
                     "stop_reason": "signal" if stopped.is_set() else "completed",

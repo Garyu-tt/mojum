@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium
+from mojum.aquarium import Aquarium, V4_MODE
 from mojum.portable_host import (
     PortableHostError, main as host_main, run_paced, validate_plan,
 )
@@ -83,6 +83,12 @@ class PortableHostTests(unittest.TestCase):
             self.db, SEED, GRAPH,
             motor_mode="developmental_fixture", sensory_mode="toy_probe",
             temporal_mode="range_guided", **options,
+        )
+
+    def open_v4_aquarium(self):
+        return Aquarium(
+            self.db, SEED, GRAPH,
+            motor_mode=V4_MODE, neural_mode="shadow",
         )
 
     def test_clock_paces_without_backlog_or_busy_loop(self):
@@ -156,6 +162,31 @@ class PortableHostTests(unittest.TestCase):
                 with self.assertRaisesRegex(PortableHostError, "3-event"):
                     run_paced(aquarium, ticks=3, interval_ms=20,
                               stop_event=threading.Event())
+            self.assertEqual(aquarium.checkpoint(), before)
+            self.assertEqual(aquarium.store.count(), 1)
+
+    def test_v4_host_accepts_sensorless_bounded_run(self):
+        fake = Clock()
+        with self.open_v4_aquarium() as aquarium:
+            committed = run_paced(
+                aquarium, ticks=2, interval_ms=20,
+                stop_event=threading.Event(),
+                monotonic=fake.read, wait=fake.sleep,
+            )
+            self.assertEqual(committed, 2)
+            self.assertEqual((aquarium.motor_mode, aquarium.sensory_mode),
+                             (V4_MODE, "none"))
+            self.assertEqual((aquarium.tick, aquarium.store.count()), (2, 3))
+
+    def test_v4_host_accounts_for_epoch_markers_before_writing(self):
+        with self.open_v4_aquarium() as aquarium:
+            before = aquarium.checkpoint()
+            with patch("mojum.aquarium.MAX_REPLAY_EVENTS", 3):
+                with self.assertRaisesRegex(PortableHostError, "3-event"):
+                    run_paced(
+                        aquarium, ticks=3, interval_ms=20,
+                        stop_event=threading.Event(),
+                    )
             self.assertEqual(aquarium.checkpoint(), before)
             self.assertEqual(aquarium.store.count(), 1)
 
@@ -250,6 +281,20 @@ class PortableHostTests(unittest.TestCase):
             self.assertEqual(aquarium.tick, 8)
             self.assertEqual(aquarium.checkpoint()["journal_head"], resumed["journal_head"])
             self.assertNotEqual(aquarium.checkpoint()["journal_head"], first_head)
+
+    def test_real_cli_can_start_opt_in_v4_host(self):
+        first = self.invoke(
+            "--motor-mode", V4_MODE,
+            "--sensory-mode", "none",
+            "--temporal-mode", "none",
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        result = json.loads(first.stdout)
+        self.assertEqual(result["motor_mode"], V4_MODE)
+        self.assertEqual(result["sensory_mode"], "none")
+        self.assertEqual((result["end_tick"], result["journal_events"]), (4, 5))
+        with self.open_v4_aquarium() as aquarium:
+            self.assertEqual((aquarium.tick, aquarium.store.count()), (4, 5))
 
     @unittest.skipUnless(os.name == "posix" and hasattr(signal, "SIGTERM"),
                          "POSIX process signal required")
