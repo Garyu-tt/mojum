@@ -5,7 +5,10 @@ privileged toy identities, external actuators or user memory.
 """
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -265,6 +268,52 @@ class R015FullSensoryEpochSQLiteQA(unittest.TestCase):
         with self.open(signed=False) as a:
             self.assertEqual(a.checkpoint(), expected)
             self.assertEqual(a.store.count(), 26)
+
+    def test_actual_foreground_host_v4_sensor_two_signed_sessions(self):
+        # Portable CPython/Termux-style run, but no actual Android device.
+        # The portable host uses the default 4m fixture, not this class's
+        # special contact-rich 0.32m test room.
+        db = self.root / "portable-synthetic.sqlite3"
+        snap = self.root / "portable-synthetic.snapshot"
+        key = self.root / "portable-synthetic.key"
+        create_key_file(key)
+        command = [
+            sys.executable, "-m", "mojum.portable_host",
+            "--db", str(db), "--ticks", "3", "--interval-ms", "20",
+            "--exploration-mode", "goal_free",
+            "--neural-mode", "disabled",
+            "--developmental-policy", "local_cell_v4",
+            "--sensory-mode", "toy_probe_v2",
+            "--snapshot-file", str(snap),
+            "--snapshot-key-file", str(key),
+        ]
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        results = []
+        for expected_begin in (0, 3):
+            done = subprocess.run(
+                command, cwd=ROOT, env=env, text=True,
+                capture_output=True, timeout=18,
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            info = json.loads(done.stdout)
+            self.assertEqual(info["start_tick"], expected_begin)
+            self.assertEqual(info["end_tick"], expected_begin + 3)
+            self.assertEqual(info["journal_events"], expected_begin + 4)
+            self.assertNotIn("toy_contact_state", done.stdout)
+            self.assertNotIn("measured_deflection", done.stdout)
+            results.append(info)
+        self.assertNotEqual(results[0]["journal_head"],
+                            results[1]["journal_head"])
+        with Aquarium(
+            db, SEED, GRAPH, exploration_mode="goal_free",
+            developmental_policy="local_cell_v4",
+            sensory_mode="toy_probe_v2", neural_mode="disabled",
+            replay_snapshot_file=snap, replay_snapshot_key_file=key,
+        ) as q:
+            self.assertEqual(q.tick, 6)
+            self.assertEqual(q.store.count(), 7)
+            self.assertEqual(q.sensory_bridge.model.snapshot()["schema"],
+                             MODEL_V2_SCHEMA)
 
     def test_old_mode_and_wrong_policy_rejected_without_history_change(self):
         with self.open() as a:
