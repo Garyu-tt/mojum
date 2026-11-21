@@ -39,6 +39,26 @@ def canonical(value):
     return wire
 
 
+def runtime_source_sha256():
+    """Conservatively pin the exact CPU runtime code used for cache creation.
+
+    A git/Termux update may change deterministic replay behavior without
+    incrementing a fixture schema. Never skip recomputation under changed
+    Python source files merely because an old HMAC snapshot still validates.
+    """
+    root = Path(__file__).resolve().parent
+    paths = sorted(root.glob("*.py"), key=lambda item: item.name)
+    if not paths:
+        raise SnapshotError("runtime source modules not found")
+    sha = hashlib.sha256()
+    for file in paths:
+        sha.update(file.name.encode("utf-8"))
+        sha.update(b"\\x00")
+        sha.update(file.read_bytes())
+        sha.update(b"\\x00")
+    return sha.hexdigest()
+
+
 def _open_regular(path, *, secret):
     location = Path(path)
     if location.is_symlink():
