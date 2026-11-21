@@ -127,6 +127,10 @@ class CellExplorerV3Escape:
         if state["updates"] == 0 and (state["consecutive_rests"]
                                       or state["consecutive_blocked_probes"]):
             raise CellV3EscapeError("unobserved escape counters")
+        # Rest resets the blocked-probe streak and every movement resets the
+        # rest streak; neither can legitimately be positive together.
+        if state["consecutive_rests"] and state["consecutive_blocked_probes"]:
+            raise CellV3EscapeError("escape rest and probe streaks cannot coexist")
         observed_live = 0
         for key, actions in state["records"].items():
             if (type(key) is not str or _ZONE.fullmatch(key) is None
