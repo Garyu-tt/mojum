@@ -13,9 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  # Keep only the latest PR head's CI. Never cancel manual or main runs.
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Deduplicate first attempts for a PR while keeping retries and other events independent.
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.run_attempt == '1'
+      && format('pr-{0}', github.event.pull_request.number)
+      || format('run-{0}-attempt-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == '1' }}
 
 jobs:
   installed-stdlib:
