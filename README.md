@@ -84,6 +84,12 @@ browser and select the exported file. At tick 5 the selected move is north.
 The viewer reports a prediction based on one earlier observation and the
 recorded change from range bucket 0 to 1.
 
+Current exports must retain their SHA-256 frame metadata: the viewer rejects
+a modern checkpoint whose proof has been stripped, even if the JSONL frames
+themselves still parse. Only a genuinely older checkpoint without the current
+trace-range marker can be opened through the viewer's explicit legacy
+checkbox, and it remains visibly marked as unverified.
+
 The exporter verifies the complete journal on a temporary SQLite copy. Use the
 same mode flags as the recording. Add `--expected-head SHA256` when verifying
 against a separately recorded journal head. For longer histories, add
@@ -111,6 +117,19 @@ mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 
 Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. The `mojum-aquarium` entry point also accepts `--motor-mode developmental_fixture`. [Offline install instructions](docs/LOCAL_INSTALL_R01.md)
 
+To reopen against a separately recorded head, pass the checkpoint's
+`journal_head` as `--expected-head`. The flag requires an existing journal and
+fails with exit status 2 before appending (or creating a file) when the head is
+malformed, missing or does not match the stored chain.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 1 \
+  --expected-head 0123...cdef
+```
+
+The anchor is an independent integrity check for accidental or concurrent
+rewrites; it is not authentication.
+
 ## Identify a journal's stored policy
 
 ```bash
@@ -123,6 +142,22 @@ a separately recorded head. The experimental journals from #112 and #115
 report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
 formats even though the original CLIs used the same mode name. Keep each
 journal with the matching runtime for deterministic replay.
+
+## Audit measured motor mobility
+
+A blocked-move count alone cannot show whether a developmental policy actually
+explored the room. The read-only audit verifies the journal chain and reports
+attempts, successful moves, idle fraction, longest rest streak, distinct
+positions, coverage span and path length, plus versioned rest-collapse and
+revisit-concentration gates:
+
+```bash
+PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
+```
+
+`--expected-head` checks an independently recorded chain head. The command
+never writes to the journal and rejects scripted or noncanonical journals.
+[Audit contract](docs/DEVELOPMENTAL_R013.md)
 
 ## Architecture and development
 
