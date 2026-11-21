@@ -162,11 +162,10 @@
         <button id="copy" type="button">Копировать JSON</button>
         <span class="sub">Сохраните как <code>room.json</code></span>
       </div>
-      <p class="footnote">После сохранения файл можно проверить командой
-        <code>PYTHONPATH=src python -m mojum.room_input room.json</code>,
-        а затем создать <strong>новый</strong> SQLite-журнал с
-        <code>--room-numeric-contract typed_v1 --new-room-contract room.json</code>.
-        Не указывайте существующий журнал: его нужно восстанавливать через отдельный защищённый режим.</p>
+      <p class="footnote">Этот JSON пока предназначен только для автономного редактирования и обмена
+        черновиками. В текущей ветке <code>main</code> ещё нет модуля
+        <code>mojum.room_input</code> и поддержки создания SQLite-журнала из такой комнаты.
+        Не пытайтесь передавать файл в Aquarium CLI до отдельной приёмки контракта ввода.</p>
     </section>
   </main>
   <script src="./room_designer_core.js"></script>
