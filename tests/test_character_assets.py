@@ -145,7 +145,10 @@ class CharacterAssetTests(unittest.TestCase):
             real.write_bytes(blob)
             one = manifest(blob)
             one["forms"] = one["forms"][:1]
-            (root / one["forms"][0]["glb_path"]).symlink_to(real)
+            try:
+                (root / one["forms"][0]["glb_path"]).symlink_to(real)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink permissions unavailable")
             with self.assertRaisesRegex(CharacterAssetError, "symlink"):
                 verify_files(one, root)
 
@@ -170,6 +173,19 @@ class CharacterAssetTests(unittest.TestCase):
             with self.assertRaises(CharacterAssetError):
                 verify_files(data, root)
 
+    def test_json_depth_scanner_ignores_brackets_in_strings(self):
+        packed = b'{"asset":{"version":"2.0"},"extras":"' + b"[]{}" * 1000 + b'"}'
+        packed += b" " * (-len(packed) % 4)
+        blob = (struct.pack("<4sII", b"glTF", 2, len(packed) + 20)
+                + struct.pack("<I4s", len(packed), b"JSON") + packed)
+        data = manifest(blob)
+        data["forms"] = data["forms"][:1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "keyframes").mkdir()
+            (root / data["forms"][0]["glb_path"]).write_bytes(blob)
+            self.assertTrue(verify_files(data, root))
+
     def test_load_manifest_rejects_duplicate_json_keys_and_oversize(self):
         with tempfile.TemporaryDirectory() as folder:
             p = Path(folder) / "character.json"
@@ -186,3 +202,4 @@ class CharacterAssetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
