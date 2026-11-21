@@ -271,10 +271,14 @@
         return p.matrixTransform(m.inverse());
       }
       function beginDrag(e,kind,index) {
-        const valid=updateStatus();if(!valid) return;
+        const valid=updateStatus();
+        // An invalid typed start should disable export, not trap its SVG
+        // handle. For repair, drag from the visible handle without assuming
+        // the old invalid coordinate can be parsed.
+        if(!valid && kind!=="start") return;
         const p=point(e);if(!p)return;
         if(kind==="obstacle") choose(index);
-        const r=kind==="obstacle"?valid.obstacles[index]:valid.start;
+        const r=kind==="obstacle"?valid.obstacles[index]:(valid?valid.start:p);
         pointer={kind,index,id:e.pointerId,dx:p.x-r.x,dy:p.y-r.y};
         svg.setPointerCapture(e.pointerId);
         e.preventDefault();
