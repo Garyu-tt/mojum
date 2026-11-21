@@ -17,7 +17,7 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
 from .graph import validate as validate_graph
-from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
+from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, advance, initial_state
 
@@ -103,6 +103,8 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.tick = 0
+        # Only advance this head when the corresponding state is in memory.
+        self._committed_head = EMPTY_HEAD
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
@@ -134,7 +136,7 @@ class Aquarium:
         if self.store.count() >= MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
-        return self.store.append(event, expected_head=self.store.head())
+        return self.store.append(event, expected_head=self._committed_head)
 
     def _calculate(self, dx, dy):
         dx, dy = _movement(dx), _movement(dy)
@@ -176,11 +178,12 @@ class Aquarium:
 
     def step(self, *, dx=0.02, dy=0.0):
         payload, next_world, next_learner = self._calculate(dx, dy)
-        self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
-                            self.tick * self.dt_ns, self.genome.revision)
+        head = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
+                                   self.tick * self.dt_ns, self.genome.revision)
         self.world = next_world
         self.learner = next_learner
         self.tick += 1
+        self._committed_head = head
         return copy.deepcopy(payload)
 
     def acquire(self, acquired):
@@ -194,23 +197,24 @@ class Aquarium:
         proposed = GenomeLedger.from_snapshot(self.genome.snapshot())
         proposed.append(acquired, proposed.revision)
         event_id = acquired["event_id"]
-        self._append_record("genesis.acquisition", "acq-" + event_id,
-                            {"acquisition": acquired}, self.tick * self.dt_ns,
-                            proposed.revision)
+        head = self._append_record("genesis.acquisition", "acq-" + event_id,
+                                   {"acquisition": acquired}, self.tick * self.dt_ns,
+                                   proposed.revision)
         self.genome = proposed
+        self._committed_head = head
         return self.genome.revision
 
     def _replay(self, external_expected_head):
-        self.store.verify_chain(external_expected_head=external_expected_head)
-        count = self.store.count()
+        verified = self.store.verify_chain(external_expected_head=external_expected_head)
+        count = verified["count"]
         if count > MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 replay exceeds 10,000 journal events; streaming pending")
         view = self.store.dataset(include_nonpublic=True, limit=MAX_REPLAY_EVENTS)
         items = view["projection"]["items"]
-        if len(items) != count:
-            raise AquariumError("incomplete replay dataset")
         if not items:
             raise AquariumError("bootstrap event missing")
+        if len(items) != count or items[-1]["event_hash"] != verified["head"]:
+            raise AquariumError("journal changed since verification, reopen the aquarium")
         first = items[0]["event"]
         if first != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
                                  0, self.graph_sha256):
@@ -253,20 +257,26 @@ class Aquarium:
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
+        if self.store.head() != verified["head"]:
+            raise AquariumError("journal advanced during replay, reopen the aquarium")
+        self._committed_head = verified["head"]
 
     def checkpoint(self):
-        return {
+        state = {
             "schema": "mojum.aquarium.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "sim_time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
             "world_revision": self.world.revision,
-            "journal_head": self.store.head(),
+            "journal_head": self._committed_head,
             "neural_mode": self.neural_mode,
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
+        if self.store.head() != state["journal_head"]:
+            raise AquariumError("stale aquarium checkpoint, reopen the journal")
+        return state
 
 
 def main():
@@ -293,8 +303,10 @@ def main():
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=args.dx, dy=args.dy)
+        # The checkpoint's final head check also covers the count read here.
+        stored_events = aquarium.store.count()
         checkpoint = aquarium.checkpoint()
-        checkpoint["stored_events"] = aquarium.store.count()
+        checkpoint["stored_events"] = stored_events
         checkpoint["status"] = (
             "SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
             if aquarium.neural_mode == "shadow"
