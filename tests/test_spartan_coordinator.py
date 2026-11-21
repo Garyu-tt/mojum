@@ -60,14 +60,15 @@ class SpartanTests(unittest.TestCase):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         for attempt in range(1, 4):
             worker = attempt
-            claimed = claim(self.db, worker, 110 + attempt, 30)
+            started = 100 + attempt * 40
+            claimed = claim(self.db, worker, started, 30)
             self.assertEqual(claimed["attempts"], attempt)
-            self.assertTrue(finish(self.db, worker, "a", "queued", 112 + attempt))
+            self.assertTrue(finish(self.db, worker, "a", "queued", started + 1))
             if attempt < 3:
                 self.assertEqual(status(self.db)["states"]["queued"], 1)
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
         self.assertEqual(status(self.db)["states"]["queued"], 0)
-        self.assertIsNone(claim(self.db, 4, 120))
+        self.assertIsNone(claim(self.db, 4, 260))
 
     def test_legacy_queued_exhausted_task_is_never_claimed(self):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
