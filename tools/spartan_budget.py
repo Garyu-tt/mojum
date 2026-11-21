@@ -76,7 +76,7 @@ def configure(db: sqlite3.Connection, token_limit: int, micro_usd_limit: int) ->
     try:
         row = db.execute("SELECT token_limit, micro_usd_limit FROM budget WHERE id=1").fetchone()
         if row is None:
-            db.execute("INSERT INTO budget VALUES (1, ?, ?)", (token_limit, micro_usd_limit))
+            db.execute("INSERT INTO budget(id, token_limit, micro_usd_limit) VALUES (1, ?, ?)", (token_limit, micro_usd_limit))
         elif (row["token_limit"], row["micro_usd_limit"]) != (token_limit, micro_usd_limit):
             raise BudgetError("budget is immutable; create a new ledger for a different budget")
         db.execute("COMMIT")
