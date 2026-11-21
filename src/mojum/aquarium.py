@@ -287,6 +287,10 @@ def main():
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode,
     ) as aquarium:
+        # Reject the whole CLI batch before any frame is committed. The
+        # per-step gate remains authoritative for direct API callers.
+        if aquarium.store.count() + args.ticks > MAX_REPLAY_EVENTS:
+            parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=args.dx, dy=args.dy)
         checkpoint = aquarium.checkpoint()
