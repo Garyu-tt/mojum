@@ -23,6 +23,7 @@ from .archive_device_transfer import (
 )
 from .verified_replica_restore import recover_pinned_replica
 from .quarantined_observer import QuarantinedObserver, ObserverError
+from .aquarium_progress_observer import summarize_synthetic_progress
 from .segmented_noosphere import SegmentedNoosphere
 from .noosphere import NoosphereError
 
@@ -117,6 +118,11 @@ def main(argv=None):
     watch.add_argument("--expected-agent-id", required=True)
     watch.add_argument("--include-private-metadata", action="store_true")
     watch.add_argument("--recent", type=int, default=12)
+    watch.add_argument(
+        "--include-private-progress", action="store_true",
+        help="explicitly reveal bounded synthetic activity aggregates only",
+    )
+    watch.add_argument("--progress-bins", type=int, default=16)
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -199,15 +205,25 @@ def main(argv=None):
                 allow_private_restore=True,
             )
         else:
+            if args.include_private_progress and args.include_private_metadata:
+                parser.error(
+                    "choose either private metadata or synthetic aggregate progress"
+                )
             with QuarantinedObserver(
                 args.db, args.receipt_file, args.key_file,
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
                 expected_agent_id=args.expected_agent_id,
             ) as view:
-                status = view.summary(
-                    include_private_metadata=args.include_private_metadata,
-                    max_recent=args.recent,
-                )
+                if args.include_private_progress:
+                    status = summarize_synthetic_progress(
+                        view, include_private_metrics=True,
+                        bins=args.progress_bins,
+                    )
+                else:
+                    status = view.summary(
+                        include_private_metadata=args.include_private_metadata,
+                        max_recent=args.recent,
+                    )
     except (ArchiveError, NoosphereError, ReceiptError, TransferError, ObserverError) as exc:
         parser.error(str(exc))
     # Do not expose PRIVATE data or even absolute source/destination paths.
