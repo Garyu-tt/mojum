@@ -30,8 +30,30 @@ It is deliberately not a merge/rebase of the two peer-owned histories.
   replay skips only already-verified deterministic simulation.
 - `Proprioception.MAX_EPISODE_TICKS=9999` still applies. The
   100k journal limit is **not** a claim that v3 can execute 100k
-  goal-free ticks. Future independently versioned proprioception
-  and epoch rollover are needed, not a silent tick modulo.
+  goal-free ticks. The `portable_host` now preflights the entire bounded
+  requested session against the remaining 9999-tick episode capacity
+  BEFORE making the first SQLite frame append, rather than half-running
+  a session and failing at the boundary. Future independently versioned
+  proprioception and epoch rollover are needed, not a silent tick modulo.
+- The existing CPython/Termux-compatible foreground host has an explicit
+  `--developmental-policy local_cell_v3` option; default remains
+  `legacy`. Its existing `--snapshot-file` and `--snapshot-key-file`
+  opt-in continue to work with a v3-pinned private journal.
+
+Portable opt-in example (NEW source journal only):
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db /private/path/new-v3.sqlite3 --ticks 120 --interval-ms 1000 \
+  --exploration-mode goal_free --developmental-policy local_cell_v3 \
+  --snapshot-file /private/path/new-v3.replay.json \
+  --snapshot-key-file /private/path/separately-provisioned.key
+```
+
+The HMAC key must have been explicitly provisioned separately with
+`python -m mojum.verified_snapshot --create-key ...`. The snapshot
+is not encrypted. This is a foreground CPU-only run, **not** an Android
+background service or permission to connect real actuators.
 
 ## Reproduction
 
@@ -40,6 +62,8 @@ PYTHONPATH=src python -m unittest discover -s tests \
   -p test_localcell_signed_stream.py -v
 PYTHONPATH=src python -m unittest discover -s tests \
   -p test_aquarium_cell_policy_v3.py -v
+PYTHONPATH=src python -m unittest discover -s tests \
+  -p test_localcell_portable_host.py -v
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
