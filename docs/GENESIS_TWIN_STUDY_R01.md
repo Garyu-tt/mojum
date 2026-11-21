@@ -30,7 +30,7 @@ PYTHONPATH=src python -m unittest discover -s tests -p 'test_twin_study.py' -v
   interaction happened in a virtual world. Later domain measurements can be
   compared before/after a marker, without attributing causal influence.
 - Deterministic read-only `compare(study, tick=N)`: current synthetic
-  phenotype parameters for both participants; A-minus-B deltas; latest
+  phenotype parameters and **effective acquired-event counts at that tick** for both participants; A-minus-B deltas; latest
   externally scored domain values and their A-minus-B deltas. A score missing
   for either subject has delta `null`, **not zero**.
 - Strict typed/size validation, duplicate and monotonically dated event
