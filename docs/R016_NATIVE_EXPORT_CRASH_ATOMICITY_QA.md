@@ -56,6 +56,21 @@ All subprocess tests are Linux/POSIX-only for exact hard-link/file-mode
 and process exit semantics. The workflow executes this suite under
 Python 3.11, 3.12 and 3.13, with no internet access during the test.
 
+
+## Corruption at a logical segment boundary
+
+A separate test commits **66 actual synthetic PRIVATE events** into a
+64-event segmented journal, spanning a real logical boundary. It then
+uses the original SQLite Backup API to create a disposable stage,
+deliberately drops the stage's immutability trigger and changes only
+the stage's second-segment prior-head link. The real
+`SegmentedNoosphere.verify_chain` replay must fail and no JSONL
+must be published. The original source database is byte-identical
+and can still be cold reopened against the original independently
+saved SHA-256 head. This failure injection does **not** simulate a
+physical torn-disk write; it verifies that a corrupted backup cannot
+be laundered into a valid exported trace.
+
 ## What is NOT proven
 
 - An actual kernel panic, power failure, hardware write-cache loss or
