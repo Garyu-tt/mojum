@@ -67,6 +67,16 @@ assert (guided_resume["tick"], guided_resume["stored_events"]) == (6, 7)
 assert guided_resume["temporal_range_state"]["updates"] == 6
 assert trained["motor_state"]["samples"]["north"]["trials"] == 1
 assert guided_resume["motor_state"]["samples"]["north"]["trials"] == 2
+trace_meta = json.loads(subprocess.check_output([
+    sys.executable, "-I", "-m", "mojum.aquarium_trace_export",
+    "--db", "guided.sqlite3", "--output", "guided.private.jsonl",
+    "--allow-private-export", "--expected-head", guided_resume["journal_head"],
+    "--start-tick", "5", "--frame-limit", "1", *guided,
+], text=True))
+assert trace_meta["frames"] == 1 and trace_meta["journal_head"] == guided_resume["journal_head"]
+frame, footer = map(json.loads, Path("guided.private.jsonl").read_text(encoding="utf-8").splitlines())
+assert frame["developmental_controller"]["intent"]["kind"] == "north"
+assert footer["trace_integrity"]["frame_count"] == 1
 disabled = run("mojum-aquarium", "--db", "disabled.sqlite3", "--ticks", "2", "--neural-mode", "disabled")
 assert (disabled["neural_mode"], disabled["neural_state"], disabled["stored_events"]) == ("disabled", None, 3)
 
