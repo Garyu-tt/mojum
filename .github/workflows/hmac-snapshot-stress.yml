@@ -4,9 +4,9 @@ on:
   pull_request:
     paths:
       - ".github/workflows/hmac-snapshot-stress.yml"
-      - "src/mojum/aquarium.py"
-      - "src/mojum/verified_snapshot.py"
-      - "src/mojum/noosphere.py"
+      # A portable-host or graph change may affect the replay/cache chain;
+      # re-run the real snapshot stress for any runtime change.
+      - "src/mojum/**"
       - "tests/stress_hmac_snapshot_boundary.py"
       - "tests/test_verified_replay_snapshot.py"
   workflow_dispatch:
