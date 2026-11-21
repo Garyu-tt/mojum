@@ -229,6 +229,12 @@ def inspect_journal(path, *, external_expected_head=None):
                     raise NoosphereError("noncanonical v4 frame envelope")
                 if frames // EPOCH_TICKS != epoch_index:
                     raise NoosphereError("missing durable v4 epoch marker before frame")
+                # The manifest pins max_absolute_ticks.  The event ceiling
+                # normally runs out first, but inspection must fail closed on
+                # a frame at or beyond the pinned cap instead of certifying a
+                # tick the runtime can never write.
+                if frames >= MAX_ABSOLUTE_TICKS:
+                    raise NoosphereError("v4 frame exceeds the pinned absolute-tick cap")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
