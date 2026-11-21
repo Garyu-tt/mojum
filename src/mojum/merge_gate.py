@@ -1,12 +1,12 @@
-"""Offline exact-head CI gate for PR acceptance (issue #415).
+"""Offline exact-head CI rollup preflight for PR acceptance (issue #415).
 
 The merge endpoint is not proof that the PR-triggered workflows finished, and
 parallel automation can poll a stale rollup. This module turns a *snapshot* of
 a pull request plus the head and base SHAs the caller accepted into a
 deterministic verdict:
 
-* ``ready``  -- every required check completed successfully for that exact
-  head SHA, the PR's recorded base is still the current target commit, and
+* ``ready``  -- every required check completed successfully in the supplied
+  head rollup, the PR's recorded base is still the current target commit, and
   GitHub reports a clean merge state;
 * ``defer``  -- checks are queued/running/missing, the PR is a draft, or the
   merge state is not fresh enough to decide (re-query later);
@@ -18,6 +18,10 @@ caller is expected to run it immediately before merging and to pass the same
 head SHA to ``gh pr merge --match-head-commit`` so a last-second push cannot
 slip past the verdict. Repository protection is still required to close the
 equivalent last-second base movement race.
+
+GitHub's rollup can omit each check's tested head/base provenance. A ``ready``
+preflight is therefore not merge authorization; callers must also verify the
+check runs as required by the repository acceptance policy.
 
 Inputs are the JSON produced by ``gh pr view --json ...`` (camelCase) and a
 small snake_case fixture schema used by the tests. No third-party packages and
@@ -451,7 +455,7 @@ def evaluate(
             ))
             continue
 
-        core_job = pattern in main_jobs
+        strict_main_job = facts.base_ref == "main"
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -498,7 +502,7 @@ def evaluate(
                     )
                 )
                 continue
-            if core_job and check.conclusion != "SUCCESS":
+            if strict_main_job and check.conclusion != "SUCCESS":
                 rejects.append(
                     GateReason(
                         "CHECK_NOT_SUCCESS",

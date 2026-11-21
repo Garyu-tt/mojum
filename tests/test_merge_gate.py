@@ -612,6 +612,23 @@ class MainMatrixTests(unittest.TestCase):
                 self.assertEqual(result.verdict, "reject")
                 self.assertEqual(result.code, "CHECK_NOT_SUCCESS")
 
+    def test_extra_main_jobs_also_require_success(self):
+        for conclusion in ("SKIPPED", "NEUTRAL"):
+            with self.subTest(conclusion=conclusion):
+                checks = self.green()
+                extra = run(
+                    name="actual-chrome", workflow="Viewer smoke",
+                    conclusion=conclusion,
+                )
+                result = evaluate_checks(
+                    [*checks, extra],
+                    base_ref="main",
+                    required=("Viewer smoke / actual-chrome",),
+                    waivers={"Viewer smoke / actual-chrome": "not a main override"},
+                )
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_NOT_SUCCESS")
+
 
 class CliTests(unittest.TestCase):
     def setUp(self):

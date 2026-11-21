@@ -1,10 +1,10 @@
 # Exact-head CI merge gate (R0.1)
 
-`mojum.merge_gate` is an offline, deterministic guard for PR acceptance
-(issue #415). It answers one question: **may this exact head be merged onto
-this exact current base, given the CI evidence for that head?** It never
-merges, never pushes, never calls a write endpoint, and needs no third-party
-packages.
+`mojum.merge_gate` is an offline, deterministic rollup preflight for PR
+acceptance (issue #415). It decides whether the supplied rollup and current
+head/base identifiers are complete enough to continue independent acceptance.
+It never merges, never pushes, never calls a write endpoint, and needs no
+third-party packages.
 
 The merge API is not proof that PR-triggered workflows finished. The gate reads
 a snapshot, checks the recorded head SHA against the SHA the caller intends to
@@ -39,8 +39,10 @@ failed `gh` call) is also a `reject` and never a `ready`.
   matrix. Missing required jobs defer with `MISSING_REQUIRED_CHECK`.
 - Obtain the extra job inventory from reviewed workflow YAML or protection
   rules. The live rollup may omit jobs that have yet to register.
-- The nine built-in jobs require `success`. Extra jobs can also pass with
-  `neutral` or an explicit `--waive JOB=REASON` for `skipped`.
+- Every job required for `main`, including an extra job added with
+  `--require`, must have `conclusion=success`. `neutral` and skipped-job
+  waivers cannot authorize a `main` merge. Non-`main` preflights retain the
+  generic neutral/waiver behavior.
 - A waiver never masks `failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `error` or `startup_failure`.
 - A required job that matches nothing yields `defer`
@@ -118,6 +120,9 @@ Treat a `ready` result as a prerequisite for the
 check-run provenance against that policy before submitting a merge guarded by
 `--match-head-commit`. The policy also calls for a GitHub repository ruleset to
 enforce the requirements at merge time.
+
+`ready` is only a rollup-preflight result. It does not independently prove the
+tested head/base pair and is not merge authorization.
 
 ## Limitations
 

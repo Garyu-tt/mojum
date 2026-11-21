@@ -10,10 +10,10 @@ Release acceptance and the remaining work on the integrated sensorimotor loop ar
 
 ## Exact-head CI merge gate (acceptance tooling)
 
-`mojum.merge_gate` turns a PR snapshot into a `ready` / `defer` / `reject`
-verdict for one exact commit and never performs a merge. Live mode reads the PR
-rollup, its recorded base commit, and the current target-branch commit through
-read-only GitHub calls:
+`mojum.merge_gate` preflights a PR rollup as `ready` / `defer` / `reject` for
+one pinned head and current base, and never performs a merge. Live mode reads
+the rollup, its recorded base commit, and the current target-branch commit
+through read-only GitHub calls:
 
 ```sh
 SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
@@ -30,7 +30,8 @@ tested against an older `main` defers even if GitHub reports
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
 See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdicts and
-the GitHub acceptance policy.
+the GitHub acceptance policy. A `ready` rollup is not merge authorization;
+tested check-run provenance still requires independent verification.
 
 ## Offline room designer (experimental)
 
