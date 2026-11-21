@@ -2,9 +2,7 @@
 
 from contextlib import closing
 import copy
-from contextlib import closing
 import json
-import sqlite3
 import os
 import sqlite3
 from pathlib import Path
