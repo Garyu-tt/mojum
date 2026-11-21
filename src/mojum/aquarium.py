@@ -26,6 +26,7 @@ from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
 from .local_cell_sense import Proprioception
+from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
 from .noosphere import (
@@ -136,9 +137,13 @@ class Aquarium:
         self._read_only_archive = motor_mode == V2A_ARCHIVE_MODE
         self._local_cell = motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE)
         if brain_mode not in ("placeholder", "developmental_controller"):
-            raise AquariumError("brain_mode must be placeholder or developmental_controller")
+            raise AquariumError(
+                "brain_mode must be placeholder or developmental_controller"
+            )
         if brain_mode == "developmental_controller" and motor_mode != "developmental_fixture":
-            raise AquariumError("developmental_controller brain requires developmental_fixture motor mode")
+            raise AquariumError(
+                "developmental_controller brain requires developmental_fixture motor mode"
+            )
         if pulse_sum not in ("auto", "ordered", "compensated"):
             raise AquariumError("pulse_sum must be auto, ordered or compensated")
         if pulse_sum != "auto" and neural_mode == "disabled":
