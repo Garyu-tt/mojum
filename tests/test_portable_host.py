@@ -225,6 +225,32 @@ class PortableHostTests(unittest.TestCase):
                     self.assertEqual(q.store.count(), initial_events)
                     self.assertEqual(q.checkpoint()["journal_head"], initial_head)
 
+    def test_explicit_controller_cli_pins_mode_and_replays(self):
+        first = self.invoke("--brain-mode", "developmental_controller")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        result = json.loads(first.stdout)
+        self.assertEqual(result["brain_mode"], "developmental_controller")
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.tick, 4)
+            frame = aquarium.store.dataset(include_nonpublic=True, limit=10)["projection"]["items"][-1]["event"]["payload"]
+            self.assertEqual(frame["brain"]["status"], "SYNTHETIC_DEVELOPMENTAL_CONTROLLER")
+            first_head = aquarium.checkpoint()["journal_head"]
+        wrong_mode = self.invoke()
+        self.assertNotEqual(wrong_mode.returncode, 0)
+        self.assertEqual(wrong_mode.stdout, "")
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.tick, 4)
+            self.assertEqual(aquarium.checkpoint()["journal_head"], first_head)
+        second = self.invoke("--brain-mode", "developmental_controller")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        resumed = json.loads(second.stdout)
+        self.assertEqual(resumed["start_tick"], 4)
+        self.assertEqual(resumed["end_tick"], 8)
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.tick, 8)
+            self.assertEqual(aquarium.checkpoint()["journal_head"], resumed["journal_head"])
+            self.assertNotEqual(aquarium.checkpoint()["journal_head"], first_head)
+
     @unittest.skipUnless(os.name == "posix" and hasattr(signal, "SIGTERM"),
                          "POSIX process signal required")
     def test_sigterm_stops_between_commits_and_reopens_exactly(self):

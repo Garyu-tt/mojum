@@ -191,6 +191,16 @@ learned state, with a limit of 1,000 frames. It refuses an existing
 destination and preserves the source file. Both modes can also produce
 replay-verified PRIVATE JSONL via the offline exporter.
 
+Use `--motor-mode local_cell_v3` for the distinct v3 policy. It retains up
+to 512 active cells and evicts the least recently observed cell when a
+new one arrives at capacity. The journal records evictions and forgotten
+observations. The SQLite journal still has a 10,000-event budget.
+
+To continue earlier v2B experience as v3, use the same transfer flags
+with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
+and publishes a new v3 file only if every historical frame and retained
+observation matches, with zero evictions during the transfer.
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
