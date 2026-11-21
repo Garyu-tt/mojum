@@ -334,6 +334,35 @@ class PortableHostTests(unittest.TestCase):
                 self.assertEqual(run.stdout, "")
                 self.assertFalse(self.db.exists(), run.stderr)
 
+    def test_v4_cli_rejects_incompatible_profile_before_birth(self):
+        for options in (
+            ("--motor-mode", V4_MODE),
+            ("--motor-mode", V4_MODE, "--sensory-mode", "none"),
+            ("--motor-mode", "developmental_fixture", "--sensory-mode", "none",
+             "--temporal-mode", "none"),
+            ("--motor-mode", V4_MODE, "--sensory-mode", "none",
+             "--temporal-mode", "none", "--brain-mode", "developmental_controller"),
+        ):
+            with self.subTest(options=options):
+                run = self.invoke(*options)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertEqual(run.stdout, "")
+                self.assertFalse(self.db.exists(), run.stdout + run.stderr)
+
+    def test_default_host_stdout_contract_is_unchanged(self):
+        run = subprocess.run(
+            [sys.executable, "-m", "mojum.portable_host",
+             "--db", str(self.db), "--ticks", "2", "--interval-ms", "20",
+             "--neural-mode", "disabled"],
+            cwd=ROOT, env=self.env, text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        status = json.loads(run.stdout)
+        self.assertEqual(status["schema"], "mojum.portable-host.run/2")
+        self.assertNotIn("motor_mode", status)
+        self.assertNotIn("sensory_mode", status)
+        self.assertEqual(status["journal_events"], 3)
+
     @unittest.skipUnless(os.name == "posix" and hasattr(signal, "SIGTERM"),
                          "POSIX process signal required")
     def test_sigterm_stops_between_commits_and_reopens_exactly(self):
