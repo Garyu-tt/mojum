@@ -4,7 +4,9 @@ Two equidistant toys can have different RGB and hidden softness.
 Renaming their spectator-only IDs must not change the learner's numeric
 observation or the instrument's read-only measured contact.
 """
+import json
 import unittest
+from pathlib import Path
 
 from mojum.sensory_curiosity_lab import CuriosityError, Toy, ToyScene
 from mojum.world_room import Room, initial_state
