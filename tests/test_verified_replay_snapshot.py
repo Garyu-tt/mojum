@@ -43,10 +43,10 @@ class SignedReplayCacheQA(unittest.TestCase):
 
     def aquarium(self, *, signed=True, **kwargs):
         opts = {"exploration_mode":"goal_free", "sensory_mode":"toy_probe"}
-        opts.update(kwargs)
         if signed:
             opts.update(replay_snapshot_file=self.snapshot,
                         replay_snapshot_key_file=self.key)
+        opts.update(kwargs)
         return Aquarium(self.db, SEED, GRAPH, **opts)
 
     def make_snapshot(self, ticks=12):
