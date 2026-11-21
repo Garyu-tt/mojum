@@ -207,8 +207,11 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
-            if policy == "local_cell_v4" and frames >= MAX_ABSOLUTE_TICKS:
-                raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
+            if policy == "local_cell_v4":
+                if frames >= MAX_ABSOLUTE_TICKS:
+                    raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
+                if frames // EPOCH_TICKS != epoch_index:
+                    raise NoosphereError("missing durable epoch marker before v4 frame")
             if event["observed_at_ns"] != frames * dt_ns:
                 raise NoosphereError("Aquarium frame time is not synchronized")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
@@ -230,11 +233,12 @@ def inspect_journal(path, *, external_expected_head=None):
                     or payload["absolute_tick"] != frames
                     or payload["from_epoch"] != expected_epoch - 1
                     or payload["to_epoch"] != expected_epoch
+                    or expected_epoch != epoch_index + 1
                     or payload["epoch_tick"] != 0
                     or payload["source"] != "explicit_monotonic_synthetic_epoch_boundary"
                     or event["event_id"] != f"epoch-{expected_epoch:08d}"
                     or event["observed_at_ns"] != frames * dt_ns
-                    or expected_epoch != epoch_index + 1):
+                    ):
                 raise NoosphereError("invalid Aquarium epoch boundary")
             epoch_index = expected_epoch
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:

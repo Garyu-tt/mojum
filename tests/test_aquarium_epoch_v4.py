@@ -16,6 +16,7 @@ from mojum.epoch_sense_v2 import (
     SCHEMA as EPOCH_SCHEMA,
 )
 from mojum.local_cell_sense import Proprioception
+from mojum.noosphere import NoosphereError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,11 +106,36 @@ class EpochSQLiteTests(unittest.TestCase):
             with self.assertRaisesRegex(AquariumError, "absolute tick budget"):
                 aquarium.required_events_for_steps(100_000)
 
+    def test_rejected_external_motor_input_cannot_append_epoch_marker(self):
+        """Validation precedes durable epoch transition even at a boundary."""
+        with self.open() as aquarium:
+            old_head, old_count = aquarium.store.head(), aquarium.store.count()
+            with patch.object(aquarium, "_epoch_event",
+                              side_effect=AssertionError("invalid input reached epoch marker")):
+                for request in ({"dx": 0.01}, {"dy": -0.01}):
+                    with self.subTest(request=request):
+                        with self.assertRaisesRegex(AquariumError, "rejects external"):
+                            aquarium.step(**request)
+            self.assertEqual(aquarium.store.head(), old_head)
+            self.assertEqual(aquarium.store.count(), old_count)
+            self.assertEqual(aquarium.tick, 0)
+
     def test_durable_boundary_recovery_and_10050_tick_cold_replay(self):
         with self.open() as aquarium:
             for _ in range(EPOCH_TICKS):
                 aquarium.step()
             before = aquarium.checkpoint()
+            before_count = aquarium.store.count()
+            # At the boundary a marker and its first frame need TWO slots.
+            # Refusing with only one slot prevents an orphan marker-only tail.
+            with patch.object(Aquarium, "journal_event_budget",
+                              property(lambda _: before_count + 1)):
+                with self.assertRaisesRegex(AquariumError, "budget"):
+                    aquarium.step()
+            self.assertEqual(aquarium.store.count(), before_count)
+            self.assertEqual(aquarium.tick, EPOCH_TICKS)
+            self.assertEqual(aquarium.epoch_index, 0)
+            self.assertEqual(aquarium.required_events_for_steps(1), 2)
             with patch.object(
                 aquarium, "_calculate_frame",
                 side_effect=RuntimeError("simulated interruption before epoch frame"),
@@ -150,6 +176,17 @@ class EpochSQLiteTests(unittest.TestCase):
             self.assertEqual(inspect_journal(self.db)["epoch_index"], 1)
             restored.step()
             self.assertEqual(restored.tick, 10051)
+
+    def test_wire_inspector_rejects_missing_epoch_marker(self):
+        # Exercise the boundary validator with a shorter synthetic threshold.
+        # SQLite remains a genuine canonical 3-frame v4 event/hash chain;
+        # only the read-only checker threshold is reduced for this test.
+        with self.open() as aquarium:
+            for _ in range(3):
+                aquarium.step()
+        with patch("mojum.aquarium_wire.EPOCH_TICKS", 2):
+            with self.assertRaisesRegex(NoosphereError, "missing durable epoch marker"):
+                inspect_journal(self.db)
 
     def test_v4_rejects_sensory_upgrade_before_creating_database(self):
         with self.assertRaisesRegex(AquariumError, "sensory_mode=none"):
