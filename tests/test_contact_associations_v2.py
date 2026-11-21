@@ -100,6 +100,21 @@ class V2Test(unittest.TestCase):
         with self.assertRaises(CuriosityError):
             ContactAssociationsV2.from_snapshot(erased)
 
+    def test_feedback_extra_fields_fail_closed_without_partial_learning(self):
+        m = ContactAssociationsV2()
+        cue = sensor(0, (1, 2, 3))
+        before = m.snapshot()
+        measurement = {
+            "contact": True,
+            "instrument": "synthetic_probe_not_material_classifier",
+            "source_tick": 0,
+            "measured_deflection": 0.5,
+            "untrusted_extra": "must not be silently accepted",
+        }
+        with self.assertRaises(CuriosityError):
+            m.learn(cue, measurement, m.predict(cue))
+        self.assertEqual(m.snapshot(), before)
+
     def test_tampered_accounting_rejected(self):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
