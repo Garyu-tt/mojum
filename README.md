@@ -202,6 +202,14 @@ to 512 active cells and evicts the least recently observed cell when a
 new one arrives at capacity. The journal records evictions and forgotten
 observations. The SQLite journal still has a 10,000-event budget.
 
+Use `--motor-mode local_cell_v4` for the current opt-in epoch experiment. It
+uses a new absolute-tick/epoch wire and commits an explicit boundary event
+before the first frame after tick 9,999, so cold replay can continue learned
+state without modulo wrapping. The v4 journal remains bounded by 100,000
+events; v1/v2/v3 journal bytes and their 10,000-event ceiling are unchanged.
+This is still a synthetic point-room controller, not a neural brain or proof
+of a digital organism. See [the current-main epoch contract](docs/R015_CURRENT_MAIN_EPOCH_V4.md).
+
 To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
