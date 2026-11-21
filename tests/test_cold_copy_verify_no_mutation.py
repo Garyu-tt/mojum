@@ -34,6 +34,26 @@ class ReadOnlyVerifyTests(unittest.TestCase):
         self.assertFalse(Path(str(self.archive) + "-wal").exists())
         self.assertFalse(Path(str(self.archive) + "-shm").exists())
 
+    def test_export_rejects_damaged_source_metadata_without_repair(self):
+        # Source has committed Aquarium events but an invalid metadata table.
+        # Export must not recreate it before replaying the source.
+        for mutation in ("empty", "dropped"):
+            with self.subTest(mutation=mutation):
+                source = self.root / ("source-" + mutation + ".sqlite3")
+                with Aquarium(source, SEED, GRAPH) as aquarium:
+                    aquarium.step()
+                with closing(sqlite3.connect(source)) as connection:
+                    if mutation == "empty":
+                        connection.execute("DELETE FROM metadata")
+                    else:
+                        connection.execute("DROP TABLE metadata")
+                    connection.commit()
+                before = source.read_bytes()
+                with self.assertRaisesRegex(ValueError, "metadata"):
+                    export_cold_copy(source, self.archive, SEED, GRAPH)
+                self.assertEqual(source.read_bytes(), before)
+                self.assertFalse(self.archive.exists())
+
     def test_empty_existing_sqlite_is_rejected_without_auto_bootstrap(self):
         # Reproduces the old behavior: Aquarium(path, ...) opened the ORIGINAL
         # archive and appended aquarium.bootstrap before rejecting pinned head.
