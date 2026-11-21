@@ -46,4 +46,5 @@ jobs:
       - name: Durable 100001 event append plus verified cold restart and 100002 event
         env:
           PYTHONPATH: src
+          MOJUM_SEGMENTED_100K_STRESS: "1"
         run: python -m unittest discover -s tests -p test_segmented_noosphere_100k_stress.py -v
