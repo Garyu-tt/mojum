@@ -26,6 +26,25 @@ from .noosphere import _sha
 SCHEMA = "mojum.local-write-intent/1"
 
 
+def _require_full_wal(db, name):
+    """Check the LIVE SQLite connection, not a new reader's PRAGMA defaults.
+
+    journal_mode is persistent in the DB, but synchronous is per connection.
+    A separate read-only auditor cannot establish the writer's synchronous
+    setting. Every opt-in prepared mutation checks both owner connections.
+    """
+    try:
+        mode = db.execute("PRAGMA journal_mode").fetchone()
+        sync = db.execute("PRAGMA synchronous").fetchone()
+    except sqlite3.Error as exc:
+        raise AuthorityError("durable SQLite settings unavailable for " + name) from exc
+    if (mode is None or str(mode[0]).lower() != "wal"
+            or sync is None or type(sync[0]) is not int or sync[0] != 2):
+        raise AuthorityError(
+            name + " requires live SQLite journal_mode=WAL and synchronous=FULL"
+        )
+
+
 def _installed(db):
     return db.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='write_intents'"
@@ -79,6 +98,7 @@ class IntentGuardedAquarium(GuardedAquarium):
             writer=writer, epoch=epoch, generation=generation, **kwargs,
         )
         try:
+            self._check_durability()
             if not _installed(self._registry._db):
                 raise AuthorityError("write-intent schema must be explicitly installed")
             if _pending(self._registry, self._organism_id) is not None:
@@ -86,6 +106,10 @@ class IntentGuardedAquarium(GuardedAquarium):
         except BaseException:
             self.close()
             raise
+
+    def _check_durability(self):
+        _require_full_wal(self._registry._db, "authority registry")
+        _require_full_wal(self._aq.store._db, "Noosphere journal")
 
     def _plan(self, kind, arg):
         if kind == "step":
@@ -113,6 +137,7 @@ class IntentGuardedAquarium(GuardedAquarium):
 
     def _prepare(self, kind, arg):
         self._live()
+        self._check_durability()
         with self._registry._write():
             row = self._registry._row(self._organism_id)
             self._check_admission(row)
@@ -143,6 +168,9 @@ class IntentGuardedAquarium(GuardedAquarium):
         return expected_head, expected_tick
 
     def _finish(self, expected_head, expected_tick):
+        # If a live SQLite connection was degraded after an append, keep
+        # the durable intent FROZEN instead of finalizing a weak commit.
+        self._check_durability()
         with self._registry._write():
             self._check_path_identity()
             row = self._registry._row(self._organism_id)
