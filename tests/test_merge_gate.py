@@ -147,6 +147,9 @@ class SnapshotParsingTests(unittest.TestCase):
             [],
             {"baseRefName": "main"},
             {"headRefOid": "not-a-sha", "baseRefName": "main"},
+            {"headRefOid": HEAD[:7], "baseRefName": "main"},
+            {"headRefOid": HEAD + "\\n", "baseRefName": "main"},
+            {"headRefOid": HEAD + " ", "baseRefName": "main"},
             {"headRefOid": HEAD},
             {"headRefOid": HEAD, "baseRefName": "main", "statusCheckRollup": "nope"},
             {"headRefOid": HEAD, "baseRefName": "main", "statusCheckRollup": [{}]},
@@ -165,6 +168,14 @@ class SnapshotParsingTests(unittest.TestCase):
             with self.subTest(snapshot=snapshot):
                 with self.assertRaises(SnapshotError):
                     parse_snapshot(snapshot)
+
+    def test_rejects_padded_or_shortened_check_head_sha(self):
+        for value in (HEAD[:7], HEAD + "\\n", HEAD + " "):
+            with self.subTest(value=value), self.assertRaises(SnapshotError):
+                parse_snapshot({
+                    "headRefOid": HEAD, "baseRefName": "main",
+                    "checks": [run(head_sha=value)],
+                })
 
     def test_check_without_status_but_with_conclusion_is_completed(self):
         parsed = parse_snapshot(
@@ -217,6 +228,12 @@ class GateVerdictTests(unittest.TestCase):
                 expected_head_sha="zzz",
                 required=REQUIRED,
             )
+
+    def test_expected_head_must_be_exact_and_unpadded(self):
+        for value in (HEAD[:7], HEAD + "\\n", HEAD + " ", " " + HEAD):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                evaluate(facts(self.green()), expected_head_sha=value,
+                         required=REQUIRED, required_counts={x: 1 for x in REQUIRED})
 
     def test_pending_check_defers(self):
         checks = self.green() + [run(status="IN_PROGRESS", conclusion=None, workflow="Mesh contract")]
