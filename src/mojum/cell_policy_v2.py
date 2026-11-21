@@ -123,6 +123,13 @@ class CellExplorer:
         zone, action = intent["zone"], intent["action"]
         if zone not in self.records and len(self.records) >= MAX_CELLS:
             raise LocalCellError("local cell evidence capacity exhausted")
+        existing = self.records.get(zone, {}).get(action, [0, 0])
+        # A point room can never block ``rest`` (the agent never occupies an
+        # obstacle), and ``decide`` permanently inhibits a blocked move. Both
+        # outcomes are rejected by ``from_snapshot``; refuse them here too so a
+        # live policy can never persist a snapshot its own reader rejects.
+        if blocked and (action == "rest" or existing[1] >= 1):
+            raise LocalCellError("impossible blocked motor history")
         counters = self.records.setdefault(zone, {}).setdefault(action, [0, 0])
         counters[0] += 1
         counters[1] += int(blocked)
