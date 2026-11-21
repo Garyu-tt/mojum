@@ -207,6 +207,41 @@ class EpochJournalV4Tests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "epoch"):
             inspect_journal(self.db)
 
+    def test_epoch_marker_rejects_bool_int_aliases_on_replay(self):
+        # Python True == 1 and False == 0, but the durable schema
+        # requires exact JSON integer types, never boolean aliases.
+        with self.open() as aquarium:
+            aquarium.tick = EPOCH_TICKS
+            canonical = aquarium._epoch_event(1)
+            for field, fake in (
+                ("epoch_index", True),
+                ("previous_epoch_index", False),
+                ("epoch_tick", False),
+            ):
+                with self.subTest(field=field):
+                    forged = deepcopy(canonical)
+                    forged["payload"][field] = fake
+                    with self.assertRaisesRegex(AquariumError, "invalid epoch"):
+                        aquarium._replay_event({"event": forged})
+                    self.assertEqual(aquarium.epoch_index, 0)
+
+    def test_wire_inspector_rejects_bool_epoch_index_with_valid_hash_chain(self):
+        with self.open() as aquarium:
+            aquarium.step()
+            forged = aquarium._epoch_event(1)
+            forged["payload"]["epoch_index"] = True
+            forged["payload"]["previous_epoch_index"] = False
+            forged["payload"]["epoch_tick"] = False
+            aquarium.store.append(
+                forged, expected_head=aquarium.checkpoint()["journal_head"]
+            )
+        # Only the inspector's boundary period is shortened here. The
+        # immutable bootstrap policy and the actual journal remain v4.
+        # This isolates type checking from the real 9999-frame stress test.
+        with patch("mojum.aquarium_wire.EPOCH_TICKS", 1):
+            with self.assertRaisesRegex(NoosphereError, "epoch"):
+                inspect_journal(self.db)
+
     def test_v4_journal_is_not_reinterpreted_as_v3(self):
         with self.open() as aquarium:
             aquarium.step()
