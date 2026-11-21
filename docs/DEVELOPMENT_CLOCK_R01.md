@@ -6,7 +6,7 @@ This **standalone, synthetic, CPU-only** contract separates three counters:
 - `development_ticks`: independent paced developmental exposure, used to derive a visual/developmental age, **clamped at maturity**;
 - `learning_events`: a counter of externally reported learning activity, **not** evidence of a functional brain or real learning.
 
-Only the pure `mojum.development` functions implement this contract. No changes
+Only the isolated `mojum.development_clock` functions implement this contract; existing `mojum.development` and `mojum.lifecycle` modules in main retain their public APIs. No changes
 are made to `Aquarium`, existing `GenomeLedger`, Noosphere SQLite history,
 checkpoint hashes, private training records, physical models or real organism
 semantics. This is not wired into the default simulation. Callers must persist
@@ -18,7 +18,7 @@ from `advance` is not an authoritative checkpoint.
 From the repo root, use Python 3.11+ with `PYTHONPATH=src`:
 
 ```python
-from mojum.development import default_policy, initial_state, advance, project
+from mojum.development_clock import default_policy, initial_state, advance, project
 
 policy = default_policy()
 policy.update(start_age_milli=6000, maturity_age_milli=16000,
