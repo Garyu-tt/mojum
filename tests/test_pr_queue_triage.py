@@ -115,6 +115,44 @@ class QueueTriageTests(unittest.TestCase):
         with self.assertRaises(triage.TriageInputError):
             triage.scan_queue({"base_sha": BASE, "pull_requests": {}}, JOBS)
 
+    def test_orphan_success_conclusion_is_not_a_completed_check(self):
+        forged = [check(job) for job in JOBS]
+        del forged[0]["status"]
+        result = run(pr(checks=forged))["pull_requests"][0]
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("MALFORMED_CHECK_ENTRY", result["reasons"])
+
+    def test_mixed_status_context_cannot_override_failed_check(self):
+        forged = [check(job) for job in JOBS]
+        forged[0].update(state="SUCCESS", conclusion="FAILURE")
+        result = run(pr(checks=forged))["pull_requests"][0]
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("MALFORMED_CHECK_ENTRY", result["reasons"])
+        legacy = [dict(workflowName="Aquarium", name="py311", state="SUCCESS", headSha=HEAD)]
+        legacy += [check(job) for job in JOBS[1:]]
+        self.assertEqual(run(pr(checks=legacy))["pull_requests"][0]["status"],
+                         "candidate_for_independent_acceptance")
+
+    def test_cli_rejects_duplicate_json_keys_and_nonfinite_numbers(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "snapshot.json"
+            good = json.dumps({"base_sha": BASE, "pull_requests": [pr()]})
+            for corrupted in (
+                good.replace('"isDraft": false', '"isDraft": true, "isDraft": false'),
+                good.replace('"number": 1', '"number": NaN'),
+                "[" * 1500 + "]" * 1500,
+            ):
+                with self.subTest(corrupted=corrupted[:50]):
+                    filename.write_text(corrupted, encoding="utf-8")
+                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                        code = triage.main(["--input", str(filename), "--require", JOBS[0]])
+                    self.assertEqual(code, 2)
+                    report = json.loads(out.getvalue())
+                    self.assertFalse(report["merge_authorized"])
+                    self.assertFalse(report["merge_performed"])
+
     def test_cli_exit_zero_only_reports_not_merges(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "snapshot.json"
