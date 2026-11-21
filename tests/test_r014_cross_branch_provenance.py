@@ -56,5 +56,22 @@ class PinnedCheckoutProvenanceTests(unittest.TestCase):
             assert_pinned_checkout(root, wrong, self.MARKER)
 
 
+    @unittest.skipUnless(shutil.which("git"), "git is required by the ABI gate")
+    def test_dirty_tracked_source_is_rejected_with_matching_head(self):
+        root, actual = self._checkout()
+        (root / self.MARKER).write_text("# changed without a commit\\n", encoding="utf-8")
+        with self.assertRaisesRegex(AssertionError, "tracked or untracked local changes"):
+            assert_pinned_checkout(root, actual, self.MARKER)
+
+    @unittest.skipUnless(shutil.which("git"), "git is required by the ABI gate")
+    def test_untracked_source_is_rejected_with_matching_head(self):
+        root, actual = self._checkout()
+        (root / "src/mojum/foreign_module.py").write_text(
+            "# untracked injected module\\n", encoding="utf-8",
+        )
+        with self.assertRaisesRegex(AssertionError, "tracked or untracked local changes"):
+            assert_pinned_checkout(root, actual, self.MARKER)
+
+
 if __name__ == "__main__":
     unittest.main()
