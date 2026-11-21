@@ -6,6 +6,7 @@ on:
       - ".github/workflows/r017-physical-segments.yml"
       - "src/mojum/segment_archive.py"
       - "src/mojum/segment_archive_verify.py"
+      - "src/mojum/segment_archive_cli.py"
       - "tests/test_physical_segment_archive.py"
       - "tests/test_physical_segment_archive_100k.py"
       - "docs/R017_PHYSICAL_SEGMENT_ARCHIVE_R01.md"
