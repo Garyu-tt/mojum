@@ -18,6 +18,8 @@ PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120
 
 Repeat the command to replay and append 120 more frames to the **same** private local SQLite file. The JSON checkpoint reports `tick`, `stored_events`, `journal_head`, and a status explicitly labelling synthetic shadow learning. On a new DB, 120 ticks should produce **121** events (one bootstrap + 120 frames); a second 120-tick run should produce **241**. Use a fresh path for an independent organism fixture; do not publish the SQLite file, as it contains PRIVATE synthetic event records. For a no-learning control, use a **different DB path** and `--neural-mode disabled`; the mode is pinned in the bootstrap and cannot silently change on reopen.
 
+If two processes open the same journal, an append by one makes the other process's in-memory state stale. Reopen the journal in that process before taking a checkpoint or writing another frame or GENESIS change.
+
 Windows PowerShell:
 
 ```powershell
@@ -35,7 +37,7 @@ The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or M
 
 ## Run from an installed wheel
 
-With CPython 3.11+ and a local Mojum wheel, install into a virtual environment and run from any working directory:
+With CPython 3.11+ and a locally built Mojum wheel, install into a virtual environment and run from any working directory:
 
 ```sh
 python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
@@ -43,7 +45,7 @@ mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 120
 mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 ```
 
-Starting with a new journal, the second run brings it to tick 150 with 151 stored events. The wheel includes the example genome and graph. [Offline build and install instructions](docs/LOCAL_INSTALL_R01.md)
+Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. See [offline install instructions](docs/LOCAL_INSTALL_R01.md). The installed synthetic motor-play mode is optional; the default scripted mode remains unchanged.
 
 ## Architecture and development
 
