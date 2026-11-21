@@ -636,6 +636,11 @@ class Aquarium:
         if self._read_only:
             raise AquariumError("Aquarium journal is read-only")
         if self._v4_epoch:
+            # Reject caller errors before the durable epoch marker can commit.
+            # A valid in-flight frame may crash after the marker; invalid input
+            # must never change the journal head or the epoch state.
+            if dx is not None or dy is not None:
+                raise AquariumError("developmental motor play rejects external dx/dy")
             if self._committed_count + self.required_events_for_steps(1) > self.journal_event_budget:
                 raise AquariumError("v4 session journal budget exhausted before boundary")
             self._commit_pending_epoch()
