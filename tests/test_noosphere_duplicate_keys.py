@@ -108,5 +108,39 @@ class DuplicateJSONKeyJournalTests(unittest.TestCase):
             _read_first_event(self.path, OWNER)
 
 
+    def test_source_filter_cannot_hide_duplicate_keys(self):
+        # SQLite json_extract reads the first duplicate key, while Python's
+        # default json.loads reads the last. Filtered queries must validate
+        # candidates before checking the source or applying their result cap.
+        raw = json.dumps(EVENT, sort_keys=True, separators=(",", ":"))
+        with LocalNoosphere(self.path, OWNER) as store:
+            forged = self._forge(
+                raw, '"source":"duplicate-key-fixture"',
+                '"source":"decoy","source":"duplicate-key-fixture"',
+            )
+            self.assertEqual(json.loads(forged)["source"], OWNER)
+            with sqlite3.connect(self.path) as db:
+                self.assertEqual(db.execute(
+                    "SELECT json_extract(wire_json, '$.source') FROM events"
+                ).fetchone()[0], "decoy")
+            with self.assertRaisesRegex(NoosphereError, "duplicate JSON key"):
+                store.dataset(source=OWNER, include_nonpublic=True)
+            with self.assertRaisesRegex(NoosphereError, "duplicate JSON key"):
+                list(store.iter_events(source=OWNER, include_nonpublic=True))
+
+    def test_source_filter_still_uses_post_filter_limit(self):
+        with LocalNoosphere(self.path, OWNER) as store:
+            next_event = dict(EVENT)
+            next_event.update(event_id="evt-2", source="other", recorded_at_ns=2,
+                              observed_at_ns=2, valid_from_ns=2)
+            head = store.append(next_event, expected_head=self.head)
+            self.assertEqual(store.verify_chain()["head"], head)
+            self.assertEqual(len(store.dataset(source=OWNER, limit=1)["projection"]["items"]), 1)
+            self.assertEqual(len(store.dataset(source="other", limit=1)["projection"]["items"]), 1)
+            self.assertEqual(len(store.dataset(source="absent", limit=1)["projection"]["items"]), 0)
+            self.assertEqual(len(list(store.iter_events(source=OWNER))), 1)
+            self.assertEqual(len(list(store.iter_events(source="other"))), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
