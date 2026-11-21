@@ -95,6 +95,14 @@ def _as_number(value, label, errors):
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
         return None
+    # Parsing a finite Decimal does not guarantee bounded arithmetic. Very
+    # large JSON exponents (e.g. 1e999999999) are valid tokens but can raise
+    # decimal.Overflow when room areas are calculated. Reject magnitudes
+    # outside a conservative finite range before any arithmetic, including
+    # operands too tiny for a downstream float-based room fixture.
+    if number and not -300 <= number.adjusted() <= 300:
+        errors.append("%s exceeds supported numeric magnitude" % (label,))
+        return None
     return number
 
 
