@@ -242,6 +242,16 @@ class GateVerdictTests(unittest.TestCase):
             with self.subTest(oid=oid), self.assertRaises(ValueError):
                 evaluate_checks(self.green(), expected_head_sha=oid)
 
+    def test_expected_head_with_trailing_newline_raises(self):
+        for value in ["a" * 40 + "\n", "abcdef1\n", "abcdef1 ", "\nabcdef1"]:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    evaluate(
+                        facts(self.green()),
+                        expected_head_sha=value,
+                        required=REQUIRED,
+                    )
+
     def test_pending_check_defers(self):
         checks = self.green() + [run(status="IN_PROGRESS", conclusion=None, name="mesh", workflow="Mesh contract")]
         result = evaluate_checks(checks)
