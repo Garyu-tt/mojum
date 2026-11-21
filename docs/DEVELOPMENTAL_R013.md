@@ -61,7 +61,10 @@ Thresholds are conservative heuristics, not a navigation score: a rest streak
 of at least `max(10, frames // 10)` combined with an idle fraction of at least
 0.5 marks `REST_COLLAPSE_SUSPECTED`; at least 20 moves with at least four
 successful moves per distinct position marks
-`REVISIT_CONCENTRATION_SUSPECTED`. Both gates read only committed frames; the
+`REVISIT_CONCENTRATION_SUSPECTED`. Histories with no measurable displacement
+report `NO_MEASURED_DISPLACEMENT` instead of the misleading `MOBILITY_OBSERVED`,
+even when attempts occurred; one frame cannot establish movement on its own.
+Both gates read only committed frames; the
 tool never imports the runtime, never writes to the journal, and does not
 reinterpret existing policy semantics. A scripted journal, a non-developmental
 bootstrap or a noncanonical frame is rejected instead of being averaged.
