@@ -227,6 +227,11 @@ def main():
         mutated.append(("wrapped_intent_epoch",
                         serialize(wrong_tick, footer),
                         "Неверный абсолютный такт или эпоха v4"))
+        wrong_epoch_footer = copy.deepcopy(footer)
+        wrong_epoch_footer["epoch_index"] = footer["epoch_index"] + 1
+        mutated.append(("forged_footer_epoch_index",
+                        serialize(frames, wrong_epoch_footer),
+                        "Нет проверенного checkpoint/2 и сведений эпохи v4"))
         wrong_footer = copy.deepcopy(footer)
         wrong_footer["schema"] = "mojum.aquarium.checkpoint/1"
         mutated.append(("unversioned_checkpoint",
