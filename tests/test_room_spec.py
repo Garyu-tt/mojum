@@ -344,5 +344,32 @@ class CliTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 2)
 
 
+class RuntimeNumberRangeTests(unittest.TestCase):
+    def test_huge_exponent_is_a_validation_error_not_a_decimal_overflow(self):
+        raw = (b'{"width":1e1000000,"height":4,"obstacles":[],'
+               b'"start":[0,0]}')
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIsNone(report.summary)
+        self.assertIn("width is outside the finite runtime number range",
+                      report.errors)
+
+    def test_subnormal_underflow_does_not_certify_nonzero_geometry(self):
+        raw = (b'{"width":1e-999999,"height":4,"obstacles":[],'
+               b'"start":[0,0]}')
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("width is outside the finite runtime number range",
+                      report.errors)
+
+    def test_large_but_finite_runtime_numbers_preserve_exact_spelling(self):
+        raw = (b'{"width":1e308,"height":1e308,"obstacles":[],'
+               b'"start":[0,0]}')
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.summary["width"], "1e308")
+        self.assertEqual(report.summary["estimated_free_area"], "1E+616")
+
+
 if __name__ == "__main__":
     unittest.main()
