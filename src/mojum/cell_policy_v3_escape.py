@@ -124,9 +124,8 @@ class CellExplorerV3Escape:
                 or not 0 <= state["consecutive_blocked_probes"]
                        <= REPROBE_BLOCKED_BEFORE_REST):
             raise CellV3EscapeError("invalid escape retention envelope")
-        if state["updates"] == 0 and (state["consecutive_rests"]
-                                      or state["consecutive_blocked_probes"]):
-            raise CellV3EscapeError("unobserved escape counters")
+        if max(state["consecutive_rests"], state["consecutive_blocked_probes"]) > state["updates"]:
+            raise CellV3EscapeError("escape outcome streak exceeds observations")
         # Rest resets the blocked-probe streak and every movement resets the
         # rest streak; neither can legitimately be positive together.
         if state["consecutive_rests"] and state["consecutive_blocked_probes"]:

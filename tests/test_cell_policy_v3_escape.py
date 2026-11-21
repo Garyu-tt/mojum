@@ -166,6 +166,20 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         ):
             CellExplorerV3Escape.from_snapshot(forged)
 
+    def test_snapshot_rejects_streak_longer_than_observation_history(self):
+        for pulse, counter in ((False, "consecutive_rests"),
+                               (True, "consecutive_blocked_probes")):
+            with self.subTest(counter=counter):
+                policy = CellExplorerV3Escape()
+                sense = Proprioception(0, "0" * 64, 1.0, 2.0, pulse)
+                policy.observe(sense, policy.decide(sense), blocked=pulse)
+                snapshot = policy.snapshot()
+                self.assertEqual(snapshot[counter], 1)
+                self.assertEqual(CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot)
+                snapshot[counter] = 2
+                with self.assertRaisesRegex(CellV3EscapeError, "streak exceeds observations"):
+                    CellExplorerV3Escape.from_snapshot(snapshot)
+
     def test_snapshot_rejects_more_cell_measurements_than_elapsed_ticks(self):
         # Global updates and last_tick are coherent. The first cell alone
         # claims five observations despite last being seen on tick zero.
