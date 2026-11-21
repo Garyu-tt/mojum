@@ -258,73 +258,81 @@ def inspect_actual_mobile_chromedriver(chrome, html, *, width, height):
 
 def main():
     chrome = chrome_binary()  # No silent skip/fallback to JS VM.
+    reports = []
     with tempfile.TemporaryDirectory(prefix="mojum-private-chrome-fixture-") as tmp:
         private = Path(tmp)
-        db = private / "one-organism.sqlite3"
-        trace = private / "recorded.private.jsonl"
-        with Aquarium(db, SEED, GRAPH, exploration_mode="goal_free",
-                      sensory_mode="toy_probe") as aquarium:
-            frame0 = aquarium.step()
-            frame1 = aquarium.step()
-        export_private_trace(
-            db, trace, SEED, GRAPH, allow_private_export=True,
-            exploration_mode="goal_free", sensory_mode="toy_probe",
-        )
-        data = trace.read_text(encoding="utf-8")
         original = VIEWER.read_text(encoding="utf-8")
-        injected = instrumented_html(original, data)
-        reports = []
-        for width,height,mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
-            report = (inspect_actual_mobile_chromedriver(
-                chrome, injected, width=width, height=height
-            ) if mode == "mobile" else inspect_actual_browser(
-                chrome, injected, width=width, height=height
-            ))
-            first, second, viewport = (
-                report["first"], report["second"], report["viewport"]
+        # One source organism for each persisted motor policy, not a JS toy.
+        # Old v1 traces and v2 traces must both survive cold verified export
+        # and real desktop/mobile browser playback.
+        for policy in ("coarse_v1", "local_cell_v2"):
+            db = private / (policy + ".sqlite3")
+            trace = private / (policy + ".private.jsonl")
+            with Aquarium(db, SEED, GRAPH, exploration_mode="goal_free",
+                          sensory_mode="toy_probe", motor_policy=policy) as aquarium:
+                frame0 = aquarium.step()
+                frame1 = aquarium.step()
+            export_private_trace(
+                db, trace, SEED, GRAPH, allow_private_export=True,
+                exploration_mode="goal_free", sensory_mode="toy_probe",
+                motor_policy=policy,
             )
-            assert first["tick"] == "0", (mode,"first tick")
-            assert first["action"] == frame0["developmental"]["intent"]["action"]
-            assert first["probe"] == "Запрошена", (mode,"probe")
-            assert first["measured"] == "0.75", (mode,"measured touch")
-            assert first["prediction"] == "—", (mode,"blank at birth")
-            assert first["brain"] == "UNIMPLEMENTED", (mode,"not a fake brain")
-            assert second["tick"] == "1", (mode,"next tick")
-            assert second["prediction"] == "0.75", (mode,"learned prediction")
-            assert second["counter"] == "2 / 2", (mode,"counter")
-            assert "verified.synthetic.private.jsonl" in second["source"]
-            assert "SHA-256 кадров совпадает" in second["source"], (
-                mode, "WebCrypto digest was not visibly verified", second["source"]
-            )
-            assert viewport["width"] > 0
-            if mode == "mobile":
-                assert viewport["width"] == 390, (
-                    "Chrome must render actual 390 CSS-px mobile viewport", viewport
+            data = trace.read_text(encoding="utf-8")
+            injected = instrumented_html(original, data)
+            for width, height, mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
+                report = (inspect_actual_mobile_chromedriver(
+                    chrome, injected, width=width, height=height
+                ) if mode == "mobile" else inspect_actual_browser(
+                    chrome, injected, width=width, height=height
+                ))
+                first, second, viewport = (
+                    report["first"], report["second"], report["viewport"]
                 )
-            assert viewport["canvasWidth"] >= 100
-            assert viewport["canvasHeight"] >= 60
-            assert viewport["controlsWidth"] > 0
-            assert viewport["scrollWidth"] <= viewport["width"] + 2, (
-                mode, "horizontal overflow", viewport
-            )
-            assert frame1["toy_contact"]["prediction_before"]["predicted_deflection"] == .75
-            reports.append({
-                "viewport":mode,
-                "source":"real replay-verified local SQLite + PRIVATE JSONL",
-                "actual_browser":True,
-                "first_tick":first["tick"],
-                "second_tick":second["tick"],
-                "measured_contact":first["measured"],
-                "next_prediction":second["prediction"],
-                "css_viewport_width_px":viewport["width"],
-                "canvas_width_px":round(viewport["canvasWidth"]),
-                "horizontal_overflow":False,
-            })
+                assert first["tick"] == "0", (policy, mode, "first tick")
+                assert first["action"] == frame0["developmental"]["intent"]["action"]
+                assert first["probe"] == "Запрошена", (policy, mode, "probe")
+                assert first["measured"] == "0.75", (policy, mode, "measured touch")
+                assert first["prediction"] == "—", (policy, mode, "blank at birth")
+                assert first["brain"] == "UNIMPLEMENTED", (policy, mode, "not a brain")
+                assert second["tick"] == "1", (policy, mode, "next tick")
+                assert second["prediction"] == "0.75", (policy, mode, "learned prediction")
+                assert second["counter"] == "2 / 2", (policy, mode, "counter")
+                assert "verified.synthetic.private.jsonl" in second["source"]
+                assert "SHA-256 кадров совпадает" in second["source"], (
+                    policy, mode, "WebCrypto digest was not visibly verified",
+                    second["source"]
+                )
+                assert viewport["width"] > 0
+                if mode == "mobile":
+                    assert viewport["width"] == 390, (
+                        "Chrome must render exact 390 CSS-px viewport", viewport
+                    )
+                assert viewport["canvasWidth"] >= 100
+                assert viewport["canvasHeight"] >= 60
+                assert viewport["controlsWidth"] > 0
+                assert viewport["scrollWidth"] <= viewport["width"] + 2, (
+                    policy, mode, "horizontal overflow", viewport
+                )
+                assert frame1["toy_contact"]["prediction_before"]["predicted_deflection"] == .75
+                reports.append({
+                    "motor_policy": policy,
+                    "viewport": mode,
+                    "source": "real replay-verified local SQLite + PRIVATE JSONL",
+                    "actual_browser": True,
+                    "first_tick": first["tick"],
+                    "second_tick": second["tick"],
+                    "measured_contact": first["measured"],
+                    "next_prediction": second["prediction"],
+                    "css_viewport_width_px": viewport["width"],
+                    "canvas_width_px": round(viewport["canvasWidth"]),
+                    "horizontal_overflow": False,
+                })
+    assert len(reports) == 4, "both persisted policy versions need both browsers"
     print(json.dumps({
-        "status":"PASS_ACTUAL_HEADLESS_CHROME",
-        "browser_binary":Path(chrome).name,
-        "reports":reports,
-        "privacy":"synthetic local only; no screenshots or private frames uploaded",
+        "status": "PASS_ACTUAL_HEADLESS_CHROME",
+        "browser_binary": Path(chrome).name,
+        "reports": reports,
+        "privacy": "synthetic local only; no screenshots or private frames uploaded",
     }, sort_keys=True, ensure_ascii=False))
 
 
