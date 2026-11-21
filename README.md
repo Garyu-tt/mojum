@@ -1,47 +1,68 @@
 # Mojum — CPU-first graph-native organism simulator
 
-Mojum aims to combine GENESIS development, a learnable sensorimotor system, Dante's virtual body, simulated worlds, and Noosphere memory. Universal Graph IR is the standalone typed core; Adamantium-node is an optional editor, not a runtime requirement.
+Mojum is an experimental, standalone **local aquarium for a synthetic organism**. Its long-term goals include GENESIS development, a learnable sensorimotor loop, Dante's virtual body, worlds, and Noosphere memory. The universal graph is a typed runtime contract; Adamantium-node is an **optional** visual editor, not a required dependency.
 
-## What actually runs on `main` (synthetic alpha)
+## What actually runs
 
-The checked-in Python stdlib fixture runs **offline on one CPU**. It has a versioned graph, deterministic inherited/acquired GENESIS phenotype, synthetic heartbeat/interoception, a bounded 2D point-room, an explicit **UNIMPLEMENTED** brain placeholder, a small **shadow-only** pulse predictor, and a PRIVATE SQLite journal with compare-and-append, replay, and checkpoint metadata. The predictor updates, but **does not choose movements**. The CLI supplies scripted `dx/dy`; no general learned organism, MuJoCo dynamics, real motors, secure mesh, encrypted replicas, or atomic live-state migration is implemented.
+The Python 3.11+ **stdlib-only** program works offline on one CPU. It has a versioned typed graph, deterministic GENESIS genotype and acquired phenotype, a synthetic heartbeat, a bounded 2D point-room, a PRIVATE SQLite Noosphere event journal with restart/replay, and a small shadow-only pulse predictor.
 
-The accepted scope is tracked in [issue #51](https://github.com/Garyu-tt/mojum/issues/51); [P0 issue #55](https://github.com/Garyu-tt/mojum/issues/55) tracks the missing goal-free sensory → learned intention → action → feedback loop. Experimental PRs are **not** part of `main` until merged and reverified.
+Two modes are available in this source candidate:
 
-## Run the current aquarium
+- **Default `scripted`:** calls to the CLI move by supplied `dx/dy` (default 0.02m/0); the shadow predictor can observe a pulse but **does not drive movement**.
+- **Opt-in `goal_free`:** a small deterministic local exploration policy proposes bounded virtual movements and inhibits actions after actual synthetic collision feedback. Optional `toy_probe` sensing adds numeric RGB/range cues, virtual near-contact probing, cue-specific prediction and private learned association **in the same SQLite journal**. It is a limited empirical policy, not a neural brain, autonomous human-like cognition or general object understanding.
 
-From the repository root, with Python 3.11+ and no third-party dependencies:
+The graph node `brain.placeholder` remains **UNIMPLEMENTED**. No MuJoCo body, real touch/camera, physically actuated motors, reliable multi-device failover, authenticated consensus, secure encrypted replication or Android background service is shipped.
+
+## Run the current synthetic Aquarium
+
+From a source checkout with CPython 3.11+ and no third-party runtime packages:
 
 ```sh
-PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120 --neural-mode shadow
+PYTHONPATH=src python -m mojum.aquarium --db ./dante-scripted.sqlite3 --ticks 120 --neural-mode shadow
+PYTHONPATH=src python -m mojum.aquarium --db ./dante-scripted.sqlite3 --ticks 30 --neural-mode shadow
 ```
 
-Repeat the command to replay and append 120 more frames to the **same** private local SQLite file. The JSON checkpoint reports `tick`, `stored_events`, `journal_head`, and a status explicitly labelling synthetic shadow learning. On a new DB, 120 ticks should produce **121** events (one bootstrap + 120 frames); a second 120-tick run should produce **241**. Use a fresh path for an independent organism fixture; do not publish the SQLite file, as it contains PRIVATE synthetic event records. For a no-learning control, use a **different DB path** and `--neural-mode disabled`; the mode is pinned in the bootstrap and cannot silently change on reopen.
+The second invocation resumes **150 virtual ticks / 151 private journal events** (one bootstrap event plus 150 frames). The default-mode journal cannot be reopened as a different mode or with a different graph/seed/room/clock.
 
-Windows PowerShell:
+To exercise the **opt-in synthetic developmental** loop, use a **separate** SQLite file:
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./dante-goal-free.sqlite3 --ticks 120 --exploration-mode goal_free --sensory-mode toy_probe
+PYTHONPATH=src python -m mojum.aquarium --db ./dante-goal-free.sqlite3 --ticks 30 --exploration-mode goal_free --sensory-mode toy_probe
+```
+
+The organism proposes its own tiny point-room motions; you must not supply `--dx/--dy` overrides in this mode. To view committed **PRIVATE** synthetic frames locally, append `--watch` (JSONL on stdout). Do not upload the traces, journals or raw checkpoint metadata to public issue trackers.
+
+Windows PowerShell from the checkout:
 
 ```powershell
 $env:PYTHONPATH = "src"
-python -m mojum.aquarium --db .\dante_fixture.sqlite3 --ticks 120 --neural-mode shadow
+python -m mojum.aquarium --db .\dante-goal-free.sqlite3 --ticks 30 --exploration-mode goal_free --sensory-mode toy_probe
 ```
 
-Run regression tests (Python 3.11–3.13 are the CI target):
+For an offline *evaluation-only* comparison of the toy-contact learner against a frozen model, run:
 
 ```sh
+PYTHONPATH=src python -m mojum.sensory_benchmark
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or MuJoCo. The SQLite checkpoint is a **checksum-only**, non-authenticated local record, not a portable security credential or complete atomic multi-component snapshot. Journal replay is currently capped at 10,000 events; do not run unattended past this budget.
+The benchmark deliberately demonstrates negative transfer when identical RGB hides different material response and **no prediction** for unseen RGB. It proves neither semantic material recognition nor generalization to novel environments.
 
-## Architecture and development
+For a separate scripted **shadow-learning disabled** control, use a *different* PRIVATE database path and pass `--neural-mode disabled` (do not reopen an existing `shadow` journal under a different mode). The module's Python stdlib regression suite runs in CI on 3.11–3.13. The goal-free mode's toy associations are still only a bounded synthetic fixture, not a replacement for the unimplemented graph neural node.
 
-- **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
-- **Graph IR:** typed graph execution; independent of optional IDEs.
-- **Interoception / world:** synthetic heartbeat and point-room; no calibrated muscles or physics.
-- **Neural:** shadow pulse predictor only; no autonomous motor decision in released main.
-- **Noosphere:** local PRIVATE SQLite event journal, replay and bounded dataset projections; no authenticated distributed continuity.
-- **Future:** goal-free measured sensorimotor learning, coupled body/MuJoCo, privacy-preserving distributed replicas.
+The portable foreground host, 100k-event streaming extension, and HMAC snapshot prototype are **separate unmerged review branches** ([#97](https://github.com/Garyu-tt/mojum/pull/97), [#98](https://github.com/Garyu-tt/mojum/pull/98), [#101](https://github.com/Garyu-tt/mojum/pull/101)). They must not be presented as features of this R0.13 direct-main candidate. Do not upgrade existing journals without verifying source code, schema and replay state compatibility.
 
-Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
+## Safety, data and continuity limits
 
-**License:** undecided; repository visibility does not grant a license.
+- All sensory and contact measurements here are generated by synthetic fixtures. No physical motor capability is granted. No snapshot may reset a real emergency stop.
+- SQLite journal events are marked PRIVATE but **not encrypted**; restrict filesystem access. A checkpoint hash is not a signature or an authenticated transfer token.
+- Local checkpoint calls fail closed if another writer has advanced the shared journal beyond the latest fully adopted in-memory state. This is not cross-host consensus or a multi-component frozen snapshot.
+- The replay budget is currently capped at **10,000 events**; do not leave the fixture running unattended past that limit. The CLI is not a persistent Android service.
+- Existing GraphForge prototypes outside this repository are not automatically integrated, and no external development infrastructure is required for this small CPU-first runtime.
+
+## Development and acceptance
+
+The canonical integration scope, negative controls and exact commands are recorded in [R0.13 integration acceptance](docs/R013_CANONICAL_INTEGRATION_ACCEPTANCE.md). Track [P0 sensorimotor development #55](https://github.com/Garyu-tt/mojum/issues/55) and [release acceptance #51](https://github.com/Garyu-tt/mojum/issues/51). A green CI run on a PR is **not** automatically a released feature: main merge and main-head CI must also be verified.
+
+Contributions use scoped code and QA branches with independently checked tests. Avoid committing secrets, production addresses, or PRIVATE memory. **License undecided:** a public repository does not itself grant redistribution rights.

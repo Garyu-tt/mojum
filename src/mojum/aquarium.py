@@ -16,6 +16,11 @@ from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
+from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
+from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
+from .sensory_bridge import (ToyContactBridge, validate_scene,
+                             SCHEMA as TOY_CONTACT_SCHEMA,
+                             OCCLUSION_SCHEMA)
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -25,6 +30,7 @@ from .world_room import Room, advance, initial_state
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 10_000
+_OMITTED_MOVEMENT = object()  # Distinguish omitted dx/dy from explicit None.
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
     "world.room", "brain.placeholder", "memory.episode",
@@ -66,6 +72,7 @@ class Aquarium:
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
+        exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -73,6 +80,16 @@ class Aquarium:
             raise AquariumError("invalid agent ID")
         if neural_mode not in ("shadow", "disabled"):
             raise AquariumError("neural_mode must be shadow or disabled")
+        if exploration_mode not in ("scripted", "goal_free"):
+            raise AquariumError("exploration_mode must be scripted or goal_free")
+        if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
+            raise AquariumError("sensory_mode must be none or toy_probe")
+        if sensory_mode == "toy_probe" and exploration_mode != "goal_free":
+            raise AquariumError("toy_probe requires goal_free exploration")
+        if sensory_mode == "none" and sensory_scene is not None:
+            raise AquariumError("unused synthetic sensory scene")
+        self.exploration_mode = exploration_mode
+        self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
         self.dt_ns = dt_ns
@@ -102,8 +119,31 @@ class Aquarium:
         }
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
+        self.explorer = Explorer() if exploration_mode == "goal_free" else None
+        self.sensory_bridge = None
+        if sensory_mode == "toy_probe":
+            scene = ToyScene() if sensory_scene is None else sensory_scene
+            self.sensory_bridge = ToyContactBridge(
+                validate_scene(self.room, scene), motor_room=self.room,
+            )
         self.tick = 0
+        if self.explorer is not None:
+            self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
+            self.manifest["exploration_mode"] = "goal_free"
+        if self.sensory_bridge is not None:
+            self.manifest["sensory_mode"] = "toy_probe"
+            self.manifest["sensory_schema"] = SENSE_SCHEMA
+            self.manifest["sensory_model_schema"] = MODEL_SCHEMA
+            self.manifest["sensory_scene"] = self.sensory_bridge.scene.manifest()
+            self.manifest["contact_bridge_schema"] = TOY_CONTACT_SCHEMA
+            # Pin visibility semantics in the bootstrap. Existing pre-mask
+            # private journals must fail closed rather than silently replay
+            # historical sensory frames under a different physical model.
+            self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
         self.store = LocalNoosphere(db_path, agent_id)
+        # Local RAM is authoritative only through its last fully adopted commit.
+        # A read of the shared SQLite head alone is not an organism checkpoint.
+        self._committed_head = None
         try:
             if self.store.count() == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
@@ -134,10 +174,11 @@ class Aquarium:
         if self.store.count() >= MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
-        return self.store.append(event, expected_head=self.store.head())
+        expected = (self.store.head() if self._committed_head is None
+                    else self._committed_head)
+        return self.store.append(event, expected_head=expected)
 
     def _calculate(self, dx, dy):
-        dx, dy = _movement(dx), _movement(dy)
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
         adapted = copy.deepcopy(self.graph)
@@ -149,12 +190,30 @@ class Aquarium:
         runtime = Simulation(adapted, dt_ns=self.dt_ns)
         runtime.tick = self.tick
         output = runtime.step()
+        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
+        sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
+        next_explorer = None
+        intent = signal = None
+        if self.explorer is not None:
+            if dx is not None or dy is not None:
+                raise AquariumError("goal-free mode rejects externally scripted movement")
+            # Only pre-action proprioception and own pulse reach this policy.
+            # Obstacle geometry, hidden objects and future frames stay private.
+            signal = Proprioception(
+                self.tick, self.world.revision, self.world.x, self.world.y,
+                sensory["heartbeat"]["pulse"],
+            )
+            next_explorer = Explorer.from_snapshot(self.explorer.snapshot())
+            intent = next_explorer.decide(signal)
+            dx, dy = intent["dx"], intent["dy"]
+        else:
+            # Scripted mode must reject explicit None as before R0.13.
+            dx = _movement(dx)
+            dy = _movement(dy)
         new_world, world_obs = advance(
             self.room, self.world, tick=self.tick + 1, dx=dx, dy=dy,
             expected_revision=self.world.revision,
         )
-        brain = output[self.kind_ids["brain.placeholder"]]["observation"]
-        sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         # Calculate against a copy. The predictor is committed only *after*
         # the SQLite append succeeds, and replay derives identical weights.
         next_learner = (PulsePredictor.from_snapshot(self.learner.snapshot())
@@ -172,15 +231,65 @@ class Aquarium:
             "movement_request": {"dx": dx, "dy": dy},
             "physical_model": "NONE_FIXTURE_ONLY",
         }
+        if next_explorer is not None:
+            measured = next_explorer.observe(signal, intent, world_obs["blocked"])
+            payload["developmental"] = {
+                "schema": DEVELOPMENT_SCHEMA,
+                "observation": signal.public(),
+                "intent": intent,
+                "learning": measured,
+                "policy_sha256": digest(next_explorer.snapshot()),
+                "motor_capability": "SYNTHETIC_POINT_ROOM_ONLY",
+            }
+        if self.sensory_bridge is not None:
+            sensory_frame, _ = self.sensory_bridge.evaluate(self.world)
+            payload["toy_contact"] = sensory_frame
         return payload, new_world, next_learner
 
-    def step(self, *, dx=0.02, dy=0.0):
-        payload, next_world, next_learner = self._calculate(dx, dy)
-        self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
-                            self.tick * self.dt_ns, self.genome.revision)
+    def _adopt_developmental(self, payload):
+        if self.explorer is None:
+            return
+        # Compute against a copy, validate the persisted causal event and
+        # adopt only after the SQLite CAS append or successful replay.
+        cue = Proprioception(
+            self.tick, self.world.revision, self.world.x, self.world.y,
+            payload["interoception"]["heartbeat"]["pulse"],
+        )
+        clone = Explorer.from_snapshot(self.explorer.snapshot())
+        claimed = payload["developmental"]
+        if (claimed["observation"] != cue.public()
+                or claimed["intent"] != clone.decide(cue)
+                or claimed["motor_capability"] != "SYNTHETIC_POINT_ROOM_ONLY"):
+            raise AquariumError("developmental observation/intent mismatch")
+        measured = clone.observe(cue, claimed["intent"], payload["world"]["blocked"])
+        if (measured != claimed["learning"]
+                or digest(clone.snapshot()) != claimed["policy_sha256"]):
+            raise AquariumError("developmental experience replay mismatch")
+        self.explorer = clone
+
+    def _adopt_sensory(self, payload):
+        if self.sensory_bridge is not None:
+            self.sensory_bridge.adopt(self.world, payload["toy_contact"])
+
+    def step(self, *, dx=_OMITTED_MOVEMENT, dy=_OMITTED_MOVEMENT):
+        if self.explorer is not None:
+            # Explicit None is an external command, not an omission.
+            if dx is not _OMITTED_MOVEMENT or dy is not _OMITTED_MOVEMENT:
+                raise AquariumError("goal-free mode rejects externally scripted movement")
+            arguments = (None, None)
+        else:
+            arguments = (0.02 if dx is _OMITTED_MOVEMENT else dx,
+                         0.0 if dy is _OMITTED_MOVEMENT else dy)
+        payload, next_world, next_learner = self._calculate(*arguments)
+        committed = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
+                                        self.tick * self.dt_ns, self.genome.revision)
+        self._adopt_sensory(payload)
+        self._adopt_developmental(payload)
         self.world = next_world
         self.learner = next_learner
         self.tick += 1
+        # A successful append is not a local checkpoint until RAM adoption.
+        self._committed_head = committed
         return copy.deepcopy(payload)
 
     def acquire(self, acquired):
@@ -194,10 +303,11 @@ class Aquarium:
         proposed = GenomeLedger.from_snapshot(self.genome.snapshot())
         proposed.append(acquired, proposed.revision)
         event_id = acquired["event_id"]
-        self._append_record("genesis.acquisition", "acq-" + event_id,
-                            {"acquisition": acquired}, self.tick * self.dt_ns,
-                            proposed.revision)
+        committed = self._append_record("genesis.acquisition", "acq-" + event_id,
+                                        {"acquisition": acquired}, self.tick * self.dt_ns,
+                                        proposed.revision)
         self.genome = proposed
+        self._committed_head = committed
         return self.genome.revision
 
     def _replay(self, external_expected_head):
@@ -244,29 +354,52 @@ class Aquarium:
                 move = event["payload"].get("movement_request")
                 if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
                     raise AquariumError("invalid replayed movement")
-                payload, next_world, next_learner = self._calculate(move["dx"], move["dy"])
+                # Goal-free replay always recomputes the intention, never
+                # accepts journaled dx/dy as a privileged external script.
+                args = ((None, None) if self.explorer is not None
+                        else (move["dx"], move["dy"]))
+                payload, next_world, next_learner = self._calculate(*args)
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
+                self._adopt_sensory(payload)
+                self._adopt_developmental(payload)
                 self.world = next_world
                 self.learner = next_learner
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
+        # Pin the exact committed sequence used to reconstruct this RAM state.
+        # Refuse a concurrent append that arrived while replay was running.
+        replayed_head = items[-1]["event_hash"]
+        if self.store.head() != replayed_head or self.store.count() != count:
+            raise AquariumError("journal advanced during aquarium replay")
+        self._committed_head = replayed_head
 
     def checkpoint(self):
-        return {
+        # No mixed snapshot: the database may have advanced in another process,
+        # or our last event append may have succeeded before RAM adoption.
+        if self._committed_head is None or self.store.head() != self._committed_head:
+            raise AquariumError("stale or unadopted aquarium checkpoint; reopen")
+        result = {
             "schema": "mojum.aquarium.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "sim_time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
             "world_revision": self.world.revision,
-            "journal_head": self.store.head(),
+            "journal_head": self._committed_head,
             "neural_mode": self.neural_mode,
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
+        if self.explorer is not None:
+            result["developmental_state"] = self.explorer.snapshot()
+        if self.sensory_bridge is not None:
+            result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
+        if self.store.head() != self._committed_head:
+            raise AquariumError("journal advanced during checkpoint; reopen")
+        return result
 
 
 def main():
@@ -276,19 +409,51 @@ def main():
     parser.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
     parser.add_argument("--ticks", type=int, default=120)
-    parser.add_argument("--dx", type=float, default=0.02)
-    parser.add_argument("--dy", type=float, default=0.0)
+    # None means the option was absent; a supplied nominal value is still an
+    # external motor request and must not be silently accepted in goal_free.
+    parser.add_argument("--dx", type=float, default=None)
+    parser.add_argument("--dy", type=float, default=None)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
+    parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
+                        default="scripted")
+    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
+                        default="none")
+    parser.add_argument("--watch", action="store_true",
+                        help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    # Reject a forbidden external movement before opening/bootstrapping SQLite.
+    # A failed CLI invocation must not create a new organism or journal.
+    if args.exploration_mode == "goal_free" and (
+            args.dx is not None or args.dy is not None):
+        parser.error("--dx/--dy cannot override goal-free exploratory intentions")
+    if args.exploration_mode == "scripted":
+        # Invalid scripted motion is a CLI error, not an organism birth.
+        # Reject NaN, infinite and out-of-budget displacement before SQLite
+        # opens and writes the otherwise valid bootstrap event.
+        try:
+            _movement(0.02 if args.dx is None else args.dx)
+            _movement(0.0 if args.dy is None else args.dy)
+        except AquariumError as exc:
+            parser.error(str(exc))
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
-        neural_mode=args.neural_mode,
+        neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
+        sensory_mode=args.sensory_mode,
     ) as aquarium:
         for _ in range(args.ticks):
-            aquarium.step(dx=args.dx, dy=args.dy)
+            if args.exploration_mode == "goal_free":
+                frame = aquarium.step()
+            else:
+                frame = aquarium.step(
+                    dx=0.02 if args.dx is None else args.dx,
+                    dy=0.0 if args.dy is None else args.dy,
+                )
+            if args.watch:
+                print(json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                                 allow_nan=False), flush=True)
         checkpoint = aquarium.checkpoint()
         checkpoint["stored_events"] = aquarium.store.count()
         checkpoint["status"] = (
@@ -296,7 +461,8 @@ def main():
             if aquarium.neural_mode == "shadow"
             else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
         )
-        print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
+        print(json.dumps(checkpoint, indent=None if args.watch else 2,
+                         ensure_ascii=False, allow_nan=False))
 
 
 if __name__ == "__main__":

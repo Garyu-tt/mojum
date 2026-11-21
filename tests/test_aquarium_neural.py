@@ -85,8 +85,10 @@ class AquariumNeuralTests(unittest.TestCase):
             a.step()
             with self.assertRaises(NoosphereError):
                 b.step()
-            self.assertEqual(b.checkpoint()["neural_state"], initial)
+            self.assertEqual(b.learner.snapshot(), initial)
             self.assertEqual(b.tick, 0)
+            with self.assertRaisesRegex(AquariumError, "stale or unadopted"):
+                b.checkpoint()
 
     def test_invalid_movement_cannot_train_or_commit(self):
         with self.aquarium() as a:

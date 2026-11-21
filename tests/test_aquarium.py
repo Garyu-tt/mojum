@@ -1,6 +1,7 @@
 """Cross-component CPU-first tests; all data are synthetic fixtures."""
 
 import copy
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -123,9 +124,12 @@ class AquariumIntegrationTests(unittest.TestCase):
     def test_corrupt_sqlite_event_payload_refused_on_reopen(self):
         with self.aquarium() as q:
             q.step()
-        with sqlite3.connect(self.db) as db:
-            db.execute("DROP TRIGGER noosphere_no_update")
-            db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
+        # sqlite3.Connection.__exit__ commits but does *not* close the FD.
+        # Explicitly close after the deliberate corruption fixture commits.
+        with closing(sqlite3.connect(self.db)) as db:
+            with db:
+                db.execute("DROP TRIGGER noosphere_no_update")
+                db.execute("UPDATE events SET topic='tampered' WHERE seq=2")
         with self.assertRaises(NoosphereError):
             self.aquarium()
 
@@ -205,12 +209,14 @@ class AquariumIntegrationTests(unittest.TestCase):
 
     def test_two_processes_stale_head_fails_closed(self):
         with self.aquarium() as q1, self.aquarium() as q2:
-            q1.step()
             previous = q2.checkpoint()
+            q1.step()
             with self.assertRaises(NoosphereError):
                 q2.step()
             self.assertEqual(q2.tick, previous["tick"])
             self.assertEqual(q2.world.revision, previous["world_revision"])
+            with self.assertRaisesRegex(AquariumError, "stale or unadopted"):
+                q2.checkpoint()
             self.assertEqual(q1.store.count(), 2)
 
     def test_chain_anchor_detects_divergent_database(self):
