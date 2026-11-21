@@ -91,6 +91,13 @@ against a separately recorded journal head. For longer histories, add
 Use a new output filename in a directory with private access. The JSONL is
 plaintext and its checksum detects accidental corruption.
 
+Modern trace files must contain their full exporter metadata and matching
+SHA-256 digest: removing the proof, status, range or room metadata is rejected.
+The viewer rejects unverified legacy JSONL by default. To inspect a genuinely
+old trace with no modern metadata, explicitly check the legacy opt-in box;
+playback is clearly labelled as **unverified**. This opt-in does not authenticate
+the source or make its private contents safe to share.
+
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
