@@ -18,6 +18,7 @@ import json
 
 from .motor_play_v2 import (
     MAX_CONSECUTIVE_REST,
+    MAX_OBSERVATIONS,
     MOVES,
     PROFILE,
     SCHEMA as POLICY_SCHEMA,
@@ -53,8 +54,8 @@ def run_profile(room, start, ticks, *, policy=None):
     """Drive ``policy`` through ``room`` and return measured, reproducible metrics."""
     if not isinstance(room, Room):
         raise EvalError("a Room fixture is required")
-    if type(ticks) is not int or not 0 <= ticks <= 10_000:
-        raise EvalError("ticks must be an int in [0, 10000]")
+    if type(ticks) is not int or not 0 <= ticks <= MAX_OBSERVATIONS:
+        raise EvalError(f"ticks must be an int in [0, {MAX_OBSERVATIONS}]")
     agent = MotorPlayV2() if policy is None else policy
     state = initial_state(room, *start)
     attempts = {name: 0 for name, _, _ in (*MOVES, ("rest", 0.0, 0.0))}
