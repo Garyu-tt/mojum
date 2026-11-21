@@ -47,7 +47,7 @@ def unpack(bundle, *, expected_revision=None, expected_organism_id=None):
     manifest = bundle["manifest"]
     # Optional caller-supplied identity gates are cheap preconditions. Reject
     # a known mismatch before allocating up to five decoded 4 MiB buffers.
-    # These checks never establish trust: verify_manifest still authenticates
+    # These checks never establish trust: verify_manifest still checks
     # the complete manifest-to-payload digest relationship below.
     if expected_revision is not None and (
             type(expected_revision) is not int
@@ -90,6 +90,10 @@ def loads(wire, *, expected_revision=None, expected_organism_id=None):
         raise ValueError("invalid bundle JSON") from exc
     unpack(bundle, expected_revision=expected_revision,
            expected_organism_id=expected_organism_id)
-    if dumps(bundle) != wire:
+    # unpack() already decoded and verified all five components. Re-running
+    # dumps() here would decode/rehash them a second time on every load.
+    canonical = json.dumps(bundle, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True, allow_nan=False)
+    if canonical != wire:
         raise ValueError("noncanonical bundle JSON")
     return bundle
