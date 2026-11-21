@@ -256,8 +256,9 @@ use the exact built-in point-room and frame-only journals without toy sensing.
 
 `aquarium_wire` identifies the older `coarse_v1` goal-free journals from
 #112 and #115 as `legacy_coarse_v1`. Replay a copy using the original
-runtime and `--exploration-mode goal_free`. Current Aquarium refuses
-those journals under either v2 profile and preserves the source file.
+runtime with `--exploration-mode goal_free --ticks 0` and the original
+genome, graph, and neural mode. Current Aquarium refuses those journals
+under either v2 profile and preserves the source file.
 [Pinned historical runtimes](.github/workflows/aquarium-wire-archives.yml)
 
 To transfer a verified v2A history into a separate new v2B file, use
