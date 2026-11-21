@@ -39,6 +39,10 @@ _POLICY_SELECTORS = (
       "developmental_policy": "local_cell_v2"},
      "local_cell_v2_b_unreleased",
      (_LOCAL_CELL_B, _V2B_OUTCOME, "bounded_goal_free_local_cell_motor_play_v2")),
+    ({"exploration_mode": "goal_free", "developmental_schema": "mojum.developmental.local-cell/3",
+      "developmental_policy": "local_cell_v3"}, "local_cell_v3",
+     ("mojum.developmental.local-cell/3", "mojum.developmental.local-cell.outcome/3",
+      "bounded_goal_free_local_cell_motor_play_v3")),
 )
 _TEMPORAL_FIELDS = {
     "temporal_mode": "range_guided",
