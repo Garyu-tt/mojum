@@ -17,7 +17,7 @@ from .noosphere import EMPTY_HEAD, _canonical
 from .segmented_noosphere import SegmentedNoosphere
 
 SCHEMA = "mojum.noosphere.physical-segment-archive/1"
-MAX_SEGMENT_BYTES = 64 * 1024 * 1024
+MAX_EVENT_LINE_BYTES = 128 * 1024
 
 
 class ArchiveError(ValueError):
@@ -141,9 +141,9 @@ def _export_from_snapshot(store, root, external_expected_head):
                         if row["seq"] != absolute:
                             raise ArchiveError("source events changed during export")
                         wire = (_canonical(row)+"\n").encode("utf-8")
+                        if len(wire) > MAX_EVENT_LINE_BYTES:
+                            raise ArchiveError("source event exceeds archive line size budget")
                         written += len(wire)
-                        if written > MAX_SEGMENT_BYTES:
-                            raise ArchiveError("one segment exceeds 64MiB archive budget")
                         sha.update(wire)
                         contains_private |= row["event"]["visibility"] != "PUBLIC"
                         yield wire

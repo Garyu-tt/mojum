@@ -1,7 +1,6 @@
-"""Real 102400-event 25-file sealed archive + independent SQLite restore.
+"""Sealed archive load tests for event count and large event payloads.
 
-Single high-volume CI job only. This is a data-layer test, NOT 102400
-Aquarium motor ticks or proof of a two-device disaster-recovery system.
+Single high-volume CI job for synthetic Noosphere records.
 """
 import os
 from pathlib import Path
@@ -75,6 +74,39 @@ class Physical100KArchiveStress(unittest.TestCase):
                 self.assertEqual(
                     q.dataset(limit=2)["projection"]["items"], [],
                 )
+
+    def test_large_valid_segment_restores_from_archive(self):
+        total = 1024
+        padding = "x" * 66_000
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            db = root / "synthetic-original.sqlite3"
+            sealed = root / "archive"
+            sealed.mkdir(mode=0o700)
+            with SegmentedNoosphere(db, OWNER, segment_size=total) as source:
+                head = ZERO
+                for start in range(0, total, 64):
+                    events = [record(tick) for tick in range(start, start + 64)]
+                    for event in events:
+                        event["payload"]["synthetic_padding"] = padding
+                    head = source.append_many(events, expected_head=head)
+                exported = export_sealed_segments(
+                    source, sealed, include_nonpublic=True,
+                    external_expected_head=head,
+                )
+            self.assertEqual(exported["archived_events"], total)
+            self.assertGreater(
+                (sealed / "segment-00000000.events.jsonl").stat().st_size,
+                64 * 1024 * 1024,
+            )
+            db.rename(root / "original-offline.sqlite3")
+            destination = root / "restored.sqlite3"
+            restored = restore_into_new_sqlite(
+                sealed, destination, external_expected_head=head,
+            )
+            self.assertEqual(restored["restored_events"], total)
+            with SegmentedNoosphere(destination, OWNER, segment_size=total) as journal:
+                self.assertEqual(journal.verify_chain(external_expected_head=head)["count"], total)
 
 
 if __name__ == "__main__":

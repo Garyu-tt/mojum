@@ -21,7 +21,7 @@ from .segmented_noosphere import (
     MAX_BATCH, MAX_JOURNAL_EVENTS,
 )
 from .segment_archive import (
-    ArchiveError, SCHEMA, MAX_SEGMENT_BYTES, private_directory,
+    ArchiveError, SCHEMA, MAX_EVENT_LINE_BYTES, private_directory,
     names, fsync_directory,
 )
 
@@ -34,7 +34,6 @@ _FIELDS = {
 _HEX = frozenset("0123456789abcdef")
 _DATA_RE = re.compile(r"segment-[0-9]{8}\.events\.jsonl\Z", re.ASCII)
 _META_RE = re.compile(r"segment-[0-9]{8}\.manifest\.json\Z", re.ASCII)
-_MAX_EVENT_LINE_BYTES = 128 * 1024
 # append_many holds both the input and the checked event copies.
 _RESTORE_BATCH_BYTES = 1024 * 1024
 
@@ -106,7 +105,7 @@ def read_manifest(root, index):
             or not _digest(m["segment_head"])
             or not _digest(m["data_sha256"])
             or type(m["data_bytes"]) is not int
-            or not 1 <= m["data_bytes"] <= MAX_SEGMENT_BYTES
+            or not 1 <= m["data_bytes"] <= m["event_count"] * MAX_EVENT_LINE_BYTES
             or type(m["contains_private"]) is not bool
             or m["encoding"] != "canonical-jsonl-utf8"):
         raise ArchiveError("invalid physical sealed segment manifest")
@@ -127,16 +126,16 @@ def iter_segment_events(root, manifest, previous, *, include_line_size=False):
     count = 0
     nonpublic = False
     head = previous
-    with _file(root / data_name, MAX_SEGMENT_BYTES) as source:
+    with _file(root / data_name, manifest["data_bytes"]) as source:
         while count < manifest["event_count"]:
-            line = source.readline(_MAX_EVENT_LINE_BYTES + 1)
+            line = source.readline(MAX_EVENT_LINE_BYTES + 1)
             line_size = len(line)
-            if (not line or line_size > _MAX_EVENT_LINE_BYTES
+            if (not line or line_size > MAX_EVENT_LINE_BYTES
                     or not line.endswith(b"\n")):
                 raise ArchiveError("missing/oversized physical event line")
             size += line_size
-            if size > MAX_SEGMENT_BYTES:
-                raise ArchiveError("physical segment size budget exceeded")
+            if size > manifest["data_bytes"]:
+                raise ArchiveError("physical segment exceeds declared data size")
             digest.update(line)
             row = _decode(line[:-1])
             if (type(row) is not dict or set(row) !=
