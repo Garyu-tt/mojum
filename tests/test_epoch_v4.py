@@ -132,6 +132,19 @@ class EpochJournalTests(unittest.TestCase):
             self.db, SEED, GRAPH, neural_mode="disabled", motor_mode=V4_MODE,
         )
 
+    def test_v4_exact_100k_event_frame_ceiling_preflight_is_nonmutating(self):
+        # No 100k writes required: verify the precise bootstrap + boundary math.
+        from mojum.aquarium import MAX_V4_FRAMES, MAX_REPLAY_EVENTS
+        self.assertEqual(MAX_V4_FRAMES, 99_990)
+        with self.open() as q:
+            admitted = q.required_events_for_steps(MAX_V4_FRAMES)
+            self.assertEqual(1 + admitted, MAX_REPLAY_EVENTS)
+            self.assertEqual(admitted, MAX_V4_FRAMES + 9)
+            with self.assertRaisesRegex(AquariumError, "source event budget"):
+                q.required_events_for_steps(MAX_V4_FRAMES + 1)
+            self.assertEqual(q.stored_events, 1)
+            self.assertEqual(q.store.count(), 1)
+
     def test_v4_is_explicit_and_rejects_toy_probe_before_birth(self):
         with self.assertRaisesRegex(AquariumError, "sensory_mode=none"):
             Aquarium(
