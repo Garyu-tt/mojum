@@ -201,6 +201,11 @@ class GoalFreeAffordanceTests(unittest.TestCase):
         fake = copy.deepcopy(good)
         fake["table"]["0|999:0:0|1"] = {"x+": {"samples": 1, "blocked": 0}}
         corruptions.append(fake)
+        # A regex-matching malformed colour sentinel must raise AffordanceError,
+        # not the bare ValueError from int("-").
+        malformed_sentinel = copy.deepcopy(good)
+        malformed_sentinel["table"] = {"0|-|1": {"x+": {"samples": 1, "blocked": 0}}}
+        corruptions.append(malformed_sentinel)
         for snapshot in corruptions:
             with self.subTest(snapshot=snapshot), self.assertRaises(AffordanceError):
                 AffordanceMemory.from_snapshot(snapshot)
