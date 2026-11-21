@@ -37,7 +37,7 @@ class ReadOnlyVerifyTests(unittest.TestCase):
     def test_export_rejects_damaged_source_metadata_without_repair(self):
         # Source has committed Aquarium events but an invalid metadata table.
         # Export must not recreate it before replaying the source.
-        for mutation in ("empty", "dropped"):
+        for mutation in ("empty", "dropped", "foreign_owner"):
             with self.subTest(mutation=mutation):
                 source = self.root / ("source-" + mutation + ".sqlite3")
                 with Aquarium(source, SEED, GRAPH) as aquarium:
@@ -45,8 +45,12 @@ class ReadOnlyVerifyTests(unittest.TestCase):
                 with closing(sqlite3.connect(source)) as connection:
                     if mutation == "empty":
                         connection.execute("DELETE FROM metadata")
-                    else:
+                    elif mutation == "dropped":
                         connection.execute("DROP TABLE metadata")
+                    else:
+                        connection.execute(
+                            "UPDATE metadata SET v=? WHERE k='owner'", ("foreign-owner",)
+                        )
                     connection.commit()
                 before = source.read_bytes()
                 with self.assertRaisesRegex(ValueError, "metadata"):
