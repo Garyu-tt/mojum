@@ -18,7 +18,9 @@ from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, valida
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
 from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
-from .sensory_bridge import ToyContactBridge, validate_scene, SCHEMA as TOY_CONTACT_SCHEMA
+from .sensory_bridge import (ToyContactBridge, validate_scene,
+                             SCHEMA as TOY_CONTACT_SCHEMA,
+                             OCCLUSION_SCHEMA)
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -121,7 +123,9 @@ class Aquarium:
         self.sensory_bridge = None
         if sensory_mode == "toy_probe":
             scene = ToyScene() if sensory_scene is None else sensory_scene
-            self.sensory_bridge = ToyContactBridge(validate_scene(self.room, scene))
+            self.sensory_bridge = ToyContactBridge(
+                validate_scene(self.room, scene), motor_room=self.room,
+            )
         self.tick = 0
         if self.explorer is not None:
             self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
@@ -132,6 +136,10 @@ class Aquarium:
             self.manifest["sensory_model_schema"] = MODEL_SCHEMA
             self.manifest["sensory_scene"] = self.sensory_bridge.scene.manifest()
             self.manifest["contact_bridge_schema"] = TOY_CONTACT_SCHEMA
+            # Pin visibility semantics in the bootstrap. Existing pre-mask
+            # private journals must fail closed rather than silently replay
+            # historical sensory frames under a different physical model.
+            self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
         self.store = LocalNoosphere(db_path, agent_id)
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
