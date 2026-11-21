@@ -119,6 +119,19 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(report["successful_moves"], 1)
         self.assertEqual(report["path_length_m"], 0.125)
 
+    def test_blocked_or_short_stationary_history_is_not_mobility(self):
+        # A zero-collision history is not proof of movement, and repeated
+        # blocked attempts must not make a stationary policy look mobile.
+        for actions in (
+            [frame(tick, "east", True, (1.0, 2.0)) for tick in range(30)],
+            [frame(tick, "rest", False, (1.0, 2.0)) for tick in range(4)],
+            [frame(0, "east", False, (1.0, 2.0))],
+        ):
+            with self.subTest(frames=len(actions), kind=actions[0]["developmental_controller"]["intent"]["kind"]):
+                report = summarize(manifest(), actions)
+                self.assertEqual(report["path_length_m"], 0.0)
+                self.assertEqual(report["verdict"], "NO_MEASURED_DISPLACEMENT")
+
     def test_empty_history_is_explicitly_not_averaged(self):
         report = summarize(manifest(), [])
         self.assertEqual(report["frames"], 0)
