@@ -3,6 +3,7 @@
 import copy
 import json
 import os
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -114,6 +115,21 @@ class ColdAquariumCopyTests(unittest.TestCase):
         self.assertEqual(self.exported.read_bytes(), old_bytes)
         self.assertEqual(self._verify(first)["journal_head"], first["journal_head"])
         self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
+
+    def test_existing_empty_sqlite_source_refused_without_bootstrap(self):
+        # Export must never turn an unrelated existing SQLite into an
+        # Aquarium journal merely by opening it for a backup.
+        with sqlite3.connect(self.source) as db:
+            db.execute("CREATE TABLE unrelated_data (value TEXT)")
+            db.execute("INSERT INTO unrelated_data VALUES ('keep-me')")
+            db.commit()
+        original = self.source.read_bytes()
+        with self.assertRaisesRegex(ValueError, "existing nonempty Aquarium journal"):
+            self._export()
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertFalse(self.exported.exists())
+        self.assertFalse(Path(str(self.source) + "-wal").exists())
+        self.assertFalse(Path(str(self.source) + "-shm").exists())
 
     def test_missing_source_does_not_create_new_database(self):
         with self.assertRaises(ValueError):
