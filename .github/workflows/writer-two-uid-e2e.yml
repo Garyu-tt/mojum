@@ -1,0 +1,43 @@
+name: Mojum Linux real multi-UID writer integration
+on:
+  push:
+  pull_request:
+
+# The only privileged actions are on disposable GitHub-hosted CI runners.
+# No production host, SSH key, external service, or repository write token.
+permissions:
+  contents: read
+
+jobs:
+  linux-distinct-uid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Provision throwaway local identities on ephemeral CI VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo groupadd --system mojumqaipc
+          for name in mojumqawriter mojumqaclient mojumqastranger; do
+            sudo useradd --system --no-create-home --user-group --shell /usr/sbin/nologin "$name"
+            sudo usermod -aG mojumqaipc "$name"
+          done
+          id mojumqawriter
+          id mojumqaclient
+          id mojumqastranger
+      - name: Verify actual Linux UID/GID isolation, RPC and crash restart
+        shell: bash
+        env:
+          MOJUM_TWO_UID_E2E: "1"
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -euo pipefail
+          # Only this isolated job invokes root. The tests immediately
+          # drop each spawned server/client to its dedicated Unix UID.
+          sudo -E env MOJUM_TWO_UID_E2E=1 PYTHONPATH="$PYTHONPATH" \
+            "$(command -v python)" -m unittest discover \
+            -s tests -p 'test_writer_two_uid_e2e.py' -v
