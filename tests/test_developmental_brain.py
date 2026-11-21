@@ -1,5 +1,6 @@
 """Acceptance tests for the explicit synthetic controller boundary."""
 
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -113,7 +114,7 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
 
         with self.aquarium():
             pass
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             seq, raw, previous = db.execute(
                 "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.bootstrap'"
             ).fetchone()
@@ -139,7 +140,7 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
 
         with self.aquarium() as aquarium:
             aquarium.step()
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             row = db.execute(
                 "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.frame'"
             ).fetchone()
