@@ -2,7 +2,9 @@
 
 from contextlib import closing
 import copy
+from contextlib import closing
 import json
+import sqlite3
 import os
 import sqlite3
 from pathlib import Path
@@ -131,6 +133,33 @@ class ColdAquariumCopyTests(unittest.TestCase):
         self.assertFalse(self.exported.exists())
         self.assertFalse(Path(str(self.source) + "-wal").exists())
         self.assertFalse(Path(str(self.source) + "-shm").exists())
+
+    def test_export_rejects_uninitialized_source_without_mutating_bytes(self):
+        # An existing path is not evidence of an Aquarium journal.
+        # A writable Aquarium constructor otherwise bootstraps or repairs it.
+        for kind in ("empty_file", "unrelated_sqlite", "events_without_metadata",
+                     "events_with_empty_metadata"):
+            with self.subTest(kind=kind):
+                candidate = self.root / (kind + ".sqlite3")
+                if kind == "empty_file":
+                    candidate.touch()
+                else:
+                    with closing(sqlite3.connect(candidate)) as db:
+                        if kind == "unrelated_sqlite":
+                            db.execute("CREATE TABLE unrelated (x INTEGER)")
+                            db.execute("INSERT INTO unrelated VALUES (99)")
+                        else:
+                            db.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY, wire_json TEXT)")
+                            db.execute("INSERT INTO events VALUES (1, '{}')")
+                            if kind == "events_with_empty_metadata":
+                                db.execute("CREATE TABLE metadata (k TEXT PRIMARY KEY, v TEXT)")
+                        db.commit()
+                before = candidate.read_bytes()
+                with self.assertRaises(ValueError):
+                    export_cold_copy(candidate, self.exported, SEED, GRAPH)
+                self.assertEqual(candidate.read_bytes(), before)
+                self.assertFalse(self.exported.exists())
+                self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
 
     def test_missing_source_does_not_create_new_database(self):
         with self.assertRaises(ValueError):
