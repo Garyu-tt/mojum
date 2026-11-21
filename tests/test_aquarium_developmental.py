@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
+from mojum.noosphere import NoosphereError
 from mojum.developmental import MotorPlay, DevelopmentalError, MOVES, SCHEMA
 from mojum.world_room import Room
 
@@ -108,6 +109,23 @@ class AquariumMotorPlayTests(unittest.TestCase):
                     q.step()
             self.assertEqual(q.checkpoint(), before)
             self.assertEqual(q.store.count(), 2)
+
+    def test_stale_developmental_writer_fails_without_state_adoption(self):
+        with self.aquarium() as writer, self.aquarium() as stale:
+            old = stale.checkpoint()
+            writer.step()
+            with self.assertRaisesRegex(NoosphereError, "stale event head"):
+                stale.step()
+            self.assertEqual(stale.tick, 0)
+            self.assertEqual(stale.world.revision, old["world_revision"])
+            self.assertEqual(stale.motor.snapshot(), old["motor_state"])
+            self.assertEqual(stale.learner.snapshot(), old["neural_state"])
+            with self.assertRaises(AquariumError):
+                stale.checkpoint()
+        with self.aquarium() as resumed:
+            self.assertEqual(resumed.tick, 1)
+            self.assertEqual(resumed.motor.observations, 1)
+            self.assertEqual(resumed.store.count(), 2)
 
     def test_external_action_refused_and_mode_pinned_to_bootstrap(self):
         with self.aquarium() as q:

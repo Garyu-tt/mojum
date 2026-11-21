@@ -3,6 +3,7 @@
 This is a **small goal-free motor exploration milestone**, not a neural brain,
 a conscious organism, MuJoCo, real motor control, or a release of full P0 #55.
 The existing six-node Graph IR still reports brain `UNIMPLEMENTED`.
+The motor integration was accepted into `main` via PR #202; this follow-up documents and tests it.
 
 ## Run on a single CPU, offline
 
