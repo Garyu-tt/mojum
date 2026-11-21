@@ -135,6 +135,18 @@ class ShapeErrorTests(unittest.TestCase):
         raw = encode({**CANONICAL, "color": "red"})
         self.assertEqual(errors_of(raw), ("unexpected room key(s): color",))
 
+    def test_versioned_room_rejects_unknown_schema(self):
+        for schema in ("mojum.world.point-room-draft/2", None, 1):
+            with self.subTest(schema=schema):
+                raw = encode({**CANONICAL, "schema": schema})
+                self.assertEqual(errors_of(raw), ("unsupported room draft schema",))
+
+    def test_versioned_room_rejects_extra_keys(self):
+        raw = encode({
+            **CANONICAL, "schema": "mojum.world.point-room-draft/1", "color": "red",
+        })
+        self.assertEqual(errors_of(raw), ("unexpected room key(s): color",))
+
     def test_duplicate_root_key_is_rejected(self):
         raw = b'{"width":4,"width":4,"height":4,"obstacles":[],"start":[1,1]}'
         self.assertEqual(errors_of(raw), ("duplicate JSON key: width",))
@@ -315,6 +327,16 @@ class CliTests(unittest.TestCase):
         payload = json.loads(out)
         self.assertEqual(payload["schema"], REPORT_SCHEMA)
         self.assertIs(payload["valid"], True)
+
+    def test_accepts_the_shipped_room_designer_draft(self):
+        fixture = Path(__file__).resolve().parents[1] / "examples" / "room_simple_mixed.json"
+        code, out, err = self._run([str(fixture), "--format", "json"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(err, "")
+        summary = json.loads(out)["summary"]
+        self.assertEqual((summary["width"], summary["height"]), ("4.5", "4"))
+        self.assertEqual(summary["obstacles"], [["2.0", "1", "0.125", "2.0"]])
+        self.assertEqual(summary["start"], ["1.25", "2.5"])
 
     def test_warnings_are_reported_in_text_mode(self):
         path = self._write(encode({

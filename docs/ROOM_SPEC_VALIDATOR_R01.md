@@ -23,10 +23,12 @@ therefore keeps every number token verbatim (`0.1`, `0.10000000000000001`,
 
 ## Accepted document
 
-Exactly these four keys, no more and no fewer:
+The validator accepts the editor's `mojum.world.point-room-draft/1` format
+and hand-written files with the same geometry keys and no `schema` field.
+Other schema values and extra fields are rejected.
 
 ```json
-{"width": 4, "height": 4, "obstacles": [[2, 1, 0.1, 2]], "start": [1.0, 2.0]}
+{"schema": "mojum.world.point-room-draft/1", "width": 4, "height": 4, "obstacles": [[2, 1, 0.1, 2]], "start": [1.0, 2.0]}
 ```
 
 - `width`, `height` — finite JSON numbers greater than zero.

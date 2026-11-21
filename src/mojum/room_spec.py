@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .world_room import Room, initial_state
 
+DRAFT_SCHEMA = "mojum.world.point-room-draft/1"
 REPORT_SCHEMA = "mojum.room-spec-report/1"
 MAX_INPUT_BYTES = 256 * 1024
 MAX_OBSTACLES = 4096
@@ -157,11 +158,13 @@ def validate_room_document(document):
 
     keys = set(document)
     missing = sorted(REQUIRED_KEYS - keys)
-    unexpected = sorted(keys - REQUIRED_KEYS)
+    unexpected = sorted(keys - REQUIRED_KEYS - {"schema"})
     if missing:
         errors.append("missing room key(s): %s" % (", ".join(missing),))
     if unexpected:
         errors.append("unexpected room key(s): %s" % (", ".join(unexpected),))
+    if "schema" in document and document["schema"] != DRAFT_SCHEMA:
+        errors.append("unsupported room draft schema")
     if errors:
         return RoomReport(tuple(errors), (), None)
 
