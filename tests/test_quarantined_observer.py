@@ -46,11 +46,14 @@ class ImmutableRecoveredAquariumObserverQA(unittest.TestCase):
         self.out = self.root/"PRIVATE-quarantined-observe.sqlite3"
         create_key_file(self.key)
 
-    def make(self, count=130):
+    def make(self, count=130, *, unique_topics=False):
         with SegmentedNoosphere(self.db, OWNER, segment_size=64) as s:
             head = ZERO
             for i in range(count):
-                head = s.append(record(i), expected_head=head)
+                ev = record(i)
+                if unique_topics:
+                    ev["topic"] = f"synthetic.topic.{i:04d}"
+                head = s.append(ev, expected_head=head)
             export_sealed_segments(
                 s, self.archive, include_nonpublic=True,
                 external_expected_head=head,
@@ -171,6 +174,20 @@ class ImmutableRecoveredAquariumObserverQA(unittest.TestCase):
             with self.assertRaises(ObserverError):
                 observer.append(record(131), expected_head=head)
         self.assertFalse(Path(str(self.out)+"-wal").exists())
+
+    def test_private_topic_cardinality_bounded_at_64_with_exact_overflow(self):
+        _, digest = self.make(unique_topics=True)
+        with self.open_observer(digest) as q:
+            redacted = q.summary()
+            self.assertNotIn("topic_counts", redacted)
+            result = q.summary(include_private_metadata=True, max_recent=0)
+            self.assertEqual(len(result["topic_counts"]), 64)
+            self.assertEqual(sum(result["topic_counts"].values()), 64)
+            self.assertEqual(result["other_topics_event_count"], 66)
+            self.assertTrue(result["topic_buckets_truncated"])
+            self.assertEqual(result["recent_records"], [])
+            self.assertEqual(result["journal_events"], 130)
+            self.assertNotIn("payload", json.dumps(result))
 
     def test_wrong_owner_secret_or_receipt_sha_refused(self):
         _, digest = self.make()
