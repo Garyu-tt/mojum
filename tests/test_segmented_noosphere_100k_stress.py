@@ -48,6 +48,13 @@ class Beyond100KActualSQLiteTest(unittest.TestCase):
                 verified = reopened.verify_chain(external_expected_head=tip)
                 self.assertEqual(verified["count"], 100_001)
                 self.assertEqual(verified["segments"], 25)
+                receipts = list(reopened.iter_segment_receipts(
+                    external_expected_head=tip
+                ))
+                self.assertEqual(len(receipts), 25)
+                self.assertEqual(receipts[0]["events"], 4096)
+                self.assertEqual(receipts[-1]["last_seq"], 100_001)
+                self.assertEqual(receipts[-1]["segment_head"], tip)
                 self.assertEqual(reopened.head(), tip)
                 self.assertEqual(
                     reopened.event_at(100_001)["event_hash"], tip
