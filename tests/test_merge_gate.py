@@ -264,7 +264,7 @@ class GateVerdictTests(unittest.TestCase):
         checks = [
             run(name="mesh", conclusion="FAILURE", workflow="Mesh contract")
         ]
-        result = evaluate_checks(checks, waivers={"Mesh contract": "flaky"})
+        result = evaluate_checks(checks, waivers={"Mesh contract / mesh": "flaky"})
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
@@ -283,13 +283,13 @@ class GateVerdictTests(unittest.TestCase):
 
     def test_unknown_status_defers(self):
         checks = [run(status="MYSTERY", conclusion=None, name="mesh", workflow="Mesh contract")]
-        result = evaluate_checks(checks)
+        result = evaluate_checks(checks, required=("Mesh contract / mesh",))
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "CHECK_UNKNOWN_STATUS")
 
     def test_stale_check_head_sha_defers(self):
         checks = [run(head_sha=OTHER, name="mesh", workflow="Mesh contract")]
-        result = evaluate_checks(checks)
+        result = evaluate_checks(checks, required=("Mesh contract / mesh",))
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "STALE_CHECK")
 
