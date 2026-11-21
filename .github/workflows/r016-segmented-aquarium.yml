@@ -1,0 +1,37 @@
+name: Mojum R0.16 optional segmented Aquarium host integration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r016-segmented-aquarium.yml"
+      - "src/mojum/segmented_noosphere.py"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/portable_host.py"
+      - "tests/test_segmented_aquarium.py"
+      - "docs/R016_SEGMENTED_AQUARIUM_INTEGRATION_R01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  independent-versioned-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Real v4 Aquarium, six segment boundaries and signed replay
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_segmented_aquarium.py -v
+      - name: Independent atomic data layer and legacy source refusal
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_segmented_noosphere.py -v
