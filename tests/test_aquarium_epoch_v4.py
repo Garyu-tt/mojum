@@ -109,6 +109,20 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual(aquarium.checkpoint(), before)
             self.assertEqual(aquarium.store.count(), 1)
 
+    def test_wire_rejects_premature_epoch_marker_with_valid_hash_chain(self):
+        """Read-only inspection must enforce the boundary, not just SHA-256."""
+        with self.open() as aquarium:
+            marker = aquarium._epoch_event(1)
+            aquarium._append_record(
+                marker["topic"], marker["event_id"], marker["payload"],
+                marker["observed_at_ns"], marker["source_revision"],
+            )
+            # A well-formed, normally committed SQLite event may still be
+            # semantically wrong: epoch 1 cannot begin before tick 9999.
+            self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+            with self.assertRaisesRegex(NoosphereError, "epoch marker"):
+                inspect_journal(self.db)
+
     def test_real_sqlite_crosses_epoch_and_replays_after_durable_marker(self):
         with self.open() as aquarium:
             for _ in range(EPOCH_TICKS):
