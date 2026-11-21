@@ -290,8 +290,12 @@ def summarize_transcript(transcript):
     }
     streak = 0
     cells = set()
-    for row in transcript:
-        if type(row) is not tuple and type(row) is not list or len(row) != 2:
+    try:
+        rows = iter(transcript)
+    except TypeError:
+        raise CellV5Error("transcript must be an ordered iterable of pairs") from None
+    for row in rows:
+        if type(row) not in (tuple, list) or len(row) != 2:
             raise CellV5Error("transcript rows must be (intent, outcome) pairs")
         intent, outcome = row
         if type(intent) is not dict or type(outcome) is not dict:
