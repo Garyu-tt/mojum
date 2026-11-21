@@ -349,14 +349,16 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
+    # Reject a forbidden external movement before opening/bootstrapping SQLite.
+    # A failed CLI invocation must not create a new organism or journal.
+    if args.exploration_mode == "goal_free" and (
+            args.dx != 0.02 or args.dy != 0.0):
+        parser.error("--dx/--dy cannot override goal-free exploratory intentions")
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
     ) as aquarium:
-        if args.exploration_mode == "goal_free" and (
-                args.dx != 0.02 or args.dy != 0.0):
-            parser.error("--dx/--dy cannot override goal-free exploratory intentions")
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
                 aquarium.step()

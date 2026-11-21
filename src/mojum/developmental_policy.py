@@ -26,7 +26,13 @@ class DevelopmentError(ValueError):
 
 
 def _finite(x):
-    return type(x) in (int, float) and math.isfinite(x)
+    if type(x) not in (int, float):
+        return False
+    try:
+        return math.isfinite(x)
+    except (OverflowError, ValueError, TypeError):
+        # Python raises OverflowError when converting unbounded ints to float.
+        return False
 
 
 @dataclass(frozen=True)
