@@ -156,7 +156,8 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
                          agent_id="dante-fixture-001",
                          neural_mode="shadow",
                          room=None, start=(1.0, 2.0),
-                         dt_ns=10_000_000,
+                         exploration_mode="scripted", sensory_mode="none",
+                         sensory_scene=None, dt_ns=10_000_000,
                          start_tick=None, frame_limit=None):
     """Export real verified SQLite events only to a fresh, mode-0600 local file.
 
@@ -182,8 +183,13 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     dest = _destination(output_jsonl)
     if source.resolve() == dest.resolve():
         raise ValueError("output must not be source SQLite")
+    # Pass the *exact* declared Aquarium modes into deterministic cold replay.
+    # Never downgrade a developmental journal to scripted playback or derive
+    # hidden toy truth from private records to bypass bootstrap validation.
     options = {"agent_id": agent_id, "neural_mode": neural_mode,
-               "room": room, "start": start, "dt_ns": dt_ns}
+               "exploration_mode": exploration_mode, "sensory_mode": sensory_mode,
+               "sensory_scene": sensory_scene, "room": room,
+               "start": start, "dt_ns": dt_ns}
 
     # Staging is never published and is automatically removed on errors.
     with tempfile.TemporaryDirectory(prefix="mojum-trace-stage-") as scratch:
@@ -249,6 +255,10 @@ def main():
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
     parser.add_argument("--agent-id", default="dante-fixture-001")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
+    parser.add_argument("--exploration-mode", choices=("scripted", "goal_free"),
+                        default="scripted")
+    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
+                        default="none")
     parser.add_argument("--expected-head", default=None)
     parser.add_argument("--start-tick", type=int)
     parser.add_argument("--frame-limit", type=int)
@@ -260,6 +270,7 @@ def main():
     meta = export_private_trace(
         args.db, args.output, seed, graph,
         agent_id=args.agent_id, neural_mode=args.neural_mode,
+        exploration_mode=args.exploration_mode, sensory_mode=args.sensory_mode,
         expected_journal_head=args.expected_head,
         allow_private_export=args.allow_private_export,
         start_tick=args.start_tick, frame_limit=args.frame_limit,
