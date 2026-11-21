@@ -171,6 +171,47 @@ class VersionedMotorPolicyTests(unittest.TestCase):
         self.assertEqual(LocalCellExplorer.from_snapshot(versioned).snapshot(),
                          versioned)
 
+    def test_v2_snapshot_rejects_unreachable_blocked_action_histories(self):
+        # In a given cell, the first blocked action becomes inhibited.
+        # The same action therefore cannot accumulate two blocked outcomes;
+        # valid no-motion rest cannot be blocked even once.
+        for action, blocked_count, total_count in (
+            ("x+", 2, 2),
+            ("y-", 2, 3),
+            ("rest", 1, 1),
+        ):
+            with self.subTest(action=action, blocked=blocked_count):
+                state = {
+                    "schema": V2_SCHEMA,
+                    "last_tick": total_count - 1,
+                    "updates": total_count,
+                    "records": {"2:2": {action: [total_count, blocked_count]}},
+                }
+                original = copy.deepcopy(state)
+                with self.assertRaisesRegex(DevelopmentError, "outcome counters"):
+                    LocalCellExplorer.from_snapshot(state)
+                self.assertEqual(state, original)
+        # Two successful measurements followed by one blocked attempt
+        # are feasible and must not be rejected by the narrowed contract.
+        feasible = {
+            "schema": V2_SCHEMA, "last_tick": 2, "updates": 3,
+            "records": {"2:2": {"x+": [3, 1]}},
+        }
+        self.assertEqual(LocalCellExplorer.from_snapshot(feasible).snapshot(),
+                         feasible)
+
+    def test_v2_rejects_forged_blocked_rest_before_mutating_ram(self):
+        policy = LocalCellExplorer()
+        cue = Proprioception(0, "0" * 64, .08, .08, False)
+        intent = policy.decide(cue)
+        self.assertEqual(intent["action"], "rest")
+        before = policy.snapshot()
+        with self.assertRaisesRegex(DevelopmentError, "rest cannot"):
+            policy.observe(cue, intent, True)
+        self.assertEqual(policy.snapshot(), before)
+        self.assertFalse(policy.observe(cue, intent, False)["measured_blocked"])
+        self.assertEqual(policy.updates, 1)
+
     def test_local_cell_control_avoids_legacy_rest_collapse_in_tiny_corner(self):
         # Independent, deterministic measured environment; no reward, geometry
         # oracle or future sensor state is given to either controller.

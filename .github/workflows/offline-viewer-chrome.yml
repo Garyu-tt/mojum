@@ -3,12 +3,16 @@ name: Mojum actual offline viewer Chrome smoke
 on:
   pull_request:
     paths:
+      # The browser tests replay both canonical policy versions from SQLite.
+      # Policy/runtime edits must not silently skip the real Chrome gate.
+      - "src/mojum/**"
       - "examples/aquarium_trace_viewer.html"
       - "tests/smoke_real_chromium_viewer.py"
       - "src/mojum/aquarium_trace_export.py"
       - ".github/workflows/offline-viewer-chrome.yml"
   push:
     paths:
+      - "src/mojum/**"
       - "examples/aquarium_trace_viewer.html"
       - "tests/smoke_real_chromium_viewer.py"
       - "src/mojum/aquarium_trace_export.py"

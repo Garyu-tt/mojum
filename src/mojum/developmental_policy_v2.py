@@ -74,12 +74,18 @@ class LocalCellExplorer:
                 or not set(actions) <= set(ACTIONS)
             ):
                 raise DevelopmentError("invalid v2 local-cell key or actions")
-            for counters in actions.values():
+            for action, counters in actions.items():
                 if (
                     type(counters) is not list or len(counters) != 2
                     or any(type(v) is not int for v in counters)
                     or not 0 <= counters[1] <= counters[0] <= MAX_EPISODE_TICKS
                     or counters[0] < 1
+                    # A blocked action is immediately inhibited in this
+                    # cell. A second blocked attempt cannot occur here.
+                    or counters[1] > 1
+                    # A valid point-room position has no movement on rest,
+                    # therefore rest cannot have a collision outcome.
+                    or (action == "rest" and counters[1] != 0)
                 ):
                     raise DevelopmentError("invalid v2 motor outcome counters")
                 total += counters[0]
@@ -111,6 +117,8 @@ class LocalCellExplorer:
         if type(blocked) is not bool or intent != self.decide(sense):
             raise DevelopmentError("forged or stale v2 measured motor outcome")
         cell, action = intent["zone"], intent["action"]
+        if action == "rest" and blocked:
+            raise DevelopmentError("rest cannot have a blocked outcome")
         if cell not in self.records and len(self.records) >= MAX_ZONES:
             raise DevelopmentError("v2 local-cell memory budget exhausted")
         count = self.records.setdefault(cell, {}).setdefault(action, [0, 0])
