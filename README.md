@@ -20,8 +20,8 @@ PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA"
 ```
 
 For `main`, the gate always requires the nine Aquarium, Motor Gate, and Mesh
-jobs for Python 3.11, 3.12, and 3.13. Use `--require JOB` for any additional
-applicable check identified in the reviewed CI workflow.
+jobs for Python 3.11, 3.12, and 3.13. Use `--require 'WORKFLOW / JOB'` for any
+additional GitHub Actions check identified in the reviewed CI workflow.
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
 See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdicts and

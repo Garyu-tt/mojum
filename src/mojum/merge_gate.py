@@ -370,6 +370,18 @@ def evaluate(
             )
             continue
 
+        # A GitHub Actions job name is not globally unique: another workflow
+        # can publish the same name. Require the workflow-qualified identity
+        # whenever the rollup supplies one. Bare selectors remain useful for
+        # legacy commit statuses and external checks which have no workflow
+        # identity to qualify.
+        if " / " not in pattern and any(check.workflow for check in matches):
+            rejects.append(GateReason(
+                "AMBIGUOUS_REQUIRED_PATTERN",
+                f"Actions job {pattern!r} must be required as workflow / job",
+            ))
+            continue
+
         core_job = pattern in main_jobs
         for check in matches:
             matched_labels.append(check.label)
@@ -409,7 +421,7 @@ def evaluate(
                     )
                 )
                 continue
-            if core_job and not check.has_explicit_run_status:
+            if check.workflow is not None and not check.has_explicit_run_status:
                 defers.append(
                     GateReason(
                         "REQUIRED_RUN_STATUS_MISSING",
@@ -444,7 +456,7 @@ def evaluate(
                 )
             )
 
-        if core_job and len(matches) > 1:
+        if len(matches) > 1:
             defers.append(
                 GateReason(
                     "AMBIGUOUS_REQUIRED_CHECK",
@@ -547,8 +559,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="JOB",
         help=(
-            "one exact required job name or 'workflow / job' label; repeat as needed "
-            "(main already requires the Aquarium, Motor Gate, and Mesh matrices)"
+            "one exact 'workflow / job' label, or a bare legacy/external status; "
+            "repeat as needed (main already requires the Aquarium, Motor Gate, "
+            "and Mesh matrices)"
         ),
     )
     parser.add_argument(
