@@ -78,4 +78,15 @@ def validate_scene(room, scene):
         raise SensoryBridgeError("invalid synthetic sensory scene")
     if (scene.room.width != room.width or scene.room.height != room.height):
         raise SensoryBridgeError("sensory and motor room dimensions differ")
+    # A fixture toy may not occupy the same solid space as a motor obstacle.
+    # Test the toy disc against each closed obstacle AABB; checking only the
+    # center would admit a visually plausible but physically impossible toy.
+    # This is an occupancy check, NOT a line-of-sight/occlusion simulation.
+    for toy in scene.toys:
+        for left, bottom, width, height in room.obstacles:
+            nearest_x = max(left, min(toy.x, left + width))
+            nearest_y = max(bottom, min(toy.y, bottom + height))
+            distance_sq = (toy.x - nearest_x) ** 2 + (toy.y - nearest_y) ** 2
+            if distance_sq <= toy.radius_m ** 2:
+                raise SensoryBridgeError("synthetic toy intersects motor-room obstacle")
     return scene
