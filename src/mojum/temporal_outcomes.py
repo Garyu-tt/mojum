@@ -14,7 +14,7 @@ import re
 from .developmental_policy import ACTIONS
 from .sensory_play import ContactAssociations
 
-SCHEMA = "mojum.temporal.range-outcome/1"
+SCHEMA = "mojum.temporal.range-outcome/2"
 MAX_UPDATES = 9_999
 MAX_CONTEXTS = 40
 _KEY = re.compile(r"(?:none|[0-6])\|(?:rest|x\+|x-|y\+|y-)\Z", re.ASCII)
@@ -90,11 +90,19 @@ class RangeOutcomeMemory:
         if not outcomes:
             return {"observations": 0, "next_bucket": None,
                     "blocked": None}
-        # Argmax over *paired* observed outcomes. Sorting prevents
-        # insertion-order/iteration-order inference differences.
-        guess = min(outcomes, key=lambda k: (-outcomes[k], k))
-        bucket, blocked = guess.split("|")
-        return {"observations": sum(outcomes.values()),
+        # Do not invent certainty from a lexical tie-break. Two scenes may
+        # produce identical coarse range/action cues but contradictory outcomes.
+        # A tied empirical mode must abstain; guided motion then falls back
+        # to bounded exploration rather than treating arbitrary key order
+        # as evidence of safety or useful progress.
+        maximum = max(outcomes.values())
+        winners = [key for key, count in outcomes.items() if count == maximum]
+        total = sum(outcomes.values())
+        if len(winners) != 1:
+            return {"observations": total, "next_bucket": None,
+                    "blocked": None}
+        bucket, blocked = winners[0].split("|")
+        return {"observations": total,
                 "next_bucket": None if bucket == "none" else int(bucket),
                 "blocked": blocked == "1"}
 
@@ -120,6 +128,6 @@ class RangeOutcomeMemory:
         self.updates += 1
         return {"measured_next_bucket": None if a == "none" else int(a),
                 "measured_blocked": blocked,
-                "prediction_was_known": prior["observations"] > 0,
+                "prediction_was_known": prior["blocked"] is not None,
                 "total_updates": self.updates,
                 "source": "measured_after_synthetic_room_step_not_planned_motion"}
