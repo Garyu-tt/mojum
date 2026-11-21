@@ -58,14 +58,33 @@ class PrivateProjectionGateTests(unittest.TestCase):
         def mutate_learner(x): x["events"][1]["learner_ref"] = "other-person"
         def mutate_tick(x): x["events"][1]["sim_tick"] = 999
         def mutate_phase_hash(x): x["events"][2]["artifact_sha256"] = "wrong"
+        def mutate_observation(x): x["events"][0]["observation"] = {"unexpected": "object"}
+        def mutate_missing_feedback(x): x.pop("feedback")
+        def mutate_feedback_visibility(x): x["feedback"]["visibility"] = "PUBLIC"
+        def mutate_feedback_revision(x): x["feedback"]["revision_changed"] = not x["feedback"]["revision_changed"]
+        def mutate_feedback_phases(x): x["feedback"]["reviewed_phases"].reverse()
+        def mutate_unexpected_event_field(x): x["events"][0]["private_extra"] = "unvalidated"
         for mutation in (mutate_activity, mutate_events, mutate_artifacts,
                          mutate_wrong_phase, mutate_private_label, mutate_hash,
-                         mutate_learner, mutate_tick, mutate_phase_hash):
+                         mutate_learner, mutate_tick, mutate_phase_hash,
+                         mutate_observation, mutate_missing_feedback,
+                         mutate_feedback_visibility, mutate_feedback_revision,
+                         mutate_feedback_phases, mutate_unexpected_event_field):
             with self.subTest(mutation=mutation.__name__):
                 broken = copy.deepcopy(self.run)
                 mutation(broken)
                 with self.assertRaises(SchoolError):
                     redacted_summary(broken)
+
+    def test_maximum_valid_tick_preserves_final_phase_boundary(self):
+        from mojum.school_activity import MAX_SIM_TICK
+        run = run_activity(self.catalog, "visual_arts.starter", fixture_script(),
+                           sim_tick=MAX_SIM_TICK)
+        self.assertEqual(run["events"][-1]["sim_tick"], MAX_SIM_TICK + 4)
+        self.assertEqual(redacted_summary(run)["phase_count"], 5)
+        with self.assertRaises(SchoolError):
+            run_activity(self.catalog, "visual_arts.starter", fixture_script(),
+                         sim_tick=MAX_SIM_TICK + 1)
 
     def test_compare_trial_checks_both_source_shapes(self):
         later = run_activity(

@@ -211,7 +211,8 @@ def _check_private_fixture_run(run):
     Structural and local SHA checks are NOT an authenticity or authorization
     mechanism. A future Noosphere adapter must verify writer and consent itself.
     """
-    if type(run) is not dict or run.get("schema") != RUN_SCHEMA or run.get("visibility") != "PRIVATE":
+    if (type(run) is not dict or set(run) != {"schema", "activity_id", "learner_ref", "visibility", "sim_tick", "events", "artifacts", "feedback"}
+            or run.get("schema") != RUN_SCHEMA or run.get("visibility") != "PRIVATE"):
         raise SchoolError("invalid private run envelope")
     aid, ref, tick = run.get("activity_id"), run.get("learner_ref"), run.get("sim_tick")
     if type(aid) is not str or aid not in ACTIVITIES:
@@ -228,7 +229,10 @@ def _check_private_fixture_run(run):
     expected_media = "image/svg+xml" if kind == "art" else "application/json"
     for index, phase in enumerate(("make", "revise")):
         item = artifacts[index]
-        if type(item) is not dict or any((
+        if (type(item) is not dict or set(item) != {"schema", "phase", "media_type", "visibility",
+                                                  "sim_tick", "sha256", "content", "provenance"}):
+            raise SchoolError("invalid private artifact fields")
+        if any((
             item.get("schema") != expected_schema,
             item.get("phase") != phase,
             item.get("media_type") != expected_media,
@@ -248,6 +252,11 @@ def _check_private_fixture_run(run):
             raise SchoolError("invalid private artifact hash or size")
     for offset, phase in enumerate(PHASES):
         event = events[offset]
+        if (type(event) is not dict or set(event) != {"schema", "visibility", "learner_ref",
+                                                     "section_id", "activity_id", "phase",
+                                                     "sim_tick", "observation", "artifact_sha256",
+                                                     "provenance"}):
+            raise SchoolError("invalid private event fields")
         expected_hash = (artifacts[0]["sha256"] if phase == "make" else
                          artifacts[1]["sha256"] if phase == "revise" else None)
         if type(event) is not dict or any((
@@ -262,6 +271,26 @@ def _check_private_fixture_run(run):
             event.get("provenance") != "scripted-stdlib-fixture",
         )):
             raise SchoolError("invalid private event chain")
+        observation = event["observation"]
+        if phase in ("make", "revise"):
+            if observation != "artifact submitted":
+                raise SchoolError("invalid artifact event observation")
+        elif not _nonempty(observation):
+            raise SchoolError("invalid private event observation")
+        try:
+            observation.encode("utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise SchoolError("invalid observation UTF-8") from exc
+    feedback = run["feedback"]
+    if (type(feedback) is not dict or set(feedback) != {"schema", "visibility",
+                "revision_changed", "reviewed_phases", "note"}
+            or feedback["schema"] != "mojum.school-feedback/1"
+            or feedback["visibility"] != "PRIVATE"
+            or type(feedback["revision_changed"]) is not bool
+            or feedback["revision_changed"] != (artifacts[0]["sha256"] != artifacts[1]["sha256"])
+            or feedback["reviewed_phases"] != list(PHASES)
+            or feedback["note"] != "Scripted attempts only; no evidence of learning or transfer."):
+        raise SchoolError("invalid private feedback envelope")
 
 
 def compare_trials(baseline, repeat):
