@@ -101,6 +101,43 @@ class BoundedEscapeTests(unittest.TestCase):
         first_rest = actions.index("rest")
         self.assertTrue(set(actions[first_rest + 1:]) - {"rest"})
 
+    def test_unproven_moves_do_not_extend_a_blocked_probe_streak(self):
+        # A foreign or experimental world can hand the policy a fresh cell
+        # while the measured blocked-probe streak is already at its ceiling.
+        # The policy must take its bounded pause instead of probing again, so
+        # the committed counter never leaves the versioned snapshot envelope.
+        policy = CellExplorerV3Escape()
+        revision = "c" * 64
+        for tick in range(REPROBE_BLOCKED_BEFORE_REST):
+            sense = Proprioception(
+                tick, revision, (tick + 1) * STEP_METERS + 0.001,
+                STEP_METERS, tick == 0,
+            )
+            intent = policy.decide(sense)
+            self.assertNotEqual(intent["action"], "rest")
+            policy.observe(sense, intent, True)
+            snapshot = policy.snapshot()
+            self.assertEqual(
+                CellExplorerV3Escape.from_snapshot(snapshot).snapshot(),
+                snapshot,
+            )
+        self.assertEqual(
+            policy.consecutive_blocked_probes, REPROBE_BLOCKED_BEFORE_REST,
+        )
+        tick = REPROBE_BLOCKED_BEFORE_REST
+        sense = Proprioception(
+            tick, revision, (tick + 1) * STEP_METERS + 0.001,
+            STEP_METERS, False,
+        )
+        intent = policy.decide(sense)
+        self.assertEqual(intent["action"], "rest")
+        policy.observe(sense, intent, False)
+        snapshot = policy.snapshot()
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot,
+        )
+        self.assertEqual(snapshot["consecutive_blocked_probes"], 0)
+
     def test_open_room_keeps_rest_right_and_measured_mobility(self):
         room = Room(4, 4, ((2, 1, .1, 2),))
         report = run_policy(CellExplorerV3Escape, room, (1.0, 2.0), ticks=120)
