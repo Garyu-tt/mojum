@@ -48,7 +48,9 @@ class EpochProprioception:
             ok = split_tick(self.absolute_tick) == (self.epoch, self.local_tick)
         except DevelopmentError:
             ok = False
-        if (not ok or type(self.revision) is not str
+        if (not ok or type(self.epoch) is not int
+                or type(self.local_tick) is not int
+                or type(self.revision) is not str
                 or _REVISION.fullmatch(self.revision) is None
                 or not _finite(self.x) or not _finite(self.y)
                 or not 0 <= self.x <= 1000 or not 0 <= self.y <= 1000
