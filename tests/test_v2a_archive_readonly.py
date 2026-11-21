@@ -31,10 +31,11 @@ PINNED_SOURCE = Path(os.environ["MOJUM_ARCHIVE112_SOURCE"]).resolve() if os.envi
 def run_cli(source, db, *, policy, ticks, extra=()):
     env = os.environ.copy()
     env["PYTHONPATH"] = str((source / "src").resolve())
-    flag = "--motor-policy" if policy == "local_cell_v2_a_archive" else "--developmental-policy"
-    name = "local_cell_v2" if policy == "local_cell_v2_a_archive" and source != ROOT else policy
-    if source == ROOT and policy == "local_cell_v2_a_archive":
-        name = policy
+    if source == ROOT:
+        flag, name = "--developmental-policy", policy
+    else:
+        flag = "--motor-policy"
+        name = "local_cell_v2" if policy == "local_cell_v2_a_archive" else policy
     args = [
         sys.executable, "-m", "mojum.aquarium", "--db", str(db),
         "--ticks", str(ticks), "--exploration-mode", "goal_free",
@@ -78,7 +79,8 @@ class ReadOnlySQLiteStoreUnit(unittest.TestCase):
                 sealed.append({}, expected_head=empty_head)
         with self.assertRaisesRegex(NoosphereError, "owner or schema mismatch"):
             LocalNoosphere(self.db, "different-person", read_only=True)
-        self.assertEqual(LocalNoosphere(self.db, "dante-synthetic").count(), 0)
+        with LocalNoosphere(self.db, "dante-synthetic") as reopened:
+            self.assertEqual(reopened.count(), 0)
 
     def test_readonly_store_requires_existing_non_symlink_path(self):
         with self.assertRaisesRegex(NoosphereError, "must already exist"):
