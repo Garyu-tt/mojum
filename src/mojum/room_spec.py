@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 
+from .world_room import Room, initial_state
+
 REPORT_SCHEMA = "mojum.room-spec-report/1"
 MAX_INPUT_BYTES = 256 * 1024
 MAX_OBSTACLES = 4096
@@ -133,6 +135,11 @@ def _as_rect(value, label, errors):
     return None if any(item is None for item in rect) else rect
 
 
+def _runtime_number(token):
+    """Mirror stdlib JSON numeric types without discarding source tokens."""
+    return float(token) if any(ch in token for ch in ".eE") else int(token)
+
+
 def _overlap(first, second):
     """Closed-rectangle overlap, matching the runtime's inclusive blocking."""
     ax, ay, aw, ah = first
@@ -233,6 +240,23 @@ def validate_room_document(document):
                     )
 
     if errors:
+        return RoomReport(tuple(errors), tuple(warnings), None)
+
+    # Decimal comparisons alone are insufficient for the point-room fixture:
+    # native JSON float rounding can move an obstacle onto the start, or make
+    # an exactly fitting rectangle exceed a wall (for example 0.1 + 0.2 > 0.3).
+    # Match the runtime's int/float JSON values and Aquarium's float start,
+    # while keeping the original JSON number tokens in the report below.
+    try:
+        runtime_room = Room(
+            _runtime_number(document["width"]),
+            _runtime_number(document["height"]),
+            tuple(tuple(_runtime_number(value) for value in rect)
+                  for rect in document["obstacles"]),
+        )
+        initial_state(runtime_room, float(start[0]), float(start[1]))
+    except (ValueError, OverflowError):
+        errors.append("room geometry is not valid after runtime numeric conversion")
         return RoomReport(tuple(errors), tuple(warnings), None)
 
     areas = [w * h for _, _, w, h in obstacles]
