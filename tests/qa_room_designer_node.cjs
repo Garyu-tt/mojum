@@ -178,6 +178,16 @@ test("actual offline UI can draw, move start, erase and export valid JSON", () =
       pointerType:"touch", clientX:50, clientY:375, pointerId:1,
       preventDefault() {}
     });
+    // A second finger must not replace the initiating drag or commit it.
+    svg.dispatch("pointerdown", {
+      pointerType:"touch", clientX:300, clientY:100, pointerId:99,
+      preventDefault() {}
+    });
+    svg.dispatch("pointermove", {clientX:400, clientY:0, pointerId:99});
+    svg.dispatch("pointerup", {clientX:400, clientY:0, pointerId:99});
+    svg.dispatch("pointercancel", {pointerId:99});
+    assert.equal(JSON.parse(nodes["room-json"].value).obstacles.length, 1);
+    assert.equal(svg.hasPointerCapture(1), true);
     svg.dispatch("pointermove", {clientX:100, clientY:325, pointerId:1});
     svg.dispatch("pointerup", {clientX:100, clientY:325, pointerId:1});
     assert.equal(JSON.parse(nodes["room-json"].value).obstacles.length, 2);
