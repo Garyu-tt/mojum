@@ -59,7 +59,17 @@
         state.tick >= MAX_PREVIEW_STEPS) {
       throw new Error("Лимит тестовой прогулки — 512 шагов. Сбросьте прогулку");
     }
-    if (!Number.isFinite(dx) || !Number.isFinite(dy) ||
+    // A trace is ephemeral, but it must never display a forged collision
+    // count, an oversized history or a malformed path as measured evidence.
+    // All previous points are bounded by the same room as the next step.
+    if (!Number.isInteger(state.blocked) || state.blocked < 0 ||
+        state.blocked > state.tick ||
+        !Array.isArray(state.trail) || state.trail.length !== state.tick + 1 ||
+        state.trail.some(point => !point || typeof point !== "object" ||
+          !valid(room, point.x, point.y)) ||
+        state.trail[state.tick].x !== state.x ||
+        state.trail[state.tick].y !== state.y ||
+        !Number.isFinite(dx) || !Number.isFinite(dy) ||
         Math.hypot(dx, dy) > 1000 || !valid(room, state.x, state.y)) {
       throw new Error("Некорректный шаг или исходное состояние");
     }
