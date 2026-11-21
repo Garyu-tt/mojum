@@ -181,6 +181,30 @@ class SpartanTests(unittest.TestCase):
         })
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_invalid_json_and_bool_priority_reject_entire_batch(self):
+        bad_items = [
+            {"id": "nan", "scope": "s", "payload": {"x": float("nan")}},
+            {"id": "infinity", "scope": "s", "payload": {"x": float("inf")}},
+            {"id": "negative-infinity", "scope": "s",
+             "payload": {"x": -float("inf")}},
+            {"id": "not-serializable", "scope": "s", "payload": {"x": object()}},
+            {"id": "bool-priority", "scope": "s", "priority": True},
+            ["not", "a", "task"],
+        ]
+        for index, invalid in enumerate(bad_items):
+            with self.subTest(index=index):
+                with self.assertRaises(ValueError):
+                    enqueue(self.db, [
+                        {"id": "valid-first", "scope": "safe"}, invalid,
+                    ], 111)
+                self.assertEqual(
+                    self.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 0,
+                )
+        self.assertEqual(
+            enqueue(self.db, [{"id": "valid-first", "scope": "safe",
+                               "payload": {"flag": True}}], 112)["added"], 1,
+        )
+
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
             enqueue(self.db, [{"id": "x", "scope": "s"}, {"id": "x", "scope": "s"}], 111)
