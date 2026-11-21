@@ -152,6 +152,10 @@ class CellExplorerV5:
         # The first eviction needs 512 distinct, previously observed cells.
         if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
             raise CellV5Error("impossible v5 eviction history")
+        # Eviction is replacement, not deletion: once full, the LRU table
+        # remains at capacity for every later observation.
+        if state["evictions"] and len(state["records"]) != MAX_CELLS:
+            raise CellV5Error("evicted v5 table cannot be smaller than capacity")
         if state["rest_streak"] and state["updates"] == 0:
             raise CellV5Error("rest streak without observations")
 
