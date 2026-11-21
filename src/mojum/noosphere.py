@@ -236,6 +236,10 @@ class LocalNoosphere:
                 event = _validate_event(json.loads(raw), self.agent_id)
             except (ValueError, TypeError) as exc:
                 raise NoosphereError(f"invalid event at row {seq}") from exc
+            # A recomputed semantic event hash alone cannot reject duplicate
+            # JSON keys, whitespace rewrites, or parser disagreement.
+            if raw != _canonical(event):
+                raise NoosphereError(f"noncanonical stored JSON at row {seq}")
             if seq != expected_seq:
                 raise NoosphereError(f"noncontiguous sequence at row {seq}")
             for name in ("event_id", "agent_id", "topic", "visibility", "observed_at_ns",
