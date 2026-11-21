@@ -29,11 +29,13 @@ class ToyContactBridge:
         self.scene = validate_scene(motor_room, scene)
         self.motor_room = motor_room
 
-    def evaluate(self, world, model: ContactAssociations):
+    def sense(self, world):
+        return self.scene.sense(world, occluding_obstacles=self.motor_room.obstacles)
+
+    def evaluate(self, world, model: ContactAssociations, *, cue=None):
         """Return the pre-movement sensor frame and candidate association state."""
-        cue = self.scene.sense(
-            world, occluding_obstacles=self.motor_room.obstacles,
-        )
+        if cue is None:
+            cue = self.sense(world)
         prediction = model.predict(cue)
         near = cue["visible"] and cue["range_bucket_10cm"] <= 2
         first = prediction["observations"] == 0

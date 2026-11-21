@@ -63,8 +63,8 @@ class MotorPlay:
         instance.observations = raw["observations"]
         return instance
 
-    def choose(self, tick):
-        """Select only from committed prior outcomes, never room internals."""
+    def choose(self, tick, *, avoid=(), prefer=()):
+        """Use optional empirical range guidance during regular motion selection."""
         if type(tick) is not int or tick != self.observations:
             raise DevelopmentalError("stale motor decision tick")
         if tick < len(MOVES):
@@ -78,7 +78,9 @@ class MotorPlay:
             def score(move):
                 row = self.samples[move[0]]
                 return (row["trials"] - row["blocked"] + 1) / (row["trials"] + 2)
-            chosen = max(MOVES, key=score)
+            eligible = tuple(move for move in MOVES if move[0] not in avoid) or MOVES
+            preferred = tuple(move for move in eligible if move[0] in prefer)
+            chosen = max(preferred or eligible, key=score)
         name, dx, dy = chosen
         row = self.samples[name]
         return {

@@ -55,6 +55,22 @@ checkpoint reports the learned mean and observation count in
 `toy_contact_state`. The wheel command `mojum-aquarium` accepts the same flags.
 Keep the SQLite journal and its learned state private.
 
+To let measured changes in distance guide later movement, start another
+fresh journal with `--temporal-mode range_guided`. For example, run five ticks
+and then resume for one tick with the same flags.
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./range_guided_PRIVATE.sqlite3 --ticks 5 --motor-mode developmental_fixture --sensory-mode toy_probe --temporal-mode range_guided
+PYTHONPATH=src python -m mojum.aquarium --db ./range_guided_PRIVATE.sqlite3 --ticks 1 --motor-mode developmental_fixture --sensory-mode toy_probe --temporal-mode range_guided
+```
+
+In the default fixture the resumed tick chooses north using a previously
+measured range change. The control with `--temporal-mode none` chooses east
+at the same starting position and motor history. The guided mode keeps the
+usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
+predictions can disagree across positions or rooms. Checkpoints report
+`temporal_range_state` for this mode.
+
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
