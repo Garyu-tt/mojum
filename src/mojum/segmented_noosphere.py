@@ -59,6 +59,7 @@ class SegmentedNoosphere:
         if (path.is_symlink() or path.is_dir() or not path.name
                 or str(db_path) == ":memory:" or not path.parent.is_dir()):
             raise NoosphereError("segmented database needs an ordinary local file")
+        preexisting = path.exists()
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         try:
@@ -67,11 +68,13 @@ class SegmentedNoosphere:
             self._db.execute("PRAGMA synchronous=FULL")
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA foreign_keys=ON")
-            if os.name == "posix":
+            if os.name == "posix" and not preexisting:
                 try:
                     path.chmod(0o600)
                 except OSError:
                     pass  # Not a replacement for owner filesystem policy.
+            # Never change permissions on an existing legacy path while
+            # diagnosing an incompatible schema. No automatic migration.
             self._setup()
         except BaseException:
             self._db.close()
