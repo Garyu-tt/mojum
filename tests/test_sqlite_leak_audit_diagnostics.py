@@ -6,6 +6,7 @@ import tracemalloc
 import unittest
 import warnings
 from pathlib import Path
+from unittest.mock import patch
 
 
 _audit = runpy.run_path(str(Path(__file__).with_name("audit_sqlite_resource_warnings.py")))
@@ -34,13 +35,18 @@ class SQLiteLeakDiagnosticTests(unittest.TestCase):
             if not already_tracing:
                 tracemalloc.stop()
 
-    def test_missing_warning_source_has_actionable_fallback(self):
+    def test_missing_warning_source_has_accurate_fallback(self):
         leaked = warnings.WarningMessage(
             ResourceWarning("unclosed database"), ResourceWarning,
             "late_finalizer.py", 12,
         )
-        message = _audit["_leak_diagnostic"](leaked)
+        with patch.object(tracemalloc, "is_tracing", return_value=True):
+            message = _audit["_leak_diagnostic"](leaked)
         self.assertIn("late_finalizer.py:12", message)
+        self.assertIn("traceback unavailable in this interpreter", message)
+
+        with patch.object(tracemalloc, "is_tracing", return_value=False):
+            message = _audit["_leak_diagnostic"](leaked)
         self.assertIn("rerun with PYTHONTRACEMALLOC=1", message)
 
 
