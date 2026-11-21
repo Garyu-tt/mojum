@@ -50,6 +50,7 @@ class ContactAssociationsV2(ContactAssociations):
                 or len(snapshot["table"]) > MAX_CUES):
             raise CuriosityError("invalid developmental model snapshot")
         total = snapshot["evicted_observations"]
+        seen_last_updates = set()
         if (snapshot["evicted_cues"] > snapshot["evicted_observations"]):
             raise CuriosityError("inconsistent eviction accounting")
         for key, entry in snapshot["table"].items():
@@ -68,6 +69,11 @@ class ContactAssociationsV2(ContactAssociations):
                     or not _finite(entry["mean_deflection"])
                     or not 0 <= entry["mean_deflection"] <= 1):
                 raise CuriosityError("invalid learned association")
+            # An accepted measurement increments updates exactly once, so two
+            # live cues can never share the same last-update counter.
+            if entry["last_update"] in seen_last_updates:
+                raise CuriosityError("duplicate association update timestamp")
+            seen_last_updates.add(entry["last_update"])
             total += entry["total"]
         if total != snapshot["updates"]:
             raise CuriosityError("inconsistent association count")
