@@ -1,16 +1,23 @@
-"""Strict bounded loader for an explicitly NEW synthetic typed-room JSON file.
+"""Strict bounded loader for an explicitly NEW synthetic point-room JSON.
 
-No filesystem mutation or SQLite access. This is NOT a trusted source of
-genome data, real robotics geometry, remote content or historic migration.
+Two authoring formats are recognized: the exact scalar ABI for power users,
+and a simpler JSON number draft whose scalar types are preserved when
+materialized into the *same* exact bootstrap/2. No SQLite or network access.
 """
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
-from .room_contract import RoomContractError, decode_room_exact
+from .room_contract import (
+    RoomContractError, decode_room_exact, encode_room_exact,
+)
+from .world_room import Room
 
 MAX_ROOM_FILE_BYTES = 1_048_576
+MAX_DRAFT_DIMENSION_M = 1000
+DRAFT_SCHEMA = "mojum.world.point-room-draft/1"
 
 
 def _reject_duplicates(pairs):
@@ -26,12 +33,57 @@ def _reject_nonfinite(value):
     raise RoomContractError("invalid nonfinite JSON token in typed-room file")
 
 
-def read_new_room_contract(path):
-    """Return exact (Room, start) from a local JSON definition.
+def _draft_number(value):
+    """No float coercion for room scalars: 4 and 4.0 hash differently."""
+    if type(value) is int:
+        if not -(2**63) <= value <= (2**63 - 1):
+            raise RoomContractError("draft room integer exceeds signed 64-bit budget")
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    raise RoomContractError("draft room requires finite numeric int or float")
 
-    A valid definition contains precisely the standalone room_exact object.
-    Writing a SQLite bootstrap happens elsewhere, only after CLI preflight
-    has separately checked explicit opt-in and an absent destination.
+
+def _decode_room_draft(value):
+    if (type(value) is not dict
+            or set(value) != {"schema", "width", "height", "obstacles", "start"}
+            or value.get("schema") != DRAFT_SCHEMA
+            or type(value["obstacles"]) is not list
+            or len(value["obstacles"]) > 4096
+            or type(value["start"]) is not list
+            or len(value["start"]) != 2):
+        raise RoomContractError("invalid point-room draft envelope")
+
+    width = _draft_number(value["width"])
+    height = _draft_number(value["height"])
+    if not (0 < width <= MAX_DRAFT_DIMENSION_M
+            and 0 < height <= MAX_DRAFT_DIMENSION_M):
+        raise RoomContractError("draft point-room dimensions outside 0..1000m")
+
+    obstacles = []
+    for rect in value["obstacles"]:
+        if type(rect) is not list or len(rect) != 4:
+            raise RoomContractError("draft obstacle must contain exactly four scalars")
+        obstacles.append(tuple(_draft_number(x) for x in rect))
+
+    # Starting coordinates are normalized to binary64 by Aquarium, whereas
+    # widths/heights and all rectangle components retain their original type.
+    start = tuple(float(_draft_number(x)) for x in value["start"])
+    try:
+        room = Room(width, height, tuple(obstacles))
+        # Enforce *the exact same durable ABI* as the existing typed editor:
+        # no alternate serialization, new runtime mode or changing old data.
+        return decode_room_exact(encode_room_exact(room, start))
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise RoomContractError("invalid synthetic point-room draft geometry") from exc
+
+
+def read_new_room_contract(path):
+    """Return exact (Room, start) from a local UTF-8 JSON definition.
+
+    Supports original exact-scalar schema and the beginner draft schema.
+    Output is always the same canonical typed bootstrap/2 room contract.
+    A new SQLite file may be reserved only after this parser succeeds.
     """
     source = Path(path)
     if source.is_symlink() or not source.is_file():
@@ -51,4 +103,6 @@ def read_new_room_contract(path):
         )
     except (UnicodeDecodeError, ValueError, TypeError, RecursionError) as exc:
         raise RoomContractError("invalid typed-room JSON content") from exc
+    if type(value) is dict and value.get("schema") == DRAFT_SCHEMA:
+        return _decode_room_draft(value)
     return decode_room_exact(value)
