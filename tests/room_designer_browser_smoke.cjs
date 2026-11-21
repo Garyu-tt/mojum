@@ -117,8 +117,9 @@ async function main() {
     await evaluate(cdp,
       "(function(){const e=document.querySelector('#height');e.value='4.0';" +
       "e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
-    assert.match(await evaluate(cdp,"document.querySelector('#output').value"),
-                 /"height": 4\.0,/);
+    const canonicalExport = await evaluate(cdp,
+      "document.querySelector('#output').value");
+    assert.match(canonicalExport, /"height": 4\.0,/);
     await evaluate(cdp,
       "(function(){const e=document.querySelector('#width');e.value='invalid';" +
       "e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
@@ -130,6 +131,23 @@ async function main() {
       "document.querySelector('#download').disabled"),false);
     assert.equal(await evaluate(cdp,
       "document.querySelector('#obstacles').children.length"),1);
+
+    // Actual file input/change event: reload locally exported bytes in the
+    // editor, including the original 4.0 float token, without Noosphere.
+    await evaluate(cdp,
+      "(function(){const dt=new DataTransfer();" +
+      "dt.items.add(new File([" + JSON.stringify(canonicalExport) +
+      "],'room.json',{type:'application/json'}));" +
+      "const input=document.querySelector('#import-file');" +
+      "input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));" +
+      "return true})()");
+    await until(cdp,
+      "document.querySelector('#output').value.includes('height\": 4.0')");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#output').value"),canonicalExport);
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#obstacles').children.length"),2);
+    await evaluate(cdp,"document.querySelector('#reset-room').click()");
 
     // Keyboard arrow moves the accessible SVG start marker by 5cm.
     await evaluate(cdp,
