@@ -207,6 +207,10 @@ class CellExplorerV3Escape:
         if type(blocked) is not bool or intent != self.decide(sense):
             raise CellV3EscapeError("stale, forged or unmeasured escape outcome")
         cell, action = intent["zone"], intent["action"]
+        # Rest is a zero-displacement choice, not a collision measurement.
+        # Never commit a state that fails our own snapshot validation.
+        if action == "rest" and blocked:
+            raise CellV3EscapeError("rest cannot be a blocked outcome")
         evicted = None
         dropped = 0
         if cell not in self.records and len(self.records) >= MAX_CELLS:

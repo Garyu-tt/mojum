@@ -191,6 +191,19 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         with self.assertRaises(CellV3EscapeError):
             policy.decide(object())
 
+    def test_rest_cannot_be_recorded_as_blocked(self):
+        policy = CellExplorerV3Escape()
+        sense = Proprioception(0, "a" * 64, 1.0, 2.0, False)
+        intent = policy.decide(sense)
+        self.assertEqual(intent["action"], "rest")
+        before = policy.snapshot()
+        with self.assertRaisesRegex(CellV3EscapeError, "rest cannot be a blocked"):
+            policy.observe(sense, intent, True)
+        self.assertEqual(policy.snapshot(), before)
+        learned = policy.observe(sense, intent, False)
+        self.assertEqual(learned["action"], "rest")
+        self.assertEqual(policy.snapshot()["records"][intent["zone"]]["rest"], [1, 0])
+
     def test_learning_record_is_versioned_and_honest(self):
         room, start = sealed_cell()
         state = initial_state(room, start[0], start[1])
