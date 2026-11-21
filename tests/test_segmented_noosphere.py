@@ -362,5 +362,41 @@ class AtomicSegmentQA(unittest.TestCase):
             self.assertEqual(source.verify_chain()["head"], original_head)
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX private-file creation")
+    def test_unlinked_precreated_private_file_is_not_silently_recreated(self):
+        """Do not replace a vanished 0600 journal with a default-mode file."""
+        self.assertFalse(self.db.exists())
+        actual_connect = sqlite3.connect
+
+        def remove_after_precreate(database, *args, **kwargs):
+            if kwargs.get("uri") and "?mode=rw" in str(database):
+                self.db.unlink()
+            return actual_connect(database, *args, **kwargs)
+
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=remove_after_precreate):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.open()
+        self.assertFalse(self.db.exists(), "must not re-create lost journal")
+
+    def test_unlinked_existing_journal_after_preflight_fails_closed(self):
+        """A vanished historical store must never silently become empty."""
+        with self.open() as source:
+            head = source.append(record(0), expected_head=ZERO)
+            self.assertEqual(source.head(), head)
+        actual_connect = sqlite3.connect
+
+        def remove_between_probe_and_writer(database, *args, **kwargs):
+            if kwargs.get("uri") and "?mode=rw" in str(database):
+                self.db.unlink()
+            return actual_connect(database, *args, **kwargs)
+
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=remove_between_probe_and_writer):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.open()
+        self.assertFalse(self.db.exists(), "must not re-create lost history")
+
+
 if __name__ == "__main__":
     unittest.main()
