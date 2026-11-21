@@ -29,6 +29,12 @@ class NoosphereError(ValueError):
 def _text(value, field, max_length=256):
     if not isinstance(value, str) or not value.strip() or len(value) > max_length:
         raise NoosphereError(f"{field} requires a nonempty string of <= {max_length} characters")
+    # Python str permits isolated UTF-16 surrogate code points, but our
+    # persisted JSON / SQLite contract requires canonical UTF-8 throughout.
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise NoosphereError(f"{field} must be valid UTF-8") from exc
     return value
 
 
@@ -40,9 +46,13 @@ def _integer(value, field, minimum=0, maximum=2**63 - 1):
 
 def _canonical(value):
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        wire = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        # json.dumps(ensure_ascii=False) can return an unpaired surrogate.
+        # Reject it before hashing or touching the durable SQLite journal.
+        wire.encode("utf-8")
+        return wire
     except (TypeError, ValueError, OverflowError) as exc:
-        raise NoosphereError("event must contain canonical JSON") from exc
+        raise NoosphereError("event must contain canonical UTF-8 JSON") from exc
 
 
 def _sha(value):
