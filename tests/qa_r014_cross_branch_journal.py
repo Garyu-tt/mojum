@@ -21,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 
+from qa_r014_readonly_wire_probe import inspect_journal, WireProbeError, _format_for
+
 
 def check(condition, message):
     if not condition:
@@ -41,6 +43,8 @@ def invoke(source: Path, database: Path, *, kind: str, ticks: int):
         command += ["--motor-policy", "local_cell_v2"]
     elif kind == "v2-b":
         command += ["--developmental-policy", "local_cell_v2"]
+    elif kind == "v3-b":
+        command += ["--developmental-policy", "local_cell_v3"]
     elif kind != "legacy":
         raise AssertionError("unknown test policy kind")
     result = subprocess.run(
@@ -166,25 +170,159 @@ def legacy_cross_test(a, b, scratch):
     return True
 
 
+def _synthetic_motor_fingerprint(db):
+    """Normalize actual stored actions/outcomes; exclude versioned wire tags.
+
+    This characterizes a fixed generated room only. It is not an interchange
+    format, migration procedure, or a claim of behavioral generalization.
+    """
+    with sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute(
+            "SELECT wire_json FROM events "
+            "WHERE topic='aquarium.frame' ORDER BY seq"
+        ).fetchall()
+    actions = []
+    for (wire,) in rows:
+        frame = json.loads(wire)["payload"]
+        motor = frame["developmental"]["intent"]
+        actions.append({
+            "tick": frame["tick"],
+            "action": motor["action"],
+            "dx": motor["dx"],
+            "dy": motor["dy"],
+            "blocked": frame["world"]["blocked"],
+            "position": frame["world"]["position"],
+        })
+    encoded = json.dumps(actions, sort_keys=True, separators=(",", ":"),
+                         allow_nan=False).encode("utf-8")
+    return len(actions), hashlib.sha256(encoded).hexdigest()
+
+
+def compare_pre_eviction_motor_behavior(a, b, v3, scratch):
+    """Run three separate programs under identical fixed point-room input."""
+    signatures = {}
+    for label, source, kind in (
+        ("v2_a", a, "v2-a"),
+        ("v2_b", b, "v2-b"),
+        ("v3_b", v3, "v3-b"),
+    ):
+        database = scratch / (label + ".behavior.sqlite3")
+        checkpoint, error = invoke(source, database, kind=kind, ticks=120)
+        check(checkpoint is not None, label + " failed: " + error[:350])
+        check(checkpoint["tick"] == 120, "unexpected synthetic sample length")
+        # Inspect the *actual* stored source, not an in-RAM simulation clone.
+        verified = inspect_journal(database,
+                                   external_expected_head=checkpoint["journal_head"])
+        check(verified["events"] == 121 and verified["frames"] == 120,
+              label + " missing committed synthetic events")
+        count, fingerprint = _synthetic_motor_fingerprint(database)
+        check(count == 120, "incorrect stored synthetic motor history")
+        signatures[label] = fingerprint
+    check(len(set(signatures.values())) == 1,
+          "the three policies diverge before v3's 512-cell retention cap")
+    return {
+        "120_tick_fixed_synthetic_motor_trace": "IDENTICAL",
+        "v2a_v2b_v3b": "PASS",
+        "no_interchange_or_generalization_claim": True,
+    }
+
+
+def probe_rejects_corrupt_and_ambiguous_wire(reference, scratch):
+    # Only disposable copied journals are modified; original data stay sealed.
+    import shutil
+    original = database_state(reference)
+    before_probe = inspect_journal(reference, external_expected_head=original["head"])
+    check(before_probe["journal_head"] == original["head"], "trusted anchor mismatch")
+
+    for mode in ("whitespace", "duplicate-key"):
+        dirty = scratch / (mode + ".tampered.sqlite3")
+        shutil.copyfile(reference, dirty)
+        with sqlite3.connect(dirty) as conn:
+            conn.execute("DROP TRIGGER noosphere_no_update")
+            raw = conn.execute("SELECT wire_json FROM events WHERE seq=1").fetchone()[0]
+            if mode == "whitespace":
+                tampered = json.dumps(json.loads(raw), indent=2, ensure_ascii=False)
+            else:
+                # Python last-wins would accept the original event_id, but
+                # the independent scanner must not accept ambiguous JSON.
+                tampered = '{"event_id":"first-forged-id",' + raw[1:]
+            conn.execute("UPDATE events SET wire_json=? WHERE seq=1", (tampered,))
+            conn.commit()
+        try:
+            inspect_journal(dirty)
+        except WireProbeError:
+            pass
+        else:
+            raise AssertionError("read-only scanner accepted " + mode)
+    try:
+        inspect_journal(reference, external_expected_head="f" * 64)
+    except WireProbeError:
+        pass
+    else:
+        raise AssertionError("scanner accepted an incorrect independent head")
+    check(database_state(reference)["wire_digest"] == original["wire_digest"],
+          "integrity QA changed real reference journal")
+    return "PASS"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-a", type=Path, required=True)
     parser.add_argument("--source-b", type=Path, required=True)
+    parser.add_argument("--source-v3", type=Path, required=True)
     parser.add_argument("--require-compatible", action="store_true")
     args = parser.parse_args()
     a, b = args.source_a.resolve(), args.source_b.resolve()
+    v3 = args.source_v3.resolve()
     check((a / "src/mojum/developmental_policy_v2.py").is_file(),
           "source A is not the pinned #112 implementation")
     check((b / "src/mojum/cell_policy_v2.py").is_file(),
           "source B is not the pinned #115 implementation")
+    check((v3 / "src/mojum/cell_policy_v3.py").is_file(),
+          "v3 source is not the pinned #122 implementation")
     with tempfile.TemporaryDirectory(prefix="mojum-r014-wire-private-") as tmp:
         scratch = Path(tmp)
         legacy_cross_test(a, b, scratch)
         a_db, b_db = scratch / "a.private.sqlite3", scratch / "b.private.sqlite3"
         a_self, a_state = self_reopen(a, a_db, "v2-a")
         b_self, b_state = self_reopen(b, b_db, "v2-b")
+        v3_db = scratch / "v3.private.sqlite3"
+        v3_self, v3_state = self_reopen(v3, v3_db, "v3-b")
+        v3_probed = inspect_journal(v3_db, external_expected_head=v3_state["head"])
+        check(v3_probed["format"] == "local_cell_v3_b_unreleased",
+              "read-only registry confused v3 format with v2")
+        matched_synthetic_motor = compare_pre_eviction_motor_behavior(
+            a, b, v3, scratch)
         a_contract = public_contract(a_state, a_self)
         b_contract = public_contract(b_state, b_self)
+        # Exact stored wire ABI, not the alias "local_cell_v2", is identity.
+        a_probed = inspect_journal(a_db, external_expected_head=a_state["head"])
+        b_probed = inspect_journal(b_db, external_expected_head=b_state["head"])
+        check(a_probed["format"] == "local_cell_v2_a_unreleased",
+              "wrong registry format for PR #112 persisted history")
+        check(b_probed["format"] == "local_cell_v2_b_unreleased",
+              "wrong registry format for PR #115 persisted history")
+        check(a_probed["events"] == b_probed["events"] == 5,
+              "unexpected registry event counts")
+        probe_fails = probe_rejects_corrupt_and_ambiguous_wire(a_db, scratch)
+        # Unknown or mixed policy manifests must fail closed before replay.
+        for mixed in (
+            {"schema": "mojum.aquarium.bootstrap/1",
+             "developmental_schema": "mojum.developmental.local-cell/2",
+             "exploration_mode": "goal_free",
+             "motor_policy": "local_cell_v2",
+             "developmental_policy": "local_cell_v2"},
+            {"schema": "mojum.aquarium.bootstrap/1",
+             "developmental_schema": "mojum.developmental.local-cell/999",
+             "exploration_mode": "goal_free"},
+        ):
+            try:
+                _format_for(mixed)
+            except WireProbeError:
+                pass
+            else:
+                raise AssertionError("mixed/unknown ABI was silently accepted")
         a_to_b = foreign_reopen(b, a_db, "v2-b", "a-to-b")
         b_to_a = foreign_reopen(a, b_db, "v2-a", "b-to-a")
         same_state(a_state, database_state(a_db), "a v2 foreign replay")
@@ -195,11 +333,22 @@ def main():
             "schema": "mojum.qa.r014.cross-wire/1",
             "legacy_two_way_replay_and_append": "PASS",
             "v2_self_reopen": {"112": "PASS", "115": "PASS"},
+            "separate_v3_self_reopen": ("PASS" if
+                v3_probed["format"] == "local_cell_v3_b_unreleased" else "FAIL"),
+            "pre_eviction_motor_evidence": matched_synthetic_motor,
             "v2_foreign_reopen": {
                 "112_journal_under_115": "PASS" if a_to_b else "REJECTED",
                 "115_journal_under_112": "PASS" if b_to_a else "REJECTED",
             },
             "v2_journal_unchanged_after_foreign_open": "PASS",
+            "read_only_registry": {
+                "112": a_probed["format"],
+                "115": b_probed["format"],
+                "122_v3": v3_probed["format"],
+                "full_hash_chain_and_head": "PASS",
+                "tamper_and_unknown_abi_rejection": probe_fails,
+                "event_content_exported": False,
+            },
             "wire_contract_identical": wire_identity,
             "contract_112": a_contract,
             "contract_115": b_contract,
