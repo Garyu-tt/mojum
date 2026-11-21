@@ -54,8 +54,8 @@ PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
   --expected-head-sha "$(git rev-parse HEAD)" \
   --require '*aquarium*' --require-count '*aquarium*=3' \
-  --require '*motor-gate*' --require-count '*motor-gate*=1' \
-  --require '*mesh*' --require-count '*mesh*=1'
+  --require '*motor-gate*' --require-count '*motor-gate*=3' \
+  --require '*mesh*' --require-count '*mesh*=3'
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -81,8 +81,8 @@ SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --pr "$PR" --expected-head-sha "$SHA" \
   --require '*aquarium*' --require-count '*aquarium*=3' \
-  --require '*motor-gate*' --require-count '*motor-gate*=1' \
-  --require '*mesh*' --require-count '*mesh*=1' || exit $?
+  --require '*motor-gate*' --require-count '*motor-gate*=3' \
+  --require '*mesh*' --require-count '*mesh*=3' || exit $?
 gh pr merge "$PR" --squash --match-head-commit "$SHA"
 ```
 
@@ -101,7 +101,7 @@ does not replace repository rulesets, which remain authoritative.
   entries without `headSha` are trusted to belong to the rollup's head.
 - Skipped-check waivers are caller-supplied and are only as honest as the
   caller. They are echoed in the output for audit.
-- Before setting a count, inspect the pinned workflow matrix: three Aquarium
-  Python versions (3.11/3.12/3.13) require at least three distinct successful jobs.
+- Before setting a count, inspect the pinned workflow matrix: three Aquarium, Motor and Mesh
+  Python versions (3.11/3.12/3.13) each require at least three distinct successful jobs.
   A rollup containing only 3.11 must defer, even when GitHub says CLEAN.
 - The module performs no merge and has no write path.
