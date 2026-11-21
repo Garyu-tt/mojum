@@ -11,7 +11,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from mojum.noosphere import NoosphereError
 from mojum.segment_archive import ArchiveError, export_sealed_segments, names
 from mojum.live_tail_capsule import capture_live_tail
 from mojum.segmented_noosphere import SegmentedNoosphere
@@ -86,12 +88,22 @@ class SignedHistoricalCopyRecoveryQA(unittest.TestCase):
         self.assertEqual(result["sealed_segments"], 2)
         self.assertEqual(result["restored_tail_events"], 2)
         self.assertEqual(result["restored_head"], head)
+        self.assertEqual(result["custody"], "QUARANTINED_READ_ONLY")
         self.assertFalse(self.original.exists())
         self.assertFalse(self.copy_a.exists())
         with SegmentedNoosphere(self.dest, OWNER, segment_size=64) as q:
             self.assertEqual(q.verify_chain(external_expected_head=head)["count"], 130)
             self.assertEqual(q.event_at(130)["event"]["payload"]["sequence"], 129)
             self.assertEqual(q.dataset(limit=5)["projection"]["items"], [])
+            before_count, before_head = q.count(), q.head()
+            with self.assertRaises(NoosphereError):
+                q.append(record(130), expected_head=before_head)
+            self.assertEqual((q.count(), q.head()), (before_count, before_head))
+            custody = q._db.execute(
+                "SELECT state,pinned_source_head FROM recovery_custody WHERE id=1",
+            ).fetchone()
+            self.assertEqual(custody["state"], "QUARANTINED_READ_ONLY")
+            self.assertEqual(custody["pinned_source_head"], head)
 
     def test_requires_explicit_private_consent_and_correct_actor(self):
         head, digest = self.make()
@@ -162,6 +174,26 @@ class SignedHistoricalCopyRecoveryQA(unittest.TestCase):
         with SegmentedNoosphere(self.dest, OWNER, segment_size=64) as q:
             self.assertEqual(q.count(), 130)
 
+    def test_interruption_before_fenced_publish_leaves_no_visible_target(self):
+        head, digest = self.make()
+        import mojum.verified_replica_restore as subject
+        actual_link = subject.os.link
+
+        def stop_publishing(src, dest):
+            if str(dest) == str(self.dest):
+                raise RuntimeError("injected crash before public restored path")
+            return actual_link(src, dest)
+
+        with patch.object(subject.os, "link", side_effect=stop_publishing):
+            with self.assertRaisesRegex(RuntimeError, "injected crash"):
+                self.recover(digest)
+        self.assertFalse(self.dest.exists())
+        self.assertEqual(list(self.root.glob(".mojum-verified-recovery-*")), [])
+        with SegmentedNoosphere(self.original, OWNER, segment_size=64) as source:
+            self.assertEqual(
+                source.verify_chain(external_expected_head=head)["count"], 130,
+            )
+
     def test_real_cpu_cli_cold_restore_from_replica_after_source_unavailable(self):
         head, digest = self.make()
         self.original.rename(self.root/"unavailable-source.sqlite3")
@@ -231,8 +263,12 @@ class SignedHistoricalCopyRecoveryQA(unittest.TestCase):
         self.assertEqual(recovered["restored_events"], 131)
         with Aquarium(self.dest, SEED, GRAPH, **opts) as after:
             self.assertEqual(after.checkpoint(), before)
-            after.step()
-            self.assertEqual(after.tick, 131)
+            # A restored historical copy must be inspectable but cannot
+            # silently become another live writer on the same timeline.
+            with self.assertRaises(NoosphereError):
+                after.step()
+            self.assertEqual(after.tick, 130)
+            self.assertEqual(after.checkpoint(), before)
 
 
 if __name__ == "__main__":
