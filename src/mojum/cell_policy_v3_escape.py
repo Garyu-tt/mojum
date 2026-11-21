@@ -163,6 +163,7 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
+
         if state["updates"] and not state["records"]:
             raise CellV3EscapeError("escape updates without a retained cell")
         # One cell is observed per tick. The newest retained stamp must
