@@ -39,6 +39,13 @@ or privileged motor gates are available through this module.
 
 - A measured difference in blocked counts shows that replayable contact
   feedback changed *this* simple synthetic policy under *this* fixture.
+  **Blocked counts alone are invalid as success**: a policy that gives up
+  moving can trivially avoid further contacts. The trial therefore records
+  rest count, actual movement attempts, successful movements, approximately
+  distinct positions and longest idle streak, and warns on prolonged
+  action collapse. With the tiny default corner room, the current
+  coarse-zone Explorer can enter a rest-collapse regime; this is an
+  exposed baseline limitation, not claimed learning progress.
 - Equal results do not prove learning failed; inspect action divergence,
   causal trace and test other starting positions/seeds.
 - This is **not** a randomized, blinded biological study: both policy arms
