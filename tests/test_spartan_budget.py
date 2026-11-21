@@ -79,6 +79,22 @@ class BudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(budget.BudgetError, "changed"):
             budget.settle(self.db, "ticket", 1, 11, 2)
 
+    def test_provider_overrun_persistently_freezes_future_dispatch(self):
+        budget.reserve(self.db, "overrun", 1, 10, 20)
+        with self.assertRaisesRegex(budget.BudgetError, "ledger frozen"):
+            budget.settle(self.db, "overrun", 1, 11, 20)
+        self.assertTrue(budget.status(self.db)["frozen"])
+        with closing(budget.connect(self.path)) as reopened:
+            with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+                budget.reserve(reopened, "next", 2, 1, 1)
+            with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+                budget.reserve(reopened, "overrun", 1, 10, 20)
+            self.assertEqual(budget.status(reopened)["requests"], 1)
+        # A corrected receipt cannot implicitly reopen admission.
+        self.assertTrue(budget.settle(self.db, "overrun", 1, 10, 20)["new_settlement"])
+        with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+            budget.reserve(self.db, "later", 3, 1, 1)
+
     def test_all_integer_and_id_inputs_are_strict(self):
         for val in (True, 1.0, "1", -1, budget.MAX_VALUE + 1):
             with self.assertRaises(budget.BudgetError):
