@@ -356,6 +356,35 @@ class AquariumWireTests(unittest.TestCase):
             inspect_journal(foreign, external_expected_head=head)
         self.assertEqual(foreign.read_bytes(), before)
 
+    def test_inspector_refuses_float_selector_that_equals_an_integer(self):
+        # ``3.0 == 3`` in Python, but a JSON float is not the pinned wire
+        # integer. The chain is re-signed correctly here; only the scalar
+        # type differs, and that alone must not certify another policy.
+        with Aquarium(self.db, SEED, GRAPH, motor_mode="local_cell_v3_escape",
+                      neural_mode="disabled") as aquarium:
+            aquarium.step()
+            events = [
+                item["event"] for item in aquarium.store.dataset(
+                    include_nonpublic=True
+                )["projection"]["items"]
+            ]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(inspect_journal(self.db)["format"], "local_cell_v3_escape")
+        bootstrap, frame = json.loads(json.dumps(events))
+        pinned = bootstrap["payload"]["max_consecutive_rests"]
+        self.assertIs(type(pinned), int)
+        bootstrap["payload"]["max_consecutive_rests"] = float(pinned)
+        foreign = self.db.with_name("float-selector.sqlite3")
+        with LocalNoosphere(foreign, bootstrap["agent_id"]) as store:
+            head = store.head()
+            for event in (bootstrap, frame):
+                head = store.append(event, expected_head=head)
+            self.assertEqual(store.verify_chain()["head"], head)
+        before = foreign.read_bytes()
+        with self.assertRaisesRegex(NoosphereError, "selectors"):
+            inspect_journal(foreign, external_expected_head=head)
+        self.assertEqual(foreign.read_bytes(), before)
+
     def test_missing_file_and_empty_store(self):
         with self.assertRaises(NoosphereError):
             inspect_journal(self.db)
