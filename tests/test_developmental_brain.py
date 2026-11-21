@@ -159,6 +159,32 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             with self.aquarium():
                 pass
 
+    def test_controller_replay_rejects_noncanonical_sqlite_wire(self):
+        """Even matching parsed JSON and hashes must retain exact wire bytes."""
+        from mojum.noosphere import NoosphereError
+
+        with self.aquarium() as aquarium:
+            aquarium.step()
+        with closing(sqlite3.connect(self.db)) as db:
+            row = db.execute(
+                "SELECT seq,wire_json FROM events WHERE topic='aquarium.frame'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            seq, wire = row
+            reformatted = json.dumps(
+                json.loads(wire), ensure_ascii=False, sort_keys=True,
+                separators=(", ", ": "),
+            )
+            self.assertNotEqual(reformatted, wire)
+            # Only a disposable SQLite fixture bypasses the append-only guard.
+            # The canonical event and its chained SHA are left unchanged.
+            db.execute("DROP TRIGGER noosphere_no_update")
+            db.execute("UPDATE events SET wire_json=? WHERE seq=?", (reformatted, seq))
+            db.commit()
+        with self.assertRaisesRegex(NoosphereError, "noncanonical event"):
+            with self.aquarium():
+                pass
+
     def test_controller_bootstrap_rejects_forged_bool_coordinate(self):
         """A rehashed bootstrap must preserve exact start-coordinate JSON type."""
         from mojum.noosphere import _canonical, _sha
