@@ -248,11 +248,8 @@ def verify_sealed_archive(directory, *, external_expected_head):
     }
 
 
-def _require_unused_destination(path, *, check_database=True):
-    suffixes = ("", "-wal", "-shm", "-journal") if check_database else (
-        "-wal", "-shm", "-journal",
-    )
-    for suffix in suffixes:
+def _require_unused_destination(path):
+    for suffix in ("", "-wal", "-shm", "-journal"):
         member = path.with_name(path.name + suffix)
         if member.is_symlink() or member.exists():
             raise ArchiveError("restore requires a new absent SQLite path and no sidecars")
@@ -325,19 +322,9 @@ def restore_into_new_sqlite(directory, destination, *, external_expected_head):
             os.link(temp, dest)
         except FileExistsError as exc:
             raise ArchiveError("restore destination appeared; no overwrite") from exc
-        try:
-            fsync_directory(dest.parent)
-            # A SQLite sidecar may have appeared between the preflight and
-            # the link. Revoke our publication while retaining any sidecars.
-            _require_unused_destination(dest, check_database=False)
-        except (ArchiveError, OSError):
-            try:
-                if os.path.samestat(dest.lstat(), temp.stat()):
-                    dest.unlink()
-                    fsync_directory(dest.parent)
-            except FileNotFoundError:
-                pass
-            raise
+        # Once linked, the journal is live and another process may create
+        # its sidecars and commit events. Do not roll back the published path.
+        fsync_directory(dest.parent)
         return {
             "schema": SCHEMA, "restored_events": verified["archived_events"],
             "sealed_segments": verified["sealed_segments"],
