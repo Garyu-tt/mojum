@@ -45,7 +45,8 @@ class GraphContractTests(unittest.TestCase):
         # Test cycle detection with a temporary same-type test-only registry entry.
         PORTS["test.loop"] = ({"in": "loop/1"}, {"out": "loop/1"})
         try:
-            g = {"schema": GRAPH["schema"], "nodes": [
+            g = {"schema": GRAPH["schema"], "id": GRAPH["id"],
+                 "revision": GRAPH["revision"], "nodes": [
                 {"id": name, "kind": "test.loop", "config": {}, "notes": {"purpose": "test"}}
                 for name in ("a", "b")], "edges": [
                 {"from": {"node": "a", "port": "out"}, "to": {"node": "b", "port": "in"}},
