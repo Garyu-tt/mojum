@@ -1,0 +1,141 @@
+"""CPU-only, opt-in twin fixture: independent PRIVATE journals, no live brain."""
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import math
+from pathlib import Path
+
+from .aquarium import Aquarium, AquariumError, KINDS, MAX_REPLAY_EVENTS, _movement
+from .genesis import sha256, validate_seed
+from .graph import validate as validate_graph
+
+RECEIPT_SCHEMA = "mojum.twin-lab.synthetic-receipt/1"
+
+
+def _seed_for(template, agent_id):
+    clone = copy.deepcopy(template)
+    clone["genome_id"] = agent_id
+    return validate_seed(clone)
+
+
+def _fingerprint(template):
+    # IDs belong to individual actors, not their shared inherited traits.
+    return sha256({key: template[key] for key in ("schema", "revision", "inherited")})
+
+
+def _check_graph(graph):
+    validate_graph(graph)
+    if sorted(node["kind"] for node in graph["nodes"]) != sorted(KINDS):
+        raise AquariumError("twin lab requires the canonical six-node fixture graph")
+
+
+def _new_path(path):
+    path = Path(path)
+    if not path.name or str(path) == ":memory:":
+        raise AquariumError("explicit persistent SQLite path required")
+    if path.is_symlink() or path.exists():
+        raise AquariumError("refusing an existing or symlinked journal")
+    if not path.parent.is_dir():
+        raise AquariumError("journal parent directory does not exist")
+    if any((Path(str(path) + s).exists() or Path(str(path) + s).is_symlink())
+           for s in ("-wal", "-shm")):
+        raise AquariumError("journal has pre-existing SQLite sidecar")
+    return path
+
+
+def _summary(a):
+    return {"agent_id": a.agent_id, "tick": a.tick,
+            "position_m": [a.world.x, a.world.y],
+            "stored_events": a.store.count()}
+
+
+def create_pair(left_db, right_db, left_id, right_id, template, graph):
+    """Initialize independent zero-step organisms, never an existing journal.
+
+    Creation is only atomic *per SQLite database*, not across both files.
+    """
+    template = validate_seed(template)
+    left_seed = _seed_for(template, left_id)
+    right_seed = _seed_for(template, right_id)
+    if left_id == right_id:
+        raise AquariumError("twins need different human-selected IDs")
+    _check_graph(graph)
+    left_db, right_db = _new_path(left_db), _new_path(right_db)
+    if left_db.resolve(strict=False) == right_db.resolve(strict=False):
+        raise AquariumError("twins cannot share the same SQLite file")
+    with Aquarium(left_db, left_seed, graph, agent_id=left_id) as left:
+        with Aquarium(right_db, right_seed, graph, agent_id=right_id) as right:
+            return {
+                "schema": RECEIPT_SCHEMA,
+                "experiment": "separate_synthetic_twins_not_a_developmental_brain",
+                "shared_heritable_sha256": _fingerprint(template),
+                "twins": [_summary(left), _summary(right)],
+                "journals": "two_independent_PRIVATE_SQLite_files_not_secure_replicas",
+            }
+
+
+def mentor_steps(db, agent_id, template, graph, *, ticks, dx, dy):
+    """Advance exactly one existing twin with externally chosen movements."""
+    template = validate_seed(template)
+    seed = _seed_for(template, agent_id)
+    _check_graph(graph)
+    if type(ticks) is not int or not 0 <= ticks <= 1000:
+        raise AquariumError("ticks must be integer within 0..1000")
+    dx, dy = _movement(dx), _movement(dy)
+    if math.hypot(dx, dy) > 1000.0:
+        raise AquariumError("combined displacement exceeds fixture budget")
+    db = Path(db)
+    if db.is_symlink() or not db.is_file():
+        raise AquariumError("mentor requires an existing regular SQLite journal")
+    with Aquarium(db, seed, graph, agent_id=agent_id) as twin:
+        if twin.store.count() + ticks > MAX_REPLAY_EVENTS:
+            raise AquariumError("requested ticks exceed remaining event budget")
+        for _ in range(ticks):
+            twin.step(dx=dx, dy=dy)
+        return {
+            "schema": RECEIPT_SCHEMA,
+            "experiment": "scripted_mentor_not_learned_policy",
+            "shared_heritable_sha256": _fingerprint(template),
+            "twin": _summary(twin),
+            "journal": "PRIVATE_local_SQLite_not_exported",
+        }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Mojum offline synthetic twin lab")
+    root = Path(__file__).resolve().parents[2]
+    commands = parser.add_subparsers(dest="command", required=True)
+    pair = commands.add_parser("pair", help="create two new private local journals")
+    for flag in ("left", "right"):
+        pair.add_argument("--" + flag + "-db", type=Path, required=True)
+        pair.add_argument("--" + flag + "-id", required=True)
+    mentor = commands.add_parser("mentor", help="append scripted steps to one twin")
+    mentor.add_argument("--db", type=Path, required=True)
+    mentor.add_argument("--agent-id", required=True)
+    mentor.add_argument("--ticks", type=int, default=10)
+    mentor.add_argument("--dx", type=float, default=0.02)
+    mentor.add_argument("--dy", type=float, default=0.0)
+    for command in (pair, mentor):
+        command.add_argument("--genome", type=Path,
+                             default=root / "examples/genesis_seed.json")
+        command.add_argument("--graph", type=Path,
+                             default=root / "examples/first_loop.json")
+    args = parser.parse_args()
+    template = json.loads(args.genome.read_text(encoding="utf-8"))
+    graph = json.loads(args.graph.read_text(encoding="utf-8"))
+    try:
+        if args.command == "pair":
+            result = create_pair(args.left_db, args.right_db, args.left_id,
+                                 args.right_id, template, graph)
+        else:
+            result = mentor_steps(args.db, args.agent_id, template, graph,
+                                  ticks=args.ticks, dx=args.dx, dy=args.dy)
+    except (AquariumError, ValueError) as exc:
+        parser.error(str(exc))
+    print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
+
+
+if __name__ == "__main__":
+    main()
