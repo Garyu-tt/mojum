@@ -1,0 +1,17 @@
+{
+  "schema": "mojum.world.room-exact-scalars/1",
+  "width": { "type": "float", "hex": "0x1.2000000000000p+2" },
+  "height": { "type": "int", "value": 4 },
+  "obstacles": [
+    [
+      { "type": "float", "hex": "0x1.0000000000000p+1" },
+      { "type": "int", "value": 1 },
+      { "type": "float", "hex": "0x1.0000000000000p-3" },
+      { "type": "float", "hex": "0x1.0000000000000p+1" }
+    ]
+  ],
+  "start": [
+    { "type": "float", "hex": "0x1.4000000000000p+0" },
+    { "type": "float", "hex": "0x1.4000000000000p+1" }
+  ]
+}
