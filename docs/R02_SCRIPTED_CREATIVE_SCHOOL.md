@@ -15,6 +15,8 @@ PYTHONPATH=src python -m unittest discover -s tests -p 'test_school_runner.py' -
 
 The program refuses to overwrite an existing directory. Files and directories are owner-only where POSIX permissions apply. Do not publish the private events.json or connect the output directly to a public viewer. File permissions and SHA-256 checksums do not establish consent, persistent authentication or protection against malicious same-UID filesystem races.
 
+The CLI validates the artifacts and prepares the manifest before creating the directory. On a write error it removes the files and directory created by that attempt so the same output path can be retried.
+
 Each run produces 5 PRIVATE records: observe → experiment → make → revise → reflect. The make and revise records link artifact bytes to SHA-256, size, revision tick, activity ID, catalog hash, and SCRIPTED_FIXTURE provenance. Art is a 24×24 ASCII PPM image; the deliberately scripted revision improves bilateral pixel mirror symmetry. Music is timing-event JSON in milliseconds; scripted revision reduces sum of absolute errors for four fixed target beats. No sound driver, camera, microphone or physical actuation is touched.
 
 The standalone CLI labels `events.json` as `mojum.school-scripted-run/1` and each record as `mojum.school-scripted-event/1`. These identifiers describe the CLI's artifact and feedback fields, which differ from the lesson API in PR #172. To regenerate outputs from the earlier CLI draft with these identifiers, rerun the same command in a fresh directory.

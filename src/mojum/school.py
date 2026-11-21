@@ -5,6 +5,7 @@ Not a learner, teacher, Noosphere writer, or physical actuator.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -240,22 +241,34 @@ def run_scripted_activity(
 
 
 def write_fixture(run: dict[str, Any], output_dir: str | Path) -> Path:
-    """Write only a brand-new owner-private directory; never overwrite files.
+    """Write a new owner-private directory and roll back on a write error.
 
     No assertion of security against malicious same-UID filesystem races.
     """
-    target = Path(output_dir)
-    target.mkdir(mode=0o700, parents=False, exist_ok=False)
-    for name, payload in sorted(run["artifacts"].items()):
+    artifacts = list(run["artifacts"].items())
+    for name, payload in artifacts:
         if name not in ("baseline.ppm", "revised.ppm", "baseline.json", "revised.json"):
             raise SchoolContractError("unsupported output filename")
-        with (target / name).open("xb") as stream:
-            os.chmod(target / name, 0o600)
-            stream.write(payload)
+        if not isinstance(payload, bytes) or len(payload) > MAX_ARTIFACT_BYTES:
+            raise SchoolContractError("invalid output artifact bytes or size")
     manifest = {key: value for key, value in run.items() if key != "artifacts"}
-    with (target / "events.json").open("xb") as stream:
-        os.chmod(target / "events.json", 0o600)
-        stream.write(_canonical_json(manifest))
+    try:
+        manifest_bytes = _canonical_json(manifest)
+    except (TypeError, ValueError, RecursionError) as error:
+        raise SchoolContractError("school output manifest cannot be encoded as UTF-8 JSON") from error
+    files = sorted(artifacts) + [("events.json", manifest_bytes)]
+
+    target = Path(output_dir)
+    with ExitStack() as rollback:
+        target.mkdir(mode=0o700, parents=False, exist_ok=False)
+        rollback.callback(target.rmdir)
+        for name, payload in files:
+            path = target / name
+            with path.open("xb") as stream:
+                rollback.callback(path.unlink, missing_ok=True)
+                os.chmod(path, 0o600)
+                stream.write(payload)
+        rollback.pop_all()
     return target
 
 

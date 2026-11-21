@@ -1,13 +1,16 @@
 """Executable, bounded scripted school tests (not learner-quality tests)."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.school import (
+    MAX_ARTIFACT_BYTES,
     MAX_CATALOG_BYTES,
     SchoolContractError,
     load_catalog,
@@ -161,6 +164,41 @@ class SchoolRunnerTests(unittest.TestCase):
             if sys.platform != "win32":
                 self.assertEqual(dest.stat().st_mode & 0o777, 0o700)
                 self.assertTrue(all(p.stat().st_mode & 0o777 == 0o600 for p in dest.iterdir()))
+
+    def test_write_fixture_validates_output_before_creating_directory(self):
+        run = run_scripted_activity(self.catalog, "music")
+        invalid_runs = {
+            "filename": {**run, "artifacts": {"unexpected.json": b"{}"}},
+            "payload-type": {**run, "artifacts": {"baseline.json": "{}"}},
+            "payload-size": {**run, "artifacts": {"baseline.json": b"x" * (MAX_ARTIFACT_BYTES + 1)}},
+            "manifest": {**run, "feedback": object()},
+        }
+        with tempfile.TemporaryDirectory() as dirname:
+            for label, invalid in invalid_runs.items():
+                dest = Path(dirname) / label
+                with self.subTest(label=label):
+                    with self.assertRaises(SchoolContractError):
+                        write_fixture(invalid, dest)
+                    self.assertFalse(dest.exists())
+
+    def test_failed_manifest_write_leaves_directory_available_for_retry(self):
+        run = run_scripted_activity(self.catalog, "music")
+        real_chmod = os.chmod
+        with tempfile.TemporaryDirectory() as dirname:
+            dest = Path(dirname) / "output"
+
+            def fail_manifest(path, mode):
+                if path == dest / "events.json":
+                    raise PermissionError("simulated manifest permission failure")
+                real_chmod(path, mode)
+
+            with patch("mojum.school.os.chmod", side_effect=fail_manifest):
+                with self.assertRaisesRegex(PermissionError, "simulated manifest"):
+                    write_fixture(run, dest)
+            self.assertFalse(dest.exists())
+            self.assertEqual(write_fixture(run, dest), dest)
+            self.assertEqual(sorted(path.name for path in dest.iterdir()),
+                             ["baseline.json", "events.json", "revised.json"])
 
     def test_real_cli_subprocess(self):
         with tempfile.TemporaryDirectory() as dirname:
