@@ -1,31 +1,12 @@
 # Merge acceptance policy (issue #415)
 
-Automated and agent merges to `main` must never rely on a best-effort poll.
+An agent may merge to `main` only after an exact-revision, fail-closed acceptance. A best-effort CI poll is not sufficient.
 
-1. Resolve the PR's current head SHA immediately before merging
-   (`gh pr view N --json headRefOid`).
-2. Inspect the checks **for the pinned commit**, not just the mutable
-   pull-request UI. With `REPO=owner/name` and `SHA=<headRefOid>`, query
-   `gh api --paginate "repos/$REPO/commits/$SHA/check-runs"` and
-   `gh api "repos/$REPO/commits/$SHA/status"` (classic statuses); verify
-   the returned `head_sha` belongs to `SHA`. For Actions workflows whose
-   check results are associated with a synthetic PR merge ref, also inspect
-   the workflow-run metadata and require its **source** `head_sha` to match
-   `SHA`; verify the run's tested base is still relevant. `gh pr checks N`
-   is supplementary, never the only evidence of SHA identity.
-3. Confirm that the required Aquarium regression, Motor Gate and Mesh
-   contract contexts are **present and successful** for the exact head.
-   Zero checks, missing expected contexts, pending, queued, in-progress,
-   cancelled, timed-out or failed are blockers, not vacuous success. A skipped
-   required check cannot be waived in PR text. A skipped *non-required* check
-   needs an explicit documented waiver.
-4. Re-read the PR head and base immediately before merging. Require the head
-   to still equal `SHA`, the base to still be `main`, and the comparison to
-   remain merge-compatible; if `main` advanced, re-evaluate integration and
-   applicable checks. Merge with `gh pr merge N --squash --match-head-commit
-   <sha>` so a concurrent source push is rejected.
-5. Never bypass rulesets, force push, or open and merge your own fix in the
-   same cycle before its checks finish. Leave it for a later review pass.
-6. Repository-level enforcement (a ruleset requiring Aquarium regression,
-   Motor Gate and Mesh contract checks) is an owner setting; this note is the
-   interim agent-side policy only and does not replace it.
+1. Pin the PR number, `headRefOid`, `baseRefOid`, destination branch (`main`) and draft state. Review the actual diff and the relevant compatibility contract. Check for unresolved review blockers.
+2. Identify the commit actually tested by each required check. GitHub Actions PR jobs can report on the synthetic `refs/pull/N/merge` commit rather than the PR head. If so, fetch that merge commit and verify its parents include the pinned head and pinned base; otherwise require its check-run `head_sha` to equal the pinned PR head SHA. Never combine a stale merge result with a newer head/base.
+3. Query check runs and suites for those exact SHA(s), for example via `gh api repos/OWNER/REPO/commits/SHA/check-runs`. Verify the returned `head_sha` for each check and compare actual check names against the repository's required set. At minimum the Aquarium regression, Motor Gate and Mesh contract workflow families must be present and successful. Zero checks, absent contexts or unresolved mapping from workflow to check-run names block merge.
+4. Require the latest attempt of every applicable required context to have `conclusion=success`. Queued, pending, in-progress, failed, timed-out, cancelled, action-required and skipped required checks all block. An ad hoc PR comment or waiver cannot override a required branch-protection check. Non-required skipped checks need an explicit documented reason.
+5. Immediately before merging, re-read the current PR head and base SHA, target branch, mergeability and checks. If either SHA changed since the verified run, restart acceptance against the new test commit. Merge using `gh pr merge N --squash --match-head-commit SHA`, or the API's equivalent expected-head-SHA guard. Do not merge a Draft or an unresolved incompatible branch.
+6. Never bypass a ruleset, force-push `main`, suppress a failing release gate or merge an unverified fix in the same cycle. If checks are not yet complete, switch to another PR. Keep an auditable record of accepted SHA, required check identities and merge commit.
+
+Repository rulesets should enforce required checks independently of this agent policy. Ruleset configuration and separate audits of #394/#406/#410 remain open work under #415; this document alone cannot enforce branch protection.
