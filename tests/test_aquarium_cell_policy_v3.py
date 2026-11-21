@@ -169,6 +169,32 @@ class VersionedCellV3MemoryTests(unittest.TestCase):
         alias.last_seen_at.clear()
         self.assertEqual(m.snapshot(), checkpoint)
 
+    def test_blocked_rest_cannot_forge_an_unreloadable_v3_snapshot(self):
+        # A cell whose four moves were each measured blocked once forces
+        # decide() to choose "rest". from_snapshot() rejects any blocked rest
+        # count, so observe() must refuse the outcome instead of writing a
+        # policy state that can never be replayed.
+        all_moves_blocked = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "last_tick": 3, "updates": 4,
+            "records": {"1:1": {
+                "x+": [1, 1], "y+": [1, 1], "x-": [1, 1], "y-": [1, 1],
+            }},
+            "last_seen_at": {"1:1": 3},
+            "evictions": 0, "forgotten_observations": 0,
+        }
+        model = CellExplorerV3.from_snapshot(all_moves_blocked)
+        cue = Proprioception(4, "0"*64, STEP_METERS, STEP_METERS, False)
+        intent = model.decide(cue)
+        self.assertEqual(intent["action"], "rest")
+        frozen = model.snapshot()
+        with self.assertRaisesRegex(CellV3Error, "blocked rest"):
+            model.observe(cue, intent, True)
+        self.assertEqual(model.snapshot(), frozen)
+        self.assertEqual(
+            CellExplorerV3.from_snapshot(model.snapshot()).snapshot(), frozen,
+        )
+
     def test_strict_v3_snapshot_rejects_impossible_tick_and_eviction_history(self):
         # One observation per tick means live cells cannot share a last-seen
         # tick, the newest stamp must be the current tick, and an eviction

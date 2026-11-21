@@ -899,6 +899,16 @@ class CheckOutcomeTests(unittest.TestCase):
         check = CheckOutcome(name="test", status="COMPLETED", workflow="Aquarium")
         self.assertEqual(check.label, "Aquarium / test")
 
+    def test_pull_request_facts_preserves_original_positional_field_order(self):
+        check = CheckOutcome(name="test", status="COMPLETED")
+        snapshot = PullRequestFacts(
+            HEAD, "main", (check,), 419, "feature/x", False, "MERGEABLE", "CLEAN"
+        )
+        self.assertEqual(snapshot.checks, (check,))
+        self.assertEqual(snapshot.number, 419)
+        self.assertIsNone(snapshot.base_sha)
+        self.assertIsNone(snapshot.current_base_sha)
+
 
 if __name__ == "__main__":
     unittest.main()

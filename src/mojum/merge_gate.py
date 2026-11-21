@@ -117,14 +117,14 @@ class CheckOutcome:
 class PullRequestFacts:
     head_sha: str
     base_ref: str
-    base_sha: str | None = None
-    current_base_sha: str | None = None
     checks: tuple[CheckOutcome, ...] = ()
     number: int | None = None
     head_ref: str | None = None
     is_draft: bool = False
     mergeable: str = "UNKNOWN"
     merge_state_status: str | None = None
+    base_sha: str | None = None
+    current_base_sha: str | None = None
 
 
 @dataclass(frozen=True)
