@@ -55,6 +55,35 @@ class InstallableAquariumTests(unittest.TestCase):
             self.assertEqual(first["status"], "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
             self.assertTrue(db.is_file())
 
+    def test_cli_uses_selected_genome_identity_on_start_and_resume(self):
+        seed = json.loads(files("mojum").joinpath("data", "genesis_seed.json").read_text(encoding="utf-8"))
+        seed["genome_id"] = "portable-fixture-copy"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            genome = root / "custom-seed.json"
+            genome.write_text(json.dumps(seed), encoding="utf-8")
+            env = {**os.environ, "PYTHONPATH": str(SOURCE)}
+            command = [sys.executable, "-m", "mojum.aquarium",
+                       "--db", str(root / "custom.sqlite3"), "--neural-mode", "disabled"]
+
+            def run(ticks):
+                return json.loads(subprocess.check_output(
+                    [*command, "--genome", str(genome), "--ticks", str(ticks)],
+                    cwd=root, env=env, text=True, timeout=60))
+
+            first = run(2)
+            resumed = run(1)
+            self.assertEqual(first["agent_id"], seed["genome_id"])
+            self.assertEqual(resumed["agent_id"], first["agent_id"])
+            self.assertEqual((resumed["tick"], resumed["stored_events"]), (3, 4))
+
+            default_genome = subprocess.run(
+                [*command, "--ticks", "1"], cwd=root, env=env, text=True,
+                capture_output=True, timeout=60)
+            self.assertNotEqual(default_genome.returncode, 0)
+            self.assertIn("database schema or agent owner does not match", default_genome.stderr)
+            self.assertEqual(run(0), resumed)
+
 
 if __name__ == "__main__":
     unittest.main()
