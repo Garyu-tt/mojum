@@ -56,6 +56,26 @@ class SpartanTests(unittest.TestCase):
         self.assertIsNone(claim(self.db, 4, 203, 30))
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_voluntary_requeue_stops_at_third_attempt(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        for attempt in range(1, 4):
+            worker = attempt
+            claimed = claim(self.db, worker, 110 + attempt, 30)
+            self.assertEqual(claimed["attempts"], attempt)
+            self.assertTrue(finish(self.db, worker, "a", "queued", 112 + attempt))
+            if attempt < 3:
+                self.assertEqual(status(self.db)["states"]["queued"], 1)
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+        self.assertEqual(status(self.db)["states"]["queued"], 0)
+        self.assertIsNone(claim(self.db, 4, 120))
+
+    def test_legacy_queued_exhausted_task_is_never_claimed(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        # An old coordinator could leave an exhausted voluntary requeue queued.
+        self.db.execute("UPDATE tasks SET attempts=3 WHERE id='a'")
+        self.assertIsNone(claim(self.db, 1, 110))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+
     def test_review_requires_artifact_and_no_self_accept(self):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         claim(self.db, 1, 110)
