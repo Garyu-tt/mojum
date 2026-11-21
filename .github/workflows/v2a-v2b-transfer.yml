@@ -18,13 +18,17 @@ permissions:
 
 jobs:
   immutable-source-transfer:
-    name: fresh SQLite migration and fail-closed tests (${{ matrix.python-version }})
-    runs-on: ubuntu-24.04
+    name: fresh SQLite migration and fail-closed tests (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-24.04]
         python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - name: Checkout candidate new-journal converter
         uses: actions/checkout@v4
@@ -37,15 +41,24 @@ jobs:
           ref: 8d2eaf234c09177ae0b92dfef4bb41950529c912
           path: sources/policy112
           persist-credentials: false
+      - name: Checkout exact original #115 v2B writer
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: b755da530634c0d6b8866107e7b4e9e325839175
+          path: sources/policy115
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "${{ matrix.python-version }}"
-      - name: Verify converted experience / never overwrite a source DB
+      - name: Verify converted experience and original v2B resume
+        shell: bash
         env:
           PYTHONPATH: src
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONWARNINGS: always::ResourceWarning
           MOJUM_ARCHIVE112_SOURCE: sources/policy112
+          MOJUM_ARCHIVE115_SOURCE: sources/policy115
         run: |
           set -o pipefail
           python -m unittest discover -s tests -p test_v2a_v2b_migration.py -v 2>&1 | tee transfer-qa.log

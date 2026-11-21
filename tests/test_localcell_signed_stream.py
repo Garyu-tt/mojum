@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS
+from mojum.aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS, V2B_MODE, V2B_WIRE_MODE
 from mojum.cell_policy_v2 import SCHEMA as V2_SCHEMA
 from mojum.cell_policy_v3 import SCHEMA as V3_SCHEMA
 from mojum.developmental_policy import SCHEMA as LEGACY_SCHEMA
@@ -98,7 +98,7 @@ class SignedVersionedLocalCellQA(unittest.TestCase):
 
     def test_policy_pinning_legacy_v2_v3_and_hmac_mismatch(self):
         schemas = {"legacy": LEGACY_SCHEMA,
-                   "local_cell_v2": V2_SCHEMA,
+                   V2B_MODE: V2_SCHEMA,
                    "local_cell_v3": V3_SCHEMA}
         for selected in schemas:
             with self.subTest(selected=selected):
@@ -122,8 +122,8 @@ class SignedVersionedLocalCellQA(unittest.TestCase):
                     if selected == "legacy":
                         self.assertNotIn("developmental_policy", q.manifest)
                     else:
-                        self.assertEqual(q.manifest["developmental_policy"],
-                                         selected)
+                        wire_mode = V2B_WIRE_MODE if selected == V2B_MODE else selected
+                        self.assertEqual(q.manifest["developmental_policy"], wire_mode)
                 with Aquarium(
                     location, SEED, GRAPH, room=Room(.16, .16),
                     start=(.16, .16), exploration_mode="goal_free",

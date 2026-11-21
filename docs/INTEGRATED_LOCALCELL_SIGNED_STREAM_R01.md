@@ -13,7 +13,7 @@ It is deliberately not a merge/rebase of the two peer-owned histories.
   `after_seq` tail read, 100,000 *total events* cap, retained CAS
   checks and HMAC cached-state verification remain from #101.
 - The default `legacy` manifest stays exactly as in #101.
-  `local_cell_v2` and `local_cell_v3` are explicit opt-in modes
+  `local_cell_v2b` and `local_cell_v3` are explicit opt-in modes
   pinned in the **new PRIVATE journal bootstrap**. The policy schema
   is also recorded per `developmental` frame.
 - The signed snapshot loader dispatches through the exact policy

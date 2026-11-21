@@ -151,7 +151,7 @@ class ExactRoomSQLiteTests(unittest.TestCase):
         self.root = Path(tmp.name)
         self.db = self.root / "synthetic.sqlite3"
 
-    def open(self, room, mode, *, policy="local_cell_v2"):
+    def open(self, room, mode, *, policy="local_cell_v2b"):
         return Aquarium(
             self.db, SEED, GRAPH, room=room,
             exploration_mode="goal_free",
@@ -238,7 +238,7 @@ class ExactRoomSQLiteTests(unittest.TestCase):
             sys.executable, "-m", "mojum.aquarium",
             "--db", str(self.db), "--ticks", "2",
             "--exploration-mode", "goal_free",
-            "--developmental-policy", "local_cell_v2",
+            "--developmental-policy", "local_cell_v2b",
             "--room-numeric-contract", "typed_v1",
         ]
         run = subprocess.run(command, cwd=ROOT, env=env,
@@ -250,7 +250,7 @@ class ExactRoomSQLiteTests(unittest.TestCase):
                          "mojum.aquarium.bootstrap/2")
         absent_flag = subprocess.run(
             command[:7] + ["--ticks", "0", "--exploration-mode", "goal_free",
-                           "--developmental-policy", "local_cell_v2"],
+                           "--developmental-policy", "local_cell_v2b"],
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(absent_flag.returncode, 0)
         with self.open(Room(4, 4, ((2, 1, .1, 2),)), "typed_v1") as q:

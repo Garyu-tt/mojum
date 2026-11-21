@@ -42,7 +42,11 @@ SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 EXACT_ROOM_MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/2"
 MAX_REPLAY_EVENTS = 100_000  # Still bounded; full replay is CPU-linear.
-ARCHIVE_MODE = "local_cell_v2_a_archive"  # Identifies #112 ABI; never creates a new journal.
+ARCHIVE_MODE = "local_cell_v2_a_archive"  # Historical #112 ABI, read-only.
+V2B_MODE = "local_cell_v2b"
+V2B_WIRE_MODE = "local_cell_v2"  # Existing #115 manifest tag and resume alias.
+WRITABLE_POLICIES = ("legacy", V2B_MODE, "local_cell_v3", V2B_WIRE_MODE)
+_V2B_EXISTING_REQUIRED = "local_cell_v2 requires an existing v2B journal. Use local_cell_v2b to create one."
 _OMITTED_MOVEMENT = object()  # Distinguish omitted dx/dy from explicit None.
 KINDS = (
     "genesis.seed", "body.heartbeat", "sensory.interoception",
@@ -98,9 +102,12 @@ class Aquarium:
             raise AquariumError("neural_mode must be shadow or disabled")
         if exploration_mode not in ("scripted", "goal_free"):
             raise AquariumError("exploration_mode must be scripted or goal_free")
-        if type(developmental_policy) is not str or developmental_policy not in (
-                "legacy", "local_cell_v2", "local_cell_v3", ARCHIVE_MODE):
+        if (type(developmental_policy) is not str
+                or developmental_policy not in (*WRITABLE_POLICIES, ARCHIVE_MODE)):
             raise AquariumError("unknown versioned developmental policy")
+        legacy_v2b_selector = developmental_policy == V2B_WIRE_MODE
+        if legacy_v2b_selector:
+            developmental_policy = V2B_MODE
         if developmental_policy != "legacy" and exploration_mode != "goal_free":
             raise AquariumError("versioned local-cell requires goal_free exploration")
         if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe"):
@@ -189,7 +196,7 @@ class Aquarium:
         self.world = initial_state(self.room, *self.start)
         self.explorer = (
             (CellExplorerV3() if developmental_policy == "local_cell_v3"
-             else CellExplorer() if developmental_policy == "local_cell_v2"
+             else CellExplorer() if developmental_policy == V2B_MODE
              else ArchivedV2AExplorer() if self._read_only_archive
              else Explorer()) if exploration_mode == "goal_free" else None
         )
@@ -203,7 +210,7 @@ class Aquarium:
         if self.explorer is not None:
             self.manifest["developmental_schema"] = (
                 CELL_V3_SCHEMA if developmental_policy == "local_cell_v3"
-                else CELL_V2_SCHEMA if developmental_policy == "local_cell_v2"
+                else CELL_V2_SCHEMA if developmental_policy == V2B_MODE
                 else ARCHIVED_V2A_SCHEMA if self._read_only_archive
                 else DEVELOPMENT_SCHEMA
             )
@@ -214,8 +221,11 @@ class Aquarium:
                 self.manifest["motor_policy"] = "local_cell_v2"
                 self.manifest["motor_policy_schema"] = ARCHIVED_V2A_SCHEMA
             elif developmental_policy != "legacy":
-                # Explicit new journal only; original bootstrap is unchanged.
-                self.manifest["developmental_policy"] = developmental_policy
+                # Keep the original v2B SQLite wire tag. The explicit runtime
+                # selector does not change the manifest read by original #115.
+                self.manifest["developmental_policy"] = (
+                    V2B_WIRE_MODE if developmental_policy == V2B_MODE else developmental_policy
+                )
         if self.sensory_bridge is not None:
             self.manifest["sensory_mode"] = "toy_probe"
             self.manifest["sensory_schema"] = SENSE_SCHEMA
@@ -226,6 +236,8 @@ class Aquarium:
             # private journals must fail closed rather than silently replay
             # historical sensory frames under a different physical model.
             self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
+        if developmental_policy == V2B_MODE:
+            self._preflight_v2b(db_path, require_existing=legacy_v2b_selector)
         self.store = LocalNoosphere(
             db_path, agent_id,
             read_only=(self._read_only_archive or self._read_only_existing))
@@ -239,11 +251,24 @@ class Aquarium:
             if self._read_only_existing and self._committed_event_count == 0:
                 raise AquariumError("read-only typed journal requires existing bootstrap")
             if self._committed_event_count == 0:
+                if legacy_v2b_selector:
+                    raise AquariumError(_V2B_EXISTING_REQUIRED)
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
             self._replay(external_expected_head, signed_state=signed_state)
         except BaseException:
             self.store.close()
             raise
+
+    def _preflight_v2b(self, db_path, *, require_existing):
+        path = Path(db_path)
+        if path.is_file() and path.stat().st_size:
+            with LocalNoosphere(path, self.agent_id, read_only=True) as candidate:
+                first = candidate.dataset(include_nonpublic=True, limit=1)["projection"]["items"]
+                if first:
+                    self._verify_bootstrap(first[0]["event"])
+                    return
+        if require_existing:
+            raise AquariumError(_V2B_EXISTING_REQUIRED)
 
     def close(self):
         self.store.close()
@@ -552,6 +577,11 @@ class Aquarium:
         }
         return save_snapshot(self._snapshot_file, self._snapshot_key_file, state)
 
+    def _verify_bootstrap(self, event):
+        if event != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
+                                 0, self.graph_sha256):
+            raise AquariumError("aquarium seed, room, graph or clock mismatch")
+
     def _replay(self, external_expected_head, *, signed_state=None):
         # Still audit the FULL SQLite journal hash chain and independent head.
         # Only deterministic SIMULATION of the authenticated prefix is
@@ -584,9 +614,7 @@ class Aquarium:
             replayed_head = entry["event_hash"]
             event = entry["event"]
             if seen == 1:
-                if event != self._record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
-                                         0, self.graph_sha256):
-                    raise AquariumError("aquarium seed, room, graph or clock mismatch")
+                self._verify_bootstrap(event)
                 continue
             if event["visibility"] != "PRIVATE" or event["source"] != "mojum.aquarium.fixture":
                 raise AquariumError("unexpected journal ownership or visibility")
@@ -669,8 +697,8 @@ def main():
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
     parser.add_argument("--developmental-policy",
-                        choices=("legacy", "local_cell_v2", "local_cell_v3", ARCHIVE_MODE),
-                        default="legacy", help="new explicit policy-pinned SQLite journal")
+                        choices=(*WRITABLE_POLICIES, ARCHIVE_MODE), default="legacy",
+                        help="local_cell_v2b creates v2B journals. local_cell_v2 resumes existing v2B")
     parser.add_argument("--room-numeric-contract",
                         choices=("legacy", "typed_v1"), default="legacy",
                         help="opt-in exact int/float geometry manifest for NEW journals")

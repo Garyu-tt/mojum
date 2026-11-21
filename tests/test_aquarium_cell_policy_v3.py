@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V2B_MODE
 from mojum.cell_policy_v2 import CellExplorer
 from mojum.cell_policy_v3 import (
     CellExplorerV3, CellV3Error, MAX_CELLS, SCHEMA, LEARNING_SCHEMA,
@@ -196,7 +196,7 @@ class VersionedV3SQLiteTests(unittest.TestCase):
             self.assertEqual(before["developmental_state"]["updates"], 600)
             self.assertEqual(before["developmental_state"]["evictions"], 0)
             self.assertEqual(before["developmental_state"]["schema"], SCHEMA)
-        for other in ("legacy", "local_cell_v2"):
+        for other in ("legacy", V2B_MODE):
             with self.subTest(policy=other):
                 with self.assertRaisesRegex(
                     AquariumError, "seed, room, graph or clock",
@@ -212,7 +212,7 @@ class VersionedV3SQLiteTests(unittest.TestCase):
             self.assertEqual(restart.checkpoint(), final)
 
     def test_v2_journal_never_reinterpreted_as_v3(self):
-        with self.open("local_cell_v2") as v2:
+        with self.open(V2B_MODE) as v2:
             self.assertNotIn("evictions", v2.explorer.snapshot())
             self.assertEqual(v2.manifest["developmental_policy"],
                              "local_cell_v2")
@@ -224,7 +224,7 @@ class VersionedV3SQLiteTests(unittest.TestCase):
         ):
             with self.open("local_cell_v3"):
                 pass
-        with self.open("local_cell_v2") as reopened:
+        with self.open(V2B_MODE) as reopened:
             self.assertEqual(reopened.checkpoint(), checkpoint)
 
     def test_v3_durable_append_before_ram_adoption_recovers_once(self):
