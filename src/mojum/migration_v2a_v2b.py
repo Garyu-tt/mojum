@@ -74,12 +74,24 @@ def _source_manifest(path):
                 or type(config["start"]) is not list
                 or len(config["start"]) != 2):
             raise TransferError("unsupported room bootstrap contract")
-        room = Room(
-            float(config["width"]), float(config["height"]),
-            tuple(tuple(float(v) for v in rectangle)
-                  for rectangle in config["obstacles"]),
-        )
-        start = tuple(float(v) for v in config["start"])
+        # R0.13/R0.14 manifests coerce width/height to floats and preserve
+        # obstacle numbers as provided. The *exact* legacy room revision,
+        # however, hashes original Python int/float representations.
+        # Reconstructing arbitrary numeric room values as floats silently
+        # changes that revision even when the geometry looks identical.
+        # Until the bootstrap pins exact scalar types, support ONLY the
+        # canonical original built-in point-room fixture, byte-for-byte.
+        room = Room(4, 4, ((2, 1, .1, 2),))
+        start = (1.0, 2.0)
+        expected_room = {
+            "width": 4.0, "height": 4.0,
+            "obstacles": [[2, 1, 0.1, 2]],
+            "start": [1.0, 2.0],
+        }
+        if config != expected_room:
+            raise TransferError(
+                "room numeric scalar types are not preserved in v2A bootstrap; "
+                "only canonical default point-room is safely transferable")
         agent_id = manifest["agent_id"]
         dt_ns = manifest["dt_ns"]
         neural_mode = manifest["neural_mode"]
