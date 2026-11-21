@@ -109,11 +109,12 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
         )
     events_needed = (aquarium.required_events_for_steps(ticks)
                      if is_v4 else ticks)
-    if aquarium.store.count() + events_needed > MAX_REPLAY_EVENTS:
+    limit = getattr(aquarium, "journal_limit", MAX_REPLAY_EVENTS)
+    if aquarium.store.count() + events_needed > limit:
         raise PortableHostError(
-            "requested ticks exceed bounded %d-event source journal budget; "
+            "requested ticks exceed bounded %d-event selected source budget; "
             "signed snapshot caching does not remove this hard limit"
-            % MAX_REPLAY_EVENTS
+            % limit
         )
 
     clock = time.monotonic if monotonic is None else monotonic
@@ -158,6 +159,10 @@ def main(argv=None):
                         choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
                         default="legacy",
                         help="version-pin motor policy in a NEW PRIVATE journal")
+    parser.add_argument("--journal-backend",
+                        choices=("legacy", "segmented"), default="legacy",
+                        help="opt-in new segmented PRIVATE SQLite source")
+    parser.add_argument("--journal-segment-size", type=int, default=4096)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
     parser.add_argument("--expected-head",
@@ -173,6 +178,10 @@ def main(argv=None):
         validate_plan(args.ticks, args.interval_ms)
     except PortableHostError as exc:
         parser.error(str(exc))
+    if args.journal_backend == "segmented" and args.developmental_policy != "local_cell_v4":
+        parser.error("segmented source requires explicit local_cell_v4")
+    if not 64 <= args.journal_segment_size <= 8192:
+        parser.error("--journal-segment-size must be in 64..8192")
     # Read and validate inputs before any new SQLite bootstrap is possible.
     seed = json.loads(args.genome.read_text(encoding="utf-8"))
     graph = json.loads(args.graph.read_text(encoding="utf-8"))
@@ -185,6 +194,8 @@ def main(argv=None):
             sensory_mode=args.sensory_mode,
             neural_mode=args.neural_mode,
             developmental_policy=args.developmental_policy,
+            journal_backend=args.journal_backend,
+            journal_segment_size=args.journal_segment_size,
             external_expected_head=args.expected_head,
             replay_snapshot_file=args.snapshot_file,
             replay_snapshot_key_file=args.snapshot_key_file,
