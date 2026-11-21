@@ -38,23 +38,39 @@ def _read_small_source(path: Path) -> str:
 
 
 def standalone_html(*, html_path=HTML, js_path=JS) -> bytes:
-    """Compile exact adjacent JS into one portable HTML, without HTML eval."""
-    html = _read_small_source(Path(html_path))
-    js = _read_small_source(Path(js_path))
+    """Bundle all known adjacent scripts, with no remaining external JS."""
+    import re
+
+    template = Path(html_path)
+    html = _read_small_source(template)
+    scripts = [(SCRIPT_TAG, Path(js_path))]
     if html.count(SCRIPT_TAG) != 1:
         raise PackagingError("expected exactly one local classic core script tag")
-    if "</script" in js.lower() or "<!--" in js:
-        raise PackagingError("embedded JavaScript contains an unsafe HTML delimiter")
-    if 'MojumRoomDesignerCore' not in js:
-        raise PackagingError("wrong room editor JavaScript source")
-    # The editor's own script is kept in HTML unchanged; only the adjacent
-    # dependency is inlined. The result runs via file:// without file fetches.
-    bundled = html.replace(
-        SCRIPT_TAG,
-        "<script>\n" + js.rstrip() + "\n</script>",
-        1,
-    )
-    if SCRIPT_TAG in bundled:
+
+    # Optional modules landed on the parent editor branch after this child
+    # was created. Packaging only core.js would yield a broken single-file
+    # artifact once the branches were combined.
+    for name in ("room_designer_history.js", "room_walk_preview.js"):
+        tag = '<script src="./' + name + '"></script>'
+        if tag in html:
+            scripts.append((tag, template.parent / name))
+
+    # Never silently publish a "standalone" page retaining another script
+    # dependency (including unknown, duplicated or malformed source tags).
+    external = re.findall(r"<script\\b[^>]*\\bsrc\\b[^>]*>", html, flags=re.I)
+    if sorted(external) != sorted(tag for tag, _ in scripts):
+        raise PackagingError("unexpected or duplicate external room script dependency")
+
+    bundled = html
+    for tag, source in scripts:
+        js = _read_small_source(source)
+        if "</script" in js.lower() or "<!--" in js:
+            raise PackagingError("embedded JavaScript contains an unsafe HTML delimiter")
+        if tag == SCRIPT_TAG and "MojumRoomDesignerCore" not in js:
+            raise PackagingError("wrong room editor JavaScript source")
+        # Keep browser execution order identical to the adjacent scripts.
+        bundled = bundled.replace(tag, "<script>\n" + js.rstrip() + "\\n</script>", 1)
+    if re.search(r"<script\\b[^>]*\\bsrc\\b[^>]*>", bundled, flags=re.I):
         raise PackagingError("room editor still requires a sibling script")
     if len(bundled.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
         raise PackagingError("single file exceeds bounded portable HTML budget")
