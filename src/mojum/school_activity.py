@@ -61,7 +61,14 @@ def load_catalog(path):
 
 
 def _nonempty(value, *, limit=160):
-    return isinstance(value, str) and 0 < len(value.strip()) <= limit and not any(ord(c) < 32 for c in value)
+    if (not isinstance(value, str) or not 0 < len(value.strip()) <= limit
+            or any(ord(c) < 32 for c in value)):
+        return False
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeError:
+        return False
+    return True
 
 
 def validate_catalog(document):
@@ -104,6 +111,18 @@ def validate_catalog(document):
             raise SchoolError("duplicate/invalid cross-subject reference")
         if section["id"] in refs or not set(refs) <= ids:
             raise SchoolError("unknown/self cross-subject reference")
+    # In-memory catalogs must satisfy the same bounded, lossless UTF-8 JSON
+    # wire contract as files. Otherwise an extra field containing a tuple,
+    # NaN, surrogate or cycle can survive validation but fail at persistence.
+    try:
+        encoded = json.dumps(document, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":"), allow_nan=False).encode("utf-8")
+        if json.loads(encoded) != document:
+            raise SchoolError("catalog cannot round-trip losslessly as JSON")
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise SchoolError("catalog is not strict UTF-8 JSON") from exc
+    if len(encoded) > MAX_CATALOG_BYTES:
+        raise SchoolError("catalog byte budget exceeded")
     return document
 
 
