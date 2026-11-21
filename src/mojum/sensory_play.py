@@ -26,7 +26,8 @@ MODEL_SCHEMA = "mojum.sensory-curiosity.association/1"
 SENSE_SCHEMA = "mojum.sensor.synthetic-near-field/1"
 ACTIONS = ("rest", "x+", "x-", "y+", "y-", "probe")
 SEED = 2029
-MAX_EVENTS = 4000
+MAX_EVENTS = 4000  # Standalone SensoryPlay journal remains independently bounded.
+MAX_ASSOCIATION_UPDATES = 100000  # Canonical Aquarium may hold more history.
 MAX_CUES = 128
 
 
@@ -193,7 +194,7 @@ class ContactAssociations:
                 or set(snapshot) != {"schema", "table", "updates"}
                 or snapshot["schema"] != MODEL_SCHEMA
                 or type(snapshot["updates"]) is not int
-                or not 0 <= snapshot["updates"] <= MAX_EVENTS
+                or not 0 <= snapshot["updates"] <= MAX_ASSOCIATION_UPDATES
                 or not isinstance(snapshot["table"], dict)
                 or len(snapshot["table"]) > MAX_CUES):
             raise CuriosityError("invalid developmental model snapshot")
