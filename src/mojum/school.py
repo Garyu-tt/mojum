@@ -316,6 +316,15 @@ def _verify_scripted_export(run: Any) -> None:
     ]
     if events != expected_events or run["feedback"] != evidence[-1]:
         raise SchoolContractError("scripted events or feedback do not match artifacts")
+    # Python equality treats False == 0 and 16.0 == 16. A canonical wire
+    # comparison additionally pins JSON scalar types before any file is made.
+    try:
+        actual_wire = _canonical_json({"events": events, "feedback": run["feedback"]})
+        expected_wire = _canonical_json({"events": expected_events, "feedback": evidence[-1]})
+    except (TypeError, ValueError, RecursionError) as error:
+        raise SchoolContractError("invalid scripted event encoding") from error
+    if actual_wire != expected_wire:
+        raise SchoolContractError("scripted event scalar types were changed")
 
 
 def write_fixture(run: dict[str, Any], output_dir: str | Path) -> Path:
