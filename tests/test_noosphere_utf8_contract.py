@@ -7,6 +7,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 
@@ -77,13 +78,13 @@ class NoosphereUnicodeContractTests(unittest.TestCase):
                     self.store.dataset(**kwargs)
         self.assertEqual((self.store.head(), self.store.count()), before)
 
-    def test_deeply_nested_payload_is_not_raw_recursion_error(self):
-        nested = {"leaf": True}
-        for _ in range(1200):
-            nested = {"deeper": nested}
+    def test_encoder_recursion_error_is_bounded_contract_failure(self):
+        # CPython 3.13 may serialize >1000 JSON levels successfully:
+        # recursion depth is not a portable invalid-input fixture.
+        # Force the actual encoder boundary to fail on every supported Python.
         changed = event()
-        changed["payload"] = nested
-        self.assert_rejected_without_append(changed)
+        with patch("mojum.noosphere.json.dumps", side_effect=RecursionError("test depth limit")):
+            self.assert_rejected_without_append(changed)
 
     def test_deeply_nested_list_is_rejected_before_sqlite_append(self):
         nested = "leaf"
