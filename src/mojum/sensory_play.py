@@ -235,6 +235,10 @@ class ContactAssociations:
             value = measurement.get("measured_deflection")
             if not _finite(value) or not 0 <= value <= 1 or prediction["cue"] is None:
                 raise CuriosityError("invalid or unsupported contact response")
+            # Keep every learned state loadable by from_snapshot(): refuse the
+            # update (without mutating RAM) instead of producing updates > MAX_EVENTS.
+            if self.updates >= MAX_EVENTS:
+                raise CuriosityError("sensory association update budget reached")
             key = prediction["cue"]
             if key not in self.table:
                 if len(self.table) >= MAX_CUES:
