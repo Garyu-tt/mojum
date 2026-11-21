@@ -77,10 +77,19 @@ class PrivateExportOutputDirectoryQA(unittest.TestCase):
             with self.subTest(mode=oct(mode)):
                 os.chmod(self.output, mode)
                 try:
-                    self.assert_rejected_unchanged(target, "directory")
+                    with self.assertRaisesRegex(PermissionError, "directory"):
+                        self.export(target)
                     self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), mode)
                 finally:
+                    # A 0600 directory cannot be traversed by an unprivileged
+                    # caller. Inspect file existence only AFTER restoring 0700:
+                    # failing to stat an inaccessible path is not publication.
                     os.chmod(self.output, 0o700)
+                self.assertFalse(target.exists())
+                self.assertEqual(self.db.read_bytes(), self.before)
+                self.assertFalse(
+                    list(self.home.rglob(".mojum-private-trace-*.jsonl"))
+                )
 
     def test_wrong_owner_is_rejected_without_chown_or_source_mutation(self):
         target = self.output / "must-not-exist.jsonl"
