@@ -27,6 +27,7 @@ from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .verified_snapshot import (
     STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
+    runtime_source_sha256,
 )
 
 
@@ -358,8 +359,8 @@ class Aquarium:
     def _adopt_signed_replay_state(self, state, *, committed_count):
         """Strictly validate HMAC-protected cache and pinned SQLite prefix."""
         required = {
-            "schema", "agent_id", "manifest_sha256", "journal_events",
-            "journal_head", "tick", "world", "genome", "learner",
+            "schema", "agent_id", "manifest_sha256", "runtime_source_sha256",
+            "journal_events", "journal_head", "tick", "world", "genome", "learner",
             "explorer", "toy_contact_state", "checkpoint",
         }
         if type(state) is not dict or set(state) != required or state["schema"] != STATE_SCHEMA:
@@ -371,6 +372,9 @@ class Aquarium:
         if (state["agent_id"] != self.agent_id
                 or state["manifest_sha256"] != digest(self.manifest)):
             raise SnapshotError("snapshot belongs to a different agent/room/mode/genome")
+        if state["runtime_source_sha256"] != runtime_source_sha256():
+            raise SnapshotError("runtime source changed: full replay required; "
+                                "move signed cache aside explicitly")
         if self.store.event_at(events)["event_hash"] != state["journal_head"]:
             raise SnapshotError("signed snapshot head is absent from SQLite prefix")
         world = state["world"]
@@ -441,6 +445,7 @@ class Aquarium:
             "schema": STATE_SCHEMA,
             "agent_id": self.agent_id,
             "manifest_sha256": digest(self.manifest),
+            "runtime_source_sha256": runtime_source_sha256(),
             "journal_events": self._committed_event_count,
             "journal_head": self._committed_head,
             "tick": self.tick,
