@@ -19,6 +19,7 @@ from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
 from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import ToyContactBridge, validate_scene, SCHEMA as TOY_CONTACT_SCHEMA
+from .temporal_outcomes import RangeOutcomeMemory, SCHEMA as TEMPORAL_SCHEMA
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -71,6 +72,7 @@ class Aquarium:
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
         exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
+        temporal_mode="none",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -86,6 +88,12 @@ class Aquarium:
             raise AquariumError("toy_probe requires goal_free exploration")
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("unused synthetic sensory scene")
+        if temporal_mode not in ("none", "range_outcome"):
+            raise AquariumError("temporal_mode must be none or range_outcome")
+        if temporal_mode == "range_outcome" and (
+                exploration_mode != "goal_free" or sensory_mode != "toy_probe"):
+            raise AquariumError("temporal range model requires goal_free toy_probe")
+        self.temporal_mode = temporal_mode
         self.exploration_mode = exploration_mode
         self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
@@ -118,6 +126,8 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.explorer = Explorer() if exploration_mode == "goal_free" else None
+        self.temporal_model = (RangeOutcomeMemory()
+                               if temporal_mode == "range_outcome" else None)
         self.sensory_bridge = None
         if sensory_mode == "toy_probe":
             scene = ToyScene() if sensory_scene is None else sensory_scene
@@ -132,6 +142,10 @@ class Aquarium:
             self.manifest["sensory_model_schema"] = MODEL_SCHEMA
             self.manifest["sensory_scene"] = self.sensory_bridge.scene.manifest()
             self.manifest["contact_bridge_schema"] = TOY_CONTACT_SCHEMA
+        if self.temporal_model is not None:
+            self.manifest["temporal_mode"] = "range_outcome"
+            self.manifest["temporal_schema"] = TEMPORAL_SCHEMA
+            self.manifest["temporal_scope"] = "numeric_range_and_virtual_blocked_only"
         self.store = LocalNoosphere(db_path, agent_id)
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
@@ -236,6 +250,25 @@ class Aquarium:
         if self.sensory_bridge is not None:
             sensory_frame, _ = self.sensory_bridge.evaluate(self.world)
             payload["toy_contact"] = sensory_frame
+        if self.temporal_model is not None:
+            before = sensory_frame["observation"]
+            after = self.sensory_bridge.scene.sense(new_world)
+            cloned = RangeOutcomeMemory.from_snapshot(self.temporal_model.snapshot())
+            action = intent["action"]
+            prior = cloned.predict(before, action)
+            measured = cloned.observe(before, action, after, world_obs["blocked"], prior)
+            payload["temporal_range"] = {
+                "schema": TEMPORAL_SCHEMA,
+                "before": before, "after": after, "action": action,
+                "requested_dx_dy": [dx, dy],
+                "applied_dx_dy": [
+                    new_world.x - self.world.x, new_world.y - self.world.y,
+                ],
+                "predicted_outcome": prior,
+                "measured_outcome": measured,
+                "learned_state_sha256": digest(cloned.snapshot()),
+                "scope": "numeric_near_field_plus_actual_room_result_not_oracle",
+            }
         return payload, new_world, next_learner
 
     def _adopt_developmental(self, payload):
@@ -263,6 +296,36 @@ class Aquarium:
         if self.sensory_bridge is not None:
             self.sensory_bridge.adopt(self.world, payload["toy_contact"])
 
+    def _adopt_temporal(self, payload, new_world):
+        if self.temporal_model is None:
+            return
+        frame = payload["temporal_range"]
+        before = self.sensory_bridge.scene.sense(self.world)
+        after = self.sensory_bridge.scene.sense(new_world)
+        candidate = RangeOutcomeMemory.from_snapshot(self.temporal_model.snapshot())
+        action = payload["developmental"]["intent"]["action"]
+        prior = candidate.predict(before, action)
+        measured = candidate.observe(
+            before, action, after, payload["world"]["blocked"], prior,
+        )
+        expected = {
+            "schema": TEMPORAL_SCHEMA,
+            "before": before, "after": after, "action": action,
+            "requested_dx_dy": [
+                payload["movement_request"]["dx"],
+                payload["movement_request"]["dy"],
+            ],
+            "applied_dx_dy": [
+                new_world.x - self.world.x, new_world.y - self.world.y,
+            ],
+            "predicted_outcome": prior, "measured_outcome": measured,
+            "learned_state_sha256": digest(candidate.snapshot()),
+            "scope": "numeric_near_field_plus_actual_room_result_not_oracle",
+        }
+        if frame != expected:
+            raise AquariumError("temporal movement evidence replay mismatch")
+        self.temporal_model = candidate
+
     def step(self, *, dx=_OMITTED_MOVEMENT, dy=_OMITTED_MOVEMENT):
         if self.explorer is not None:
             # Explicit None is an external command, not an omission.
@@ -275,6 +338,7 @@ class Aquarium:
         payload, next_world, next_learner = self._calculate(*arguments)
         committed = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                                         self.tick * self.dt_ns, self.genome.revision)
+        self._adopt_temporal(payload, next_world)
         self._adopt_sensory(payload)
         self._adopt_developmental(payload)
         self.world = next_world
@@ -354,6 +418,7 @@ class Aquarium:
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
+                self._adopt_temporal(payload, next_world)
                 self._adopt_sensory(payload)
                 self._adopt_developmental(payload)
                 self.world = next_world
@@ -389,6 +454,8 @@ class Aquarium:
             result["developmental_state"] = self.explorer.snapshot()
         if self.sensory_bridge is not None:
             result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
+        if self.temporal_model is not None:
+            result["temporal_range_state"] = self.temporal_model.snapshot()
         if self.store.head() != self._committed_head:
             raise AquariumError("journal advanced during checkpoint; reopen")
         return result
@@ -410,6 +477,8 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
+    parser.add_argument("--temporal-mode", choices=("none", "range_outcome"),
+                        default="none")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
@@ -420,6 +489,10 @@ def main():
     if args.exploration_mode == "goal_free" and (
             args.dx is not None or args.dy is not None):
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
+    if args.temporal_mode == "range_outcome" and (
+            args.exploration_mode != "goal_free"
+            or args.sensory_mode != "toy_probe"):
+        parser.error("--temporal-mode range_outcome requires goal_free and toy_probe")
     if args.exploration_mode == "scripted":
         # Invalid scripted motion is a CLI error, not an organism birth.
         # Reject NaN, infinite and out-of-budget displacement before SQLite
@@ -433,7 +506,7 @@ def main():
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
-        sensory_mode=args.sensory_mode,
+        sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
