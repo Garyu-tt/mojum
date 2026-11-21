@@ -141,6 +141,19 @@ class ColdAquariumCopyTests(unittest.TestCase):
         self.assertEqual(self._verify(first)["journal_head"], first["journal_head"])
         self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
 
+    def test_export_rejects_existing_destination_wal_sidecars(self):
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            child.step()
+        for suffix in ("-wal", "-shm"):
+            with self.subTest(suffix=suffix):
+                sidecar = self.exported.with_name(self.exported.name + suffix)
+                sidecar.write_bytes(b"existing sidecar")
+                with self.assertRaisesRegex(FileExistsError, "existing SQLite sidecars"):
+                    self._export()
+                self.assertFalse(self.exported.exists())
+                self.assertEqual(sidecar.read_bytes(), b"existing sidecar")
+                sidecar.unlink()
+
     def test_existing_empty_sqlite_source_refused_without_bootstrap(self):
         # Export must never turn an unrelated existing SQLite into an
         # Aquarium journal merely by opening it for a backup.
