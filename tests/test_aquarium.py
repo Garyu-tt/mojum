@@ -205,12 +205,14 @@ class AquariumIntegrationTests(unittest.TestCase):
 
     def test_two_processes_stale_head_fails_closed(self):
         with self.aquarium() as q1, self.aquarium() as q2:
-            q1.step()
             previous = q2.checkpoint()
+            q1.step()
             with self.assertRaises(NoosphereError):
                 q2.step()
             self.assertEqual(q2.tick, previous["tick"])
             self.assertEqual(q2.world.revision, previous["world_revision"])
+            with self.assertRaisesRegex(AquariumError, "stale or unadopted"):
+                q2.checkpoint()
             self.assertEqual(q1.store.count(), 2)
 
     def test_chain_anchor_detects_divergent_database(self):
