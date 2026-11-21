@@ -297,7 +297,12 @@
     if (state.pending) return; // Ignore additional fingers during an active drag.
     if (event.button !== 0 && event.pointerType === "mouse") return;
     try {
-      const room = currentRoom();
+      // Start-placement must recover from an invalid typed start or a
+      // recently resized room; only the room dimensions are needed to map
+      // the pointer. setStart() still validates the complete final geometry.
+      const room = state.tool === "start"
+        ? {width: dimension(refs.width.value), height: dimension(refs.height.value)}
+        : currentRoom();
       const p = pointer(event, [room.width.value, room.height.value]);
       if (state.tool === "start") {
         setStart(p[0], p[1]);
