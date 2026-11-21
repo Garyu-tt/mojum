@@ -10,16 +10,76 @@ that head, public-key identity, encryption, or automatic writer failover.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import sqlite3
+import tempfile
 
 from .archive_root_receipt import (
     ReceiptError, verify_owner_receipt, _statement_for_archive,
 )
-from .segment_archive import ArchiveError, private_directory
+from .segment_archive import ArchiveError, private_directory, fsync_directory
 from .live_tail_capsule import restore_point_in_time
 from .segmented_noosphere import SegmentedNoosphere
 
 SCHEMA = "mojum.noosphere.owner-verified-replica-restore/1"
+CUSTODY_SCHEMA = "mojum.noosphere.recovered-quarantine/1"
+
+
+def _seal_read_only_custody(journal, owner, signed, receipt_sha):
+    """Persist accidental-write fences INSIDE scratch SQLite before publication.
+
+    These SQLite INSERT triggers defend against unintentional use by an
+    older canonical writer. An OS owner/admin can deliberately DROP the
+    triggers; this is NOT cryptographic writer fencing, quorum or lease.
+    """
+    before = journal.verify_chain(external_expected_head=signed["source_head"])
+    if before["count"] != signed["source_events"]:
+        raise ReceiptError("staged archive count differs from authenticated source")
+    db = journal._db
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("""CREATE TABLE recovery_custody (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            schema TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            source_events INTEGER NOT NULL,
+            pinned_source_head TEXT NOT NULL,
+            pinned_receipt_sha256 TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state='QUARANTINED_READ_ONLY')
+        )""")
+        db.execute(
+            "INSERT INTO recovery_custody("
+            "id,schema,agent_id,source_events,pinned_source_head,"
+            "pinned_receipt_sha256,state) VALUES(1,?,?,?,?,?,?)",
+            (CUSTODY_SCHEMA, owner, signed["source_events"],
+             signed["source_head"], receipt_sha, "QUARANTINED_READ_ONLY"),
+        )
+        db.execute("""CREATE TRIGGER recovery_no_event_insert
+            BEFORE INSERT ON segmented_events BEGIN
+                SELECT RAISE(ABORT,'quarantined PRIVATE replica cannot accept writes');
+            END""")
+        db.execute("""CREATE TRIGGER recovery_no_segment_insert
+            BEFORE INSERT ON segments BEGIN
+                SELECT RAISE(ABORT,'quarantined PRIVATE replica cannot add segments');
+            END""")
+        db.execute("COMMIT")
+        checkpoint = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint is None or checkpoint[0] != 0:
+            raise ReceiptError("recovered quarantine WAL checkpoint was blocked")
+        row = db.execute(
+            "SELECT schema,agent_id,source_events,pinned_source_head,"
+            "pinned_receipt_sha256,state FROM recovery_custody WHERE id=1",
+        ).fetchone()
+        if (row is None or tuple(row) != (
+                CUSTODY_SCHEMA, owner, signed["source_events"],
+                signed["source_head"], receipt_sha, "QUARANTINED_READ_ONLY")):
+            raise ReceiptError("cannot verify immutable quarantine custody marker")
+    except sqlite3.Error as exc:
+        if db.in_transaction:
+            db.execute("ROLLBACK")
+        raise ReceiptError("failed to seal recovery as read-only quarantine") from exc
+
 
 
 def _beneath(candidate, root):
@@ -77,30 +137,61 @@ def recover_pinned_replica(
     )
     if independently_verified != signed:
         raise ReceiptError("replica archive content differs from owner receipt")
-    restored = restore_point_in_time(
-        root, new_path, source_events=signed["source_events"],
-        external_expected_source_head=signed["source_head"],
-    )
-    # A new restored journal has already been fully verified in its scratch
-    # path before atomic publication. Reopen through the same versioned,
-    # read-only-preflight-backed storage contract to verify postpublish.
+    # Construct a NEW private staging path, reconstruct and verify fully,
+    # then add write-rejecting SQLite triggers BEFORE publishing the output.
+    # There is no window where the public final path is an unfenced writer.
+    with tempfile.TemporaryDirectory(
+        prefix=".mojum-verified-recovery-", dir=new_path.parent,
+    ) as work:
+        candidate = Path(work) / "quarantined-recovered.sqlite3"
+        restored = restore_point_in_time(
+            root, candidate, source_events=signed["source_events"],
+            external_expected_source_head=signed["source_head"],
+        )
+        if (restored["restored_events"] != signed["source_events"]
+                or restored["restored_tail_events"] != signed["tail_events"]):
+            raise ReceiptError("restored tail count differs from signed receipt")
+        with SegmentedNoosphere(
+            candidate, expected_agent_id, segment_size=signed["segment_size"],
+        ) as recovered:
+            _seal_read_only_custody(
+                recovered, expected_agent_id, signed,
+                independently_pinned_receipt_sha256,
+            )
+            after = recovered.verify_chain(
+                external_expected_head=signed["source_head"]
+            )
+            if (after["count"] != signed["source_events"]
+                    or after["head"] != signed["source_head"]
+                    or after["segments"] != signed["sealed_segments"] + 1):
+                raise ReceiptError(
+                    "quarantined recovery differs from authenticated archive"
+                )
+        wal = Path(str(candidate) + "-wal")
+        if wal.exists() and wal.stat().st_size:
+            raise ReceiptError("quarantined recovery has unapplied WAL bytes")
+        if new_path.is_symlink() or new_path.exists():
+            raise ReceiptError("restore target appeared during recovery")
+        try:
+            os.link(candidate, new_path)
+        except FileExistsError as exc:
+            raise ReceiptError("restore destination was created concurrently") from exc
+        fsync_directory(new_path.parent)
+    # The final file was atomically published ONLY after its triggers were
+    # committed and checkpointed, and no original writer was touched.
     with SegmentedNoosphere(
         new_path, expected_agent_id, segment_size=signed["segment_size"],
-    ) as recovered:
-        after = recovered.verify_chain(
+    ) as published:
+        confirmed = published.verify_chain(
             external_expected_head=signed["source_head"]
         )
-        if (after["count"] != signed["source_events"]
-                or after["head"] != signed["source_head"]
-                or after["segments"] != (
-                    signed["sealed_segments"] + 1
-                )):
-            raise ReceiptError(
-                "published restore differs from owner-authenticated archive"
-            )
-    if (restored["restored_events"] != signed["source_events"]
-            or restored["restored_tail_events"] != signed["tail_events"]):
-        raise ReceiptError("restored tail count differs from signed receipt")
+        quarantine = published._db.execute(
+            "SELECT state FROM recovery_custody WHERE id=1",
+        ).fetchone()
+        if (confirmed["count"] != signed["source_events"]
+                or quarantine is None
+                or quarantine["state"] != "QUARANTINED_READ_ONLY"):
+            raise ReceiptError("published recovery quarantine failed validation")
     return {
         "schema": SCHEMA,
         "agent_id": expected_agent_id,
@@ -108,5 +199,7 @@ def recover_pinned_replica(
         "sealed_segments": signed["sealed_segments"],
         "restored_tail_events": signed["tail_events"],
         "restored_head": signed["source_head"],
+        "custody": "QUARANTINED_READ_ONLY",
+        "custody_schema": CUSTODY_SCHEMA,
         "trust": "owner-hmac-pinned-historical-restore-not-writer-promotion",
     }
