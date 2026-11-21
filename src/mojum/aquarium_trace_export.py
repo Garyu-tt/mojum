@@ -20,6 +20,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError
+from .developmental_policy_v2 import MODE as LOCAL_CELL_MODE
 
 SCHEMA = "mojum.aquarium.trace-export/1"
 MAX_SOURCE_BYTES = 128_000_000
@@ -171,6 +172,7 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
                          room=None, start=(1.0, 2.0),
                          exploration_mode="scripted", sensory_mode="none",
                          sensory_scene=None, dt_ns=10_000_000,
+                         motor_policy="coarse_v1",
                          start_tick=None, frame_limit=None):
     """Export real verified SQLite events only to a fresh, mode-0600 local file.
 
@@ -181,6 +183,10 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     """
     if allow_private_export is not True:
         raise PermissionError("explicit PRIVATE history export opt-in required")
+    if type(motor_policy) is not str or motor_policy not in ("coarse_v1", LOCAL_CELL_MODE):
+        raise ValueError("unsupported versioned motor policy for trace export")
+    if motor_policy == LOCAL_CELL_MODE and exploration_mode != "goal_free":
+        raise ValueError("local-cell v2 trace export requires goal_free exploration")
     if expected_journal_head is not None and (
             type(expected_journal_head) is not str
             or _HEAD.fullmatch(expected_journal_head) is None):
@@ -202,7 +208,7 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     options = {"agent_id": agent_id, "neural_mode": neural_mode,
                "exploration_mode": exploration_mode, "sensory_mode": sensory_mode,
                "sensory_scene": sensory_scene, "room": room,
-               "start": start, "dt_ns": dt_ns}
+               "start": start, "dt_ns": dt_ns, "motor_policy": motor_policy}
 
     # Staging is never published and is automatically removed on errors.
     with tempfile.TemporaryDirectory(prefix="mojum-trace-stage-") as scratch:
@@ -272,6 +278,8 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
+    parser.add_argument("--motor-policy", choices=("coarse_v1", LOCAL_CELL_MODE),
+                        default="coarse_v1")
     parser.add_argument("--expected-head", default=None)
     parser.add_argument("--start-tick", type=int)
     parser.add_argument("--frame-limit", type=int)
@@ -284,7 +292,7 @@ def main():
         args.db, args.output, seed, graph,
         agent_id=args.agent_id, neural_mode=args.neural_mode,
         exploration_mode=args.exploration_mode, sensory_mode=args.sensory_mode,
-        expected_journal_head=args.expected_head,
+        motor_policy=args.motor_policy, expected_journal_head=args.expected_head,
         allow_private_export=args.allow_private_export,
         start_tick=args.start_tick, frame_limit=args.frame_limit,
     )
