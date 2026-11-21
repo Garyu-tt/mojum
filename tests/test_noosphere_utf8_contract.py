@@ -85,6 +85,23 @@ class NoosphereUnicodeContractTests(unittest.TestCase):
         changed["payload"] = nested
         self.assert_rejected_without_append(changed)
 
+    def test_deeply_nested_list_is_rejected_before_sqlite_append(self):
+        nested = "leaf"
+        for _ in range(1200):
+            nested = [nested]
+        changed = event()
+        changed["payload"] = {"nested": nested}
+        self.assert_rejected_without_append(changed)
+
+    def test_moderately_nested_json_remains_supported(self):
+        nested = {"leaf": "ok"}
+        for _ in range(64):
+            nested = {"next": nested}
+        changed = event()
+        changed["payload"] = nested
+        anchor = self.store.append(changed, expected_head=self.store.head())
+        self.assertEqual(self.store.verify_chain(external_expected_head=anchor)["count"], 1)
+
     def test_valid_cyrillic_and_emoji_still_roundtrip_without_mutation(self):
         changed = event()
         changed["event_id"] = "урок-🎨"
