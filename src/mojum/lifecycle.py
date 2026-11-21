@@ -199,7 +199,8 @@ class Lifecycle:
             elif e.get("kind") == "experience":
                 _keys(e, {"kind", "at_tick", "region", "development_units", "learning_units"},
                       "experience event")
-                if e["at_tick"] != restored.tick:
+                at_tick = _integer(e["at_tick"], "experience tick", MAX_TICKS)
+                if at_tick != restored.tick:
                     raise LifecycleError("experience tick mismatch")
                 restored.experience(e["region"], development_units=e["development_units"],
                                     learning_units=e["learning_units"],

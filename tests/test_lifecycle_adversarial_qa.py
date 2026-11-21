@@ -90,6 +90,22 @@ class LifecycleAdversarialQATests(unittest.TestCase):
         with self.assertRaises(LifecycleError):
             Lifecycle.from_snapshot(snapshot)
 
+    def test_original_checksum_cannot_hide_non_integer_tick_metadata(self):
+        for tick, invalid_values in ((0, (False, 0.0)), (1, (True, 1.0))):
+            clock = Lifecycle(profile())
+            if tick:
+                clock.advance(tick, expected_revision=clock.revision)
+            clock.experience("cortex", learning_units=1, expected_revision=clock.revision)
+            original = clock.snapshot()
+            self.assertEqual(Lifecycle.from_snapshot(original).snapshot(), original)
+
+            for invalid in invalid_values:
+                snapshot = copy.deepcopy(original)
+                snapshot["events"][-1]["at_tick"] = invalid
+                with self.subTest(tick=tick, invalid=invalid):
+                    with self.assertRaisesRegex(LifecycleError, "experience tick"):
+                        Lifecycle.from_snapshot(snapshot)
+
     def test_replay_with_interleaved_regions_preserves_exact_state(self):
         clock = Lifecycle(profile())
         for i in range(32):
