@@ -63,5 +63,4 @@ jobs:
       - name: Real 10k PRIVATE segmented v4 and sensory v2 + native replay export + Chrome
         env:
           PYTHONPATH: src
-          PYTHONTRACEMALLOC: 1
         run: python tests/qa_r016_epoch_export_browser.py viewer-qa
