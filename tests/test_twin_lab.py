@@ -87,6 +87,17 @@ class TwinLabTests(unittest.TestCase):
         self.assertEqual(mentor_steps(self.left, "twin-a", SEED, GRAPH,
                                       ticks=0, dx=0, dy=0), before)
 
+    def test_source_dante_identity_is_not_reused(self):
+        with self.assertRaises(AquariumError):
+            create_pair(self.left, self.right, SEED["genome_id"],
+                        "new-twin-b", SEED, GRAPH)
+        self.assertFalse(self.left.exists())
+        self.assertFalse(self.right.exists())
+        with self.assertRaises(AquariumError):
+            mentor_steps(self.left, SEED["genome_id"], SEED, GRAPH,
+                         ticks=0, dx=0, dy=0)
+        self.assertFalse(self.left.exists())
+
     def test_missing_mentor_db_is_not_created(self):
         with self.assertRaises(AquariumError):
             mentor_steps(self.left, "twin-a", SEED, GRAPH,
