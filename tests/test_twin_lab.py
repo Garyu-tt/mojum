@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from mojum.aquarium import Aquarium, AquariumError
+from mojum.noosphere import NoosphereError
 from mojum.twin_lab import create_pair, mentor_steps
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,7 @@ class TwinLabTests(unittest.TestCase):
             with Aquarium(db, seed, GRAPH, agent_id=actor) as reopened:
                 self.assertEqual(reopened.tick, tick)
                 self.assertEqual(reopened.store.count(), tick + 1)
-        with self.assertRaises(AquariumError):
+        with self.assertRaises(NoosphereError):
             mentor_steps(self.left, "twin-b", SEED, GRAPH,
                          ticks=1, dx=0, dy=0)
         self.assertEqual(mentor_steps(self.left, "twin-a", SEED, GRAPH,
