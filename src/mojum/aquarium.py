@@ -279,8 +279,20 @@ class Aquarium:
             "payload": payload,
         }
 
+    def _effective_journal_limit(self):
+        """Preserve legacy admission/replay budget gates in both modes.
+
+        Existing callers/tests may tighten MAX_REPLAY_EVENTS dynamically.
+        That must still fail before any partial append or RAM adoption.
+        The *explicit* segmented backend is independent and retains its
+        larger bounded journal capacity, never inheriting a legacy cap.
+        """
+        if self.journal_backend == "segmented":
+            return self.journal_limit
+        return min(self.journal_limit, MAX_REPLAY_EVENTS)
+
     def _append_record(self, topic, event_id, payload, at_ns, source_revision):
-        if self._committed_event_count >= self.journal_limit:
+        if self._committed_event_count >= self._effective_journal_limit():
             raise AquariumError("journal event budget reached; verified snapshot/compaction pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
         expected = (self.store.head() if self._committed_head is None
@@ -444,7 +456,7 @@ class Aquarium:
                          0.0 if dy is _OMITTED_MOVEMENT else dy)
         if (self.developmental_policy == "local_cell_v4"
                 and self._committed_event_count +
-                    self.required_events_for_steps(1) > self.journal_limit):
+                    self.required_events_for_steps(1) > self._effective_journal_limit()):
             raise AquariumError("v4 session journal budget exhausted before boundary")
         self._commit_pending_epoch()
         payload, next_world, next_learner = self._calculate(*arguments)
@@ -648,7 +660,7 @@ class Aquarium:
         # Only deterministic SIMULATION of the authenticated prefix is
         # skipped when an explicit HMAC-protected sidecar is available.
         count = self.store.count()
-        if count > self.journal_limit:
+        if count > self._effective_journal_limit():
             raise AquariumError("journal exceeds selected bounded source event budget")
         verified = self.store.verify_chain(external_expected_head=external_expected_head)
         if verified["count"] != count:
