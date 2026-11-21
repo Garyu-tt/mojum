@@ -85,6 +85,18 @@ class SegmentedNoosphere:
                 raise NoosphereError(
                     "wrong owner/schema/segment size; old journal unchanged"
                 )
+        if not preexisting:
+            # SQLite's default file mode depends on the process umask. Reserve
+            # PRIVATE paths with 0600 *before* SQLite first opens or writes the
+            # database; chmod after connect leaves an avoidable disclosure window.
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            except OSError as exc:
+                raise NoosphereError(
+                    "cannot securely reserve new PRIVATE segmented journal"
+                ) from exc
+            else:
+                os.close(fd)
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         try:
@@ -93,11 +105,6 @@ class SegmentedNoosphere:
             self._db.execute("PRAGMA synchronous=FULL")
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA foreign_keys=ON")
-            if os.name == "posix" and not preexisting:
-                try:
-                    path.chmod(0o600)
-                except OSError:
-                    pass  # Not a replacement for owner filesystem policy.
             # Never change permissions on an existing legacy path while
             # diagnosing an incompatible schema. No automatic migration.
             self._setup()
