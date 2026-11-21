@@ -140,10 +140,17 @@ class ContactAssociationsV2Tests(unittest.TestCase):
         self.assertNotIn("1:0:0", model.table)
         self.assertEqual(model.evictions, 1)
         self.assertEqual(model.forgotten_observations, 1)
+        snapshot = model.snapshot()
         self.assertEqual(
-            ContactAssociationsV2.from_snapshot(model.snapshot()).snapshot(),
-            model.snapshot(),
+            ContactAssociationsV2.from_snapshot(snapshot).snapshot(), snapshot,
         )
+
+        # A full table replaces one cue per eviction and cannot lose a slot.
+        dropped = snapshot["table"].pop("2:0:0")
+        del snapshot["last_seen_at"]["2:0:0"]
+        snapshot["forgotten_observations"] += dropped["count"]
+        with self.assertRaises(SensoryV2Error):
+            ContactAssociationsV2.from_snapshot(snapshot)
 
     def test_rejected_update_does_not_mutate_state(self):
         model = ContactAssociationsV2()
@@ -392,15 +399,29 @@ class CanonicalV4SensoryV2Tests(unittest.TestCase):
         "10k-frame v4 sensory replay runs in the dedicated long-run workflow",
     )
     def test_v4_versioned_sensory_crosses_epoch_and_replays(self):
-        with self.open() as aquarium:
-            for _ in range(EPOCH_TICKS + 51):
+        # Keep contact in range along the built-in fixture's deterministic path.
+        positions = (
+            (.16, 2), (.50, 2), (.84, 2),
+            (.16, 1.67), (.16, 1.34), (.16, 1.01), (.16, .68), (.16, .35),
+        )
+        scene = ToyScene(toys=tuple(
+            Toy(f"spectator.fixture.{index}", x, y, .15, (42, 90, 174), .4)
+            for index, (x, y) in enumerate(positions)
+        ))
+        with self.open(sensory_scene=scene) as aquarium:
+            for _ in range(EPOCH_TICKS):
+                aquarium.step()
+            updates_before_epoch = aquarium.contact_model.updates
+            self.assertGreater(updates_before_epoch, 4_000)
+            for _ in range(51):
                 aquarium.step()
             saved = aquarium.checkpoint()
             self.assertEqual((aquarium.tick, aquarium.epoch_index), (10_050, 1))
             self.assertEqual(aquarium.store.count(), 10_052)
             model = aquarium.contact_model.snapshot()
+            self.assertGreater(model["updates"], updates_before_epoch)
 
-        with self.open() as restored:
+        with self.open(sensory_scene=scene) as restored:
             self.assertEqual(restored.checkpoint(), saved)
             self.assertEqual(restored.contact_model.snapshot(), model)
 

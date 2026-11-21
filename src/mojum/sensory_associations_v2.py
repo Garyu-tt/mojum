@@ -128,6 +128,7 @@ class ContactAssociationsV2(ContactAssociations):
             retained_observations + data["forgotten_observations"] != data["updates"]
             or (data["updates"] and latest_seen != data["last_contact_tick"])
             or (data["evictions"] == 0 and data["forgotten_observations"] != 0)
+            or (data["evictions"] and len(data["table"]) != MAX_CUES)
             or (data["updates"] and not data["table"])
         ):
             raise SensoryV2Error("contact memory evidence accounting mismatch")
