@@ -65,7 +65,7 @@ def call_once(endpoint: str, model: str, timeout: float, *, opener=None) -> dict
         raise CanaryError("timeout outside 1..60 seconds")
     data = json.dumps({
         "model": model, "messages": [{"role": "user", "content": CANARY_PROMPT}],
-        "max_tokens": 32, "temperature": 0, "stream": False,
+        "max_tokens": 256, "temperature": 0, "stream": False,
     }).encode("utf-8")
     req = Request(endpoint, data=data, method="POST",
                   headers={"Content-Type": "application/json",
