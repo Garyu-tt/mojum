@@ -95,6 +95,15 @@ def _as_number(value, label, errors):
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
         return None
+    # Decimal accepts finite JSON tokens such as 1e999999999, but later
+    # arithmetic (room area and obstacle bounds) can raise Overflow.
+    # Bound both exponent and adjusted magnitude before doing any arithmetic.
+    # 10000 is generous for offline drafts and well inside Decimal's
+    # default arithmetic exponent range (Emax=999999).
+    if (abs(number.as_tuple().exponent) > 10_000
+            or (number and abs(number.adjusted()) > 10_000)):
+        errors.append("%s exceeds the supported decimal magnitude" % (label,))
+        return None
     return number
 
 
