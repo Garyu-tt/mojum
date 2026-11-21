@@ -273,7 +273,7 @@ class SignedHistoricalCopyRecoveryQA(unittest.TestCase):
             shutil.copy2(file, self.copy_b/file.name)
         self.original.rename(self.root/"original-unavailable.sqlite3")
         self.copy_a.rename(self.root/"first-archive-unavailable")
-        recovered = self.recover(signed["receipt_sha256"])
+        recovered = self.recover(signed["receipt_sha256"], agent=SEED["genome_id"])
         self.assertEqual(recovered["restored_events"], 131)
         with Aquarium(self.dest, SEED, GRAPH, **opts) as after:
             self.assertEqual(after.checkpoint(), before)
