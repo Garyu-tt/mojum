@@ -37,6 +37,10 @@ failed `gh` call) is also a `reject` and never a `ready`.
   `defer` (`STALE_CHECK`).
 - `--expected-head-sha` is mandatory. Without it the verdict is `reject`
   (`EXPECTED_HEAD_REQUIRED`).
+- The snapshot head and `--expected-head-sha` must each be the **complete**
+  40-character SHA-1 or 64-character SHA-256 Git object ID. Abbreviations
+  (for example seven hexadecimal characters) are rejected; prefix equality
+  is not evidence that the same commit passed CI.
 - No requirements at all is `reject` (`NO_REQUIRED_CHECKS`): a gate that
   requires nothing proves nothing.
 

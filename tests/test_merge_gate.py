@@ -138,6 +138,19 @@ class SnapshotParsingTests(unittest.TestCase):
                 self.assertEqual(parsed.checks[0].status, status)
                 self.assertEqual(parsed.checks[0].conclusion, conclusion)
 
+    def test_snapshot_requires_full_git_object_id(self):
+        # Seven-character abbreviations are valid for interactive Git commands
+        # but cannot establish the exact PR head for a merge gate.
+        for short in (HEAD[:7], HEAD[:39], HEAD + "f"):
+            with self.subTest(head=short), self.assertRaises(SnapshotError):
+                parse_snapshot({"headRefOid": short, "baseRefName": "main"})
+        # Preserve the complete SHA-256 format if the repository migrates.
+        full_sha256 = "f" * 64
+        self.assertEqual(
+            parse_snapshot({"headRefOid": full_sha256, "baseRefName": "main"}).head_sha,
+            full_sha256,
+        )
+
     def test_invalid_snapshots_are_rejected(self):
         cases = [
             [],
@@ -175,6 +188,11 @@ class SnapshotParsingTests(unittest.TestCase):
 
 
 class GateVerdictTests(unittest.TestCase):
+    def test_expected_head_requires_full_git_object_id(self):
+        for short in (HEAD[:7], HEAD[:39], HEAD + "a"):
+            with self.subTest(sha=short), self.assertRaises(ValueError):
+                evaluate(facts(()), expected_head_sha=short, required=REQUIRED)
+
     def green(self):
         return [
             run(name="test", workflow="Aquarium regression QA"),

@@ -63,7 +63,7 @@ FAILING_CONCLUSIONS = frozenset(
     }
 )
 
-_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_SHA_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"
@@ -195,7 +195,7 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if not head_sha:
         raise SnapshotError("snapshot has no head SHA")
     if not _SHA_RE.match(head_sha):
-        raise SnapshotError("snapshot head SHA is not hexadecimal")
+        raise SnapshotError("snapshot head SHA must be a full 40- or 64-character hexadecimal object ID")
 
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
     if not base_ref:
@@ -250,7 +250,7 @@ def evaluate(
     """Return the gate verdict for an already-parsed snapshot."""
 
     if expected_head_sha is not None and not _SHA_RE.match(expected_head_sha):
-        raise ValueError("expected_head_sha must be 7-64 hexadecimal characters")
+        raise ValueError("expected_head_sha must be a full 40- or 64-character hexadecimal object ID")
 
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
