@@ -109,7 +109,13 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
         )
     events_needed = (aquarium.required_events_for_steps(ticks)
                      if is_v4 else ticks)
-    limit = getattr(aquarium, "journal_limit", MAX_REPLAY_EVENTS)
+    # Original host contract may apply a tightened runtime source
+    # budget during admission. Only the explicitly versioned segmented
+    # backend uses its separate fixed max; do not stale-cache legacy
+    # MAX_REPLAY_EVENTS from the Aquarium constructor.
+    limit = (getattr(aquarium, "journal_limit", MAX_REPLAY_EVENTS)
+             if getattr(aquarium, "journal_backend", "legacy") == "segmented"
+             else MAX_REPLAY_EVENTS)
     if aquarium.store.count() + events_needed > limit:
         raise PortableHostError(
             "requested ticks exceed bounded %d-event selected source budget; "
