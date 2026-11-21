@@ -26,6 +26,7 @@ from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRA
 from .archived_policy_v2a import LocalCellExplorer as ArchivedV2AExplorer, SCHEMA as V2A_SCHEMA
 from .cell_policy_v2 import CellExplorer, SCHEMA as V2B_SCHEMA
 from .local_cell_sense import Proprioception
+from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
 from .noosphere import (
