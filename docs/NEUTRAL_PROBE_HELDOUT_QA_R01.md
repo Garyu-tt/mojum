@@ -63,3 +63,27 @@ learned-policy semantics and preserve deterministic replay of old R0.13
 journals; compare broader held-out performance and have a separate reviewer
 assess the method. PR #104, R0.13 #95, P0 #55 and release acceptance #51
 must not be merged or closed automatically.
+
+## Explicitly post-hoc forced-contact challenge (not held-out evidence)
+
+Initial 36-case CI matrix showed only **13/36 cases with any measured block**;
+23 cases made no contact at all. To test the boundary rather than mislabel
+quiet room fixtures as learned navigation, a **separate** file
+`tests/test_neutral_probe_contact_challenge.py` now fixes 5 initial
+positions inside 4 cm of a wall or room edge, with first pulse TRUE and the
+same three pulse streams. This produces **15 intentionally contact-rich**
+challenges, after looking at the initial report; they are *not* counted
+as held-out generalization. Every arm's first x+ intent must encounter an
+actual measured block before any policy update. The challenge reports
+all arm motion and stalling outcomes as aggregate diagnostics, without
+PRIVATE events or trace publication.
+
+```sh
+PYTHONPATH=src python -m unittest discover -s tests -p test_neutral_probe_contact_challenge.py -v
+PYTHONPATH=src python tests/test_neutral_probe_contact_challenge.py --report
+```
+
+Neither the 36-case matrix nor the new 15 stress fixtures establish real
+navigation, safe unbounded learning, a full neural brain, hardware actuation,
+or absence of subjective experience. Maintain the frozen control and explicit
+policy-schema/versioned replay gate before modifying the canonical organism.
