@@ -116,6 +116,32 @@ class QueueTriageTests(unittest.TestCase):
         with self.assertRaises(triage.TriageInputError):
             triage.scan_queue({"base_sha": BASE, "pull_requests": {}}, JOBS)
 
+    def test_orphan_success_and_mixed_check_evidence_fail_closed(self):
+        orphan = [check(job) for job in JOBS]
+        del orphan[0]["status"]
+        result = run(pr(checks=orphan))["pull_requests"][0]
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("MALFORMED_CHECK_ENTRY", result["reasons"])
+
+        # A contradictory legacy state cannot be silently ignored in a
+        # seemingly passing CheckRun, even if status/conclusion look green.
+        for state, conclusion in (("FAILURE", "SUCCESS"),
+                                  ("SUCCESS", "FAILURE")):
+            with self.subTest(state=state, conclusion=conclusion):
+                mixed = [check(job) for job in JOBS]
+                mixed[0].update(state=state, conclusion=conclusion)
+                result = run(pr(checks=mixed))["pull_requests"][0]
+                self.assertEqual(result["status"], "invalid")
+                self.assertIn("MALFORMED_CHECK_ENTRY", result["reasons"])
+
+        # The legitimate legacy StatusContext shape stays supported.
+        legacy = [dict(workflowName="Aquarium", name="py311",
+                       state="SUCCESS", headSha=HEAD)]
+        legacy += [check(job) for job in JOBS[1:]]
+        result = run(pr(checks=legacy))["pull_requests"][0]
+        self.assertEqual(result["status"], "candidate_for_independent_acceptance")
+
+
     def test_cli_exit_zero_only_reports_not_merges(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "snapshot.json"
