@@ -247,6 +247,36 @@ async function main() {
       "document.querySelector('#output').value"),canonicalExport);
     await evaluate(cdp,"document.querySelector('#reset-room').click()");
 
+    // A delayed import must not overwrite a subsequent user's room edit.
+    // Exercise the real DOM change listener with a deliberately held file.text().
+    await evaluate(cdp,
+      "(function(){const original=File.prototype.text;window.__roomOriginalText=original;" +
+      "File.prototype.text=function(){if(this.name==='delayed-import.json')" +
+      "return new Promise(resolve=>{window.__resolveRoomImport=resolve;});" +
+      "return original.call(this)};" +
+      "const input=document.querySelector('#import-file'),dt=new DataTransfer();" +
+      "dt.items.add(new File(['placeholder'],'delayed-import.json'," +
+      "{type:'application/json'}));input.files=dt.files;" +
+      "input.dispatchEvent(new Event('change',{bubbles:true}));return true})()");
+    await until(cdp, "typeof window.__resolveRoomImport==='function'");
+    await evaluate(cdp,
+      "(function(){const el=document.querySelector('#width');el.value='5.0';" +
+      "el.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
+    const newerDraft=await evaluate(cdp,"document.querySelector('#output').value");
+    assert.notEqual(newerDraft,canonicalExport);
+    await evaluate(cdp,"window.__resolveRoomImport(" +
+      JSON.stringify(canonicalExport) + ");true");
+    await evaluate(cdp,"new Promise(resolve=>setTimeout(resolve,0))");
+    assert.equal(await evaluate(cdp,
+      "document.querySelector('#output').value"),newerDraft,
+      "Stale asynchronous JSON import clobbered a newer user edit");
+    assert.doesNotMatch(await evaluate(cdp,
+      "document.querySelector('#status').textContent"),/загружена локально/);
+    await evaluate(cdp,
+      "File.prototype.text=window.__roomOriginalText;" +
+      "delete window.__roomOriginalText;delete window.__resolveRoomImport;true");
+    await evaluate(cdp,"document.querySelector('#reset-room').click()");
+
     // Keyboard arrow moves the accessible SVG start marker by 5cm.
     await evaluate(cdp,
       "(function(){const p=document.querySelector('#start > g');" +
