@@ -7,11 +7,14 @@ consciousness test, a physical rabbit, a real MuJoCo body, or a full organism.
 ## Purpose
 
 Provide a minimal candidate with the *existing* canonical world-room,
-proprioception and pulse-driven, goal-free Explorer, and compare it with a
-frozen innate-rotation negative control. Both arms start at the same position
-and receive identical changing synthetic heartbeat bits. Only the adaptive
-arm uses measured blocked/unblocked outcomes to adjust future selection.
-The frozen arm takes its preprogrammed sequence without updates.
+proprioception and pulse-driven, goal-free Explorer, then compare **three arms**:
+canonical coarse-zone adaptive Explorer, frozen innate-rotation negative
+control, and a research-only **local-cell** policy which limits learned
+blocked-motion evidence to one 4 cm proprioceptive position cell. All
+start at the same position and receive identical changing synthetic heartbeat
+bits. The two adaptive arms use only measured blocked/unblocked outcomes
+to update their own policies. Frozen control takes the preprogrammed
+sequence without updates. No new controller sees an obstacle map.
 
 Neither arm has an explicit pain, distress, aversive-valence, reward,
 punishment, biological homeostasis or goals-to-survive representation.
@@ -26,6 +29,7 @@ On a CPython 3.11+ installation with the repository checked out:
 ```bash
 PYTHONPATH=src python -m mojum.neutral_probe_trial --ticks 120 --mode compare
 PYTHONPATH=src python -m mojum.neutral_probe_trial --ticks 120 --mode adaptive
+PYTHONPATH=src python -m mojum.neutral_probe_trial --ticks 120 --mode local_cell
 PYTHONPATH=src python -m unittest discover -s tests -p test_neutral_probe_trial.py -v
 ```
 
@@ -45,7 +49,11 @@ or privileged motor gates are available through this module.
   distinct positions and longest idle streak, and warns on prolonged
   action collapse. With the tiny default corner room, the current
   coarse-zone Explorer can enter a rest-collapse regime; this is an
-  exposed baseline limitation, not claimed learning progress.
+  exposed baseline limitation, not claimed learning progress. The third
+  local-cell arm is a separately isolated recovery hypothesis and must be
+  judged by actual movement/coverage as well as blocked events. It is
+  deliberately **not** substituted into the canonical Aquarium until a
+  schema/replay review can prevent reinterpretation of persisted histories.
 - Equal results do not prove learning failed; inspect action divergence,
   causal trace and test other starting positions/seeds.
 - This is **not** a randomized, blinded biological study: both policy arms
