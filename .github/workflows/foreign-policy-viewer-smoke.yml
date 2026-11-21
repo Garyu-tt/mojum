@@ -1,0 +1,52 @@
+name: Mojum actual foreign v2B/v3B offline Chrome archive smoke
+
+on:
+  push:
+    paths:
+      - ".github/workflows/foreign-policy-viewer-smoke.yml"
+      - "examples/aquarium_trace_viewer.html"
+      - "tests/qa_real_foreign_policy_chrome.py"
+      - "tests/smoke_real_chromium_viewer.py"
+  pull_request:
+    paths:
+      - ".github/workflows/foreign-policy-viewer-smoke.yml"
+      - "examples/aquarium_trace_viewer.html"
+      - "tests/qa_real_foreign_policy_chrome.py"
+      - "tests/smoke_real_chromium_viewer.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-foreign-chrome:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout proposed local viewer (never main)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable peer v2B implementation PR 115
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: b755da530634c0d6b8866107e7b4e9e325839175
+          path: peer-v2b
+          persist-credentials: false
+      - name: Checkout immutable peer v3B implementation PR 122
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 8b7b12a1ca3fc89067671c8a63f82c0f0a752e31
+          path: peer-v3b
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Require actual Chromium binary, never JS-only fallback
+        run: command -v google-chrome-stable
+      - name: Cross-source real SQLite and local WebCrypto Chrome assertions
+        env:
+          PYTHONPATH: src
+        run: python tests/qa_real_foreign_policy_chrome.py peer-v2b peer-v3b

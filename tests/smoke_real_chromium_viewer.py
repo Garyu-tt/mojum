@@ -325,7 +325,7 @@ def main():
                 assert first["brain"] == "UNIMPLEMENTED", (policy, mode, "not a brain")
                 expected_policy = (
                     "coarse_v1 · зоны 0,5 м" if policy == "coarse_v1"
-                    else "local_cell_v2 · ячейки 4 см"
+                    else "local_cell_v2A · ячейки 4 см"
                 )
                 assert first["policy"] == expected_policy, (
                     policy, mode, "actual displayed motor policy", first["policy"]
@@ -433,6 +433,34 @@ def main():
         result = inspect_actual_browser(
             chrome, instrumented_html(
                 original, tampered_file,
+                expected_rejection="Схема обучения не совпадает с моторной политикой"
+            ), width=1280, height=800
+        )
+        assert result["rejected"] and result["controls_disabled"]
+        assert result["displayed_policy"] == "—"
+
+        # Negative control 2b: unsupported and unversioned future schema
+        # must fail even when its accompanying learning schema and SHA match.
+        for frame in altered_frames:
+            frame["developmental"]["schema"] = "mojum.developmental.local-cell/999"
+            frame["developmental"]["learning"]["schema"] = (
+                "mojum.developmental.local-cell.outcome/999"
+            )
+        unsupported_bytes = "".join(
+            json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":"), allow_nan=False) + "\n"
+            for frame in altered_frames
+        ).encode("utf-8")
+        footer = json.loads(clean[-1])
+        footer["policy_schema"] = "mojum.developmental.local-cell/999"
+        footer["trace_integrity"]["byte_length"] = len(unsupported_bytes)
+        footer["trace_integrity"]["sha256"] = hashlib.sha256(unsupported_bytes).hexdigest()
+        result = inspect_actual_browser(
+            chrome, instrumented_html(
+                original, unsupported_bytes.decode("utf-8") + json.dumps(
+                    footer, sort_keys=True, ensure_ascii=False,
+                    separators=(",", ":"), allow_nan=False
+                ) + "\n",
                 expected_rejection="Неподдерживаемая версия моторной политики"
             ), width=1280, height=800
         )
