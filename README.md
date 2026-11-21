@@ -11,8 +11,9 @@ Release acceptance and the remaining work on the integrated sensorimotor loop ar
 ## Exact-head CI merge gate (acceptance tooling)
 
 `mojum.merge_gate` checks a PR status rollup against a pinned head and exact
-CI job names. The [merge gate guide](docs/MERGE_GATE_R01.md) lists the nine
-Aquarium, Motor Gate, and Mesh matrix jobs and shows how to run the offline
+CI job names. For `main`, it always requires all nine Aquarium, Motor Gate,
+and Mesh matrix jobs even if the caller supplies a narrower list. The
+[merge gate guide](docs/MERGE_GATE_R01.md) shows how to run the offline
 preflight. The [merge acceptance policy](docs/MERGE_ACCEPTANCE_POLICY.md)
 requires verification of the tested head and base before merging.
 

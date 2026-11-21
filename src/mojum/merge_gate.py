@@ -67,6 +67,19 @@ _GH_FIELDS = (
     "mergeStateStatus,statusCheckRollup"
 )
 
+# These workflows run on every pull request to main. Keep their exact matrix
+# identities independent of the live rollup: GitHub can return a partial
+# statusCheckRollup before every matrix job has registered.
+MAIN_REQUIRED_JOBS = tuple(
+    f"{workflow} / {job} ({version})"
+    for workflow, job in (
+        ("Mojum R0.3 online-learning aquarium regression", "aquarium-stdlib"),
+        ("Mojum motor-gate independent QA", "motor-gate-stdlib"),
+        ("Mojum mesh contract independent QA", "mesh-stdlib"),
+    )
+    for version in ("3.11", "3.12", "3.13")
+)
+
 
 class SnapshotError(ValueError):
     """The supplied PR snapshot does not have the expected shape."""
@@ -85,6 +98,7 @@ class CheckOutcome:
     conclusion: str | None = None
     workflow: str | None = None
     head_sha: str | None = None
+    has_explicit_run_status: bool = True
 
     @property
     def label(self) -> str:
@@ -135,6 +149,20 @@ def _text(raw: Mapping[str, object], *keys: str) -> str | None:
     return None
 
 
+def _read_oid(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
+    oid = None
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or _SHA_RE.fullmatch(value) is None:
+            raise SnapshotError(f"{label} must be a full hexadecimal Git object ID")
+        if oid is not None and oid.lower() != value.lower():
+            raise SnapshotError(f"{label} has conflicting aliases")
+        oid = value
+    return oid
+
+
 def _parse_check(raw: object, index: int) -> CheckOutcome:
     if not isinstance(raw, Mapping):
         raise SnapshotError(f"check[{index}] must be an object")
@@ -144,24 +172,29 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         raise SnapshotError(f"check[{index}] has no name or context")
 
     workflow = _text(raw, "workflowName", "workflow")
-    head_sha = raw.get("headSha", raw.get("head_sha"))
-    if head_sha is not None and (
-        not isinstance(head_sha, str) or _SHA_RE.fullmatch(head_sha) is None
-    ):
-        raise SnapshotError(f"check[{index}] has invalid head SHA")
+    head_sha = _read_oid(raw, f"check[{index}] head SHA", "headSha", "head_sha")
     typename = raw.get("__typename")
     status_raw = _text(raw, "status")
+    has_explicit_run_status = (
+        status_raw is not None and typename in (None, "CheckRun")
+    )
     conclusion_raw = _text(raw, "conclusion")
     state_raw = _text(raw, "state")
 
-    if state_raw is not None and status_raw is None:
+    if state_raw is not None:
         # StatusContext: EXPECTED/PENDING are non-terminal; SUCCESS/FAILURE/
         # ERROR are terminal legacy commit statuses.
         state = state_raw.upper()
-        if state in {"SUCCESS", "FAILURE", "ERROR"}:
-            status_raw, conclusion_raw = "COMPLETED", state
-        else:
-            status_raw = state
+        if state in {"FAILURE", "ERROR"}:
+            # A contradictory negative legacy state must never be overwritten
+            # by a stale successful conclusion.
+            conclusion_raw = state
+        if status_raw is None:
+            if state in {"SUCCESS", "FAILURE", "ERROR"}:
+                status_raw = "COMPLETED"
+                conclusion_raw = conclusion_raw or state
+            else:
+                status_raw = state
 
     if status_raw is None:
         if conclusion_raw is not None:
@@ -184,6 +217,7 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         conclusion=conclusion,
         workflow=workflow,
         head_sha=head_sha,
+        has_explicit_run_status=has_explicit_run_status,
     )
 
 
@@ -193,15 +227,9 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if not isinstance(raw, Mapping):
         raise SnapshotError("snapshot must be a JSON object")
 
-    head_sha = None
-    for key in ("headRefOid", "head_sha", "headSha"):
-        if key in raw:
-            head_sha = raw[key]
-            break
-    if not isinstance(head_sha, str) or not head_sha:
+    head_sha = _read_oid(raw, "snapshot head SHA", "headRefOid", "head_sha", "headSha")
+    if head_sha is None:
         raise SnapshotError("snapshot has no head SHA")
-    if _SHA_RE.fullmatch(head_sha) is None:
-        raise SnapshotError("snapshot head SHA must be exact full hex with no padding")
 
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
     if not base_ref:
@@ -256,11 +284,15 @@ def evaluate(
         not isinstance(expected_head_sha, str) or _SHA_RE.fullmatch(expected_head_sha) is None
     ):
         raise ValueError("expected_head_sha must be 40 or 64 hexadecimal characters")
+    if not isinstance(expected_base, str) or not expected_base.strip():
+        raise ValueError("expected_base must name a branch")
 
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
     defers: list[GateReason] = []
     selectors = tuple(required)
+    main_jobs = MAIN_REQUIRED_JOBS if facts.base_ref == "main" else ()
+    selectors += tuple(job for job in main_jobs if job not in selectors)
     matched_labels: list[str] = []
 
     if not expected_head_sha:
@@ -278,7 +310,7 @@ def evaluate(
             )
         )
 
-    if expected_base and facts.base_ref != expected_base:
+    if facts.base_ref != expected_base:
         rejects.append(
             GateReason(
                 "BASE_MISMATCH",
@@ -321,7 +353,11 @@ def evaluate(
         )
 
     for selector in selectors:
-        if not isinstance(selector, str) or not selector.strip():
+        if (
+            not isinstance(selector, str)
+            or not selector.strip()
+            or any(char in selector for char in "*?")
+        ):
             rejects.append(GateReason(
                 "AMBIGUOUS_REQUIRED_PATTERN",
                 f"required job {selector!r} must be a nonempty exact job name or workflow / job label",
@@ -329,18 +365,13 @@ def evaluate(
             continue
         matches = [check for check in facts.checks if _matches(selector, check)]
         if not matches:
-            if any(char in selector for char in "*?[]"):
-                rejects.append(GateReason(
-                    "AMBIGUOUS_REQUIRED_PATTERN",
-                    f"no check named {selector!r}; glob selectors are unsupported",
-                ))
-            else:
-                defers.append(GateReason(
-                    "MISSING_REQUIRED_CHECK",
-                    f"no check matched required job {selector!r}",
-                ))
+            defers.append(GateReason(
+                "MISSING_REQUIRED_CHECK",
+                f"no check matched required job {selector!r}",
+            ))
             continue
 
+        main_job = selector in main_jobs
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -377,6 +408,22 @@ def evaluate(
                     GateReason(
                         "CHECK_UNKNOWN_STATUS",
                         f"{check.label} has an unrecognized status {check.status!r}",
+                    )
+                )
+                continue
+            if main_job and not check.has_explicit_run_status:
+                defers.append(
+                    GateReason(
+                        "REQUIRED_RUN_STATUS_MISSING",
+                        f"{check.label} lacks an explicit workflow job status",
+                    )
+                )
+                continue
+            if main_job and check.conclusion != "SUCCESS":
+                rejects.append(
+                    GateReason(
+                        "CHECK_NOT_SUCCESS",
+                        f"{check.label} must succeed for main (conclusion {check.conclusion!r})",
                     )
                 )
                 continue

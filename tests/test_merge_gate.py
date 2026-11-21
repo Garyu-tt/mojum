@@ -14,6 +14,7 @@ from mojum.merge_gate import (
     EXIT_READY,
     EXIT_REJECT,
     EXIT_USAGE,
+    MAIN_REQUIRED_JOBS,
     SCHEMA,
     CheckOutcome,
     FetchError,
@@ -46,7 +47,7 @@ def run(status="COMPLETED", conclusion="SUCCESS", name="Aquarium QA", workflow=N
 def facts(checks, **overrides):
     defaults = dict(
         head_sha=HEAD,
-        base_ref="main",
+        base_ref="release",
         checks=tuple(checks),
         number=419,
         is_draft=False,
@@ -62,7 +63,7 @@ def evaluate_checks(checks, **overrides):
     fact_overrides = {k: v for k, v in overrides.items() if k in fact_fields}
     kwargs = {k: v for k, v in overrides.items() if k not in fact_fields}
     kwargs.setdefault("expected_head_sha", HEAD)
-    kwargs.setdefault("expected_base", "main")
+    kwargs.setdefault("expected_base", fact_overrides.get("base_ref", "release"))
     kwargs.setdefault("required", REQUIRED)
     parsed = parse_snapshot(
         {
@@ -173,6 +174,33 @@ class SnapshotParsingTests(unittest.TestCase):
                     "checks": [run(head_sha=value)],
                 })
 
+    def test_rejects_conflicting_head_aliases(self):
+        with self.assertRaisesRegex(SnapshotError, "conflicting aliases"):
+            parse_snapshot({
+                "headRefOid": HEAD,
+                "head_sha": OTHER,
+                "baseRefName": "main",
+            })
+        with self.assertRaisesRegex(SnapshotError, "conflicting aliases"):
+            parse_snapshot({
+                "headRefOid": HEAD,
+                "baseRefName": "main",
+                "checks": [dict(run(), headSha=HEAD, head_sha=OTHER)],
+            })
+
+    def test_negative_legacy_state_cannot_be_hidden_by_conclusion(self):
+        for entry in (
+            {"context": "legacy", "state": "SUCCESS", "conclusion": "FAILURE"},
+            {"context": "legacy", "state": "ERROR", "conclusion": "SUCCESS"},
+        ):
+            with self.subTest(entry=entry):
+                parsed = parse_snapshot({
+                    "headRefOid": HEAD,
+                    "baseRefName": "main",
+                    "checks": [entry],
+                })
+                self.assertIn(parsed.checks[0].conclusion, {"FAILURE", "ERROR"})
+
     def test_check_without_status_but_with_conclusion_is_completed(self):
         parsed = parse_snapshot(
             {
@@ -213,9 +241,13 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.code, "HEAD_MISMATCH")
 
     def test_base_mismatch_rejects(self):
-        result = evaluate_checks(self.green(), expected_base="release")
+        result = evaluate_checks(self.green(), expected_base="main")
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "BASE_MISMATCH")
+
+    def test_blank_expected_base_raises(self):
+        with self.assertRaisesRegex(ValueError, "expected_base"):
+            evaluate_checks(self.green(), expected_base="")
 
     def test_malformed_expected_head_raises(self):
         with self.assertRaises(ValueError):
@@ -423,6 +455,64 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual((result.verdict, result.code), ("reject", "CHECK_FAILED"))
 
 
+class MainMatrixTests(unittest.TestCase):
+    def green(self):
+        checks = []
+        for label in MAIN_REQUIRED_JOBS:
+            workflow, name = label.split(" / ", 1)
+            checks.append(run(name=name, workflow=workflow))
+        return checks
+
+    def test_complete_main_floor_is_ready_without_require_flags(self):
+        result = evaluate_checks(self.green(), base_ref="main", required=())
+        self.assertEqual(result.verdict, "ready")
+        self.assertEqual(result.required, MAIN_REQUIRED_JOBS)
+
+    def test_narrow_selector_cannot_bypass_main_floor(self):
+        check = self.green()[0]
+        result = evaluate_checks(
+            [check], base_ref="main", required=(check["name"],)
+        )
+        self.assertEqual(result.verdict, "defer")
+        self.assertIn("MISSING_REQUIRED_CHECK", {reason.code for reason in result.reasons})
+
+    def test_wrong_workflow_cannot_fill_main_slot(self):
+        checks = self.green()
+        checks[0]["workflowName"] = "Unrelated CI"
+        result = evaluate_checks(checks, base_ref="main", required=())
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+
+    def test_main_floor_requires_explicit_check_run_status(self):
+        for override in ({"status": None}, {"__typename": "StatusContext"}):
+            with self.subTest(override=override):
+                checks = self.green()
+                checks[0].update(override)
+                result = evaluate_checks(checks, base_ref="main", required=())
+                self.assertEqual(result.verdict, "defer")
+                self.assertEqual(result.code, "REQUIRED_RUN_STATUS_MISSING")
+
+    def test_main_floor_requires_success_without_waiver(self):
+        for conclusion in ("NEUTRAL", "SKIPPED"):
+            with self.subTest(conclusion=conclusion):
+                checks = self.green()
+                checks[0]["conclusion"] = conclusion
+                result = evaluate_checks(
+                    checks,
+                    base_ref="main",
+                    required=(),
+                    waivers={MAIN_REQUIRED_JOBS[0]: "not sufficient for main"},
+                )
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_NOT_SUCCESS")
+
+    def test_duplicate_main_job_defers(self):
+        checks = self.green()
+        result = evaluate_checks([*checks, checks[0]], base_ref="main", required=())
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "AMBIGUOUS_REQUIRED_CHECK")
+
+
 class CliTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -433,7 +523,7 @@ class CliTests(unittest.TestCase):
         return {
             "number": 999,
             "headRefOid": HEAD,
-            "baseRefName": "main",
+            "baseRefName": "release",
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
@@ -461,6 +551,7 @@ class CliTests(unittest.TestCase):
         return [
             "--input", str(path),
             "--expected-head-sha", HEAD,
+            "--expected-base", "release",
             "--require", REQUIRED[0],
             "--require", REQUIRED[1],
             "--require", REQUIRED[2],
@@ -473,6 +564,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["schema"], SCHEMA)
         self.assertEqual(payload["verdict"], "ready")
         self.assertFalse(payload["merge_performed"])
+
+    def test_main_floor_runs_without_require_flags(self):
+        checks = []
+        for label in MAIN_REQUIRED_JOBS:
+            workflow, name = label.split(" / ", 1)
+            checks.append(run(name=name, workflow=workflow))
+        snapshot = self.snapshot(checks)
+        snapshot["baseRefName"] = "main"
+        code, payload, _ = self.invoke(
+            "--input", str(self.write(snapshot)), "--expected-head-sha", HEAD
+        )
+        self.assertEqual(code, EXIT_READY)
+        self.assertEqual(payload["required"], list(MAIN_REQUIRED_JOBS))
 
     def test_defer_exit_two(self):
         payload = self.snapshot([
@@ -532,6 +636,7 @@ class CliTests(unittest.TestCase):
                 run(name="aquarium-stdlib (3.11)", workflow="Aquarium regression QA")
             ]))),
             "--expected-head-sha", HEAD,
+            "--expected-base", "release",
             "--require", "Aquarium*",
         ]
         code, result, _ = self.invoke(*args)
@@ -558,6 +663,7 @@ class CliTests(unittest.TestCase):
             code, result, _ = self.invoke(
                 "--pr", "419",
                 "--expected-head-sha", HEAD,
+                "--expected-base", "release",
                 "--require", REQUIRED[0],
                 "--require", REQUIRED[1],
                 "--require", REQUIRED[2],

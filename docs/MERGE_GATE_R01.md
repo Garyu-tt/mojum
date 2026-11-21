@@ -1,7 +1,7 @@
 # Exact-head CI merge gate (R0.1)
 
 `mojum.merge_gate` is an offline preflight for a PR status rollup (issue #415).
-It checks the listed jobs, recorded head, target branch, and merge state.
+It checks the required jobs, recorded head, target branch, and merge state.
 It needs no third-party packages and only reads GitHub when asked.
 
 The merge API is not proof that PR-triggered workflows finished. The gate reads
@@ -12,7 +12,7 @@ merge, and returns `ready`, `defer` or `reject` with machine-readable reasons.
 
 | Verdict | Exit | Meaning |
 | --- | --- | --- |
-| `ready` | 0 | The listed checks pass in the supplied rollup, the recorded head and target branch match, and the merge state is clean. |
+| `ready` | 0 | Every required check passes in the supplied rollup, the recorded head and target branch match, and the merge state is clean. |
 | `defer` | 2 | Evidence is incomplete: a check is queued/running/missing, the PR is a draft, or mergeability is still unknown. Re-query later. |
 | `reject` | 1 | Evidence is bad: head/base mismatch, conflicts, or a required check failed, was cancelled, timed out, or was skipped without a waiver. |
 
@@ -22,6 +22,9 @@ failed `gh` call) is also a `reject` and never a `ready`.
 
 ### Check rules
 
+- A PR targeting `main` always requires the exact 3.11/3.12/3.13 jobs from
+  Aquarium, Motor Gate, and Mesh (nine jobs total). This built-in floor cannot
+  be narrowed with `--require`; explicit requirements are additive.
 - A requirement names one exact job, for example `aquarium-stdlib (3.12)`.
   Use `workflow / job` to match the workflow and the job fields together.
   Repeat `--require` for every expected job in every required matrix. Multiple
@@ -29,8 +32,10 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - The gate compares selectors literally. Supply no globs or standalone workflow
   names. Obtain the expected jobs from reviewed workflow definitions or branch
   protection. A live rollup can omit jobs that have yet to register.
-- `success` and `neutral` are passing. `skipped` is rejected unless the same
-  exact selector appears in `--waive JOB=REASON`.
+- Built-in `main` jobs must report an explicit workflow-run status and
+  `success`; `neutral`, `skipped`, and waivers cannot satisfy that floor.
+  For extra or non-`main` requirements, `success` and `neutral` are passing,
+  while `skipped` needs the same exact selector in `--waive JOB=REASON`.
 - A waiver never masks `failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `error` or `startup_failure`.
 - A missing required job yields `defer` (`MISSING_REQUIRED_CHECK`).
@@ -42,8 +47,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
   hexadecimal SHA without whitespace or padding. Abbreviated SHAs are not
   acceptable for an exact-head acceptance decision; missing values reject
   (`EXPECTED_HEAD_REQUIRED`).
-- No requirements at all is `reject` (`NO_REQUIRED_CHECKS`): a gate that
-  requires nothing proves nothing.
+- A non-`main` target with no explicit requirements is `reject`
+  (`NO_REQUIRED_CHECKS`). A `main` target gets the built-in nine-job floor.
 
 ## Offline usage
 
@@ -53,17 +58,13 @@ Snapshot a PR to JSON, then evaluate it without network access:
 gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup > pr.json
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
-  --expected-head-sha "$(git rev-parse HEAD)" \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)'
+  --expected-head-sha "$(git rev-parse HEAD)"
 ```
+
+For `main`, that command applies all nine exact jobs automatically. Use
+`--require 'workflow / job'` for additive project-specific checks. For another
+target branch, pass at least one explicit `--require` and the matching
+`--expected-base`.
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
 (opt-in network). Output is one JSON object on stdout:
