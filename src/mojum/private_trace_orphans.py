@@ -136,12 +136,56 @@ def _internally_consistent(data, expected_head):
                     "epoch_index": tick // 9999,
                 }:
                     raise ValueError("missing epoch boundary")
-            if any(
-                not isinstance(frame.get("developmental"), dict)
-                or frame["developmental"].get("schema")
-                != "mojum.developmental.local-cell/4" for frame in frames
-            ):
-                raise ValueError("frame policy mismatch")
+            # A self-consistent SHA cannot make a forged epoch frame a
+            # coherent v4 observation. Apply the SAME read-only temporal
+            # contract as the offline viewer before calling an orphan
+            # internally consistent, even with a matching external head.
+            for frame in frames:
+                tick = frame["tick"]
+                index, offset = divmod(tick, 9999)
+                dev = frame.get("developmental")
+                if not isinstance(dev, dict) or dev.get("schema") != (
+                        "mojum.developmental.local-cell/4"):
+                    raise ValueError("frame policy mismatch")
+                observation = dev.get("observation")
+                intent = dev.get("intent")
+                learning = dev.get("learning")
+                interoception = frame.get("interoception")
+                heartbeat = (interoception.get("heartbeat")
+                             if isinstance(interoception, dict) else None)
+                if (tick >= 99999
+                        or not isinstance(observation, dict)
+                        or not isinstance(intent, dict)
+                        or not isinstance(learning, dict)
+                        or not isinstance(heartbeat, dict)
+                        or observation.get("schema")
+                        != "mojum.developmental.proprioception/2"
+                        or learning.get("schema")
+                        != "mojum.developmental.local-cell.outcome/4"
+                        or type(observation.get("absolute_tick")) is not int
+                        or observation["absolute_tick"] != tick
+                        or type(observation.get("epoch_index")) is not int
+                        or observation["epoch_index"] != index
+                        or type(observation.get("epoch_tick")) is not int
+                        or observation["epoch_tick"] != offset
+                        or type(intent.get("tick")) is not int
+                        or intent["tick"] != tick
+                        or type(intent.get("epoch_index")) is not int
+                        or intent["epoch_index"] != index
+                        or type(intent.get("epoch_tick")) is not int
+                        or intent["epoch_tick"] != offset
+                        or type(learning.get("epoch_index")) is not int
+                        or learning["epoch_index"] != index
+                        or type(learning.get("epoch_tick")) is not int
+                        or learning["epoch_tick"] != offset
+                        or type(learning.get("total_updates")) is not int
+                        or learning["total_updates"] != tick + 1
+                        # Native EpochProprioception and interoception
+                        # encode a heartbeat *event* as strict bool, not BPM.
+                        or type(observation.get("heartbeat_pulse")) is not bool
+                        or type(heartbeat.get("pulse")) is not bool
+                        or observation.get("heartbeat_pulse") != heartbeat.get("pulse")):
+                    raise ValueError("incoherent v4 epoch/sense/motor/learning frame")
         elif "policy_schema" in footer:
             declared = footer["policy_schema"]
             if not isinstance(declared, str):
