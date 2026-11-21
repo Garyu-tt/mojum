@@ -1,7 +1,5 @@
 """Opt-in epoch-v4 foreground host admission without legacy status ABI changes."""
 
-from contextlib import redirect_stdout
-from io import StringIO
 import json
 import os
 from pathlib import Path
