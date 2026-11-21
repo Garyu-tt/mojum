@@ -1,0 +1,42 @@
+name: Mojum R0.16 POSIX directory durability boundary QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r016-export-directory-fsync.yml"
+      - "src/mojum/aquarium_trace_export.py"
+      - "tests/test_r016_export_directory_sync.py"
+  push:
+    paths:
+      - ".github/workflows/r016-export-directory-fsync.yml"
+      - "src/mojum/aquarium_trace_export.py"
+      - "tests/test_r016_export_directory_sync.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mojum-r016-dir-fsync-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  posix-fsync:
+    name: dir-fsync (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Real SQLite PRIVATE JSONL and directory fsync ordering/failure tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_r016_export_directory_sync.py -v

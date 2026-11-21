@@ -53,6 +53,32 @@ def _destination(path):
     return dest
 
 
+def _fsync_published_directory(directory):
+    """Durably request POSIX namespace publication after file fsync+link.
+
+    Called only AFTER the new link is published and the private stage path
+    has been unlinked. A failure leaves a complete but durability-uncertain
+    final file in place: callers must reconcile, never silently retry-overwrite.
+
+    No claim of actual electrical power-cut safety, controller caches, flash
+    translation guarantees, remote filesystems or Windows directory sync.
+    """
+    if os.name != "posix":
+        # No portable directory fsync equivalent is implemented here.
+        return False
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(str(directory), flags)
+    try:
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("expected a trusted output directory for fsync")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return True
+
+
 def _limit_source_pages(source):
     pages = source.execute("PRAGMA page_count").fetchone()[0]
     bytes_per_page = source.execute("PRAGMA page_size").fetchone()[0]
@@ -290,16 +316,30 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     )
     try:
         with os.fdopen(fd, "wb") as stream:
+            # The temp inode is 0600 from mkstemp. Reinforce that promise
+            # on its OWN open descriptor *before* flushing inode metadata;
+            # changing mode after file fsync would leave new permissions
+            # outside that explicit durability boundary.
+            if os.name == "posix":
+                os.fchmod(stream.fileno(), 0o600)
+            else:
+                os.chmod(stage_out, 0o600)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(stage_out, 0o600)
         os.link(stage_out, dest)  # EEXIST rather than overwrite; same FS.
     finally:
         try:
             os.unlink(stage_out)
         except FileNotFoundError:
             pass
+
+    # File fsync alone is not enough to request persistence of the directory
+    # entry. Sync AFTER the stage unlink so successful POSIX publication
+    # includes both the new hard-link and removal of its PRIVATE temp name.
+    # If this fails, the final file MAY ALREADY EXIST. Propagate failure;
+    # do not claim success, delete/overwrite the output, or hide the error.
+    _fsync_published_directory(dest.parent)
 
     return {
         "schema": SCHEMA,
