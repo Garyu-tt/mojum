@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
-from fnmatch import fnmatchcase
 import json
 from pathlib import Path
 import re
@@ -231,12 +230,9 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
 
 
 def _matches(pattern: str, check: CheckOutcome) -> bool:
-    targets = [check.name]
-    if check.workflow:
-        # A workflow name matches every job it produced, so all of that
-        # workflow's checks must pass; "workflow / job" targets one job.
-        targets.extend([check.workflow, f"{check.workflow} / {check.name}"])
-    return any(fnmatchcase(target, pattern) for target in targets)
+    # A workflow or wildcard can match one registered matrix job before its
+    # siblings exist. Require an explicitly named job, not a partial rollup.
+    return pattern == check.name or pattern == check.label
 
 
 def evaluate(
@@ -316,6 +312,12 @@ def evaluate(
         )
 
     for pattern in patterns:
+        if "*" in pattern or "?" in pattern:
+            rejects.append(GateReason(
+                "UNSAFE_CHECK_SELECTOR",
+                f"required check {pattern!r} uses a wildcard; enumerate each exact matrix job",
+            ))
+            continue
         matches = [check for check in facts.checks if _matches(pattern, check)]
         if not matches:
             defers.append(
@@ -475,8 +477,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="PATTERN",
         help=(
-            "required check name, 'workflow / name', or fnmatch pattern; repeatable. "
-            "All checks matching a pattern must have completed successfully."
+            "exact required job name or 'workflow / job' label; repeat for every "
+            "matrix job. Wildcards and workflow-only selectors are not accepted."
         ),
     )
     parser.add_argument(
