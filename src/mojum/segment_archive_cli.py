@@ -21,6 +21,7 @@ from .archive_root_receipt import (
 from .archive_device_transfer import (
     TransferError, copy_pinned_archive_to_device,
 )
+from .verified_replica_restore import recover_pinned_replica
 from .segmented_noosphere import SegmentedNoosphere
 from .noosphere import NoosphereError
 
@@ -93,6 +94,17 @@ def main(argv=None):
     transport.add_argument("--key-file", type=Path, required=True)
     transport.add_argument("--expected-receipt-sha", required=True)
     transport.add_argument("--include-private", action="store_true")
+    cold = sub.add_parser(
+        "recover-replica",
+        help="owner-HMAC verified cold restoration into a NEW PRIVATE SQLite",
+    )
+    cold.add_argument("--archive-dir", type=Path, required=True)
+    cold.add_argument("--new-db", type=Path, required=True)
+    cold.add_argument("--receipt-file", type=Path, required=True)
+    cold.add_argument("--key-file", type=Path, required=True)
+    cold.add_argument("--expected-receipt-sha", required=True)
+    cold.add_argument("--expected-agent-id", required=True)
+    cold.add_argument("--include-private", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -155,7 +167,7 @@ def main(argv=None):
                 args.receipt_file, args.key_file,
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
             )
-        else:
+        elif args.operation == "copy-device":
             if not args.include_private:
                 parser.error("PRIVATE cross-device copy requires --include-private")
             status = copy_pinned_archive_to_device(
@@ -163,6 +175,16 @@ def main(argv=None):
                 args.receipt_file, args.key_file,
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
                 include_nonpublic=True,
+            )
+        else:
+            if not args.include_private:
+                parser.error("PRIVATE replica recovery requires --include-private")
+            status = recover_pinned_replica(
+                args.archive_dir, args.new_db,
+                args.receipt_file, args.key_file,
+                independently_pinned_receipt_sha256=args.expected_receipt_sha,
+                expected_agent_id=args.expected_agent_id,
+                allow_private_restore=True,
             )
     except (ArchiveError, NoosphereError, ReceiptError, TransferError) as exc:
         parser.error(str(exc))
