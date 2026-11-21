@@ -3,6 +3,7 @@
 These tests use only disposable synthetic SQLite journals.  They verify the
 new opt-in wire without changing the legacy v1/v2/v3 policy contracts.
 """
+from contextlib import closing
 from copy import deepcopy
 import json
 import sqlite3
@@ -177,9 +178,9 @@ class AquariumEpochV4Tests(unittest.TestCase):
         # close the sequence gap and recompute every event hash. The inspector
         # must reject the otherwise hash-consistent first epoch-1 frame.
         missing_marker = Path(self.tmp.name) / "missing_marker.sqlite3"
-        with sqlite3.connect(self.db) as source, sqlite3.connect(missing_marker) as target:
+        with closing(sqlite3.connect(self.db)) as source, closing(sqlite3.connect(missing_marker)) as target:
             source.backup(target)
-        with sqlite3.connect(missing_marker) as db:
+        with closing(sqlite3.connect(missing_marker)) as db:
             db.execute("DROP TRIGGER noosphere_no_delete")
             db.execute("DROP TRIGGER noosphere_no_update")
             self.assertEqual(db.execute(
@@ -197,6 +198,7 @@ class AquariumEpochV4Tests(unittest.TestCase):
                 )
                 previous = digest
             db.execute("UPDATE events SET seq=-seq WHERE seq<0")
+            db.commit()
         with self.assertRaisesRegex(NoosphereError, "missing durable v4 epoch marker"):
             inspect_journal(missing_marker)
 
