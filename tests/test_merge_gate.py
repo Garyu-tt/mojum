@@ -432,9 +432,11 @@ class GateVerdictTests(unittest.TestCase):
         # exist when 3.11 completes. Enumerate expected jobs explicitly.
         checks = [run(name="aquarium-stdlib (3.11)",
                       workflow="Mojum R0.3 online-learning aquarium regression")]
+        workflow = "Mojum R0.3 online-learning aquarium regression"
         result = evaluate_checks(checks, required=(
-            "aquarium-stdlib (3.11)", "aquarium-stdlib (3.12)",
-            "aquarium-stdlib (3.13)",
+            f"{workflow} / aquarium-stdlib (3.11)",
+            f"{workflow} / aquarium-stdlib (3.12)",
+            f"{workflow} / aquarium-stdlib (3.13)",
         ))
         self.assertEqual(result.verdict, "defer")
         self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
@@ -508,6 +510,36 @@ class GateVerdictTests(unittest.TestCase):
                 self.assertEqual(result.verdict, "defer")
                 self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
+    def test_actions_job_requires_workflow_qualified_selector(self):
+        # Job names are not globally unique. A similarly named job from a
+        # different workflow must not satisfy the intended requirement.
+        checks = [run(name="actual-chrome", workflow="Unrelated workflow")]
+        result = evaluate_checks(checks, required=("actual-chrome",))
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.code, "AMBIGUOUS_REQUIRED_PATTERN")
+
+    def test_bare_legacy_commit_status_remains_supported(self):
+        checks = [{"context": "external/security", "state": "SUCCESS"}]
+        result = evaluate_checks(checks, required=("external/security",))
+        self.assertEqual(result.verdict, "ready")
+
+    def test_duplicate_extra_workflow_job_defers(self):
+        check = run(name="actual-chrome", workflow="Viewer smoke")
+        result = evaluate_checks(
+            [check, check], required=("Viewer smoke / actual-chrome",),
+        )
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "AMBIGUOUS_REQUIRED_CHECK")
+
+    def test_extra_workflow_job_requires_explicit_run_status(self):
+        check = run(name="actual-chrome", workflow="Viewer smoke")
+        check["status"] = None
+        result = evaluate_checks(
+            [check], required=("Viewer smoke / actual-chrome",),
+        )
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "REQUIRED_RUN_STATUS_MISSING")
+
 
 class MainMatrixTests(unittest.TestCase):
     def green(self):
@@ -522,11 +554,11 @@ class MainMatrixTests(unittest.TestCase):
         self.assertEqual(result.verdict, "ready")
         self.assertEqual(len(result.required), 9)
 
-    def test_narrow_selector_does_not_bypass_main_matrices(self):
+    def test_bare_narrow_selector_is_rejected_and_cannot_bypass_main_matrices(self):
         check = self.green()[0]
         result = evaluate_checks([check], base_ref="main", required=(check["name"],))
-        self.assertEqual(result.verdict, "defer")
-        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.code, "AMBIGUOUS_REQUIRED_PATTERN")
 
     def test_same_job_name_in_another_workflow_cannot_fill_main_matrix(self):
         checks = self.green()
