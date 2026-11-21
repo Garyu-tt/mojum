@@ -86,6 +86,12 @@ Repeat with the same path to resume. This is still a synthetic CPU fixture,
 not a neural brain, physical actuator, Android service, or 24/7 guarantee.
 See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
 
+For a separately versioned contact-association retention experiment, use a
+fresh journal with `--sensory-mode toy_probe_v2`. It keeps the original
+`toy_probe` wire contract unchanged, bounds live numeric associations to 128
+cue records with deterministic eviction, and records forgotten evidence in
+the PRIVATE checkpoint. See [the R0.15 contract](docs/SENSORY_ASSOCIATIONS_V2_R015.md).
+
 ### Replay a committed decision offline
 
 After the six-tick guided run above, export a local trace from the same journal.
