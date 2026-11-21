@@ -1,0 +1,22 @@
+# R0.2 scripted creative-school fixture (draft)
+
+This isolated offline Python-stdlib component demonstrates two scripted exercises. The inherited R0.1 catalog from draft PR #165 remains CATALOG_ONLY_NOT_EXECUTABLE because the other nine sections, a learner policy, real evaluation, a school UI, and Noosphere integration do not exist. Released main is unchanged until review and merge.
+
+## Run on one CPU
+
+Use a fresh output directory each time:
+
+~~~sh
+PYTHONPATH=src python -m mojum.school --catalog examples/school_catalog_r01.json --section visual_arts --out ./private-art-001 --start-tick 100
+PYTHONPATH=src python -m mojum.school --catalog examples/school_catalog_r01.json --section music --out ./private-music-001 --start-tick 200
+PYTHONPATH=src python -m mojum.school --catalog examples/school_catalog_r01.json --section music --mode frozen_control --out ./private-music-control-001 --start-tick 200
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_school_runner.py' -v
+~~~
+
+The program refuses to overwrite an existing directory. Files and directories are owner-only where POSIX permissions apply. Do not publish the private events.json or connect the output directly to a public viewer. File permissions and SHA-256 checksums do not establish consent, persistent authentication or protection against malicious same-UID filesystem races.
+
+Each run produces 5 PRIVATE records: observe → experiment → make → revise → reflect. The make and revise records link artifact bytes to SHA-256, size, revision tick, activity ID, catalog hash, and SCRIPTED_FIXTURE provenance. Art is a 24×24 ASCII PPM image; the deliberately scripted revision improves bilateral pixel mirror symmetry. Music is timing-event JSON in milliseconds; scripted revision reduces sum of absolute errors for four fixed target beats. No sound driver, camera, microphone or physical actuation is touched.
+
+The separate frozen_control run repeats the baseline artifact and produces no improvement. This is a scripted independent control, not a randomized or independently trained learner; comparisons demonstrate only that fixture feedback distinguishes changed versus unchanged output. Retention, transfer, genuine learning, subjective experience, interests, agency and grades are not demonstrated. No forced grades, punishment, hunger/thirst, age penalty or physical actuator instructions.
+
+Bounds: catalog ≤64 KiB when loaded through CLI, ≤32 sections, exactly 5 logical ticks per run, each artifact ≤32 KiB, bounded nonnegative virtual ticks, known schema and verified activity IDs. This library does not open or modify the Aquarium SQLite journal or Noosphere. Future authorized adapters must preserve explicit privacy/provenance before integration.
