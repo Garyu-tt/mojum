@@ -120,6 +120,9 @@ class BoundedContactUnitQA(unittest.TestCase):
             ("evictions", 1),
             ("table", {"042:90:174": {"count": 1, "mean_deflection": .4}}),
             ("table", {"42:90:174": {"count": True, "mean_deflection": .4}}),
+            ("table", {"42:90:174": {
+                "count": 1, "mean_deflection": 10**1000,
+            }}),
         ):
             with self.subTest(field=field, value=altered):
                 bad = deepcopy(original)
@@ -130,6 +133,13 @@ class BoundedContactUnitQA(unittest.TestCase):
             model.learn(cue(2), measured(2), model.predict(cue(2)))
         with self.assertRaises(SensoryV2Error):
             model.learn(cue(3), measured(3, 9), model.predict(cue(3)))
+        with self.assertRaises(SensoryV2Error):
+            model.learn(cue(3), measured(3, 10**1000),
+                        model.predict(cue(3)))
+        forged = measured(3)
+        forged["privileged_object_id"] = "secret-identification"
+        with self.assertRaises(SensoryV2Error):
+            model.learn(cue(3), forged, model.predict(cue(3)))
         self.assertEqual(model.snapshot(), original)
 
     def test_candidate_only_mutates_after_verified_sensory_adoption(self):
