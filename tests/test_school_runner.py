@@ -7,7 +7,14 @@ import sys
 import tempfile
 import unittest
 
-from mojum.school import SchoolContractError, load_catalog, run_scripted_activity, write_fixture
+from mojum.school import (
+    MAX_CATALOG_BYTES,
+    SchoolContractError,
+    load_catalog,
+    run_scripted_activity,
+    validate_catalog,
+    write_fixture,
+)
 
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "examples" / "school_catalog_r01.json"
 
@@ -67,7 +74,7 @@ class SchoolRunnerTests(unittest.TestCase):
         for tick in (True, -1, 2**63 - 4, 1.5, "5"):
             with self.subTest(tick=tick), self.assertRaises(SchoolContractError):
                 run_scripted_activity(self.catalog, "music", start_tick=tick)
-        for section in ("dance", "bogus"):
+        for section in ("dance", "bogus", [], {}, True, None):
             with self.subTest(section=section), self.assertRaises(SchoolContractError):
                 run_scripted_activity(self.catalog, section)
         with self.assertRaises(SchoolContractError):
@@ -82,6 +89,31 @@ class SchoolRunnerTests(unittest.TestCase):
                 path.write_bytes(content)
                 with self.subTest(content=content[:20]), self.assertRaises(SchoolContractError):
                     load_catalog(path)
+
+    def test_catalog_file_rejects_nonfinite_numbers_and_invalid_unicode(self):
+        catalog_json = json.dumps(self.catalog)
+        with tempfile.TemporaryDirectory() as dirname:
+            path = Path(dirname) / "catalog.json"
+            for value in ("NaN", "Infinity", "-Infinity", "1e999", r'"\ud800"'):
+                path.write_text(catalog_json[:-1] + ', "metadata": ' + value + "}",
+                                encoding="utf-8")
+                with self.subTest(value=value), self.assertRaises(SchoolContractError):
+                    load_catalog(path)
+
+    def test_in_memory_catalog_uses_the_same_json_and_size_contract(self):
+        values = {
+            "nonfinite": float("nan"),
+            "invalid-unicode": "\ud800",
+            "non-json": object(),
+            "oversized": "a" * MAX_CATALOG_BYTES,
+        }
+        for label, value in values.items():
+            catalog = {**self.catalog, "metadata": value}
+            with self.subTest(label=label):
+                with self.assertRaises(SchoolContractError):
+                    validate_catalog(catalog)
+                with self.assertRaises(SchoolContractError):
+                    run_scripted_activity(catalog, "music")
 
     def test_malformed_structure_and_resource_budgets(self):
         import copy
@@ -101,6 +133,9 @@ class SchoolRunnerTests(unittest.TestCase):
             dest = Path(dirname) / "output"
             write_fixture(run, dest)
             manifest = json.loads((dest / "events.json").read_bytes())
+            self.assertEqual(manifest["schema"], "mojum.school-scripted-run/1")
+            self.assertEqual({event["schema"] for event in manifest["events"]},
+                             {"mojum.school-scripted-event/1"})
             self.assertNotIn("artifacts", manifest)
             self.assertEqual(manifest["visibility"], "PRIVATE")
             self.assertEqual(sorted(p.name for p in dest.iterdir()),

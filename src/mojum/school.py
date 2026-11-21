@@ -13,8 +13,8 @@ import re
 from typing import Any
 
 CATALOG_SCHEMA = "mojum.school-catalog/1"
-EVENT_SCHEMA = "mojum.school-event/1"
-RUN_SCHEMA = "mojum.school-run/1"
+EVENT_SCHEMA = "mojum.school-scripted-event/1"
+RUN_SCHEMA = "mojum.school-scripted-run/1"
 PHASES = ("observe", "experiment", "make", "revise", "reflect")
 MAX_CATALOG_BYTES = 65_536
 MAX_SECTIONS = 32
@@ -41,8 +41,7 @@ def _nonempty_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip()) and len(value) <= 4096
 
 
-def validate_catalog(catalog: Any) -> dict[str, Any]:
-    """Validate the R0.1 proposed schema before making any work."""
+def _validated_catalog_bytes(catalog: Any) -> bytes:
     if not isinstance(catalog, dict) or catalog.get("schema") != CATALOG_SCHEMA:
         raise SchoolContractError("unsupported school catalog schema")
     if catalog.get("learning_loop") != list(PHASES):
@@ -86,6 +85,19 @@ def validate_catalog(catalog: Any) -> dict[str, Any]:
     for section in sections:
         if not set(section["cross_subject_ids"]).issubset(section_ids):
             raise SchoolContractError("unresolved cross-subject reference")
+
+    try:
+        payload = _canonical_json(catalog)
+    except (TypeError, ValueError, RecursionError) as error:
+        raise SchoolContractError("school catalog cannot be encoded as UTF-8 JSON") from error
+    if len(payload) > MAX_CATALOG_BYTES + 1:  # Canonical JSON adds a trailing newline.
+        raise SchoolContractError("school catalog exceeds byte limit")
+    return payload
+
+
+def validate_catalog(catalog: Any) -> dict[str, Any]:
+    """Validate the R0.1 schema and its bounded, canonical JSON representation."""
+    _validated_catalog_bytes(catalog)
     return catalog
 
 
@@ -97,13 +109,17 @@ def load_catalog(path: str | Path) -> dict[str, Any]:
         raise SchoolContractError("school catalog exceeds byte limit")
     try:
         catalog = json.loads(payload.decode("utf-8"), object_pairs_hook=_object_no_duplicates)
-    except (UnicodeError, json.JSONDecodeError) as error:
+    except SchoolContractError:
+        raise
+    except (ValueError, RecursionError) as error:
         raise SchoolContractError("school catalog is not valid UTF-8 JSON") from error
     return validate_catalog(catalog)
 
 
 def _canonical_json(value: Any) -> bytes:
-    return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), allow_nan=False)
+    return (encoded + "\n").encode("utf-8")
 
 
 def _digest(payload: bytes) -> str:
@@ -169,8 +185,8 @@ def run_scripted_activity(
     revision: scripted changed work. frozen_control: independent no-change control.
     Neither mode models a genuine learner or transferable skill.
     """
-    validate_catalog(catalog)
-    if section_id not in _SUPPORTED:
+    catalog_bytes = _validated_catalog_bytes(catalog)
+    if not isinstance(section_id, str) or section_id not in _SUPPORTED:
         raise SchoolContractError("section is not supported by synthetic R0.2 runner")
     if not any(s["id"] == section_id and s["starter_activity"]["id"] == _SUPPORTED[section_id]
                for s in catalog["sections"]):
@@ -190,7 +206,7 @@ def run_scripted_activity(
     artifacts = {f"baseline.{suffix}": baseline, f"revised.{suffix}": revised}
     if any(len(payload) > MAX_ARTIFACT_BYTES for payload in artifacts.values()):
         raise SchoolContractError("synthetic artifact exceeds byte budget")
-    catalog_hash = _digest(_canonical_json(catalog))
+    catalog_hash = _digest(catalog_bytes)
 
     def artifact_meta(filename: str) -> dict[str, Any]:
         data = artifacts[filename]
