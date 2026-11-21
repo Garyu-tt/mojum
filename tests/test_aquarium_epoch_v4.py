@@ -8,6 +8,8 @@ an authenticated snapshot.
 from copy import deepcopy
 import json
 from pathlib import Path
+import subprocess
+import sys
 import sqlite3
 import tempfile
 import unittest
@@ -142,6 +144,21 @@ class EpochJournalV4Tests(unittest.TestCase):
                 with self.assertRaisesRegex(NoosphereError, "requires sensory_mode none"):
                     _stored_policy(bogus)
 
+    def test_v4_cli_omits_motor_arguments_and_commits_real_frames(self):
+        process = subprocess.run(
+            [sys.executable, "-m", "mojum.aquarium",
+             "--db", str(self.db), "--motor-mode", V4_MODE,
+             "--neural-mode", "disabled", "--ticks", "2"],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        checkpoint = json.loads(process.stdout)
+        self.assertEqual(checkpoint["tick"], 2)
+        self.assertEqual(checkpoint["stored_events"], 3)
+        with self.open() as resumed:
+            self.assertEqual(resumed.tick, 2)
+            self.assertEqual(resumed.checkpoint()["journal_head"], checkpoint["journal_head"])
+
     def test_wire_rejects_premature_epoch_marker_with_valid_hash_chain(self):
         """Read-only inspection must enforce the boundary, not just SHA-256."""
         with self.open() as aquarium:
@@ -163,7 +180,8 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual((aquarium.tick, aquarium.epoch_index), (EPOCH_TICKS, 0))
             self.assertEqual(aquarium.store.count(), EPOCH_TICKS + 1)
             before = aquarium.checkpoint()
-            for args in ({"dx": 0.0}, {"dy": 0.0}, {"dx": "invalid"}):
+            for args in ({"dx": 0.0}, {"dy": 0.0}, {"dx": "invalid"},
+                         {"dx": None}, {"dy": None}, {"dx": None, "dy": None}):
                 with self.subTest(args=args):
                     with self.assertRaisesRegex(
                         AquariumError, "rejects external dx/dy"

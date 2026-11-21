@@ -61,6 +61,7 @@ MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
 MAX_REPLAY_EVENTS = 100_000
 MAX_MOTOR_REPLAY_EVENTS = 10_000
 REPLAY_BATCH_SIZE = 128
+_STEP_OMITTED = object()  # distinguish omitted argument from explicit None
 V2A_ARCHIVE_MODE = "local_cell_v2_a_archive"
 V2B_MODE = "local_cell_v2b"
 V2B_WIRE_MODE = "local_cell_v2"
@@ -638,12 +639,15 @@ class Aquarium:
         self._committed_head = head
         return copy.deepcopy(self.identity)
 
-    def step(self, *, dx=None, dy=None):
+    def step(self, *, dx=_STEP_OMITTED, dy=_STEP_OMITTED):
         if self._read_only:
             raise AquariumError("Aquarium journal is read-only")
-        # Validate API arguments before the epoch marker can commit.
-        if self._epoch_v4 and (dx is not None or dy is not None):
+        # Even explicit None is caller-supplied motor input. Refuse it before
+        # committing an epoch marker, while preserving older mode defaults.
+        if self._epoch_v4 and (dx is not _STEP_OMITTED or dy is not _STEP_OMITTED):
             raise AquariumError("developmental motor play rejects external dx/dy")
+        dx = None if dx is _STEP_OMITTED else dx
+        dy = None if dy is _STEP_OMITTED else dy
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
@@ -966,7 +970,10 @@ def main():
         if aquarium.stored_events + required > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
-            aquarium.step(dx=dx, dy=dy)
+            if aquarium.motor_mode == V4_MODE:
+                aquarium.step()
+            else:
+                aquarium.step(dx=dx, dy=dy)
         # The checkpoint's final head check also covers the count read here.
         stored_events = aquarium.stored_events
         checkpoint = aquarium.checkpoint()
