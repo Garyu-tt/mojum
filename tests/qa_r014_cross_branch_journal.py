@@ -41,6 +41,21 @@ def assert_pinned_checkout(source: Path, expected_sha: str, marker: str):
     check(completed.returncode == 0, "source is not a verifiable git checkout")
     check(completed.stdout.strip() == expected_sha,
           "checkout HEAD differs from pinned source " + expected_sha)
+    # An exact HEAD alone is insufficient if a manual checkout has edited
+    # tracked files or injected untracked Python modules. GitHub Actions
+    # creates clean source trees, and the offline harness must enforce that
+    # same provenance contract before executing either source.
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(source), "status", "--porcelain",
+             "--untracked-files=all"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AssertionError("cannot verify checkout cleanliness") from exc
+    check(status.returncode == 0, "cannot inspect checkout cleanliness")
+    check(not status.stdout.strip(),
+          "pinned source checkout has tracked or untracked local changes")
 
 
 def invoke(source: Path, database: Path, *, kind: str, ticks: int):
