@@ -772,6 +772,11 @@ def main():
     parser.add_argument("--developmental-policy",
                         choices=("legacy", "local_cell_v2", "local_cell_v3", "local_cell_v4"),
                         default="legacy", help="new explicit policy-pinned SQLite journal")
+    parser.add_argument("--journal-backend",
+                        choices=("legacy", "segmented"), default="legacy",
+                        help="EXPERIMENTAL opt-in entirely new SQLite journal format")
+    parser.add_argument("--journal-segment-size", type=int, default=4096,
+                        help="segmented-only events per immutable logical section")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
@@ -784,6 +789,10 @@ def main():
         parser.error("--dx/--dy cannot override goal-free exploratory intentions")
     if args.developmental_policy != "legacy" and args.exploration_mode != "goal_free":
         parser.error("versioned local-cell requires --exploration-mode goal_free")
+    if args.journal_backend == "segmented" and args.developmental_policy != "local_cell_v4":
+        parser.error("segmented journal requires explicit local_cell_v4")
+    if not MIN_SEGMENT_SIZE <= args.journal_segment_size <= MAX_SEGMENT_SIZE:
+        parser.error("--journal-segment-size must be in 64..8192")
     if args.exploration_mode == "scripted":
         # Invalid scripted motion is a CLI error, not an organism birth.
         # Reject NaN, infinite and out-of-budget displacement before SQLite
@@ -799,6 +808,8 @@ def main():
         neural_mode=args.neural_mode, exploration_mode=args.exploration_mode,
         sensory_mode=args.sensory_mode,
         developmental_policy=args.developmental_policy,
+        journal_backend=args.journal_backend,
+        journal_segment_size=args.journal_segment_size,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
