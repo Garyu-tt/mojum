@@ -95,13 +95,17 @@ PRIVATE sensory events and acquisition IDs are not returned.
 
 | Diagnostic result | Interpretation | CLI exit |
 | --- | --- | --- |
-| NO_PREPARED_INTENT | No staged operation exists | 0 |
+| NO_PREPARED_INTENT | No staged operation; full source replay also matches ACTIVE authority anchor | 0 |
+| UNANCHORED_JOURNAL_WITHOUT_INTENT_STOP | No staged intent but journal differs from anchored registry | 3 |
+| AUTHORITY_FROZEN_WITHOUT_INTENT_STOP | Transfer/other FROZEN state without a staged mutation | 3 |
 | PREPARED_NO_EVENT_STOP | Intent committed but no journal event | 3 |
 | PREPARED_EXACT_EVENT_REQUIRES_REVIEW | Exactly the declared event appears committed | 3 |
 | PREPARED_MISMATCH_STOP | Journal differs from declared hash or count | 3 |
 | JOURNAL_INVALID_STOP | Replay / journal verification failed | 3 |
 | JOURNAL_CHANGED_DURING_AUDIT_STOP | Source moved while checking | 3 |
 | UNTRUSTED_INTENT_STATE_STOP | Authority phase/epoch/generation disagrees with intent | 3 |
+
+No-intent does **not** mean "everything is healthy" on its own: the inspector also fully replays the journal and compares it to ACTIVE authority head/count/tick. A missing intent paired with a mismatched source, or an existing transfer FROZEN state, is a nonzero STOP result.
 
 **Every report sets `auto_repair_allowed=false`.** A matching hash
 shows *content equivalence*, not that the trusted writer executable
