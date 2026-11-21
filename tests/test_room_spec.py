@@ -116,6 +116,36 @@ class ValidRoomTests(unittest.TestCase):
         self.assertTrue(report.valid, report.errors)
 
 
+
+class RuntimeNumberRangeTests(unittest.TestCase):
+    def test_overflowing_json_exponents_are_rejected_not_crashed(self):
+        # Decimal considers these finite, but Python float cannot represent
+        # them. Previously summary-area multiplication could raise Overflow.
+        for token in (b"1e9999999", b"1e1000000", b"1e309"):
+            with self.subTest(token=token):
+                raw = (
+                    b'{"width":' + token +
+                    b',"height":' + token +
+                    b',"obstacles":[],"start":[0,0]}'
+                )
+                report = validate_room_bytes(raw)
+                self.assertFalse(report.valid)
+                self.assertIn("runtime float range", " ".join(report.errors))
+                self.assertIsNone(report.summary)
+
+    def test_nonzero_underflow_is_rejected_before_runtime_coercion(self):
+        raw = b'{"width":1e-400,"height":4,"obstacles":[],"start":[0,0]}'
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float range", " ".join(report.errors))
+
+    def test_large_but_representable_json_number_is_still_valid(self):
+        raw = b'{"width":1e308,"height":4,"obstacles":[],"start":[0,0]}'
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.summary["width"], "1e308")
+
+
 class ShapeErrorTests(unittest.TestCase):
     def test_root_must_be_object(self):
         for document in ([], 1, "room", True, None):
