@@ -127,6 +127,19 @@ class SignedReplayCacheQA(unittest.TestCase):
         with self.aquarium(signed=False) as good:
             self.assertEqual(good.tick, 12)
 
+    def test_valid_hmac_cannot_fast_forward_after_deterministic_code_change(self):
+        # Source byte fingerprints prevent skipping historic simulations under
+        # changed runtime logic even when every cache field is re-MACed.
+        self.make_snapshot(ticks=6)
+        state = load_snapshot(self.snapshot, self.key)
+        altered = copy.deepcopy(state)
+        altered["runtime_source_sha256"] = "0" * 64
+        save_snapshot(self.snapshot, self.key, altered)
+        with self.assertRaisesRegex(SnapshotError, "runtime source changed"):
+            self.aquarium()
+        with self.aquarium(signed=False) as cold:
+            self.assertEqual(cold.tick, 6)
+
     def test_corrupt_source_prefix_rejected_even_with_valid_hmac(self):
         self.make_snapshot()
         with closing(sqlite3.connect(self.db)) as con:
