@@ -70,6 +70,27 @@ def load_graph(path):
         raise GraphError("Malformed graph JSON") from exc
 
 
+def _require_lossless_json(graph):
+    """Reject values whose hashed executable graph is not its JSON round-trip.
+
+    Validation is also called with in-memory Python graphs, not just files
+    decoded by load_graph(). Reject non-string mapping keys, tuples, NaN,
+    unpaired surrogates and recursive objects before Simulation computes a
+    digest or Aquarium opens a journal. Valid v1 JSON hashes are unchanged.
+    """
+    try:
+        wire = json.dumps(graph, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"), allow_nan=False)
+        wire.encode("utf-8", errors="strict")
+        restored = json.loads(wire, object_pairs_hook=_unique_json_object)
+    except GraphError:
+        raise
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise GraphError("Graph v1 requires lossless UTF-8 JSON") from exc
+    if restored != graph:
+        raise GraphError("Graph v1 requires lossless UTF-8 JSON")
+
+
 def validate(graph):
     if not isinstance(graph, dict) or graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
@@ -152,4 +173,5 @@ def validate(graph):
                 ready.sort()
     if len(order) != len(by_id):
         raise GraphError("Cycle detected: feedback requires explicit scheduler")
+    _require_lossless_json(graph)
     return by_id, incoming, order
