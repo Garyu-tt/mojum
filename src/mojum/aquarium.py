@@ -21,6 +21,7 @@ from .body_genetics import (compile_body, compile_body_at_month,
                             validate_human_name)
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
+from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
 from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -521,9 +522,12 @@ def main():
         # The internal controller selects each action from committed history.
         dx, dy = None, None
     seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    try:
+        graph = load_graph(args.graph)
+    except GraphError as exc:
+        parser.error(str(exc))
     with Aquarium(
-        args.db, seed, json.loads(args.graph.read_text(encoding="utf-8")),
-        agent_id=seed["genome_id"],
+        args.db, seed, graph, agent_id=seed["genome_id"],
         neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
     ) as aquarium:
         # Reject the whole CLI batch before any frame is committed. The
