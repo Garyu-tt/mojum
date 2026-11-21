@@ -44,7 +44,7 @@ def validate(graph):
     # Missing or malformed metadata must fail before Simulation hashes this
     # object or Aquarium opens its durable SQLite journal.
     if set(graph) != {"schema", "id", "revision", "nodes", "edges"}:
-        raise GraphError("Graph v1 requires exact root fields")
+        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
     for field in ("id", "revision"):
         value = graph[field]
         if type(value) is not str or not value.strip() or len(value) > 256:
