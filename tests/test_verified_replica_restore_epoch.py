@@ -88,7 +88,7 @@ class OwnerSignedEpochSensoryColdReplayQA(unittest.TestCase):
             report = recover_pinned_replica(
                 replica, recovered, signed_file, secret,
                 independently_pinned_receipt_sha256=owner["receipt_sha256"],
-                expected_agent_id=SEED["agent_id"],
+                expected_agent_id=SEED["genome_id"],
                 allow_private_restore=True,
             )
             self.assertEqual(report["restored_events"], 10052)
