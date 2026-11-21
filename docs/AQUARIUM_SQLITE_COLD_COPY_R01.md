@@ -54,13 +54,13 @@ coordinated replication: writing to two forks creates divergent histories.
 
 ## Actual consistency checks
 
-- Opens the existing source SQLite **read-only**, copies committed WAL pages with the online Backup API, and fully replays only the disposable SQLite copy. The source is never opened through writable Aquarium.
+- Preflights the original journal read-only, takes a consistent SQLite snapshot through a read-only connection, and fully replays **only the temporary copy**. Export never chmods, repairs or bootstraps the original.
 - Uses SQLite's **online backup API** rather than copying an open WAL-backed
   `.sqlite3` file via ordinary file copy. No external network is used.
-- Pins the committed head of the copied snapshot before writable replay and verifies
-  its complete deterministic checkpoint against that head. Concurrent commits
-  may be present in the consistent snapshot; metadata names the verified copy,
-  not a separately observed earlier source head.
+- Pins the temporary copy's committed event head before any writable replay,
+  then checks its deterministic Aquarium checkpoint against that recorded head.
+  Concurrent source commits may be included in the consistent backup; the
+  output identifies that exact snapshot by head, tick and SHA-256.
 - Verifies the standalone `.sqlite3` has no required WAL sidecar, computes a
   SHA-256 of the final file and fsyncs the data file. Publishes via hard link
   to a **new** filename only, never replacing an existing path.
