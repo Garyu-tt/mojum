@@ -65,6 +65,82 @@ class SimulationRestoreReplayTests(unittest.TestCase):
         self.assertEqual(self.sim.tick, 0)
         self.assertEqual(self.sim.episodes, [])
 
+    def test_graph_without_episode_sink_restores_its_own_clock(self):
+        room_node = copy.deepcopy(next(n for n in GRAPH["nodes"] if n["id"] == "room"))
+        graph = {
+            "schema": GRAPH["schema"],
+            "id": "mojum.test.room-without-episode",
+            "revision": "1",
+            "nodes": [room_node],
+            "edges": [],
+        }
+        original = Simulation(graph)
+        for _ in range(7):
+            original.step()
+        snapshot = original.snapshot()
+        self.assertEqual(snapshot["state"]["episodes"], [])
+
+        restored = Simulation(graph)
+        restored.restore(snapshot)
+        self.assertEqual(restored.snapshot(), snapshot)
+        self.assertEqual(restored.step(), original.step())
+        self.assertEqual(restored.snapshot(), original.snapshot())
+
+        # A checksum-rewritten phantom episode still cannot be restored.
+        malformed = copy.deepcopy(snapshot)
+        malformed["state"]["episodes"].append({"tick": 0})
+        malformed["sha256"] = digest(malformed["state"])
+        unchanged = restored.snapshot()
+        with self.assertRaisesRegex(GraphError, "Inconsistent snapshot state"):
+            restored.restore(malformed)
+        self.assertEqual(restored.snapshot(), unchanged)
+
+    def test_two_episode_sinks_restore_and_replay_each_record(self):
+        graph = copy.deepcopy(GRAPH)
+        second_sink = copy.deepcopy(next(n for n in graph["nodes"] if n["id"] == "episode"))
+        second_sink["id"] = "episode_copy"
+        graph["nodes"].append(second_sink)
+        for edge in list(graph["edges"]):
+            if edge["to"]["node"] == "episode":
+                duplicated_edge = copy.deepcopy(edge)
+                duplicated_edge["to"]["node"] = "episode_copy"
+                graph["edges"].append(duplicated_edge)
+
+        original = Simulation(graph)
+        for _ in range(4):
+            original.step()
+        snapshot = original.snapshot()
+        self.assertEqual(len(snapshot["state"]["episodes"]), 8)
+        self.assertEqual(
+            [e["tick"] for e in snapshot["state"]["episodes"]],
+            [0, 0, 1, 1, 2, 2, 3, 3],
+        )
+
+        restored = Simulation(graph)
+        restored.restore(snapshot)
+        self.assertEqual(restored.snapshot(), snapshot)
+        self.assertEqual(restored.step(), original.step())
+        self.assertEqual(restored.snapshot(), original.snapshot())
+
+        # The second copy at tick zero must be checked, not just one
+        # arbitrarily chosen memory sink per tick.
+        forged = copy.deepcopy(snapshot)
+        forged["state"]["episodes"][1]["brain_observation"]["action"] = {"dx": 1}
+        forged["sha256"] = digest(forged["state"])
+        unchanged = restored.snapshot()
+        with self.assertRaisesRegex(GraphError, "deterministic replay"):
+            restored.restore(forged)
+        self.assertEqual(restored.snapshot(), unchanged)
+
+        # Both sinks' tick metadata are checked against the same clock.
+        forged = copy.deepcopy(snapshot)
+        forged["state"]["episodes"][3]["tick"] = 99
+        forged["sha256"] = digest(forged["state"])
+        with self.assertRaisesRegex(GraphError, "episode sequence"):
+            restored.restore(forged)
+        self.assertEqual(restored.snapshot(), unchanged)
+
+
 
 if __name__ == "__main__":
     unittest.main()
