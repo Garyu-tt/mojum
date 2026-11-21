@@ -52,6 +52,31 @@ run("mojum-aquarium", "--db", "other.sqlite3", "--ticks", "120", "--pulse-sum", 
 continued = run("mojum-aquarium", "--db", "other.sqlite3", "--ticks", "30", *motor)
 assert continued == run("mojum-aquarium", "--db", "other-control.sqlite3", "--ticks", "150", "--pulse-sum", other, *motor)
 assert continued["motor_state"]["observations"] == 150
+contact = (*motor, "--sensory-mode", "toy_probe")
+measured = run("mojum-aquarium", "--db", "contact.sqlite3", "--ticks", "1", *contact)
+predicted = run("mojum-aquarium", "--db", "contact.sqlite3", "--ticks", "1", *contact)
+assert (predicted["tick"], predicted["stored_events"]) == (2, 3)
+assert measured["toy_contact_state"] == predicted["toy_contact_state"]
+assert predicted["toy_contact_state"]["table"]["220:70:30"] == {
+    "count": 1, "mean_deflection": 0.75,
+}
+guided = (*contact, "--temporal-mode", "range_guided")
+trained = run("mojum-aquarium", "--db", "guided.sqlite3", "--ticks", "5", *guided)
+guided_resume = run("mojum-aquarium", "--db", "guided.sqlite3", "--ticks", "1", *guided)
+assert (guided_resume["tick"], guided_resume["stored_events"]) == (6, 7)
+assert guided_resume["temporal_range_state"]["updates"] == 6
+assert trained["motor_state"]["samples"]["north"]["trials"] == 1
+assert guided_resume["motor_state"]["samples"]["north"]["trials"] == 2
+trace_meta = json.loads(subprocess.check_output([
+    sys.executable, "-I", "-m", "mojum.aquarium_trace_export",
+    "--db", "guided.sqlite3", "--output", "guided.private.jsonl",
+    "--allow-private-export", "--expected-head", guided_resume["journal_head"],
+    "--start-tick", "5", "--frame-limit", "1", *guided,
+], text=True))
+assert trace_meta["frames"] == 1 and trace_meta["journal_head"] == guided_resume["journal_head"]
+frame, footer = map(json.loads, Path("guided.private.jsonl").read_text(encoding="utf-8").splitlines())
+assert frame["developmental_controller"]["intent"]["kind"] == "north"
+assert footer["trace_integrity"]["frame_count"] == 1
 disabled = run("mojum-aquarium", "--db", "disabled.sqlite3", "--ticks", "2", "--neural-mode", "disabled")
 assert (disabled["neural_mode"], disabled["neural_state"], disabled["stored_events"]) == ("disabled", None, 3)
 
