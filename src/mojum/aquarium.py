@@ -113,6 +113,9 @@ class Aquarium:
             self.manifest["developmental_schema"] = DEVELOPMENT_SCHEMA
             self.manifest["exploration_mode"] = "goal_free"
         self.store = LocalNoosphere(db_path, agent_id)
+        # Local RAM is authoritative only through its last fully adopted commit.
+        # A read of the shared SQLite head alone is not an organism checkpoint.
+        self._committed_head = None
         try:
             if self.store.count() == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
@@ -143,7 +146,9 @@ class Aquarium:
         if self.store.count() >= MAX_REPLAY_EVENTS:
             raise AquariumError("R0.2 journal event budget reached; streaming replay pending")
         event = self._record(topic, event_id, payload, at_ns, source_revision)
-        return self.store.append(event, expected_head=self.store.head())
+        expected = (self.store.head() if self._committed_head is None
+                    else self._committed_head)
+        return self.store.append(event, expected_head=expected)
 
     def _calculate(self, dx, dy):
         pheno = self.genome.phenotype(self.tick)
@@ -232,12 +237,14 @@ class Aquarium:
 
     def step(self, *, dx=None, dy=None):
         payload, next_world, next_learner = self._calculate(dx, dy)
-        self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
-                            self.tick * self.dt_ns, self.genome.revision)
+        committed = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
+                                        self.tick * self.dt_ns, self.genome.revision)
         self._adopt_developmental(payload)
         self.world = next_world
         self.learner = next_learner
         self.tick += 1
+        # A successful append is not a local checkpoint until RAM adoption.
+        self._committed_head = committed
         return copy.deepcopy(payload)
 
     def acquire(self, acquired):
@@ -251,10 +258,11 @@ class Aquarium:
         proposed = GenomeLedger.from_snapshot(self.genome.snapshot())
         proposed.append(acquired, proposed.revision)
         event_id = acquired["event_id"]
-        self._append_record("genesis.acquisition", "acq-" + event_id,
-                            {"acquisition": acquired}, self.tick * self.dt_ns,
-                            proposed.revision)
+        committed = self._append_record("genesis.acquisition", "acq-" + event_id,
+                                        {"acquisition": acquired}, self.tick * self.dt_ns,
+                                        proposed.revision)
         self.genome = proposed
+        self._committed_head = committed
         return self.genome.revision
 
     def _replay(self, external_expected_head):
@@ -315,15 +323,25 @@ class Aquarium:
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
+        # Pin the exact committed sequence used to reconstruct this RAM state.
+        # Refuse a concurrent append that arrived while replay was running.
+        replayed_head = items[-1]["event_hash"]
+        if self.store.head() != replayed_head or self.store.count() != count:
+            raise AquariumError("journal advanced during aquarium replay")
+        self._committed_head = replayed_head
 
     def checkpoint(self):
+        # No mixed snapshot: the database may have advanced in another process,
+        # or our last event append may have succeeded before RAM adoption.
+        if self._committed_head is None or self.store.head() != self._committed_head:
+            raise AquariumError("stale or unadopted aquarium checkpoint; reopen")
         result = {
             "schema": "mojum.aquarium.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "sim_time_ns": self.tick * self.dt_ns,
             "genome_revision": self.genome.revision,
             "world_revision": self.world.revision,
-            "journal_head": self.store.head(),
+            "journal_head": self._committed_head,
             "neural_mode": self.neural_mode,
             "neural_state": self.learner.snapshot() if self.learner is not None else None,
             "manifest_sha256": digest(self.manifest),
@@ -331,6 +349,8 @@ class Aquarium:
         }
         if self.explorer is not None:
             result["developmental_state"] = self.explorer.snapshot()
+        if self.store.head() != self._committed_head:
+            raise AquariumError("journal advanced during checkpoint; reopen")
         return result
 
 

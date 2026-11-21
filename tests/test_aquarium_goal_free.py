@@ -106,14 +106,15 @@ class CanonicalDevelopmentalAquariumTests(unittest.TestCase):
             left.step()
             with self.assertRaises(NoosphereError):
                 right.step()
-            # A second SQLite connection sees the externally advanced
-            # durable head; only this writer's speculative RAM must stay put.
-            after = right.checkpoint()
-            for field in ("tick", "sim_time_ns", "genome_revision",
-                          "world_revision", "neural_state",
-                          "developmental_state"):
-                self.assertEqual(after[field], before[field])
-            self.assertNotEqual(after["journal_head"], before["journal_head"])
+            # An externally advanced durable head must never be combined
+            # with this stale writer's unadvanced world/policy as a checkpoint.
+            self.assertEqual(right.tick, before["tick"])
+            self.assertEqual(right.world.revision, before["world_revision"])
+            self.assertEqual(right.explorer.snapshot(), before["developmental_state"])
+            self.assertEqual(right.learner.snapshot(), before["neural_state"])
+            self.assertNotEqual(right.store.head(), before["journal_head"])
+            with self.assertRaisesRegex(AquariumError, "stale or unadopted"):
+                right.checkpoint()
             self.assertEqual(right.explorer.updates, 0)
 
     def test_restart_recovers_append_before_ram_adoption(self):
