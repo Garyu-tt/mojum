@@ -87,6 +87,50 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
                 aquarium.step(dx=0.0)
             self.assertEqual(aquarium.checkpoint(), before)
 
+    def test_direct_contract_rejects_future_stale_and_foreign_sensor_cues(self):
+        brain = DevelopmentalBrain()
+        motor = MotorPlay()
+        heartbeat = {
+            "kind": "interoception",
+            "heartbeat": {
+                "beat_index": 0, "phase_milli": 0,
+                "pulse": True, "synthetic": True,
+            },
+            "observed_at_ns": 0,
+        }
+        proprioception = {
+            "tick": 0, "position": [1.0, 2.0],
+            "world_revision": "a" * 64,
+        }
+        cue = {
+            "schema": "mojum.sensor.synthetic-near-field/1",
+            "tick": 0, "world_revision": "a" * 64,
+            "visible": True, "reflectance_rgb": [1, 2, 3],
+            "range_bucket_10cm": 2,
+            "source": "synthetic_local_proximity_not_camera",
+        }
+        original = motor.snapshot()
+        for overrides in (
+            {"tick": 1},
+            {"tick": -1},
+            {"world_revision": "b" * 64},
+            {"tick": 1, "world_revision": "b" * 64},
+        ):
+            with self.subTest(overrides=overrides):
+                bad_cue = dict(cue, **overrides)
+                with self.assertRaises(DevelopmentalBrainError):
+                    brain.decide(
+                        motor, tick=0, interoception=heartbeat,
+                        proprioception=proprioception, near_field=bad_cue,
+                    )
+                self.assertEqual(motor.snapshot(), original)
+        accepted = brain.decide(
+            motor, tick=0, interoception=heartbeat,
+            proprioception=proprioception, near_field=cue,
+        )
+        self.assertEqual(accepted["input"]["near_field"], cue)
+        self.assertEqual(motor.snapshot(), original)
+
     def test_direct_contract_rejects_hidden_sensor_metadata(self):
         brain = DevelopmentalBrain()
         interoception = {
