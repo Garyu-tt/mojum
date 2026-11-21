@@ -272,10 +272,10 @@ class Aquarium:
 
 def main():
     parser = argparse.ArgumentParser(description="Mojum R0.2 CPU-only fixture aquarium")
-    packaged = files("mojum")
+    packaged = files("mojum").joinpath("data")
     parser.add_argument("--db", type=Path, required=True, help="explicit local SQLite file; not cloud")
-    parser.add_argument("--genome", type=Path, default=packaged.joinpath("data/genesis_seed.json"))
-    parser.add_argument("--graph", type=Path, default=packaged.joinpath("data/first_loop.json"))
+    parser.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
+    parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--dx", type=float, default=0.02)
     parser.add_argument("--dy", type=float, default=0.0)

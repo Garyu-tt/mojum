@@ -5,19 +5,31 @@ This package is an **experimental, CPU-first, single-device synthetic fixture**.
 ## Requirements
 
 - CPython 3.11 or newer with standard-library `sqlite3`.
-- A local Python packaging backend (`setuptools>=61`) and `pip` for installation.
+- `pip` to install a local wheel. Only source builds use `setuptools>=61` and older setuptools versions also need `wheel` available on the builder.
 - No mandatory third-party **runtime** dependencies and no GPU.
 - **License undecided:** this in-repository install support does not grant permission to redistribute or publish on PyPI.
 
 ## Install from a local source checkout
 
-For an already-provisioned machine with `setuptools` available locally, a no-network installation command is:
+With the build tools available locally, install directly from the repository root:
 
 ```sh
 python -m pip install --no-index --no-build-isolation --no-deps .
 ```
 
 This fails *explicitly* if the required build tooling is not installed; do not silently invoke an online package index. Normal online development installation may use `python -m pip install -e .`.
+
+Alternatively, build a wheel once for transfer to another compatible machine.
+
+```sh
+python -m pip wheel --no-index --no-build-isolation --no-deps --wheel-dir dist .
+```
+
+Copy `dist/mojum-0.1.0-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
+
+```sh
+python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+```
 
 The source checkout and the installed package contain the same example synthetic GENESIS seed and Universal Graph IR. The installed defaults are read through `importlib.resources`, not through a repository-relative `__file__` path.
 
@@ -32,7 +44,7 @@ mojum-aquarium --db ./dante-local.sqlite3 --ticks 30 --neural-mode shadow
 
 The second invocation resumes the same deterministic PRIVATE journal and yields `tick=150`, `stored_events=151`. The output status still explicitly says the brain is not complete.
 
-`mojum-fixture <graph.json> --ticks 10` is a separate, short-lived graph demonstration, not the persistent aquarium. Existing commands `python -m mojum.aquarium ...` and explicit `--genome` / `--graph` overrides are preserved.
+`mojum-fixture --ticks 10` runs the bundled graph as a short-lived demonstration. Pass a graph path as the first argument to run your own. The persistent aquarium also accepts explicit `--genome` and `--graph` paths.
 
 ## Isolated test
 
@@ -42,7 +54,7 @@ The full stdlib suite remains:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-`tests/test_installable_package.py` additionally launches the aquarium from a temporary directory outside the checkout and verifies deterministic SQLite restart. The dedicated package smoke workflow installs the project and launches the console command **outside** the source directory.
+`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow provisions the build tools, then builds the wheel, installs it in a fresh virtual environment, and runs both console commands outside the checkout in a Linux network namespace with only loopback. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
 
 ## Limits
 
