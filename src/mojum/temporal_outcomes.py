@@ -16,7 +16,7 @@ from .sensory_play import ContactAssociations
 
 SCHEMA = "mojum.temporal.range-outcome/1"
 MAX_UPDATES = 9_999
-MAX_CONTEXTS = 35
+MAX_CONTEXTS = 40
 _KEY = re.compile(r"(?:none|[0-6])\|(?:rest|x\+|x-|y\+|y-)\Z", re.ASCII)
 _OUTCOME = re.compile(r"(?:none|[0-6])\|[01]\Z", re.ASCII)
 
@@ -62,13 +62,20 @@ class RangeOutcomeMemory:
         for key, outcomes in snapshot["histograms"].items():
             if (type(key) is not str or _KEY.fullmatch(key) is None
                     or type(outcomes) is not dict or not outcomes
-                    or len(outcomes) > 14):
+                    or len(outcomes) > 16):
                 raise TemporalOutcomeError("invalid movement context")
             for outcome, count in outcomes.items():
                 if (type(outcome) is not str or _OUTCOME.fullmatch(outcome) is None
                         or type(count) is not int
                         or not 1 <= count <= MAX_UPDATES):
                     raise TemporalOutcomeError("invalid movement outcome")
+                # A blocked point-room movement cannot change range,
+                # and a zero-displacement rest is never blocked.
+                before_bucket, action = key.split("|")
+                next_bucket, blocked_flag = outcome.split("|")
+                if blocked_flag == "1" and (
+                        before_bucket != next_bucket or action == "rest"):
+                    raise TemporalOutcomeError("impossible blocked transition snapshot")
                 total += count
         if total != snapshot["updates"]:
             raise TemporalOutcomeError("inconsistent movement evidence count")
