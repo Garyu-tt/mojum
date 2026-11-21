@@ -38,6 +38,19 @@ class AquariumError(ValueError):
     """Nonrecoverable mismatch, invalid command or unsupported fixture."""
 
 
+def _start_coordinate(value):
+    """Validate an initial world position, not a per-step displacement."""
+    if type(value) not in (int, float):
+        raise AquariumError("start must be a numeric scalar")
+    try:
+        numeric = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise AquariumError("start coordinate exceeds numeric range") from exc
+    if not math.isfinite(numeric):
+        raise AquariumError("start coordinate must be finite")
+    return numeric
+
+
 def _movement(value):
     if type(value) not in (int, float):
         raise AquariumError("movement must be a numeric scalar, not bool or string")
@@ -95,9 +108,12 @@ class Aquarium:
         self.kind_ids = {node["kind"]: node["id"] for node in self.graph["nodes"]}
         self.graph_sha256 = digest(self.graph)
         self.room = room if room is not None else Room(4, 4, ((2, 1, .1, 2),))
-        if not isinstance(self.room, Room) or len(start) != 2:
+        if not isinstance(self.room, Room) or type(start) not in (tuple, list) or len(start) != 2:
             raise AquariumError("invalid room or start")
-        self.start = (float(start[0]), float(start[1]))
+        try:
+            self.start = (_start_coordinate(start[0]), _start_coordinate(start[1]))
+        except AquariumError as exc:
+            raise AquariumError("invalid room start coordinates") from exc
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
@@ -112,7 +128,10 @@ class Aquarium:
             self.manifest["motor_mode"] = self.motor_mode
             self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
         self.genome = GenomeLedger(self.seed)
-        self.world = initial_state(self.room, *self.start)
+        try:
+            self.world = initial_state(self.room, *self.start)
+        except ValueError as exc:
+            raise AquariumError("invalid room start coordinates") from exc
         self.tick = 0
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
@@ -344,7 +363,8 @@ def main():
     parser.add_argument("--dx", type=float)
     parser.add_argument("--dy", type=float)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
-    parser.add_argument("--motor-mode", choices=("scripted", "developmental_fixture"), default="scripted")
+    parser.add_argument("--motor-mode", choices=("scripted", "developmental_fixture"),
+                        default="scripted")
     args = parser.parse_args()
     if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
         parser.error("developmental motor play does not accept --dx/--dy")
@@ -361,6 +381,7 @@ def main():
         if not displacement_within_budget(dx, dy):
             parser.error(f"movement length must be finite and at most {MAX_DISPLACEMENT_M:g} m")
     else:
+        # The internal controller selects each action from committed history.
         dx, dy = None, None
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
