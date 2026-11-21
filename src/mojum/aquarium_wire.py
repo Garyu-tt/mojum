@@ -140,12 +140,21 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
             if state_schema == V4_SCHEMA:
                 observation = _object_field(motor, "observation")
+                intent = _object_field(motor, "intent")
+                learning = _object_field(motor, "learning")
+                tick = frame["tick"]  # Verified as exact int by inspect_event.
+                expected_epoch = {
+                    "epoch_index": tick // EPOCH_TICKS,
+                    "epoch_tick": tick % EPOCH_TICKS,
+                }
+                def wrong_clock(fields, expected):
+                    # Python True == 1, but JSON bool is not a wire integer.
+                    return any(type(fields.get(key)) is not int or
+                               fields[key] != value for key, value in expected.items())
                 if (observation.get("schema") != EPOCH_SENSE_SCHEMA
-                        or any(type(observation.get(field)) is not int for field in (
-                            "absolute_tick", "epoch_index", "epoch_tick"))
-                        or observation.get("absolute_tick") != frame.get("tick")
-                        or observation.get("epoch_index") != frame.get("tick") // EPOCH_TICKS
-                        or observation.get("epoch_tick") != frame.get("tick") % EPOCH_TICKS):
+                        or wrong_clock(observation, {"absolute_tick": tick, **expected_epoch})
+                        or wrong_clock(intent, {"tick": tick, **expected_epoch})
+                        or wrong_clock(learning, expected_epoch)):
                     raise NoosphereError("frame disagrees with its pinned epoch schema")
     if temporal_schema is not None:
         if _object_field(frame, "range_guidance").get("schema") != _GUIDANCE:
