@@ -101,11 +101,15 @@ function replaceFooter(source,transform){
  const brokenProof=await attempt(replaceFooter(wire,
    f=>{f.trace_integrity.sha256="0".repeat(64)}));
  const missingProof=await attempt(replaceFooter(wire, f=>{delete f.trace_integrity}));
+  const strippedModern=await attempt(replaceFooter(wire,
+    f=>{delete f.trace_integrity;delete f.export_status}));
  const legacy=await attempt(replaceFooter(wire,
-   f=>{delete f.trace_integrity;delete f.export_status}));
+    f=>{delete f.trace_integrity;delete f.export_status;
+        delete f.trace_range;delete f.trace_room}));
  const encoding=await attempt(Buffer.concat([Buffer.from(wire),Buffer.from([255])]));
  process.stdout.write(JSON.stringify({valid,altered,truncated,mismatch,
-                                      brokenProof,missingProof,legacy,encoding})+"\n");
+                                       brokenProof,missingProof,strippedModern,
+                                       legacy,encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
@@ -183,6 +187,8 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("SHA-256", values["brokenProof"]["status"])
         self.assertFalse(values["missingProof"]["enabled"])
         self.assertIn("SHA-256", values["missingProof"]["status"])
+        self.assertFalse(values["strippedModern"]["enabled"])
+        self.assertIn("SHA-256", values["strippedModern"]["status"])
         self.assertFalse(values["encoding"]["enabled"])
         self.assertTrue(values["legacy"]["enabled"])
         self.assertIn("не проверен", values["legacy"]["status"])
