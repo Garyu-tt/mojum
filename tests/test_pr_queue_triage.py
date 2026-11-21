@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools" / "pr_queue_triage.py"
 spec = importlib.util.spec_from_file_location("pr_queue_triage", SOURCE)
@@ -133,26 +134,6 @@ class QueueTriageTests(unittest.TestCase):
         self.assertEqual(run(pr(checks=legacy))["pull_requests"][0]["status"],
                          "candidate_for_independent_acceptance")
 
-    def test_cli_rejects_duplicate_json_keys_and_nonfinite_numbers(self):
-        import contextlib
-        import io
-        with tempfile.TemporaryDirectory() as directory:
-            filename = Path(directory) / "snapshot.json"
-            good = json.dumps({"base_sha": BASE, "pull_requests": [pr()]})
-            for corrupted in (
-                good.replace('"isDraft": false', '"isDraft": true, "isDraft": false'),
-                good.replace('"number": 1', '"number": NaN'),
-                "[" * 1500 + "]" * 1500,
-            ):
-                with self.subTest(corrupted=corrupted[:50]):
-                    filename.write_text(corrupted, encoding="utf-8")
-                    with contextlib.redirect_stdout(io.StringIO()) as out:
-                        code = triage.main(["--input", str(filename), "--require", JOBS[0]])
-                    self.assertEqual(code, 2)
-                    report = json.loads(out.getvalue())
-                    self.assertFalse(report["merge_authorized"])
-                    self.assertFalse(report["merge_performed"])
-
     def test_cli_exit_zero_only_reports_not_merges(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "snapshot.json"
@@ -166,6 +147,42 @@ class QueueTriageTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertFalse(json.loads(out.getvalue())["merge_authorized"])
 
+    def test_cli_rejects_duplicate_json_keys_and_nonfinite_values(self):
+        # JSON's default last-key-wins behavior can make contradictory check
+        # evidence appear CLEAN / SUCCESS. Reject ambiguity before triage.
+        valid = json.dumps({"base_sha": BASE, "pull_requests": [pr()]})
+        cases = {
+            "duplicate root base": valid.replace(
+                f'"base_sha": "{BASE}"',
+                f'"base_sha": "{OTHER}", "base_sha": "{BASE}"', 1),
+            "duplicate PR merge state": valid.replace(
+                '"mergeStateStatus": "CLEAN"',
+                '"mergeStateStatus": "DIRTY", "mergeStateStatus": "CLEAN"', 1),
+            "duplicate nested conclusion": valid.replace(
+                '"conclusion": "SUCCESS"',
+                '"conclusion": "FAILURE", "conclusion": "SUCCESS"', 1),
+            "nonfinite extra field": valid[:-1] + ', "ignored": NaN}',
+        }
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "snapshot.json"
+            for label, payload in cases.items():
+                with self.subTest(label=label):
+                    self.assertNotEqual(payload, valid)
+                    filename.write_text(payload, encoding="utf-8")
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        code = triage.main([
+                            "--input", str(filename), "--require", JOBS[0],
+                            "--require", JOBS[1], "--require", JOBS[2],
+                        ])
+                    self.assertEqual(code, 2)
+                    report = json.loads(output.getvalue())
+                    self.assertFalse(report["merge_authorized"])
+                    self.assertFalse(report["merge_performed"])
+
+
     def test_cli_rejects_oversize_input(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "snapshot.json"
@@ -178,6 +195,25 @@ class QueueTriageTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertFalse(json.loads(out.getvalue())["merge_authorized"])
 
+
+    def test_cli_handles_recursive_json_decoder_failure(self):
+        # A small encoded input can exhaust JSON nesting limits before triage.
+        # The CLI must return its documented structured refusal, not traceback.
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "deep.json"
+            filename.write_text('[' * 12000 + '0' + ']' * 12000, encoding="utf-8")
+            import contextlib
+            import io
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), mock.patch.object(
+                triage.json, "loads", side_effect=RecursionError("too deep")
+            ):
+                code = triage.main(["--input", str(filename), "--require", JOBS[0]])
+            self.assertEqual(code, 2)
+            payload = json.loads(out.getvalue())
+            self.assertIn("too deep", payload["error"])
+            self.assertFalse(payload["merge_authorized"])
+            self.assertFalse(payload["merge_performed"])
 
 if __name__ == "__main__":
     unittest.main()

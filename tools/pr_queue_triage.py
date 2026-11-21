@@ -29,18 +29,18 @@ class TriageInputError(ValueError):
     """Invalid input, which must never become positive CI evidence."""
 
 
-def _unique_object(pairs):
-    """Reject ambiguous input, including duplicate keys nested in check rows."""
-    obj = {}
+def _unique_json_object(pairs):
+    """Refuse duplicate keys at every depth of an untrusted JSON snapshot."""
+    result = {}
     for key, value in pairs:
-        if key in obj:
-            raise TriageInputError("duplicate snapshot JSON key")
-        obj[key] = value
-    return obj
+        if key in result:
+            raise TriageInputError("duplicate key in snapshot JSON")
+        result[key] = value
+    return result
 
 
-def _reject_nonfinite(value):
-    raise TriageInputError("non-finite snapshot JSON number")
+def _reject_nonfinite_json(value):
+    raise TriageInputError("non-finite JSON value in snapshot")
 
 
 def _sha(value):
@@ -70,8 +70,8 @@ def _normalized_check(raw, index):
     label = f"{workflow.strip()} / {name.strip()}" if workflow else name.strip()
     status = raw.get("status")
     conclusion = raw.get("conclusion")
-    # A StatusContext uses `state`; a CheckRun uses `status` and
-    # `conclusion`. Never mix evidence from the two representations.
+    # GitHub StatusContext uses `state`; CheckRun uses `status` and
+    # `conclusion`. Mixing those representations is ambiguous evidence.
     if raw.get("state") is not None:
         if status is not None or conclusion is not None:
             raise TriageInputError(f"check[{index}] mixes state and check-run fields")
@@ -83,7 +83,7 @@ def _normalized_check(raw, index):
             status, conclusion = "COMPLETED", state
         else:
             status = state
-    # An orphan conclusion cannot prove that a check actually completed.
+    # An orphan conclusion must not manufacture a completed check.
     if not isinstance(status, str):
         raise TriageInputError(f"check[{index}] has no valid status")
     if conclusion is not None and not isinstance(conclusion, str):
@@ -200,8 +200,11 @@ def main(argv=None):
             data = stream.read(MAX_INPUT_BYTES + 1)
         if len(data) > MAX_INPUT_BYTES:
             raise TriageInputError("snapshot exceeds 4 MiB")
-        payload = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object,
-                             parse_constant=_reject_nonfinite)
+        payload = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json,
+        )
         report = scan_queue(payload, args.require)
     except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         print(json.dumps({"schema": SCHEMA, "error": str(exc),
