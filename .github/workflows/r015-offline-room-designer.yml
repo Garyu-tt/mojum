@@ -45,3 +45,29 @@ jobs:
             echo "FAIL: room designer interaction test" >&2
             exit 1
           fi
+
+  chromium-file-smoke:
+    name: actual Chromium file:// startup (desktop + portrait)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Open actual offline editor in headless browser, no HTTP server
+        run: |
+          set -euo pipefail
+          BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)"
+          for size in "390,844" "1280,800"; do
+            "$BROWSER" \
+              --headless=new --no-sandbox --disable-dev-shm-usage \
+              --disable-gpu --window-size="$size" --virtual-time-budget=2000 \
+              --dump-dom "file://$PWD/tools/room_designer.html" \
+              > "room-designer-${size}.html" 2> "chromium-${size}.log"
+            grep -F "Модель корректна" "room-designer-${size}.html"
+            grep -F "Удалить препятствие 1" "room-designer-${size}.html"
+            if grep -E 'Not allowed to load local resource|Uncaught (TypeError|ReferenceError|SyntaxError)' "chromium-${size}.log"; then
+              echo "FAIL: browser reported a JS/local-file error" >&2
+              exit 1
+            fi
+          done
