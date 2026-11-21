@@ -82,11 +82,18 @@ predictions can disagree across positions or rooms. Checkpoints report
 For a separate bounded long-run motor journal, use the new `local_cell_v4`
 policy. It carries an absolute logical tick and commits an explicit epoch
 marker at the 9,999-tick boundary; existing scripted, v2 and v3 journals are
-not reinterpreted. Use `sensory_mode=none` and repeat bounded batches:
+not reinterpreted. The default profile is sensorless; the versioned
+`toy_probe_v2` table can be composed with v4 for numeric near-field evidence.
+The legacy `toy_probe` table remains incompatible with v4. Use explicit
+selectors and repeat bounded batches:
 
 ```bash
 PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_PRIVATE.sqlite3 \
   --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+
+PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_sensory_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --sensory-mode toy_probe_v2 \
+  --neural-mode disabled
 ```
 
 For a wall-paced foreground session on the same one-device journal, use the
@@ -101,6 +108,10 @@ PYTHONPATH=src python -m mojum.portable_host \
 
 The host prints metadata only and admits the epoch marker in its event-budget
 preflight; repeat the bounded command to continue after a clean restart.
+
+For the versioned sensory profile, use `--sensory-mode toy_probe_v2` with the
+same `--temporal-mode none` selector. Its bootstrap pins the v4 and sensory v2
+contracts, and the wire inspector reports `local_cell_v4+toy_probe_v2`.
 
 The v4 path is still bounded by the 100,000-event local journal budget and the
 current checksum-only replay contract. It is not a neural brain, an
@@ -121,6 +132,16 @@ PYTHONPATH=src python -m mojum.portable_host --db ./host_PRIVATE.sqlite3 --ticks
 Repeat with the same path to resume. This is still a synthetic CPU fixture,
 not a neural brain, physical actuator, Android service, or 24/7 guarantee.
 See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
+
+The same host can pace the opt-in `local_cell_v4` policy. The sensorless
+profile uses the versioned epoch marker at tick 9,999 and accounts for those
+markers before writing so the 100,000-event bound is never crossed:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_host_PRIVATE.sqlite3 --ticks 20 --interval-ms 50 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none
+```
 
 For a separately versioned contact-association retention experiment, use a
 fresh journal with `--sensory-mode toy_probe_v2`. It keeps the original

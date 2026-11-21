@@ -6,13 +6,16 @@ not a trained brain, object understanding, physical touch, or consciousness.
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V4_MODE
 from mojum.aquarium_wire import inspect_journal
+from mojum.cell_policy_v4 import SCHEMA as V4_SCHEMA
 from mojum.developmental_brain import SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
+from mojum.epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SCHEMA
 from mojum.sensory_associations_v2 import (
     ContactAssociationsV2,
     LEARNING_SCHEMA,
@@ -35,6 +38,7 @@ from mojum.world_room import Room
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
 GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
+V4_SENSORY_STRESS_ENABLED = os.environ.get("MOJUM_V4_SENSORY_V2_STRESS") == "1"
 
 
 def cue(tick, rgb=(42, 90, 174), visible=True):
@@ -284,6 +288,95 @@ class AquariumSensoryV2Tests(unittest.TestCase):
                 sensory_scene=self.scene,
             )
         self.assertEqual(inspect_journal(self.db)["journal_head"], before)
+
+
+class CanonicalV4SensoryV2Tests(unittest.TestCase):
+    """The versioned sensory table must compose with the canonical v4 ABI."""
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.db = Path(scratch.name) / "v4-sensory-v2.sqlite3"
+
+    def open(self, **kwargs):
+        return Aquarium(
+            self.db,
+            SEED,
+            GRAPH,
+            neural_mode="disabled",
+            motor_mode=V4_MODE,
+            sensory_mode="toy_probe_v2",
+            **kwargs,
+        )
+
+    def test_v4_versioned_sensory_is_replayable_and_wire_identifiable(self):
+        with self.open() as aquarium:
+            frame = aquarium.step()
+            saved = aquarium.checkpoint()
+            self.assertEqual(frame["developmental"]["schema"], V4_SCHEMA)
+            self.assertEqual(frame["developmental"]["observation"]["schema"], EPOCH_SCHEMA)
+            self.assertEqual(frame["toy_contact"]["schema"], BRIDGE_SCHEMA)
+            self.assertEqual(frame["toy_contact"]["learning"]["schema"], LEARNING_SCHEMA)
+            self.assertEqual(aquarium.manifest["sensory_model_schema"], SCHEMA)
+
+        with self.open() as restored:
+            self.assertEqual(restored.checkpoint(), saved)
+
+        wire = inspect_journal(self.db, external_expected_head=saved["journal_head"])
+        self.assertEqual(wire["format"], "local_cell_v4+toy_probe_v2")
+        self.assertEqual(wire["state_schema"], V4_SCHEMA)
+        self.assertEqual(wire["sensory_schema"], SCHEMA)
+        self.assertEqual(wire["epoch_schema"], EPOCH_SCHEMA)
+        self.assertEqual(wire["epoch_ticks"], EPOCH_TICKS)
+
+    def test_v4_legacy_sensory_is_rejected_before_journal_birth(self):
+        with self.assertRaisesRegex(AquariumError, "none or toy_probe_v2"):
+            Aquarium(
+                self.db,
+                SEED,
+                GRAPH,
+                neural_mode="disabled",
+                motor_mode=V4_MODE,
+                sensory_mode="toy_probe",
+            )
+        self.assertFalse(self.db.exists())
+
+    def test_v4_sensorless_reopen_cannot_reinterpret_versioned_sensory_journal(self):
+        with self.open() as aquarium:
+            aquarium.step()
+            before = aquarium.checkpoint()["journal_head"]
+        with self.assertRaises(AquariumError):
+            Aquarium(
+                self.db,
+                SEED,
+                GRAPH,
+                neural_mode="disabled",
+                motor_mode=V4_MODE,
+                sensory_mode="none",
+            )
+        self.assertEqual(inspect_journal(self.db)["journal_head"], before)
+
+    @unittest.skipUnless(
+        V4_SENSORY_STRESS_ENABLED,
+        "10k-frame v4 sensory replay runs in the dedicated long-run workflow",
+    )
+    def test_v4_versioned_sensory_crosses_epoch_and_replays(self):
+        with self.open() as aquarium:
+            for _ in range(EPOCH_TICKS + 51):
+                aquarium.step()
+            saved = aquarium.checkpoint()
+            self.assertEqual((aquarium.tick, aquarium.epoch_index), (10_050, 1))
+            self.assertEqual(aquarium.store.count(), 10_052)
+            model = aquarium.contact_model.snapshot()
+
+        with self.open() as restored:
+            self.assertEqual(restored.checkpoint(), saved)
+            self.assertEqual(restored.contact_model.snapshot(), model)
+
+        wire = inspect_journal(self.db, external_expected_head=saved["journal_head"])
+        self.assertEqual(wire["format"], "local_cell_v4+toy_probe_v2")
+        self.assertEqual(wire["frames"], 10_050)
+        self.assertEqual(wire["events"], 10_052)
 
 
 if __name__ == "__main__":
