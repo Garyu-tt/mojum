@@ -58,6 +58,10 @@ def canonical(value):
         # ensure_ascii=False preserves Unicode; an unpaired surrogate would
         # otherwise escape validation until sha256() calls .encode().
         serialized.encode("utf-8")
+        # JSON silently coerces integer object keys to strings and tuples to
+        # arrays. Those changes must not receive the original object's hash.
+        if json.loads(serialized) != value:
+            raise GenesisError("Genome is not lossless canonical JSON")
         return serialized
     except (TypeError, ValueError, OverflowError, UnicodeError) as exc:
         raise GenesisError("Genome is not canonical UTF-8 JSON") from exc
