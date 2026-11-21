@@ -29,7 +29,7 @@ from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .room_contract import encode_room_exact
-from .typed_room_resume import load_verified_typed_room
+from .typed_room_resume import load_verified_typed_room, TypedRoomResumeError
 from .verified_snapshot import (
     STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
     runtime_source_sha256,
@@ -689,9 +689,12 @@ def main():
     # the same head again so a concurrent source append cannot be adopted.
     geometry = {}
     if args.resume_typed_room:
-        room, start, _ = load_verified_typed_room(
-            args.db, agent_id="dante-fixture-001",
-            expected_journal_head=args.expected_journal_head)
+        try:
+            room, start, _ = load_verified_typed_room(
+                args.db, agent_id="dante-fixture-001",
+                expected_journal_head=args.expected_journal_head)
+        except TypedRoomResumeError as exc:
+            parser.error(str(exc))
         geometry = {
             "room": room, "start": start,
             "external_expected_head": args.expected_journal_head,
