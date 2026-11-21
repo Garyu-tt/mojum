@@ -23,6 +23,16 @@
     return { value, lexical };
   }
 
+  function startCoordinate(raw) {
+    if (typeof raw !== "string" ||
+        !/^-?(?:0|[1-9]\d{0,3})(?:\.\d{1,12})?$/.test(raw.trim())) {
+      throw new Error("Координата старта должна быть десятичным числом.");
+    }
+    const result = Number(raw.trim());
+    if (!Number.isFinite(result)) throw new Error("Некорректная координата старта.");
+    return result;
+  }
+
   function numeric(x, label) {
     if (typeof x !== "number" || !Number.isFinite(x)) {
       throw new Error(label + ": требуется конечное число.");
@@ -114,7 +124,7 @@
     ];
   }
 
-  const API = { SCHEMA, MAX_OBSTACLES, dimension, validate, buildDraft,
+  const API = { SCHEMA, MAX_OBSTACLES, dimension, startCoordinate, validate, buildDraft,
                 floatToken, pointerToWorld, snap, withinRect };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (!root || !root.document) return;
@@ -165,8 +175,8 @@
   function currentRoom() {
     state.widthRaw = refs.width.value;
     state.heightRaw = refs.height.value;
-    state.start[0] = Number(refs.startX.value);
-    state.start[1] = Number(refs.startY.value);
+    state.start[0] = startCoordinate(refs.startX.value);
+    state.start[1] = startCoordinate(refs.startY.value);
     return validate(state);
   }
   function gridStep() { return state.grid ? 0.25 : 0; }
@@ -306,6 +316,7 @@
   });
   function finishDraw(event) {
     if (!state.pending) return;
+    let rejected = null;
     try {
       const [width, height] = state.lastValidSize;
       state.pending[1] = pointer(event, [width, height]);
@@ -316,17 +327,18 @@
         Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])
       ];
       if (rect[2] < 0.01 || rect[3] < 0.01) {
-        labelMessage("Протяни мышью или пальцем, чтобы нарисовать препятствие.", false);
+        rejected = "Протяни мышью или пальцем, чтобы нарисовать препятствие.";
       } else {
         state.obstacles.push(rect);
         try { validate(state); } catch (error) {
           state.obstacles.pop();
-          labelMessage(error.message, false);
+          rejected = error.message;
         }
       }
     } finally {
       if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
       render();
+      if (rejected) labelMessage(rejected, false);
     }
   }
   svg.addEventListener("pointerup", finishDraw);
