@@ -273,7 +273,7 @@ class LocalNoosphere:
         }
         return {"projection": copy.deepcopy(projection), "sha256": _sha(projection)}
 
-    def iter_events(self, *, include_nonpublic=False, batch_size=128):
+    def iter_events(self, *, include_nonpublic=False, batch_size=128, after_seq=0):
         """Iterate journal rows in bounded memory, PRIVATE only by opt-in.
 
         This is a read-only projection, not a substitute for verify_chain().
@@ -284,10 +284,11 @@ class LocalNoosphere:
         if type(include_nonpublic) is not bool:
             raise NoosphereError("include_nonpublic must be boolean")
         _integer(batch_size, "batch_size", 1, 1024)
-        sql = ("SELECT seq,wire_json,event_hash FROM events WHERE agent_id = ?"
+        _integer(after_seq, "after_seq")
+        sql = ("SELECT seq,wire_json,event_hash FROM events WHERE agent_id = ? AND seq > ?"
                + ("" if include_nonpublic else " AND visibility = 'PUBLIC'")
                + " ORDER BY seq")
-        cursor = self._db.execute(sql, (self.agent_id,))
+        cursor = self._db.execute(sql, (self.agent_id, after_seq))
         try:
             while True:
                 batch = cursor.fetchmany(batch_size)
@@ -301,3 +302,18 @@ class LocalNoosphere:
                     }
         finally:
             cursor.close()
+
+    def event_at(self, seq):
+        """Read exactly one persisted event, for verified checkpoint anchoring."""
+        _integer(seq, "seq", 1)
+        row = self._db.execute(
+            "SELECT seq,wire_json,event_hash FROM events "
+            "WHERE agent_id = ? AND seq = ?", (self.agent_id, seq),
+        ).fetchone()
+        if row is None:
+            raise NoosphereError("snapshot anchor event not found")
+        return {
+            "seq": row["seq"],
+            "event": json.loads(row["wire_json"]),
+            "event_hash": row["event_hash"],
+        }
