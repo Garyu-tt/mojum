@@ -28,6 +28,11 @@ from mojum.merge_gate import (
 HEAD = "a" * 40
 OTHER = "b" * 40
 REQUIRED = ("Aquarium regression QA / test", "Motor Gate / motor", "Mesh contract / mesh")
+MAIN_MATRIX_CHECKS = (
+    ("Mojum R0.3 online-learning aquarium regression", "aquarium-stdlib"),
+    ("Mojum motor-gate independent QA", "motor-gate-stdlib"),
+    ("Mojum mesh contract independent QA", "mesh-stdlib"),
+)
 
 
 def run(status="COMPLETED", conclusion="SUCCESS", name="Aquarium QA", workflow=None, head_sha=None):
@@ -46,7 +51,7 @@ def run(status="COMPLETED", conclusion="SUCCESS", name="Aquarium QA", workflow=N
 def facts(checks, **overrides):
     defaults = dict(
         head_sha=HEAD,
-        base_ref="main",
+        base_ref="release",
         checks=tuple(checks),
         number=419,
         is_draft=False,
@@ -62,7 +67,7 @@ def evaluate_checks(checks, **overrides):
     fact_overrides = {k: v for k, v in overrides.items() if k in fact_fields}
     kwargs = {k: v for k, v in overrides.items() if k not in fact_fields}
     kwargs.setdefault("expected_head_sha", HEAD)
-    kwargs.setdefault("expected_base", "main")
+    kwargs.setdefault("expected_base", fact_overrides.get("base_ref", "release"))
     kwargs.setdefault("required", REQUIRED)
     parsed = parse_snapshot(
         {
@@ -224,7 +229,7 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.code, "HEAD_MISMATCH")
 
     def test_base_mismatch_rejects(self):
-        result = evaluate_checks(self.green(), expected_base="release")
+        result = evaluate_checks(self.green(), expected_base="main")
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "BASE_MISMATCH")
 
@@ -437,6 +442,46 @@ class GateVerdictTests(unittest.TestCase):
                 self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
 
+class MainMatrixTests(unittest.TestCase):
+    def green(self):
+        return [
+            run(name=f"{job} ({version})", workflow=workflow)
+            for workflow, job in MAIN_MATRIX_CHECKS
+            for version in ("3.11", "3.12", "3.13")
+        ]
+
+    def test_complete_main_matrices_ready_without_extra_requirements(self):
+        result = evaluate_checks(self.green(), base_ref="main", required=())
+        self.assertEqual(result.verdict, "ready")
+        self.assertEqual(len(result.required), 9)
+
+    def test_narrow_selector_does_not_bypass_main_matrices(self):
+        check = self.green()[0]
+        result = evaluate_checks([check], base_ref="main", required=(check["name"],))
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+
+    def test_same_job_name_in_another_workflow_cannot_fill_main_matrix(self):
+        checks = self.green()
+        checks[0]["workflowName"] = "Unrelated CI"
+        result = evaluate_checks(checks, base_ref="main", required=())
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+
+    def test_main_jobs_require_success_even_with_waiver(self):
+        for conclusion in ("SKIPPED", "NEUTRAL"):
+            with self.subTest(conclusion=conclusion):
+                checks = self.green()
+                check = checks[0]
+                check["conclusion"] = conclusion
+                label = f"{check['workflowName']} / {check['name']}"
+                result = evaluate_checks(
+                    checks, base_ref="main", required=(), waivers={label: "docs-only"},
+                )
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_NOT_SUCCESS")
+
+
 class CliTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -447,7 +492,7 @@ class CliTests(unittest.TestCase):
         return {
             "number": 999,
             "headRefOid": HEAD,
-            "baseRefName": "main",
+            "baseRefName": "release",
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
@@ -475,6 +520,7 @@ class CliTests(unittest.TestCase):
         return [
             "--input", str(path),
             "--expected-head-sha", HEAD,
+            "--expected-base", "release",
             "--require", "Aquarium regression QA / test",
             "--require", "Motor Gate / motor",
             "--require", "Mesh contract / mesh",
@@ -487,6 +533,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["schema"], SCHEMA)
         self.assertEqual(payload["verdict"], "ready")
         self.assertFalse(payload["merge_performed"])
+
+    def test_main_floor_runs_without_require_flags(self):
+        snapshot = self.snapshot([
+            run(name="aquarium-stdlib (3.11)", workflow=MAIN_MATRIX_CHECKS[0][0]),
+        ])
+        snapshot["baseRefName"] = "main"
+        code, payload, _ = self.invoke(
+            "--input", str(self.write(snapshot)), "--expected-head-sha", HEAD,
+        )
+        self.assertEqual(code, EXIT_DEFER)
+        self.assertEqual(payload["code"], "MISSING_REQUIRED_CHECK")
+        self.assertEqual(len(payload["required"]), 9)
 
     def test_defer_exit_two(self):
         payload = self.snapshot([
@@ -560,6 +618,7 @@ class CliTests(unittest.TestCase):
             code, result, _ = self.invoke(
                 "--pr", "419",
                 "--expected-head-sha", HEAD,
+                "--expected-base", "release",
                 "--require", "Aquarium regression QA / test",
                 "--require", "Motor Gate / motor",
                 "--require", "Mesh contract / mesh",

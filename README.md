@@ -16,26 +16,16 @@ verdict for one exact commit and never performs a merge. Pass the snapshot from
 
 ```sh
 SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
-PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
-  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
-  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
-  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)'
+PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA"
 ```
 
-The expected job list comes from the reviewed CI matrix, **not** the live
-check rollup: missing matrix siblings may not yet be registered. Wildcards
-and workflow-only selectors cannot certify matrix completion.
+For `main`, the gate always requires the nine Aquarium, Motor Gate, and Mesh
+jobs for Python 3.11, 3.12, and 3.13. Use `--require JOB` for any additional
+applicable check identified in the reviewed CI workflow.
 
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
-See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
-the recommended `gh pr merge --match-head-commit` sequence. The gate is a
-client-side guard; repository rulesets remain authoritative.
+See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdicts and
+the GitHub acceptance policy.
 
 ## Offline room designer (experimental)
 

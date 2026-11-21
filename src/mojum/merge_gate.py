@@ -67,6 +67,17 @@ _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"
 )
+# These three workflows run on every pull request. Pin their exact job
+# identities independently of the live rollup, which may only show a subset.
+MAIN_REQUIRED_JOBS = tuple(
+    f"{workflow} / {job} ({version})"
+    for workflow, job in (
+        ("Mojum R0.3 online-learning aquarium regression", "aquarium-stdlib"),
+        ("Mojum motor-gate independent QA", "motor-gate-stdlib"),
+        ("Mojum mesh contract independent QA", "mesh-stdlib"),
+    )
+    for version in ("3.11", "3.12", "3.13")
+)
 
 
 class SnapshotError(ValueError):
@@ -238,8 +249,7 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
 
 
 def _matches(pattern: str, check: CheckOutcome) -> bool:
-    # Never certify an incomplete matrix through an aggregate workflow name
-    # or a wildcard. Every expected job must be enumerated by the caller.
+    # A qualified selector requires both identities from the check rollup.
     if " / " in pattern:
         return check.workflow is not None and pattern == check.label
     return pattern == check.name
@@ -265,7 +275,9 @@ def evaluate(
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
     defers: list[GateReason] = []
+    main_jobs = MAIN_REQUIRED_JOBS if facts.base_ref == "main" else ()
     patterns = tuple(required)
+    patterns += tuple(job for job in main_jobs if job not in patterns)
     matched_labels: list[str] = []
 
     if not expected_head_sha:
@@ -321,7 +333,7 @@ def evaluate(
         rejects.append(
             GateReason(
                 "NO_REQUIRED_CHECKS",
-                "no required check patterns were supplied; a gate without requirements proves nothing",
+                "supply at least one exact required job for a non-main target",
             )
         )
 
@@ -381,6 +393,14 @@ def evaluate(
                     GateReason(
                         "CHECK_UNKNOWN_STATUS",
                         f"{check.label} has an unrecognized status {check.status!r}",
+                    )
+                )
+                continue
+            if pattern in main_jobs and check.conclusion != "SUCCESS":
+                rejects.append(
+                    GateReason(
+                        "CHECK_NOT_SUCCESS",
+                        f"{check.label} must succeed for main (conclusion {check.conclusion!r})",
                     )
                 )
                 continue
@@ -489,26 +509,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--expected-head-sha",
         required=True,
-        help="the exact commit SHA the caller intends to merge",
+        help="the full 40- or 64-character commit SHA the caller intends to merge",
     )
     parser.add_argument("--expected-base", default="main", help="expected base ref")
     parser.add_argument(
         "--require",
         action="append",
         default=[],
-        metavar="PATTERN",
+        metavar="JOB",
         help=(
-            "one exact required job name or 'workflow / job' label; repeat "
-            "for every expected matrix job (wildcards and workflow-only "
-            "selectors are not allowed)"
+            "one exact required job name or 'workflow / job' label; repeat as needed "
+            "(main already requires the Aquarium, Motor Gate, and Mesh matrices)"
         ),
     )
     parser.add_argument(
         "--waive",
         action="append",
         default=[],
-        metavar="PATTERN=REASON",
-        help="accept a skipped check matching PATTERN, recording REASON",
+        metavar="JOB=REASON",
+        help="accept a skipped extra job, recording REASON",
     )
     parser.add_argument("--gh", default="gh", help="GitHub CLI executable for --pr")
     return parser
