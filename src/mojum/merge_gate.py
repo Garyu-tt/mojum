@@ -146,7 +146,11 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         raise SnapshotError(f"check[{index}] has no name or context")
 
     workflow = _text(raw, "workflowName", "workflow")
-    head_sha = _text(raw, "headSha", "head_sha")
+    head_sha = raw.get("headSha", raw.get("head_sha"))
+    if head_sha is not None and (
+        not isinstance(head_sha, str) or _SHA_RE.fullmatch(head_sha) is None
+    ):
+        raise SnapshotError(f"check[{index}] has invalid head SHA")
     typename = raw.get("__typename")
     status_raw = _text(raw, "status")
     conclusion_raw = _text(raw, "conclusion")
@@ -191,11 +195,15 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if not isinstance(raw, Mapping):
         raise SnapshotError("snapshot must be a JSON object")
 
-    head_sha = _text(raw, "headRefOid", "head_sha", "headSha")
-    if not head_sha:
+    head_sha = None
+    for key in ("headRefOid", "head_sha", "headSha"):
+        if key in raw:
+            head_sha = raw[key]
+            break
+    if not isinstance(head_sha, str) or not head_sha:
         raise SnapshotError("snapshot has no head SHA")
-    if not _SHA_RE.match(head_sha):
-        raise SnapshotError("snapshot head SHA is not hexadecimal")
+    if _SHA_RE.fullmatch(head_sha) is None:
+        raise SnapshotError("snapshot head SHA must be exact full hex with no padding")
 
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
     if not base_ref:
@@ -250,7 +258,7 @@ def evaluate(
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
 
-    if expected_head_sha is not None and not _SHA_RE.match(expected_head_sha):
+    if expected_head_sha is not None and _SHA_RE.fullmatch(expected_head_sha) is None:
         raise ValueError("expected_head_sha must be 40 or 64 hexadecimal characters")
 
     waivers = dict(waivers or {})
