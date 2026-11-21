@@ -115,6 +115,17 @@ class V2Test(unittest.TestCase):
             m.learn(cue, measurement, m.predict(cue))
         self.assertEqual(m.snapshot(), before)
 
+    def test_unicode_decimal_cue_rejected_without_raw_conversion_error(self):
+        m = ContactAssociationsV2()
+        feed(m, 0, (1, 1, 1), 0.5)
+        for forged_key in ("²:1:1", "١:1:1"):
+            with self.subTest(forged_key=forged_key):
+                forged = m.snapshot()
+                row = forged["table"].pop("1:1:1")
+                forged["table"][forged_key] = row
+                with self.assertRaises(CuriosityError):
+                    ContactAssociationsV2.from_snapshot(forged)
+
     def test_tampered_accounting_rejected(self):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
