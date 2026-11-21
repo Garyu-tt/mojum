@@ -1,5 +1,8 @@
 """Atomic dispatcher tests: no LLM required."""
 import concurrent.futures
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
 import sqlite3
 import sys
 import tempfile
@@ -13,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import tools.spartan_coordinator as coordinator
 from tools.spartan_coordinator import (
     MAX_ATTEMPTS, claim, connect, create_schema, enqueue, finish, heartbeat,
     init, status,
@@ -184,6 +188,33 @@ class SpartanTests(unittest.TestCase):
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
             enqueue(self.db, [{"id": "x", "scope": "s"}, {"id": "x", "scope": "s"}], 111)
+
+
+    def test_cli_closes_connection_on_success_and_failure(self):
+        opened = []
+        original_connect = coordinator.connect
+
+        def tracked(path):
+            connection = original_connect(path)
+            opened.append(connection)
+            return connection
+
+        def invoke(*args):
+            with patch.object(coordinator, "connect", side_effect=tracked):
+                with patch.object(sys, "argv", [
+                    "spartan_coordinator.py", "--db", self.path, *args,
+                ]):
+                    with redirect_stdout(StringIO()):
+                        return coordinator.main()
+
+        self.assertEqual(invoke("status"), 0)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            opened[-1].execute("SELECT 1")
+
+        with self.assertRaisesRegex(ValueError, "unknown agent id"):
+            invoke("claim", "--worker", "999")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            opened[-1].execute("SELECT 1")
 
 
 if __name__ == "__main__":
