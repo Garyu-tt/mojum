@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sim import digest
+from .world_room import Room
 
 SCHEMA = "mojum.aquarium.toy-contact/1"
+OCCLUSION_SCHEMA = "mojum.sensor.center-ray-wall-mask/1"
 PROBE_CAPABILITY = "SYNTHETIC_READ_ONLY_CONTACT"
 REPROBE_PERIOD_TICKS = 7
 
@@ -21,10 +23,16 @@ class SensoryBridgeError(ValueError):
 class ToyContactBridge:
     """Pure evaluation followed by an explicit after-CAS model adoption."""
 
-    def __init__(self, scene: ToyScene):
+    def __init__(self, scene: ToyScene, *, motor_room=None):
         if not isinstance(scene, ToyScene):
             raise SensoryBridgeError("ToyScene fixture required")
+        if motor_room is not None and not isinstance(motor_room, Room):
+            raise SensoryBridgeError("motor_room must be a Room")
         self.scene = scene
+        self.motor_room = scene.room if motor_room is None else motor_room
+        if (self.motor_room.width != scene.room.width
+                or self.motor_room.height != scene.room.height):
+            raise SensoryBridgeError("sensor and motor-room dimensions differ")
         self.model = ContactAssociations()
 
     def evaluate(self, world):
@@ -33,7 +41,9 @@ class ToyContactBridge:
         No mutation of self.model or world occurs here. The existing local
         Aquarium decides whether the proposed frame is actually committed.
         """
-        cue = self.scene.sense(world)
+        cue = self.scene.sense(
+            world, occluding_obstacles=self.motor_room.obstacles,
+        )
         prediction = self.model.predict(cue)
         near = cue["visible"] and cue["range_bucket_10cm"] <= 2
         first = prediction["observations"] == 0
@@ -49,7 +59,9 @@ class ToyContactBridge:
             "external_actuator": None,
         }
         candidate = ContactAssociations.from_snapshot(self.model.snapshot())
-        measurement = self.scene.probe(world, cue) if requested else None
+        measurement = (self.scene.probe(
+            world, cue, occluding_obstacles=self.motor_room.obstacles,
+        ) if requested else None)
         learned = (candidate.learn(cue, measurement, prediction)
                    if measurement is not None else None)
         frame = {
