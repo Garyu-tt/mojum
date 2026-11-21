@@ -19,6 +19,8 @@ from .neural import PulsePredictor
 from .developmental_policy import (Explorer, Proprioception, ACTIONS as MOTOR_ACTIONS,
                                    SCHEMA as DEVELOPMENT_SCHEMA)
 from .temporal_outcomes import RangeOutcomeMemory, SCHEMA as TEMPORAL_SCHEMA
+from .directional_outcomes import BearingOutcomeMemory, SCHEMA as BEARING_SCHEMA
+from .sensory_play import DIRECTION_SENSE_SCHEMA
 from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import (ToyContactBridge, validate_scene,
                              SCHEMA as TOY_CONTACT_SCHEMA,
@@ -92,7 +94,7 @@ class Aquarium:
             raise AquariumError("toy_probe requires goal_free exploration")
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("unused synthetic sensory scene")
-        if temporal_mode not in ("none", "range_outcome", "range_guided"):
+        if temporal_mode not in ("none", "range_outcome", "range_guided", "bearing_guided"):
             raise AquariumError("unsupported temporal_mode")
         if temporal_mode != "none" and (
                 exploration_mode != "goal_free" or sensory_mode != "toy_probe"):
@@ -130,8 +132,11 @@ class Aquarium:
         self.genome = GenomeLedger(self.seed)
         self.world = initial_state(self.room, *self.start)
         self.explorer = Explorer() if exploration_mode == "goal_free" else None
-        self.temporal_model = (RangeOutcomeMemory()
-                               if temporal_mode != "none" else None)
+        self.temporal_model = (
+            BearingOutcomeMemory() if temporal_mode == "bearing_guided"
+            else RangeOutcomeMemory() if temporal_mode != "none"
+            else None
+        )
         self.sensory_bridge = None
         if sensory_mode == "toy_probe":
             scene = ToyScene() if sensory_scene is None else sensory_scene
@@ -154,9 +159,14 @@ class Aquarium:
             self.manifest["occlusion_schema"] = OCCLUSION_SCHEMA
         if self.temporal_model is not None:
             self.manifest["temporal_mode"] = temporal_mode
-            self.manifest["temporal_schema"] = TEMPORAL_SCHEMA
-            if temporal_mode == "range_guided":
+            self.manifest["temporal_schema"] = (
+                BEARING_SCHEMA if temporal_mode == "bearing_guided"
+                else TEMPORAL_SCHEMA
+            )
+            if temporal_mode in ("range_guided", "bearing_guided"):
                 self.manifest["motor_guidance_schema"] = GUIDANCE_SCHEMA
+            if temporal_mode == "bearing_guided":
+                self.manifest["relative_bearing_schema"] = DIRECTION_SENSE_SCHEMA
         self.store = LocalNoosphere(db_path, agent_id)
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
@@ -195,6 +205,24 @@ class Aquarium:
                     else self._committed_head)
         return self.store.append(event, expected_head=expected)
 
+    def _temporal_cue(self, world):
+        """Return an observable sensor frame, never privileged scene geometry."""
+        if self.temporal_mode == "bearing_guided":
+            return self.sensory_bridge.scene.sense_direction(
+                world, occluding_obstacles=self.room.obstacles,
+            )
+        return self.sensory_bridge.scene.sense(
+            world, occluding_obstacles=self.room.obstacles,
+        )
+
+    def _temporal_clone(self):
+        """Use the pinned, explicitly selected learner with validated replay."""
+        if self.temporal_mode == "bearing_guided":
+            return BearingOutcomeMemory.from_snapshot(
+                self.temporal_model.snapshot(),
+            )
+        return RangeOutcomeMemory.from_snapshot(self.temporal_model.snapshot())
+
     def _motor_guidance(self):
         """Choose bounded affordances from *past* numeric sensor/action evidence.
 
@@ -203,11 +231,9 @@ class Aquarium:
         while the original innate rotating order remains the tie-breaker.
         No oracle room obstacles, object IDs, softness or future frame input.
         """
-        if self.temporal_mode != "range_guided":
+        if self.temporal_mode not in ("range_guided", "bearing_guided"):
             return None, (), ()
-        before = self.sensory_bridge.scene.sense(
-            self.world, occluding_obstacles=self.room.obstacles,
-        )
+        before = self._temporal_cue(self.world)
         predictions = {
             action: self.temporal_model.predict(before, action)
             for action in MOTOR_ACTIONS
@@ -306,18 +332,19 @@ class Aquarium:
         if guidance is not None:
             payload["motor_guidance"] = guidance
         if self.temporal_model is not None:
-            before = sensory_frame["observation"]
-            after = self.sensory_bridge.scene.sense(
-                new_world, occluding_obstacles=self.room.obstacles,
-            )
-            candidate = RangeOutcomeMemory.from_snapshot(self.temporal_model.snapshot())
+            before = self._temporal_cue(self.world)
+            after = self._temporal_cue(new_world)
+            candidate = self._temporal_clone()
             action = intent["action"]
             prior = candidate.predict(before, action)
             measured = candidate.observe(
                 before, action, after, world_obs["blocked"], prior,
             )
             payload["temporal_range"] = {
-                "schema": TEMPORAL_SCHEMA,
+                "schema": (
+                    BEARING_SCHEMA if self.temporal_mode == "bearing_guided"
+                    else TEMPORAL_SCHEMA
+                ),
                 "before": before, "after": after, "action": action,
                 "requested_dx_dy": [dx, dy],
                 "applied_dx_dy": [
@@ -364,20 +391,19 @@ class Aquarium:
         if self.temporal_model is None:
             return
         frame = payload["temporal_range"]
-        before = self.sensory_bridge.scene.sense(
-            self.world, occluding_obstacles=self.room.obstacles,
-        )
-        after = self.sensory_bridge.scene.sense(
-            new_world, occluding_obstacles=self.room.obstacles,
-        )
-        candidate = RangeOutcomeMemory.from_snapshot(self.temporal_model.snapshot())
+        before = self._temporal_cue(self.world)
+        after = self._temporal_cue(new_world)
+        candidate = self._temporal_clone()
         action = payload["developmental"]["intent"]["action"]
         prior = candidate.predict(before, action)
         measured = candidate.observe(
             before, action, after, payload["world"]["blocked"], prior,
         )
         expected = {
-            "schema": TEMPORAL_SCHEMA,
+            "schema": (
+                BEARING_SCHEMA if self.temporal_mode == "bearing_guided"
+                else TEMPORAL_SCHEMA
+            ),
             "before": before, "after": after, "action": action,
             "requested_dx_dy": [
                 payload["movement_request"]["dx"],
@@ -547,7 +573,8 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
-    parser.add_argument("--temporal-mode", choices=("none", "range_outcome", "range_guided"),
+    parser.add_argument("--temporal-mode", choices=("none", "range_outcome", "range_guided",
+                                                     "bearing_guided"),
                         default="none")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
