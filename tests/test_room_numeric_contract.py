@@ -117,6 +117,11 @@ class ExactRoomScalarContractTests(unittest.TestCase):
         with self.assertRaises(RoomContractError):
             encode_room_exact(room, (True, 2.0))
 
+    def test_encoder_never_generates_an_over_quota_contract(self):
+        room = Room(2, 2, ((0.5, 0.5, 0.01, 0.01),) * 4097)
+        with self.assertRaisesRegex(RoomContractError, "obstacle count"):
+            encode_room_exact(room, (1.0, 1.0))
+
     def test_negative_zero_and_binary_float_hex_are_reversible(self):
         room = Room(2, 2.0, ())
         code = encode_room_exact(room, (-0.0, 0.1))
