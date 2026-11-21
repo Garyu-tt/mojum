@@ -67,10 +67,11 @@ class V2Test(unittest.TestCase):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
         feed(m, 1, (2, 2, 2), 0.5)
+        feed(m, 2, (1, 1, 1), 0.5)
         latest_missing = m.snapshot()
-        latest_missing["table"]["2:2:2"]["last_update"] = 1
-        # Keep unique times while removing the newest stamp.
-        latest_missing["table"]["1:1:1"]["last_update"] = 0
+        # The counters still sum to 3 and timestamps remain distinct,
+        # but neither retained cue claims the latest update 3.
+        latest_missing["table"]["1:1:1"]["last_update"] = 1
         with self.assertRaises(CuriosityError):
             ContactAssociationsV2.from_snapshot(latest_missing)
         premature = m.snapshot()
