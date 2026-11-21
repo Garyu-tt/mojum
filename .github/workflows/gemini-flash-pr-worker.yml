@@ -128,26 +128,54 @@ jobs:
           fi
           echo 'changed=true' >> "$GITHUB_OUTPUT"
 
-      - name: Run repository tests without the model API secret
+      - name: Export untrusted candidate patch
         if: steps.patch.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-patch
+          path: ${{ runner.temp }}/worker.patch
+          if-no-files-found: error
+          retention-days: 2
+
+  # A fresh runner is a real credential boundary; a step in the model job is not.
+  # Untrusted generated tests must never run where the Gemini key was present.
+  test:
+    needs: propose
+    if: needs.propose.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-patch
+          path: ${{ runner.temp }}/candidate
+      - name: Apply candidate in credential-isolated runner
+        run: |
+          set -euo pipefail
+          git apply --check --binary "$RUNNER_TEMP/candidate/worker.patch"
+          git apply --binary "$RUNNER_TEMP/candidate/worker.patch"
+      - name: Compile and run the complete repository suite
         env:
           PYTHONPATH: src
         run: |
           python -m compileall -q src tests
           python -m unittest discover -s tests -v
-
-      - name: Export reviewed patch
-        if: steps.patch.outputs.changed == 'true'
+      - name: Export tested patch
         uses: actions/upload-artifact@v4
         with:
           name: verified-change
-          path: ${{ runner.temp }}/worker.patch
+          path: ${{ runner.temp }}/candidate/worker.patch
           if-no-files-found: error
           retention-days: 2
 
   publish:
-    needs: propose
-    if: needs.propose.outputs.changed == 'true'
+    needs: [propose, test]
+    if: needs.propose.outputs.changed == 'true' && needs.test.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
