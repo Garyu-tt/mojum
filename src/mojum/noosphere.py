@@ -51,7 +51,7 @@ def _canonical(value):
         # Reject it before hashing or touching the durable SQLite journal.
         wire.encode("utf-8")
         return wire
-    except (TypeError, ValueError, OverflowError) as exc:
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise NoosphereError("event must contain canonical UTF-8 JSON") from exc
 
 
