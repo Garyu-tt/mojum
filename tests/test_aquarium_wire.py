@@ -51,6 +51,33 @@ class AquariumWireTests(unittest.TestCase):
             self.assertEqual(restored.checkpoint(), saved)
             self.assertEqual(restored.step()["tick"], 1)
 
+    def test_existing_events_without_metadata_fail_before_writable_repair(self):
+        for mutation in ("delete_rows", "drop_table"):
+            with self.subTest(mutation=mutation):
+                path = self.db if mutation == "delete_rows" else self.db.with_name(
+                    "missing-metadata-table.sqlite3")
+                with Aquarium(path, SEED, GRAPH) as aquarium:
+                    aquarium.step(dx=0.01, dy=0.0)
+                with closing(sqlite3.connect(path)) as connection:
+                    if mutation == "delete_rows":
+                        connection.execute("DELETE FROM metadata")
+                    else:
+                        connection.execute("DROP TABLE metadata")
+                    connection.commit()
+                before = path.read_bytes()
+                with self.assertRaisesRegex(NoosphereError, "metadata is missing"):
+                    with Aquarium(path, SEED, GRAPH):
+                        pass
+                self.assertEqual(path.read_bytes(), before)
+                with closing(sqlite3.connect(path)) as connection:
+                    self.assertEqual(connection.execute("SELECT count(*) FROM events").fetchone()[0], 2)
+                    if mutation == "delete_rows":
+                        self.assertEqual(connection.execute("SELECT count(*) FROM metadata").fetchone()[0], 0)
+                    else:
+                        self.assertIsNone(connection.execute(
+                            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='metadata'"
+                        ).fetchone())
+
     def test_inspector_reports_mode_and_anchor_with_writer_wal_open(self):
         with self.aquarium("developmental_fixture") as aquarium:
             aquarium.step()

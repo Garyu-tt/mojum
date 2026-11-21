@@ -146,11 +146,20 @@ def _read_first_event(path, agent_id):
         tables = {row["name"] for row in db.execute(
             "SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('metadata','events')",
         )}
-        if "metadata" in tables:
+        has_metadata = "metadata" in tables
+        has_events = "events" in tables
+        if has_metadata:
             saved = dict(db.execute("SELECT k,v FROM metadata"))
-            if saved and saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
-                raise NoosphereError("database schema or agent owner does not match")
-        if "events" not in tables:
+            if saved != {"schema": STORE_SCHEMA, "owner": agent_id}:
+                if saved:
+                    raise NoosphereError("database schema or agent owner does not match")
+                raise NoosphereError("database metadata is missing or does not match")
+        elif has_events:
+            # A journal with events but no metadata is not a new database.
+            # Refuse it before LocalNoosphere can repair the metadata table
+            # through a writable connection and potentially alter the source.
+            raise NoosphereError("database metadata is missing or does not match")
+        if not has_events:
             return None
         first = db.execute("SELECT wire_json FROM events ORDER BY seq LIMIT 1").fetchone()
         if first is None:
