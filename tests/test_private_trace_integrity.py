@@ -113,7 +113,7 @@ function replaceFooter(source,transform){
  // A present-but-forged status is not "legacy": it must fail closed even
  // when the operator explicitly opts into unverified historical traces.
  const wrongStatus=await attempt(replaceFooter(wire,
-   f=>{f.export_status="LEGACY_UNVERIFIED"}, true));
+   f=>{f.export_status="LEGACY_UNVERIFIED"}), true);
  const frameCountMismatch=await attempt(replaceFooter(wire,
    f=>{f.trace_integrity.frame_count+=1}));
  const byteLengthMismatch=await attempt(replaceFooter(wire,
