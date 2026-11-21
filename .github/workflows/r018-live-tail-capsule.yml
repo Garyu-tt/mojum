@@ -1,0 +1,52 @@
+name: Mojum R0.18 PRIVATE sealed-prefix plus live-tail recovery
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r018-live-tail-capsule.yml"
+      - "src/mojum/live_tail_capsule.py"
+      - "src/mojum/segment_archive_cli.py"
+      - "tests/test_live_tail_capsule.py"
+      - "tests/test_live_tail_capsule_100k.py"
+      - "docs/R018_LIVE_TAIL_BACKUP_R01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-source-tail-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Real CPU SQLite tail source, strict 0700/0600 archive, crash and Aquarium cold replay
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_live_tail_capsule.py -v
+      - name: Re-run parent physical sealed-segment archive and source CAS suites
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p test_physical_segment_archive.py -v
+          python -m unittest discover -s tests -p test_segmented_noosphere.py -v
+
+  actual-100001-tail-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Restore 100001 actual PRIVATE events from 24 sealed + 1697 tail
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_live_tail_capsule_100k.py -v
