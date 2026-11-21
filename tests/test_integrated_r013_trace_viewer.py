@@ -132,6 +132,39 @@ class IntegratedR013RealTraceTests(unittest.TestCase):
                          [80, 100, 120])
         self.assertNotIn("id", record["toy_contact"]["observation"])
 
+    def test_occluded_toy_never_leaks_private_rgb_or_probe_through_viewer_export(self):
+        # The object is numerically near, but solid canonical motor-room wall
+        # occludes the center ray. Export only committed public-to-sensor
+        # observations, never the PRIVATE experimenter's hidden fixture.
+        occluded = ToyScene(toys=(
+            Toy("spectator.private-behind-wall", 2.25, 2.0, .10,
+                (250, 1, 3), .97),
+        ))
+        with self.baby(start=(1.98, 2.0), sensory_scene=occluded) as a:
+            frames = [a.step() for _ in range(3)]
+            trusted_head = a.checkpoint()["journal_head"]
+            self.assertEqual(a.manifest["occlusion_schema"],
+                             "mojum.sensor.center-ray-wall-mask/1")
+        result = self.private_export(
+            expected_journal_head=trusted_head,
+            start=(1.98, 2.0), sensory_scene=occluded,
+        )
+        self.assertEqual(result["frames"], 3)
+        rows = [json.loads(line) for line in self.trace.read_text().splitlines()]
+        self.assertEqual(rows[:-1], frames)
+        first = rows[0]["toy_contact"]
+        self.assertFalse(first["observation"]["visible"])
+        self.assertIsNone(first["observation"]["reflectance_rgb"])
+        self.assertIsNone(first["observation"]["range_bucket_10cm"])
+        self.assertFalse(first["probe_intent"]["requested"])
+        self.assertIsNone(first["measured_contact"])
+        for row in rows[:-1]:
+            private_sensor_wire = json.dumps(row["toy_contact"], sort_keys=True)
+            self.assertNotIn("spectator.private-behind-wall", private_sensor_wire)
+            self.assertNotIn("[250, 1, 3]", private_sensor_wire)
+        self.assertEqual(rows[-1]["journal_head"], trusted_head)
+        self.assertIn("trace_integrity", rows[-1])
+
     def test_actual_contact_trace_slice_keeps_history_and_replay(self):
         observed, head, _, _ = self.born(22)
         result = self.private_export(expected_journal_head=head,
