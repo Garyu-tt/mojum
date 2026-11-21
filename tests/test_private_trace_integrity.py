@@ -110,6 +110,30 @@ function legacyVariant(source,transform){
    f=>{delete f.trace_integrity;delete f.export_status;delete f.trace_range;
        delete f.trace_room}),transform);
 }
+// Build a legacy frame whose serialized line is exactly `lineLength` UTF-16
+// code units long, matching the viewer's `source.length` guard. Padding uses
+// plain ASCII so JSON escaping never changes the measured length.
+function exactFrame(tick,lineLength){
+ const frame={schema:"mojum.aquarium.frame/1",tick,
+   world:{position:[0,0],blocked:false},
+   interoception:{heartbeat:{pulse:false}}};
+ if(lineLength){
+   frame.brain={status:""};
+   const missing=lineLength-JSON.stringify(frame).length;
+   if(missing<0)throw Error("line target too small");
+   frame.brain.status="x".repeat(missing);
+   if(JSON.stringify(frame).length!==lineLength)
+     throw Error("unexpected line length "+JSON.stringify(frame).length);
+ }
+ return JSON.stringify(frame);
+}
+function syntheticLegacyTrace(count,lineLength){
+ const rows=[];
+ for(let i=0;i<count;i++)rows.push(exactFrame(i,lineLength));
+ rows.push(JSON.stringify({schema:"mojum.aquarium.checkpoint/1",
+   stored_events:count+1}));
+ return rows.join("\n")+"\n";
+}
 async function race(source){
  const get=openDOM(),input=get("file");
  get("allow-legacy").checked=true;
@@ -180,6 +204,15 @@ async function race(source){
  manyRows.push(JSON.stringify({schema:"mojum.aquarium.checkpoint/1",
    stored_events:5002}));
  const manyFrames=await attempt(manyRows.join("\n")+"\n", true);
+ // Exact boundaries must be inclusive: the documented maxima are usable
+ // limits, and only one unit beyond each maximum is rejected.
+ const lineAtLimit=await attempt(syntheticLegacyTrace(1,64000), true);
+ const lineOverLimit=await attempt(syntheticLegacyTrace(1,64001), true);
+ const framesAtLimit=await attempt(syntheticLegacyTrace(5000,0), true);
+ const framesOverLimit=await attempt(syntheticLegacyTrace(5001,0), true);
+ const bytesAtLimit=await attempt(legacyVariant(wire, ()=>{}), true, 24*1024*1024);
+ const bytesOverLimit=await attempt(legacyVariant(wire, ()=>{}), true,
+                                     24*1024*1024+1);
  const raced=await race(legacyVariant(wire, f=>{f.brain.status="current"}));
  const blankLine=await attempt(wire.replace("\n", "\n\n"));
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
@@ -191,7 +224,10 @@ async function race(source){
                                       wrongStatus,frameCountMismatch,
                                       byteLengthMismatch,afterCheckpoint,
                                       legacyDefault,legacyOptIn,
-                                      safe,gap,oversized,longLine,manyFrames,raced,
+                                      safe,gap,oversized,longLine,manyFrames,
+                                      lineAtLimit,lineOverLimit,framesAtLimit,
+                                      framesOverLimit,bytesAtLimit,bytesOverLimit,
+                                      raced,
                                       blankLine,whitespaceLine,trailingBlank,
                                       encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
@@ -334,6 +370,20 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("Слишком длинная", values["longLine"]["status"])
         self.assertFalse(values["manyFrames"]["enabled"])
         self.assertIn("Слишком много кадров", values["manyFrames"]["status"])
+        # Exact documented maxima are inclusive; one unit beyond fails closed.
+        self.assertTrue(values["lineAtLimit"]["enabled"],
+                        values["lineAtLimit"]["status"])
+        self.assertIn("не проверен", values["lineAtLimit"]["status"])
+        self.assertFalse(values["lineOverLimit"]["enabled"])
+        self.assertIn("Слишком длинная", values["lineOverLimit"]["status"])
+        self.assertTrue(values["framesAtLimit"]["enabled"],
+                        values["framesAtLimit"]["status"])
+        self.assertFalse(values["framesOverLimit"]["enabled"])
+        self.assertIn("Слишком много кадров", values["framesOverLimit"]["status"])
+        self.assertTrue(values["bytesAtLimit"]["enabled"],
+                        values["bytesAtLimit"]["status"])
+        self.assertFalse(values["bytesOverLimit"]["enabled"])
+        self.assertIn("24 МиБ", values["bytesOverLimit"]["status"])
         self.assertTrue(values["raced"]["enabled"])
         self.assertEqual(values["raced"]["tick"], "0")
         self.assertIn("current.jsonl", values["raced"]["status"])

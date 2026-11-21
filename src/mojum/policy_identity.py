@@ -120,6 +120,8 @@ def validate_identities(identities):
     seen_ids, seen_config, seen_selectors, seen_contracts = (
         set(), set(), set(), set(),
     )
+    # Capture each validated declaration once: callers may supply a generator.
+    validated = []
     for item in identities:
         _check_fields(item)
         selectors = tuple(sorted(item.selector_dict.items()))
@@ -136,7 +138,8 @@ def validate_identities(identities):
         seen_selectors.add(selectors)
         if item.frame_contract is not None:
             seen_contracts.add(item.frame_contract)
-    return tuple(identities)
+        validated.append(item)
+    return tuple(validated)
 
 
 POLICIES = validate_identities((
