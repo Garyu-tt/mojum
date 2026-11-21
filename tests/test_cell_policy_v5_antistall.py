@@ -402,6 +402,26 @@ class TranscriptSummaryTests(unittest.TestCase):
                     summarize_transcript(bad)
 
 
+    def test_summary_accepts_contiguous_tail_and_unclocked_pairs(self):
+        transcript = []
+        drive(CellExplorerV5(), 20, transcript=transcript)
+        # Chronological run slices need not start at virtual tick zero.
+        tail = transcript[5:12]
+        self.assertEqual(summarize_transcript(tail)["ticks"], len(tail))
+        lightweight = [
+            (
+                {"action": intent["action"], "zone": intent["zone"],
+                 "forced_probe": intent["forced_probe"]},
+                {"action": outcome["action"],
+                 "measured_blocked": outcome["measured_blocked"],
+                 "forced_probe": outcome["forced_probe"]},
+            )
+            for intent, outcome in tail
+        ]
+        self.assertEqual(
+            summarize_transcript(lightweight)["ticks"], len(lightweight),
+        )
+
     def test_summary_rejects_forged_sequence_and_outcome_disagreements(self):
         transcript = []
         drive(CellExplorerV5(), 12, transcript=transcript)
