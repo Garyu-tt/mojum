@@ -87,6 +87,51 @@ class EpochSenseV4Tests(unittest.TestCase):
                 with self.assertRaises(CellV4Error):
                     CellExplorerV4.from_snapshot(bad)
 
+    def test_v4_snapshot_rejects_impossible_tick_and_eviction_history(self):
+        model = CellExplorerV4()
+        for tick in range(2):
+            cue = self.sense(tick)
+            model.observe(cue, model.decide(cue), False)
+        self.assertEqual(
+            CellExplorerV4.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+        common = {
+            "schema": V4_SCHEMA, "cell_size_m": .04,
+            "last_epoch_index": 0, "evictions": 0,
+            "forgotten_observations": 0,
+        }
+        # One observation per absolute tick: live cells cannot share a
+        # last-seen tick and the newest stamp must be the current tick.
+        forged = {
+            "two_cells_on_one_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {
+                    "4:4": {"rest": [1, 0]}, "5:4": {"rest": [1, 0]},
+                },
+                "last_seen_at": {"4:4": 1, "5:4": 1},
+            },
+            "newest_stamp_before_last_tick": {
+                **common, "last_tick": 2, "updates": 3,
+                "records": {"4:4": {"rest": [3, 0]}},
+                "last_seen_at": {"4:4": 1},
+            },
+            "eviction_before_table_full": {
+                **common, "last_tick": 1, "updates": 2,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {"5:4": {"rest": [1, 0]}},
+                "last_seen_at": {"5:4": 1},
+            },
+            "learned_but_no_retained_cell": {
+                **common, "last_tick": 0, "updates": 1,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {}, "last_seen_at": {},
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name), self.assertRaises(CellV4Error):
+                CellExplorerV4.from_snapshot(snapshot)
+
     def test_blocked_rest_is_rejected_before_policy_mutation(self):
         model = CellExplorerV4()
         cue = self.sense(0)
