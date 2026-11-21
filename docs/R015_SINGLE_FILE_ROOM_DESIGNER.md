@@ -1,6 +1,6 @@
 # R0.15 — portable single-file offline Mojum room editor
 
-**Experimental Draft.** The canonical editable source is still [`tools/room_designer.html`](../tools/room_designer.html) plus the adjacent [`room_designer_core.js`](../tools/room_designer_core.js) from [#163](https://github.com/Garyu-tt/mojum/pull/163). This helper produces a portable **one-file HTML** copy so a phone or offline device needs just one document to edit synthetic room layouts.
+**Experimental Draft.** The canonical editable source is [`tools/room_designer.html`](../tools/room_designer.html) plus its three adjacent JavaScript modules: [`room_designer_core.js`](../tools/room_designer_core.js), [`room_designer_history.js`](../tools/room_designer_history.js) and [`room_walk_preview.js`](../tools/room_walk_preview.js) from the #163 lineage. This helper produces a portable **one-file HTML** copy so a phone or offline device needs just one document to edit synthetic room layouts.
 
 ## Generate the one-file editor
 
@@ -12,7 +12,7 @@ python tools/package_room_designer.py --out ./room-designer-offline.html
 
 Open the resulting `room-designer-offline.html` in a local browser (`file://`). The editor itself needs **no Python, Node, npm, package installation, hosting server or Internet** to open or operate. It draws the existing SVG canvas, edits room size/start/obstacles, validates geometry, exports/copies a plain local `mojum.world.point-room-draft/1` JSON file, and supports canonical local JSON reimport.
 
-The Python packager is run **only at generation time**. It reads and validates the two checked-in local UTF-8 source files, replaces exactly one local classic JS script tag with the literal JS bytes, refuses unsafe `</script` delimiters, and produces an HTML file with no sibling script dependency. It publishes through a same-directory owner-only 0600 temporary file, flush/fsync, and atomic exclusive filesystem link. It **never overwrites** a file (including a symlink or a second concurrent creator) and never opens SQLite, Noosphere or an agent process. A crash after exclusive publish may leave a complete, already created output; rerunning deliberately refuses reuse, so choose a fresh filename if necessary.
+The Python packager is run **only at generation time**. It reads and validates the four pinned UTF-8 source files (HTML plus three local JavaScript modules), replaces all three classic `src` tags in dependency order with their literal JS bytes, rejects missing/extra script dependencies and unsafe `</script` delimiters, and produces an HTML file with no sibling script dependency. It publishes through a same-directory owner-only 0600 temporary file, flush/fsync, and atomic exclusive filesystem link. It **never overwrites** a file (including a symlink or a second concurrent creator) and never opens SQLite, Noosphere or an agent process. A crash after exclusive publish may leave a complete, already created output; rerunning deliberately refuses reuse, so choose a fresh filename if necessary.
 
 The command prints a local file path, byte count and SHA-256 of the emitted HTML. Those metadata are for reproducibility only, **not code signing or remote attestation**. No user data, API keys or private journal files are included.
 
