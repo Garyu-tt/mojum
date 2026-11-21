@@ -92,8 +92,10 @@ class LocalNoosphere:
     malicious history rewriting matters. This is NOT an auth or encryption API.
     """
 
-    def __init__(self, db_path, agent_id):
+    def __init__(self, db_path, agent_id, *, read_only=False):
         self.agent_id = _text(agent_id, "agent_id")
+        if type(read_only) is not bool:
+            raise NoosphereError("read_only must be boolean")
         path = Path(db_path)
         if path.is_symlink():
             raise NoosphereError("database path cannot be a symbolic link")
@@ -104,19 +106,37 @@ class LocalNoosphere:
             raise NoosphereError("a persistent SQLite database file is required")
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
-        self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.execute("PRAGMA trusted_schema=OFF")
-        self._db.execute("PRAGMA synchronous=FULL")
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA foreign_keys=ON")
-        if os.name == "posix":
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass  # Caller must enforce host filesystem policy.
-        self._setup()
+        if read_only and not path.is_file():
+            raise NoosphereError("read-only journal must already exist")
+        self.read_only = read_only
+        # 'mode=ro' is enforced by SQLite itself: not a writable connection
+        # with an application-only 'please do not write' convention.
+        source = path.resolve().as_uri() + "?mode=ro" if read_only else str(path)
+        self._db = sqlite3.connect(source, uri=read_only, timeout=5.0,
+                                   isolation_level=None)
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("PRAGMA trusted_schema=OFF")
+            if read_only:
+                self._db.execute("PRAGMA query_only=ON")
+                saved = dict(self._db.execute("SELECT k,v FROM metadata"))
+                if saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
+                    raise NoosphereError("read-only journal owner or schema mismatch")
+            else:
+                self._db.execute("PRAGMA synchronous=FULL")
+                self._db.execute("PRAGMA journal_mode=WAL")
+                self._db.execute("PRAGMA foreign_keys=ON")
+                if os.name == "posix":
+                    try:
+                        path.chmod(0o600)
+                    except OSError:
+                        pass  # Caller must enforce host filesystem policy.
+                self._setup()
+        except BaseException:
+            # An exception during __init__ bypasses context-manager __exit__.
+            self._db.close()
+            raise
 
     def close(self):
         self._db.close()
@@ -162,6 +182,8 @@ class LocalNoosphere:
 
     def append(self, event, *, expected_head):
         """Append via CAS. Caller supplies expected previous hash; no retries hidden."""
+        if self.read_only:
+            raise NoosphereError("read-only archive cannot append")
         checked = _validate_event(event, self.agent_id)
         if not isinstance(expected_head, str) or len(expected_head) != 64:
             raise NoosphereError("expected_head must be the observed 64-character hash")
