@@ -1,0 +1,38 @@
+name: Mojum R0.16 fault injection at PRIVATE export publication
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r016-export-crash-qa.yml"
+      - "tests/test_r016_export_crash_atomicity.py"
+      - "src/mojum/aquarium_trace_export.py"
+  push:
+    paths:
+      - ".github/workflows/r016-export-crash-qa.yml"
+      - "tests/test_r016_export_crash_atomicity.py"
+      - "src/mojum/aquarium_trace_export.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  forced-crash-matrix:
+    name: crash-atomicity (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Kill real export process before/during publish and race no-clobber
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_r016_export_crash_atomicity.py -v
