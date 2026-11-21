@@ -63,6 +63,29 @@ class V2Test(unittest.TestCase):
         with self.assertRaisesRegex(CuriosityError, "duplicate association update"):
             ContactAssociationsV2.from_snapshot(snapshot)
 
+    def test_impossible_eviction_and_update_history_rejected(self):
+        m = ContactAssociationsV2()
+        feed(m, 0, (1, 1, 1), 0.5)
+        feed(m, 1, (2, 2, 2), 0.5)
+        latest_missing = m.snapshot()
+        latest_missing["table"]["2:2:2"]["last_update"] = 1
+        # Keep unique times while removing the newest stamp.
+        latest_missing["table"]["1:1:1"]["last_update"] = 0
+        with self.assertRaises(CuriosityError):
+            ContactAssociationsV2.from_snapshot(latest_missing)
+        premature = m.snapshot()
+        del premature["table"]["1:1:1"]
+        premature["evicted_cues"] = 1
+        premature["evicted_observations"] = 1
+        with self.assertRaisesRegex(CuriosityError, "eviction history"):
+            ContactAssociationsV2.from_snapshot(premature)
+        erased = m.snapshot()
+        erased["table"] = {}
+        erased["evicted_cues"] = 2
+        erased["evicted_observations"] = 2
+        with self.assertRaises(CuriosityError):
+            ContactAssociationsV2.from_snapshot(erased)
+
     def test_tampered_accounting_rejected(self):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
