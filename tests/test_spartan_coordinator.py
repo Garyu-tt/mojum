@@ -185,6 +185,44 @@ class SpartanTests(unittest.TestCase):
         })
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_boolean_priority_rejected_instead_of_aliasing_integer(self):
+        # Python's isinstance(True, int) is true and SQLite stores True as 1.
+        # A second enqueue of the same ID with integer 1 must not silently
+        # reinterpret a different priority type as an identical task.
+        with self.assertRaisesRegex(ValueError, "priority must be an integer"):
+            enqueue(self.db, [
+                {"id": "safe", "scope": "other"},
+                {"id": "bad", "scope": "room", "priority": True},
+            ], 101)
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM tasks WHERE id='safe'"
+        ).fetchone())
+        self.assertEqual(enqueue(self.db, [
+            {"id": "same", "scope": "room", "priority": 1},
+        ], 102)["added"], 1)
+        with self.assertRaisesRegex(ValueError, "priority must be an integer"):
+            enqueue(self.db, [
+                {"id": "same", "scope": "room", "priority": True},
+            ], 103)
+        self.assertEqual(self.db.execute(
+            "SELECT priority FROM tasks WHERE id='same'"
+        ).fetchone()[0], 1)
+
+    def test_nonfinite_payload_is_not_persisted_as_nonstandard_json(self):
+        # json.load accepts NaN/Infinity by default, but those are not JSON.
+        # Preflight must reject them before committing any batch members.
+        for number in (float("nan"), float("inf"), -float("inf")):
+            with self.subTest(value=repr(number)):
+                with self.assertRaises(ValueError):
+                    enqueue(self.db, [
+                        {"id": "safe", "scope": "other"},
+                        {"id": "bad", "scope": "room",
+                         "payload": {"score": number}},
+                    ], 101)
+                self.assertIsNone(self.db.execute(
+                    "SELECT 1 FROM tasks WHERE id='safe'"
+                ).fetchone())
+
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
             enqueue(self.db, [{"id": "x", "scope": "s"}, {"id": "x", "scope": "s"}], 111)
