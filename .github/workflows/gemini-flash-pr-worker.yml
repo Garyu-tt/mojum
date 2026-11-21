@@ -124,7 +124,13 @@ jobs:
                 echo "Agent changed a non-allowlisted path: $path" >&2
                 exit 1 ;;
             esac
-          done < <(git diff --cached --name-only -z)
+            # A rename's destination alone is insufficient: review its source,
+            # too, or a forbidden file can be moved into an allowed path.
+            if [ "$(git ls-files --stage -- "$path" | cut -c1-6)" = "120000" ]; then
+              echo "Agent modified a symlink: $path" >&2
+              exit 1
+            fi
+          done < <(git diff --cached --no-renames --name-only -z)
           if (( count > 8 )); then
             echo "Too many changed paths: $count" >&2
             exit 1
