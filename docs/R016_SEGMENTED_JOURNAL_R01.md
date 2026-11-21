@@ -74,9 +74,11 @@ PYTHONPATH=src python -m mojum.segment_archive_cli restore \
 ```
 
 Export reads one SQLite snapshot and copies its complete segments into
-versioned manifest and JSONL pairs. The export summary reports how many
-unsealed events were present in that snapshot. Retain the verified sealed head
-separately from the archive. It can differ from the full source head.
+versioned manifest and JSONL pairs. A read-only open can still create
+SQLite `-wal` and `-shm` sidecars beside a WAL-mode source. The export
+summary reports how many unsealed events were present in that snapshot.
+Retain the verified sealed head separately from the archive. It can differ
+from the full source head.
 Verification and restore use that independent anchor without opening the
 source. Restore publishes a new SQLite file after checking the full
 reconstructed chain. Choose a destination without existing SQLite

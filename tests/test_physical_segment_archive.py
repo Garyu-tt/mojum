@@ -17,7 +17,7 @@ from unittest.mock import patch
 from mojum.noosphere import NoosphereError
 from mojum.segmented_noosphere import SegmentedNoosphere
 from mojum.segment_archive import (
-    ArchiveError, export_sealed_segments, names,
+    ArchiveError, export_sealed_segments, names, publish_new,
 )
 from mojum.segment_archive_verify import (
     verify_sealed_archive, restore_into_new_sqlite,
@@ -276,6 +276,22 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
                 self.archive,
                 external_expected_head="f" * 64,
             )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX archive file permissions")
+    def test_permission_failure_closes_temporary_archive_file(self):
+        with patch("mojum.segment_archive.os.fchmod", side_effect=PermissionError) as chmod:
+            with self.assertRaises(PermissionError):
+                publish_new(self.archive / "member", [b"synthetic"])
+
+        descriptor = chmod.call_args.args[0]
+        try:
+            os.fstat(descriptor)
+        except OSError as exc:
+            self.assertEqual(exc.errno, errno.EBADF)
+        else:
+            os.close(descriptor)
+            self.fail("temporary archive file descriptor remained open")
+        self.assertEqual(list(self.archive.iterdir()), [])
 
     def test_failed_data_write_releases_source_read_transaction(self):
         source_head = self.build(70)

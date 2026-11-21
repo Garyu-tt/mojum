@@ -51,9 +51,9 @@ def publish_new(path, blocks):
     """Atomic non-overwriting publication. Existing paths are NEVER replaced."""
     fd, temp = tempfile.mkstemp(prefix=".mojum-pending-", dir=path.parent)
     try:
-        if os.name == "posix":
-            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as out:
+            if os.name == "posix":
+                os.fchmod(out.fileno(), 0o600)
             for block in blocks:
                 out.write(block)
             out.flush()
