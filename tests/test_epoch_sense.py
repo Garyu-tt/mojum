@@ -46,6 +46,21 @@ class EpochSenseTests(unittest.TestCase):
                 with self.assertRaises(DevelopmentError):
                     EpochProprioception(9999, epoch, local, REV, 1, 2, False)
 
+    def test_exported_timestamp_stays_json_safe(self):
+        # The public nanosecond integer crosses the 53-bit JSON boundary
+        # far earlier than the absolute tick itself.
+        self.assertLessEqual(observed_at_ns(MAX_ABSOLUTE_TICK), 2**53 - 1)
+        self.assertEqual(float(observed_at_ns(MAX_ABSOLUTE_TICK)),
+                         observed_at_ns(MAX_ABSOLUTE_TICK))
+        with self.assertRaises(DevelopmentError):
+            observed_at_ns(MAX_ABSOLUTE_TICK + 1)
+
+    def test_epoch_and_local_tick_reject_boolean_aliases(self):
+        with self.assertRaises(DevelopmentError):
+            EpochProprioception(9999, True, 0, REV, 1, 2, False)
+        with self.assertRaises(DevelopmentError):
+            EpochProprioception(1, 0, True, REV, 1, 2, False)
+
     def test_public_schema_distinct(self):
         public = EpochProprioception.at(10000, REV, 1, 2, True).public()
         self.assertTrue(public["schema"].endswith("/4"))
