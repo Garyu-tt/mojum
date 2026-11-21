@@ -134,8 +134,9 @@ class SignedReplayCacheQA(unittest.TestCase):
             self.assertEqual(resumed.store.count(), 5)
         with self.aquarium(signed=False) as full:
             self.assertEqual(full.checkpoint(), finished)
-        self.assertNotEqual(pinned["genome_revision"],
-                            "not-a-real-revision")
+        self.assertEqual(pinned["tick"], 2)
+        self.assertEqual(load_snapshot(self.snapshot, self.key)["checkpoint"],
+                         pinned)
 
     def test_bad_hmac_refused_before_changing_source_sqlite(self):
         self.make_snapshot()
