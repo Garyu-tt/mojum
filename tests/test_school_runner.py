@@ -217,16 +217,6 @@ class SchoolRunnerTests(unittest.TestCase):
                     "false provenance": altered(
                         lambda r: r["events"][0]["provenance"].__setitem__(
                             "physical_actuation", True)),
-                    "float event tick": altered(
-                        lambda r: r["events"][1].__setitem__("sim_tick", 43.0)),
-                    "float event metric": altered(
-                        lambda r: r["events"][3]["evidence"].__setitem__(
-                            "measured", float(r["events"][3]["evidence"]["measured"]))),
-                    "float feedback metric": altered(
-                        lambda r: r["feedback"].__setitem__(
-                            "baseline", float(r["feedback"]["baseline"]))),
-                    "nonfinite feedback": altered(
-                        lambda r: r["feedback"].__setitem__("baseline", float("nan"))),
                     "untrusted catalog checksum": altered(
                         lambda r: r["events"][0]["provenance"].__setitem__(
                             "catalog_sha256", "not-a-sha256")),
@@ -241,6 +231,29 @@ class SchoolRunnerTests(unittest.TestCase):
                     good = Path(dirname) / "valid"
                     self.assertEqual(write_fixture(valid, good), good)
                     self.assertTrue((good / "events.json").is_file())
+
+    def test_writer_rejects_python_equal_but_wire_distinct_types(self):
+        import copy
+
+        original = run_scripted_activity(self.catalog, "music", start_tick=0)
+        poisons = {
+            "boolean-tick": lambda r: r["events"][1].__setitem__("sim_tick", True),
+            "float-tick": lambda r: r["events"][1].__setitem__("sim_tick", 1.0),
+            "float-measurement": lambda r: r["events"][2]["evidence"].__setitem__(
+                "measured", float(r["events"][2]["evidence"]["measured"])),
+            "float-feedback": lambda r: r["feedback"].__setitem__(
+                "baseline", float(r["feedback"]["baseline"])),
+        }
+        with tempfile.TemporaryDirectory() as dirname:
+            for label, poison in poisons.items():
+                with self.subTest(label=label):
+                    candidate = copy.deepcopy(original)
+                    poison(candidate)
+                    output = Path(dirname) / label
+                    with self.assertRaisesRegex(
+                            SchoolContractError, "scripted events or feedback"):
+                        write_fixture(candidate, output)
+                    self.assertFalse(output.exists())
 
     def test_failed_manifest_write_leaves_directory_available_for_retry(self):
         run = run_scripted_activity(self.catalog, "music")
