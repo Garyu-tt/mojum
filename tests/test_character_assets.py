@@ -41,8 +41,8 @@ class CharacterAssetTests(unittest.TestCase):
     def test_select_keyframes_without_mutating_identity_or_input(self):
         original = manifest()
         before = copy.deepcopy(original)
-        self.assertEqual([select_form(original, age)["age_years"] for age in (0, 6, 8.9, 9, 11, 12, 16, 100)],
-                         [6, 6, 6, 9, 9, 12, 16, 16])
+        self.assertEqual([select_form(original, age)["age_years"] for age in (0, 6, 8.9, 9, 11, 12, 16, 100, 10**1000)],
+                         [6, 6, 6, 9, 9, 12, 16, 16, 16])
         self.assertEqual(original, before)
         self.assertEqual(validate_manifest(original)["organism_id"], "dante-fixture")
         for value in (True, -1, float("nan"), float("inf"), "16"):
