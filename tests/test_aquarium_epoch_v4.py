@@ -148,11 +148,14 @@ class EpochJournalTests(unittest.TestCase):
                     aquarium.step()
             self.assertEqual((aquarium.tick, aquarium.epoch_index), (EPOCH_TICKS, 1))
             self.assertEqual(aquarium.stored_events, EPOCH_TICKS + 2)
-            marker = next(
-                entry["event"]
-                for entry in aquarium.store.iter_events(include_nonpublic=True)
-                if entry["event"]["topic"] == "aquarium.epoch"
-            )
+            events = aquarium.store.iter_events(include_nonpublic=True)
+            try:
+                marker = next(
+                    entry["event"] for entry in events
+                    if entry["event"]["topic"] == "aquarium.epoch"
+                )
+            finally:
+                events.close()
             self.assertEqual(marker["topic"], "aquarium.epoch")
             self.assertEqual(marker["payload"]["absolute_tick"], EPOCH_TICKS)
             self.assertEqual(marker["payload"]["epoch_index"], 1)
