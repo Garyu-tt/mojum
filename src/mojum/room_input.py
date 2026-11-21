@@ -6,6 +6,7 @@ materialized into the *same* exact bootstrap/2. No SQLite or network access.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 from .room_contract import (
     RoomContractError, decode_room_exact, encode_room_exact,
 )
-from .world_room import Room
+from .world_room import Room, _revision
 
 MAX_ROOM_FILE_BYTES = 1_048_576
 MAX_DRAFT_DIMENSION_M = 1000
@@ -106,3 +107,33 @@ def read_new_room_contract(path):
     if type(value) is dict and value.get("schema") == DRAFT_SCHEMA:
         return _decode_room_draft(value)
     return decode_room_exact(value)
+
+
+def main(argv=None):
+    """Preflight a custom room without creating *any* SQLite journal."""
+    parser = argparse.ArgumentParser(
+        description="Verify a local synthetic point-room JSON without writing SQLite")
+    parser.add_argument("file", type=Path, help="existing local room draft or exact JSON")
+    args = parser.parse_args(argv)
+    try:
+        room, start = read_new_room_contract(args.file)
+    except RoomContractError as exc:
+        parser.error(str(exc))
+    result = {
+        "schema": "mojum.world.point-room-preview/1",
+        "status": "VALID_SYNTHETIC_POINT_ROOM_NO_SQLITE_CREATED",
+        "width_m": room.width,
+        "width_type": type(room.width).__name__,
+        "height_m": room.height,
+        "height_type": type(room.height).__name__,
+        "obstacle_count": len(room.obstacles),
+        "start": list(start),
+        "initial_world_revision": _revision(room, 0, *start),
+        "physical_model": "NONE_POINT_ROOM_FIXTURE_NOT_MUJOCO",
+    }
+    print(json.dumps(result, sort_keys=True, allow_nan=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
