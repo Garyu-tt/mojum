@@ -60,6 +60,8 @@ def init(db: sqlite3.Connection, slots: int, now: int) -> dict:
 def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
     seen = set()
     for item in items:
+        if type(item) is not dict:
+            raise ValueError("task must be a JSON object")
         task_id, scope = item.get("id"), item.get("scope")
         if not isinstance(task_id, str) or not 1 <= len(task_id) <= 120:
             raise ValueError("task id must be 1..120 chars")
@@ -68,16 +70,22 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
         if task_id in seen:
             raise ValueError("duplicate id in batch")
         seen.add(task_id)
-        if not isinstance(item.get("priority", 0), int):
+        if type(item.get("priority", 0)) is not int:
             raise ValueError("priority must be an integer")
-        if len(json.dumps(item.get("payload", {}))) > 8192:
+        try:
+            payload_wire = json.dumps(item.get("payload", {}), sort_keys=True,
+                                      allow_nan=False)
+        except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+            raise ValueError("payload must be finite JSON") from exc
+        if len(payload_wire) > 8192:
             raise ValueError("payload is too large")
     db.execute("BEGIN IMMEDIATE")
     try:
         before = db.total_changes
         for item in items:
             priority = item.get("priority", 0)
-            payload = json.dumps(item.get("payload", {}), sort_keys=True)
+            payload = json.dumps(item.get("payload", {}), sort_keys=True,
+                                 allow_nan=False)
             inserted = db.execute(
                 "INSERT OR IGNORE INTO tasks(id, scope, priority, payload, updated_at) "
                 "VALUES(?, ?, ?, ?, ?)",
