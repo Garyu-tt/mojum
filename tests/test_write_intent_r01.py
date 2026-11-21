@@ -104,7 +104,8 @@ class WriteIntentTests(unittest.TestCase):
         self.install()
         with self.guard() as q:
             revision = q.acquire(gene(1))
-            self.assertEqual(revision, 1)
+            self.assertIsInstance(revision, str)
+            self.assertEqual(len(revision), 64)
             self.assertEqual(q.generation, 2)
             self.assertEqual(q.checkpoint()["tick"], 1)
             q.step(dx=0)
