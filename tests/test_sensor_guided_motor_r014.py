@@ -194,6 +194,86 @@ class SensorGuidedMotorTests(unittest.TestCase):
             divergence, "autonomous committed history did not change any motor action",
         )
 
+    def test_guided_actions_independent_of_spectator_ids_and_rgb(self):
+        # Both worlds have identical object geometry and movement outcomes.
+        # Distinct spectator labels, RGB and hidden softness may change
+        # *contact* learning, never the range-based motor guidance decision.
+        a_scene = ToyScene(toys=(
+            Toy("spectator.one", 1.22, 2., .10, (200, 40, 10), .15),
+        ))
+        b_scene = ToyScene(toys=(
+            Toy("spectator.two", 1.22, 2., .10, (5, 180, 220), .95),
+        ))
+        with self.baby(sensory_scene=a_scene) as a, self.baby(
+                self.control_db, sensory_scene=b_scene) as b:
+            for _ in range(32):
+                fa, fb = a.step(), b.step()
+                self.assertEqual(fa["movement_request"], fb["movement_request"])
+                self.assertEqual(fa["developmental"]["intent"],
+                                 fb["developmental"]["intent"])
+                self.assertEqual(fa["motor_guidance"]["avoid"],
+                                 fb["motor_guidance"]["avoid"])
+                self.assertEqual(fa["motor_guidance"]["prefer"],
+                                 fb["motor_guidance"]["prefer"])
+                self.assertEqual(fa["motor_guidance"]["predictions"],
+                                 fb["motor_guidance"]["predictions"])
+            self.assertEqual(a.temporal_model.snapshot(),
+                             b.temporal_model.snapshot())
+            self.assertEqual(a.explorer.snapshot(), b.explorer.snapshot())
+            self.assertNotEqual(a.sensory_bridge.model.snapshot(),
+                                b.sensory_bridge.model.snapshot())
+            encoded = json.dumps(a.temporal_model.snapshot())
+            self.assertNotIn("spectator", encoded)
+            self.assertNotIn("softness", encoded)
+            self.assertNotIn("rgb", encoded)
+
+    def test_guided_stale_writer_never_adopts_new_virtual_evidence(self):
+        with self.baby() as committed, self.baby() as stale:
+            old = stale.temporal_model.snapshot()
+            old_policy = stale.explorer.snapshot()
+            committed.step()
+            with self.assertRaises(NoosphereError):
+                stale.step()
+            self.assertEqual(stale.temporal_model.snapshot(), old)
+            self.assertEqual(stale.explorer.snapshot(), old_policy)
+            with self.assertRaises(AquariumError):
+                stale.checkpoint()
+        with self.baby() as reopened:
+            self.assertEqual(reopened.temporal_model.updates, 1)
+            self.assertEqual(reopened.explorer.updates, 1)
+
+    def test_guided_cli_resume_and_bad_pair_does_not_create_sqlite(self):
+        import os
+        import subprocess
+        import sys
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        command = [sys.executable, "-m", "mojum.aquarium",
+                   "--db", str(self.db), "--ticks", "2",
+                   "--exploration-mode", "goal_free",
+                   "--sensory-mode", "toy_probe",
+                   "--temporal-mode", "range_guided",
+                   "--neural-mode", "disabled"]
+        one = json.loads(subprocess.check_output(
+            command, cwd=ROOT, env=env, text=True, timeout=30,
+        ))
+        two = json.loads(subprocess.check_output(
+            command, cwd=ROOT, env=env, text=True, timeout=30,
+        ))
+        self.assertEqual(one["temporal_range_state"]["updates"], 2)
+        self.assertEqual(two["temporal_range_state"]["updates"], 4)
+        self.assertEqual(two["stored_events"], 5)
+        invalid_path = self.db.with_name("invalid-cli.sqlite3")
+        result = subprocess.run(
+            [sys.executable, "-m", "mojum.aquarium", "--db",
+             str(invalid_path), "--ticks", "1", "--temporal-mode",
+             "range_guided"],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            timeout=30, check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires goal_free and toy_probe", result.stderr)
+        self.assertFalse(invalid_path.exists())
+
     def test_forged_preaction_guidance_rejected_before_adoption(self):
         with self.baby() as child:
             payload, _, _ = child._calculate(None, None)
