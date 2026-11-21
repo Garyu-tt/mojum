@@ -66,10 +66,11 @@ class TemporalOutcomeAquariumTests(unittest.TestCase):
                         and left["world"]["blocked"]):
                     observed = left["temporal_range"]
                     baseline = right["temporal_range"]
-                    self.assertEqual(observed["before"]["reflectance_rgb"],
-                                     baseline["before"]["reflectance_rgb"])
-                    self.assertEqual(observed["before"]["range_bucket_10cm"],
-                                     baseline["before"]["range_bucket_10cm"])
+                    # Canonical R0.13 wall occlusion is intentionally
+                    # authoritative: the blocked room masks a toy behind its
+                    # wall; free-room RGB/range must not leak into that cue.
+                    self.assertFalse(observed["before"]["visible"])
+                    self.assertTrue(baseline["before"]["visible"])
                     self.assertGreater(observed["requested_dx_dy"][0], 0)
                     self.assertEqual(observed["applied_dx_dy"], [0.0, 0.0])
                     self.assertFalse(baseline["measured_outcome"]["measured_blocked"])
