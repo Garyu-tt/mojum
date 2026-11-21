@@ -53,9 +53,9 @@ def runtime_source_sha256():
     sha = hashlib.sha256()
     for file in paths:
         sha.update(file.name.encode("utf-8"))
-        sha.update(b"\\x00")
+        sha.update(bytes((0,)))
         sha.update(file.read_bytes())
-        sha.update(b"\\x00")
+        sha.update(bytes((0,)))
     return sha.hexdigest()
 
 
