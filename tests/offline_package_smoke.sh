@@ -82,7 +82,8 @@ seed["genome_id"] = "wheel-smoke-custom-genesis"
 Path("epoch-genesis.json").write_text(json.dumps(seed), encoding="utf-8")
 epoch = ("--motor-mode", "local_cell_v4", "--sensory-mode", "toy_probe_v2",
          "--genome", "epoch-genesis.json")
-epoch_state = run("mojum-aquarium", "--db", "epoch.sqlite3", "--ticks", "8", *epoch)
+epoch_state = run("mojum-host", "--db", "epoch.sqlite3", "--ticks", "8",
+                  "--interval-ms", "20", "--temporal-mode", "none", *epoch)
 cold_copy = (sys.executable, "-I", "-m", "mojum.aquarium_cold_copy")
 backup = json.loads(subprocess.check_output([
     *cold_copy, "export", "--db", "epoch.sqlite3", "--output", "backup.sqlite3", *epoch,
@@ -92,7 +93,7 @@ assert (backup["tick"], backup["event_count"], backup["journal_head"]) == (
 )
 assert backup["agent_id"] == seed["genome_id"]
 verified = json.loads(subprocess.check_output([
-    *cold_copy, "verify", "--db", "backup.sqlite3", "--expected-head", backup["journal_head"],
+    *cold_copy, "verify", "--db", "backup.sqlite3", "--expected-head", epoch_state["journal_head"],
     "--expected-sha256", backup["db_sha256"], "--expected-tick", "8", *epoch,
 ], text=True))
 assert verified["journal_head"] == backup["journal_head"]
