@@ -2,7 +2,10 @@
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -109,6 +112,27 @@ class EpochJournalTests(unittest.TestCase):
                 self.assertEqual(aquarium.stored_events, 4)
             with self.assertRaisesRegex(NoosphereError, "missing durable epoch"):
                 inspect_journal(self.db)
+
+    def test_legacy_cli_tick_limit_remains_1000(self):
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+        legacy = subprocess.run(
+            [sys.executable, "-m", "mojum.aquarium",
+             "--db", str(self.db), "--motor-mode", "scripted",
+             "--neural-mode", "disabled", "--ticks", "1001"],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=20,
+        )
+        self.assertNotEqual(legacy.returncode, 0)
+        self.assertIn("--ticks must be within 0..1000", legacy.stderr)
+        self.assertFalse(self.db.exists(), "invalid legacy batch must not create a journal")
+        v4_path = self.db.with_name("valid-v4-batch.sqlite3")
+        v4 = subprocess.run(
+            [sys.executable, "-m", "mojum.aquarium",
+             "--db", str(v4_path), "--motor-mode", V4_MODE,
+             "--neural-mode", "disabled", "--ticks", "1001"],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=45,
+        )
+        self.assertEqual(v4.returncode, 0, v4.stderr)
+        self.assertEqual(json.loads(v4.stdout)["tick"], 1001)
 
     def test_real_sqlite_boundary_marker_replays_after_interrupted_frame(self):
         with self.open() as aquarium:
