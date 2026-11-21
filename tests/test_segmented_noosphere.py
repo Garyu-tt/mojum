@@ -78,6 +78,16 @@ class AtomicSegmentQA(unittest.TestCase):
                              q.event_at(128)["event_hash"])
             self.assertEqual(b[3]["prior_segment_head"],
                              q.event_at(192)["event_hash"])
+            receipts = list(
+                q.iter_segment_receipts(external_expected_head=final)
+            )
+            self.assertEqual(len(receipts), 4)
+            self.assertEqual([x["events"] for x in receipts],
+                             [64, 64, 64, 3])
+            self.assertEqual(receipts[0]["prior_segment_head"], ZERO)
+            self.assertEqual(receipts[-1]["segment_head"], final)
+            self.assertEqual(receipts[-1]["last_seq"], 195)
+            self.assertTrue(all("payload" not in x for x in receipts))
             self.assertEqual(
                 [x["seq"] for x in q.iter_events(
                     include_nonpublic=True, batch_size=17, after_seq=190,
