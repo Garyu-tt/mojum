@@ -11,6 +11,7 @@ cryptographic authentication, or continuous Aquarium beyond its tick cap.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -67,7 +68,11 @@ class SegmentedNoosphere:
             # silently prepare migrations or rewrite PRIVATE histories.
             uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=ro"
             try:
-                with sqlite3.connect(uri, uri=True, timeout=5.0) as probe:
+                # sqlite3.Connection.__exit__ commits/rolls back a
+                # transaction, but does NOT close the connection. Keep the
+                # readonly owner/schema preflight strictly short-lived on
+                # both successful and exception paths (Python 3.13 warns).
+                with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as probe:
                     actual = dict(probe.execute("SELECT k,v FROM metadata"))
             except (sqlite3.Error, ValueError, TypeError) as exc:
                 raise NoosphereError(
