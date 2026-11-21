@@ -159,6 +159,49 @@ class NewTypedRoomCliTests(unittest.TestCase):
                 self.assertFalse(db_path.exists())
         self.assertFalse(self.db.exists())
 
+    def test_concurrent_creators_are_exclusive_and_cannot_overwrite(self):
+        command = [
+            sys.executable, "-m", "mojum.aquarium",
+            "--db", str(self.db), *new_args(EXAMPLE, ticks=8),
+        ]
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        workers = [
+            subprocess.Popen(
+                command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True)
+            for _ in range(2)
+        ]
+        reports = [worker.communicate(timeout=35) for worker in workers]
+        codes = [worker.returncode for worker in workers]
+        self.assertEqual(sorted(codes), [0, 2], (codes, reports))
+        winner = reports[codes.index(0)][0]
+        self.assertEqual(json.loads(winner)["stored_events"], 9)
+        self.assertEqual(len(_stored(self.db)), 9)
+        self.assertTrue(
+            ("existing SQLite" in reports[codes.index(2)][1]
+             or "destination already exists" in reports[codes.index(2)][1]),
+            reports[codes.index(2)][1],
+        )
+
+    def test_symlink_source_and_existing_symlink_target_fail_closed(self):
+        definition = self.root / "symlink-room.json"
+        try:
+            definition.symlink_to(EXAMPLE)
+        except OSError:
+            self.skipTest("host does not allow symlinks")
+        bad = invoke(self.db, *new_args(definition, ticks=1))
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertFalse(self.db.exists())
+        # Even if the target symlink points to an unrelated file,
+        # the opt-in CLI must not follow it or truncate its contents.
+        private_other = self.root / "private-other.sqlite3"
+        private_other.write_bytes(b"do-not-touch-existing-private-file")
+        self.db.symlink_to(private_other)
+        invalid = invoke(self.db, *new_args(EXAMPLE, ticks=1))
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertEqual(private_other.read_bytes(),
+                         b"do-not-touch-existing-private-file")
+
     def test_zero_tick_new_room_is_valid_versioned_bootstrap(self):
         created = invoke(self.db, *new_args(EXAMPLE, ticks=0))
         self.assertEqual(created.returncode, 0, created.stderr[-950:])
