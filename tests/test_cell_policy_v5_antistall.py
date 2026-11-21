@@ -244,7 +244,7 @@ class RetentionTests(unittest.TestCase):
 
         forged = deepcopy(checkpoint)
         forged["records"]["0:0"]["x+"][1] = 0
-        with self.assertRaisesRegex(CellV5Error, "rest streak requires four measured blocks"):
+        with self.assertRaisesRegex(CellV5Error, "requires four measured blocks"):
             CellExplorerV5.from_snapshot(forged)
 
     def test_snapshot_requires_enough_ticks_for_forced_probes(self):
@@ -257,6 +257,34 @@ class RetentionTests(unittest.TestCase):
         checkpoint = model.snapshot()
         self.assertEqual(checkpoint["forced_probes"], 1)
         self.assertEqual(CellExplorerV5.from_snapshot(checkpoint).snapshot(), checkpoint)
+
+    def test_snapshot_checks_retained_probe_evidence_after_leaving_the_cell(self):
+        model = CellExplorerV5()
+        drive(model, 8)
+        drive(model, 1, start=8, x=STEP_METERS, blocked_rule=lambda _: False)
+        checkpoint = model.snapshot()
+        self.assertEqual(CellExplorerV5.from_snapshot(checkpoint).snapshot(), checkpoint)
+
+        missing_probe = dict(checkpoint, forced_probes=0)
+        missing_rest = deepcopy(checkpoint)
+        missing_block = deepcopy(checkpoint)
+        directions = checkpoint["records"]["0:0"]
+        once_blocked = next(action for action, counts in directions.items() if counts == [1, 1])
+        missing_rest["records"]["0:0"]["rest"][0] -= 1
+        missing_rest["records"]["0:0"][once_blocked][0] += 1
+        missing_block["records"]["0:0"][once_blocked][1] = 0
+        for name, forged in (("missing probe", missing_probe),
+                             ("missing rest", missing_rest),
+                             ("missing block", missing_block)):
+            with self.subTest(name=name), self.assertRaises(CellV5Error):
+                CellExplorerV5.from_snapshot(forged)
+
+        for tick in range(9, MAX_CELLS + 8):
+            sense = cue(tick, (tick - 7) * STEP_METERS)
+            model.observe(sense, model.decide(sense), False)
+        evicted = model.snapshot()
+        self.assertNotIn("0:0", evicted["records"])
+        self.assertEqual(CellExplorerV5.from_snapshot(evicted).snapshot(), evicted)
 
     def test_snapshot_rejects_forged_or_cross_version_envelopes(self):
         model = CellExplorerV5()
@@ -307,35 +335,35 @@ class RetentionTests(unittest.TestCase):
             "two_cells_on_one_tick": {
                 **common, "last_tick": 1, "updates": 2,
                 "records": {
-                    "1:1": {"rest": [1, 0]},
-                    "2:1": {"rest": [1, 0]},
+                    "1:1": {"x+": [1, 0]},
+                    "2:1": {"x+": [1, 0]},
                 },
                 "last_seen_at": {"1:1": 1, "2:1": 1},
                 "evictions": 0, "forgotten_observations": 0,
             },
             "latest_observation_before_current_tick": {
                 **common, "last_tick": 1, "updates": 2,
-                "records": {"1:1": {"rest": [2, 0]}},
+                "records": {"1:1": {"x+": [2, 0]}},
                 "last_seen_at": {"1:1": 0},
                 "evictions": 0, "forgotten_observations": 0,
             },
             "eviction_before_512_distinct_cells": {
                 **common, "last_tick": 1, "updates": 2,
-                "records": {"1:1": {"rest": [1, 0]}},
+                "records": {"1:1": {"x+": [1, 0]}},
                 "last_seen_at": {"1:1": 1},
                 "evictions": 1, "forgotten_observations": 1,
             },
             "eviction_must_preserve_a_full_table": {
                 **common, "last_tick": 512, "updates": 513,
-                "records": {"1:1": {"rest": [1, 0]}},
+                "records": {"1:1": {"x+": [1, 0]}},
                 "last_seen_at": {"1:1": 512},
                 "evictions": 1, "forgotten_observations": 512,
             },
             "cell_measured_more_often_than_ticks": {
                 **common, "last_tick": 99, "updates": 100,
                 "records": {
-                    "0:0": {"rest": [5, 0]},
-                    "2500:0": {"rest": [95, 0]},
+                    "0:0": {"x+": [5, 0]},
+                    "2500:0": {"x+": [95, 0]},
                 },
                 "last_seen_at": {"0:0": 0, "2500:0": 99},
                 "evictions": 0, "forgotten_observations": 0,

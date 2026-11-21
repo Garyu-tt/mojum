@@ -122,6 +122,8 @@ class CellExplorerV5:
                 + state["rest_streak"] > state["updates"]):
             raise CellV5Error("insufficient ticks for forced probes")
         observed_live = 0
+        retained_rests = 0
+        repeated_blocks = 0
         for key, actions in state["records"].items():
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
@@ -133,6 +135,8 @@ class CellExplorerV5:
                     or not 0 <= last_seen <= state["last_tick"]):
                 raise CellV5Error("invalid last observed cell tick")
             cell_observations = 0
+            cell_repeated_blocks = 0
+            blocked_directions = 0
             for action, counts in actions.items():
                 if (type(counts) is not list or len(counts) != 2
                         or any(type(v) is not int for v in counts)
@@ -142,6 +146,15 @@ class CellExplorerV5:
                 if action == "rest" and counts[1]:
                     raise CellV5Error("impossible blocked rest history")
                 cell_observations += counts[0]
+                if counts[1]:
+                    blocked_directions += 1
+                    cell_repeated_blocks += counts[1] - 1
+            cell_rests = actions.get("rest", (0, 0))[0]
+            if ((cell_rests or cell_repeated_blocks)
+                    and blocked_directions != len(_MOVE_ACTIONS)):
+                raise CellV5Error("v5 rest or re-probe requires four measured blocks")
+            retained_rests += cell_rests
+            repeated_blocks += cell_repeated_blocks
             # Each tick observes at most one cell. A cell last observed at
             # absolute tick t cannot have accumulated more than t + 1 samples.
             if cell_observations > last_seen + 1:
@@ -177,8 +190,13 @@ class CellExplorerV5:
             latest_actions = state["records"][latest_cell]
             if latest_actions.get("rest", [0, 0])[0] < state["rest_streak"]:
                 raise CellV5Error("rest streak exceeds retained rest evidence")
-            if any(latest_actions.get(action, [0, 0])[1] == 0 for action in _MOVE_ACTIONS):
-                raise CellV5Error("rest streak requires four measured blocks")
+        # Every repeat block came from a forced probe. Each probe needed a
+        # distinct streak of rests, some of which may have been evicted.
+        forced_probes = state["forced_probes"]
+        required_rests = forced_probes * MAX_REST_STREAK + state["rest_streak"]
+        if (repeated_blocks > forced_probes
+                or required_rests > retained_rests + state["forgotten_observations"]):
+            raise CellV5Error("insufficient measured evidence for forced probes")
 
         model = cls()
         model.last_tick = state["last_tick"]
