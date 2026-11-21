@@ -172,6 +172,14 @@ async function race(source){
  const gap=await attempt(legacyVariant(wire,
    (f,i)=>{if(i===1)f.tick+=1}), true);
  const oversized=await attempt(legacyVariant(wire, ()=>{}), true, 25*1024*1024);
+ const longLine=await attempt(legacyVariant(wire,
+   f=>{f.brain.status="x".repeat(70000)}), true);
+ const firstFrame=JSON.parse(wire.split("\n")[0]);
+ const manyRows=[];
+ for(let i=0;i<5001;i++){firstFrame.tick=i;manyRows.push(JSON.stringify(firstFrame));}
+ manyRows.push(JSON.stringify({schema:"mojum.aquarium.checkpoint/1",
+   stored_events:5002}));
+ const manyFrames=await attempt(manyRows.join("\n")+"\n", true);
  const raced=await race(legacyVariant(wire, f=>{f.brain.status="current"}));
  const blankLine=await attempt(wire.replace("\n", "\n\n"));
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
@@ -183,7 +191,7 @@ async function race(source){
                                       wrongStatus,frameCountMismatch,
                                       byteLengthMismatch,afterCheckpoint,
                                       legacyDefault,legacyOptIn,
-                                      safe,gap,oversized,raced,
+                                      safe,gap,oversized,longLine,manyFrames,raced,
                                       blankLine,whitespaceLine,trailingBlank,
                                       encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
@@ -322,6 +330,10 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("Пропуск", values["gap"]["status"])
         self.assertFalse(values["oversized"]["enabled"])
         self.assertIn("24 МиБ", values["oversized"]["status"])
+        self.assertFalse(values["longLine"]["enabled"])
+        self.assertIn("Слишком длинная", values["longLine"]["status"])
+        self.assertFalse(values["manyFrames"]["enabled"])
+        self.assertIn("Слишком много кадров", values["manyFrames"]["status"])
         self.assertTrue(values["raced"]["enabled"])
         self.assertEqual(values["raced"]["tick"], "0")
         self.assertIn("current.jsonl", values["raced"]["status"])

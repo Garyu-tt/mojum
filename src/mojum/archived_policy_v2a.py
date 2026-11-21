@@ -15,7 +15,10 @@ from .local_cell_sense import (
 )
 
 SCHEMA = "mojum.developmental.explorer.local-cell/2"
-MODE = "local_cell_v2"
+# Issue #116: this archived draft must never answer to the bare canonical
+# ``local_cell_v2`` name. The persisted SCHEMA above is unchanged; only the
+# public configuration spelling is disambiguated from draft B.
+MODE = "local_cell_v2_a_archive"
 CELL_METERS = STEP_METERS  # 4 cm local spatial bucket; explicit v2 identity.
 _CELL = re.compile(r"(?:0|[1-9][0-9]{0,4}):(?:0|[1-9][0-9]{0,4})\Z", re.ASCII)
 _DELTAS = {

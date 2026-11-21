@@ -100,6 +100,27 @@ test("start must stay in bounds and outside every obstacle including edges", () 
   assert.doesNotThrow(() => C.validate(room));
 });
 
+test("start drag repairs invalid previous coordinates but preserves strict geometry", () => {
+  const room = fresh();
+  room.start.x = "";
+  assert.throws(() => C.validate(room));
+  const repaired = C.dragStart(room, 0.5, 0.5);
+  assert.deepEqual(C.validate(repaired).start, {x: 0.5, y: 0.5});
+  assert.equal(room.start.x, "", "repair must not mutate the old draft");
+
+  const resized = fresh();
+  resized.width = "3.5";
+  resized.start.x = "4.4";
+  const moved = C.dragStart(resized, 0.25, 1);
+  assert.deepEqual(C.validate(moved).start, {x: 0.25, y: 1});
+
+  assert.throws(() => C.dragStart(room, 2.05, 2), /пересекает препятствие/);
+  const bad = fresh();
+  bad.start.x = "";
+  bad.width = "";
+  assert.throws(() => C.dragStart(bad, 0.25, 1), /Ширина/);
+});
+
 test("obstacle scalar, position, size, quota and room dimensions guarded", () => {
   const room = fresh();
   room.obstacles[0].x = "4.4";

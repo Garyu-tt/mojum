@@ -77,6 +77,36 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Versioned epoch continuation (opt-in)
+
+For a separate bounded long-run motor journal, use the new `local_cell_v4`
+policy. It carries an absolute logical tick and commits an explicit epoch
+marker at the 9,999-tick boundary; existing scripted, v2 and v3 journals are
+not reinterpreted. Use `sensory_mode=none` and repeat bounded batches:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+```
+
+For a wall-paced foreground session on the same one-device journal, use the
+bounded host with the v4 selectors explicit:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host \
+  --db ./local_cell_v4_PRIVATE.sqlite3 --ticks 1000 --interval-ms 1000 \
+  --motor-mode local_cell_v4 --sensory-mode none --temporal-mode none \
+  --neural-mode disabled
+```
+
+The host prints metadata only and admits the epoch marker in its event-budget
+preflight; repeat the bounded command to continue after a clean restart.
+
+The v4 path is still bounded by the 100,000-event local journal budget and the
+current checksum-only replay contract. It is not a neural brain, an
+authenticated segment archive, a physical device runtime, or proof of
+conscious experience. See [the epoch contract](docs/LOCAL_CELL_V4_EPOCH_R01.md).
+
 ### Bounded foreground host
 
 For a paced, restartable one-device session around the same canonical loop,
@@ -171,6 +201,12 @@ a separately recorded head. The experimental journals from #112 and #115
 report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
 formats even though the original CLIs used the same mode name. Keep each
 journal with the matching runtime for deterministic replay.
+
+`python -m mojum.aquarium_wire --list-policies` prints every distinct
+persisted identity (selectors, state schema, learning schema, intent source)
+without opening a journal. The list comes from `mojum.policy_identity`, which
+fails at import time if two identities claim the same selector set, public
+configuration, or schema so no future mode can silently impersonate another.
 
 ## Audit measured motor mobility
 
