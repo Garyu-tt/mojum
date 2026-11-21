@@ -52,7 +52,7 @@ def _canonical(value):
         wire.encode("utf-8")
         return wire
     except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
-        raise NoosphereError("event must contain valid UTF-8 canonical JSON") from exc
+        raise NoosphereError("event must contain canonical JSON") from exc
 
 
 def _sha(value):
