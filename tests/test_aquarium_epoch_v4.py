@@ -106,6 +106,17 @@ class EpochSQLiteTests(unittest.TestCase):
             for _ in range(EPOCH_TICKS):
                 aquarium.step()
             before = aquarium.checkpoint()
+            before_count = aquarium.store.count()
+            # At the boundary a marker and its first frame need TWO slots.
+            # Refusing with only one slot prevents an orphan marker-only tail.
+            with patch.object(Aquarium, "journal_event_budget",
+                              property(lambda _: before_count + 1)):
+                with self.assertRaisesRegex(AquariumError, "budget"):
+                    aquarium.step()
+            self.assertEqual(aquarium.store.count(), before_count)
+            self.assertEqual(aquarium.tick, EPOCH_TICKS)
+            self.assertEqual(aquarium.epoch_index, 0)
+            self.assertEqual(aquarium.required_events_for_steps(1), 2)
             with patch.object(
                 aquarium, "_calculate_frame",
                 side_effect=RuntimeError("simulated interruption before epoch frame"),
