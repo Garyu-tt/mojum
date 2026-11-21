@@ -6,6 +6,7 @@ delete a user's old PRIVATE Noosphere journal.
 from contextlib import closing
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -57,6 +58,25 @@ class AtomicSegmentQA(unittest.TestCase):
                 expected_head=tip,
             )
         return tip
+
+    def test_new_private_database_is_0600_before_sqlite_opens_it(self):
+        if os.name != "posix":
+            self.skipTest("POSIX file mode regression")
+        original_connect = sqlite3.connect
+        seen = []
+
+        def check_mode_before_connect(database, *args, **kwargs):
+            if str(database) == str(self.db):
+                self.assertTrue(self.db.is_file(), "secure file must preexist connect")
+                self.assertEqual(self.db.stat().st_mode & 0o777, 0o600)
+                seen.append(True)
+            return original_connect(database, *args, **kwargs)
+
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=check_mode_before_connect):
+            with self.open() as store:
+                self.assertEqual(store.head(), ZERO)
+        self.assertEqual(seen, [True])
 
     def test_195_real_events_split_four_immutable_linked_boundaries(self):
         with self.open() as q:
