@@ -145,6 +145,24 @@ class EpochJournalTests(unittest.TestCase):
             self.assertEqual(q.stored_events, 1)
             self.assertEqual(q.store.count(), 1)
 
+    def test_external_motor_args_cannot_commit_epoch_marker(self):
+        """Invalid API input must fail before a pending epoch marker can write."""
+        with self.open() as aquarium:
+            previous_head = aquarium.store.head()
+            previous_count = aquarium.store.count()
+            with patch.object(
+                aquarium, "_commit_pending_epoch",
+                side_effect=AssertionError("invalid input reached epoch append"),
+            ):
+                for kwargs in ({"dx": 0.01}, {"dy": -0.01},
+                               {"dx": 0.01, "dy": 0.0}):
+                    with self.subTest(kwargs=kwargs):
+                        with self.assertRaisesRegex(AquariumError, "rejects external"):
+                            aquarium.step(**kwargs)
+            self.assertEqual(aquarium.store.head(), previous_head)
+            self.assertEqual(aquarium.store.count(), previous_count)
+            self.assertEqual(aquarium.tick, 0)
+
     def test_v4_is_explicit_and_rejects_toy_probe_before_birth(self):
         with self.assertRaisesRegex(AquariumError, "sensory_mode=none"):
             Aquarium(
