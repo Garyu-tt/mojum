@@ -31,7 +31,7 @@ class ImmutableRoomContractTests(unittest.TestCase):
     def test_invalid_dimension_types_and_gigantic_integers_are_rejected(self):
         for width in (True, False, "4", None, float("nan"),
                       float("inf"), 10**5000):
-            with self.subTest(width=str(width)[:24]):
+            with self.subTest(width_type=type(width).__name__):
                 with self.assertRaises(ValueError):
                     Room(width, 4)
 
@@ -42,8 +42,8 @@ class ImmutableRoomContractTests(unittest.TestCase):
             [[2, 1, 10**5000, 2]], [[float("nan"), 1, 0.1, 2]],
             [[[2], 1, 0.1, 2]],
         ]
-        for obstacles in invalid:
-            with self.subTest(obstacles=str(obstacles)[:50]):
+        for index, obstacles in enumerate(invalid):
+            with self.subTest(case=index):
                 with self.assertRaises(ValueError):
                     Room(4, 4, obstacles)
 
@@ -55,7 +55,7 @@ class ImmutableRoomContractTests(unittest.TestCase):
         room = Room(4, 4)
         state = initial_state(room, 1, 1)
         for coordinate in (True, "1", 10**5000):
-            with self.subTest(coordinate=str(coordinate)[:24]):
+            with self.subTest(coordinate_type=type(coordinate).__name__):
                 with self.assertRaises(ValueError):
                     initial_state(room, coordinate, 1)
                 with self.assertRaises(ValueError):
