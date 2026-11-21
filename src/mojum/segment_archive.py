@@ -80,7 +80,7 @@ def export_sealed_segments(store, directory, *, include_nonpublic=False,
     if type(store) is not SegmentedNoosphere:
         raise ArchiveError("export needs an explicit segmented Noosphere source")
     if include_nonpublic is not True:
-        raise ArchiveError("PRIVATE data export requires include_nonpublic=True")
+        raise ArchiveError("PRIVATE data export requires explicit include_nonpublic=True")
     root = private_directory(directory)
     source = store.verify_chain(external_expected_head=external_expected_head)
     count = source["count"]
