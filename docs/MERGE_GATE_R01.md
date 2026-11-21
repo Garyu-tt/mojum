@@ -23,16 +23,22 @@ failed `gh` call) is also a `reject` and never a `ready`.
 
 ### Check rules
 
-- A requirement is a check name, a `workflow / job` label, a workflow name, or
-  an `fnmatch` pattern (`Aquarium*`). Repeat `--require` for each gate.
-- Every check matching a requirement must pass. Requiring a workflow name
-  therefore requires all of that workflow's jobs.
+- **Explicit inventory required:** each `--require` names ONE concrete job
+  (e.g. `aquarium-stdlib (3.12)`) or an exact `workflow / job` label.
+  Repeat `--require` for **every expected job in every required matrix**.
+- Wildcards (`* ? [ ]`) are rejected with `AMBIGUOUS_REQUIRED_PATTERN`.
+  Workflow-only names are not job selectors and cannot certify a partial
+  matrix. Missing required jobs defer with `MISSING_REQUIRED_CHECK`.
+- Obtain the expected job inventory from reviewed workflow YAML / protection
+  rules **before** reading the live rollup; the rollup itself may omit
+  not-yet-registered matrix siblings. A caller-supplied incomplete inventory
+  is not a sufficient release gate.
 - `success` and `neutral` are passing. `skipped` is rejected unless the same
-  pattern appears in `--waive PATTERN=REASON`.
+  exact job selector appears in `--waive JOB=REASON`.
 - A waiver never masks `failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `error` or `startup_failure`.
-- A required pattern that matches nothing yields `defer`
-  (`MISSING_REQUIRED_CHECK`), because the workflow may not have registered yet.
+- A required job that matches nothing yields `defer`
+  (`MISSING_REQUIRED_CHECK`), because its workflow may not have registered yet.
 - A check whose recorded `headSha` differs from the snapshot head yields
   `defer` (`STALE_CHECK`).
 - `--expected-head-sha` is mandatory. Without it the verdict is `reject`
@@ -49,7 +55,15 @@ gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeabl
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
   --expected-head-sha "$(git rev-parse HEAD)" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+  --require 'aquarium-stdlib (3.11)' \
+  --require 'aquarium-stdlib (3.12)' \
+  --require 'aquarium-stdlib (3.13)' \
+  --require 'motor-gate-stdlib (3.11)' \
+  --require 'motor-gate-stdlib (3.12)' \
+  --require 'motor-gate-stdlib (3.13)' \
+  --require 'mesh-stdlib (3.11)' \
+  --require 'mesh-stdlib (3.12)' \
+  --require 'mesh-stdlib (3.13)'
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -73,8 +87,16 @@ be pointed at real PR data. Input is capped at 4 MiB.
 ```sh
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --pr "$PR" --expected-head-sha "$SHA" --require '*aquarium*' \
-  --require '*motor-gate*' --require '*mesh*' || exit $?
+  --pr "$PR" --expected-head-sha "$SHA" \
+  --require 'aquarium-stdlib (3.11)' \
+  --require 'aquarium-stdlib (3.12)' \
+  --require 'aquarium-stdlib (3.13)' \
+  --require 'motor-gate-stdlib (3.11)' \
+  --require 'motor-gate-stdlib (3.12)' \
+  --require 'motor-gate-stdlib (3.13)' \
+  --require 'mesh-stdlib (3.11)' \
+  --require 'mesh-stdlib (3.12)' \
+  --require 'mesh-stdlib (3.13)' || exit $?
 gh pr merge "$PR" --squash --match-head-commit "$SHA"
 ```
 
@@ -85,6 +107,11 @@ does not replace repository rulesets, which remain authoritative.
 
 ## Limitations
 
+- This client-side guard cannot discover a complete matrix inventory from an
+  incomplete rollup; users must pin all expected job names from workflow YAML
+  or branch protection. A green listed subset is **not** proof all jobs ran.
+  Verify the declared inventory when workflows change.
+- It does not configure or substitute GitHub `main` branch rulesets.
 - The snapshot is a point-in-time read. The gate cannot prove that no later
   push occurred; pair it with `--match-head-commit` and re-run immediately
   before merging.
