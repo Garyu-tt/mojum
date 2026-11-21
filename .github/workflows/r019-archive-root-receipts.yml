@@ -1,0 +1,36 @@
+name: Mojum R0.19 owner-HMAC archive root receipts
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r019-archive-root-receipts.yml"
+      - "src/mojum/archive_root_receipt.py"
+      - "src/mojum/segment_archive_cli.py"
+      - "tests/test_archive_root_receipt.py"
+      - "docs/R019_OWNER_ARCHIVE_RECEIPT_R01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-root-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Owner-key HMAC, pinned receipt head and two archive copy integrity
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_archive_root_receipt.py -v
+      - name: Real sealed plus tail source and parent regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_live_tail_capsule.py -v

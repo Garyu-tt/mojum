@@ -14,6 +14,10 @@ from .segment_archive_verify import verify_sealed_archive, restore_into_new_sqli
 from .live_tail_capsule import (
     capture_live_tail, verify_point_in_time, restore_point_in_time,
 )
+from .archive_root_receipt import (
+    ReceiptError, sign_owner_receipt, verify_owner_receipt,
+    verify_two_archive_copies,
+)
 from .segmented_noosphere import SegmentedNoosphere
 from .noosphere import NoosphereError
 
@@ -60,6 +64,22 @@ def main(argv=None):
     restore_point.add_argument("--source-events", type=int, required=True)
     restore_point.add_argument("--expected-source-head", required=True)
     restore_point.add_argument("--new-db", type=Path, required=True)
+    signer = sub.add_parser("seal-root", help="HMAC-sign exact PRIVATE archive root metadata")
+    signer.add_argument("--archive-dir", type=Path, required=True)
+    signer.add_argument("--receipt-file", type=Path, required=True)
+    signer.add_argument("--key-file", type=Path, required=True)
+    signer.add_argument("--source-events", type=int, required=True)
+    signer.add_argument("--expected-source-head", required=True)
+    auditor = sub.add_parser("verify-root", help="verify owner-HMAC and externally pinned receipt")
+    auditor.add_argument("--receipt-file", type=Path, required=True)
+    auditor.add_argument("--key-file", type=Path, required=True)
+    auditor.add_argument("--expected-receipt-sha", required=True)
+    pair = sub.add_parser("verify-copies", help="verify two explicit archive copies against owner HMAC")
+    pair.add_argument("--archive-dir-a", type=Path, required=True)
+    pair.add_argument("--archive-dir-b", type=Path, required=True)
+    pair.add_argument("--receipt-file", type=Path, required=True)
+    pair.add_argument("--key-file", type=Path, required=True)
+    pair.add_argument("--expected-receipt-sha", required=True)
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -99,13 +119,30 @@ def main(argv=None):
                 args.archive_dir, source_events=args.source_events,
                 external_expected_source_head=args.expected_source_head,
             )
-        else:
+        elif args.operation == "restore-point":
             status = restore_point_in_time(
                 args.archive_dir, args.new_db,
                 source_events=args.source_events,
                 external_expected_source_head=args.expected_source_head,
             )
-    except (ArchiveError, NoosphereError) as exc:
+        elif args.operation == "seal-root":
+            status = sign_owner_receipt(
+                args.archive_dir, args.receipt_file, args.key_file,
+                source_events=args.source_events,
+                external_expected_source_head=args.expected_source_head,
+            )
+        elif args.operation == "verify-root":
+            status = verify_owner_receipt(
+                args.receipt_file, args.key_file,
+                independently_pinned_receipt_sha256=args.expected_receipt_sha,
+            )
+        else:
+            status = verify_two_archive_copies(
+                args.archive_dir_a, args.archive_dir_b,
+                args.receipt_file, args.key_file,
+                independently_pinned_receipt_sha256=args.expected_receipt_sha,
+            )
+    except (ArchiveError, NoosphereError, ReceiptError) as exc:
         parser.error(str(exc))
     # Do not expose PRIVATE data or even absolute source/destination paths.
     status.pop("restored_path", None)
