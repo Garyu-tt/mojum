@@ -60,7 +60,8 @@ FAILING_CONCLUSIONS = frozenset(
     }
 )
 
-_SHA_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+# All callers use fullmatch so padding and trailing newlines are rejected.
+_SHA_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
 _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"

@@ -226,7 +226,9 @@ class GateVerdictTests(unittest.TestCase):
             )
 
     def test_expected_head_must_be_exact_and_unpadded(self):
-        for value in (HEAD[:7], HEAD[:39], HEAD + "a", HEAD + "\n", HEAD + " ", "\n" + HEAD):
+        values = (HEAD[:7], HEAD[:39], HEAD + "a", HEAD + "\n", HEAD + " ",
+                  "\n" + HEAD, "abcdef1\n", "abcdef1 ", "\nabcdef1")
+        for value in values:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 evaluate(facts(self.green()), expected_head_sha=value, required=REQUIRED)
 
