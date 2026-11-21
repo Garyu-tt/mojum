@@ -81,6 +81,11 @@ class ToyScene:
         ids = [t.id for t in toys]
         if len(ids) != len(set(ids)):
             raise CuriosityError("duplicate spectator toy IDs")
+        # Equal observable geometry/reflectance cannot identify different
+        # hidden outcomes without making spectator names or order an oracle.
+        signatures = [(t.x, t.y, t.radius_m, t.rgb) for t in toys]
+        if len(signatures) != len(set(signatures)):
+            raise CuriosityError("ambiguous observationally identical toys")
         for t in toys:
             if not (t.radius_m < t.x < width - t.radius_m
                     and t.radius_m < t.y < height - t.radius_m):
@@ -102,7 +107,10 @@ class ToyScene:
     def _nearest(self, state):
         return min(
             self.toys,
-            key=lambda t: (math.hypot(state.x - t.x, state.y - t.y), t.id),
+            key=lambda t: (
+                math.hypot(state.x - t.x, state.y - t.y),
+                t.x, t.y, t.radius_m, t.rgb,
+            ),
             default=None,
         )
 
