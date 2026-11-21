@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from itertools import islice
 from pathlib import Path
 import stat
@@ -27,12 +28,34 @@ MAX_MANIFEST_BYTES = 65_536
 
 
 def _read_regular_bounded(path: Path, limit: int) -> bytes:
-    """Read at most limit bytes; reject symlinks and nonregular entries."""
+    """Read one checked inode, not a pathname reopened after validation.
+
+    O_NOFOLLOW rejects a symlink inserted after lstat on supporting systems;
+    O_NONBLOCK prevents a swapped-in FIFO from stalling the cold verifier.
+    Comparing file identity and checking the opened descriptor also protects
+    platforms without O_NOFOLLOW against ordinary pathname replacement.
+    This is not a defense against a malicious writer mutating the same inode.
+    """
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+             | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
             raise SchoolContractError("school fixture contains a nonregular file")
-        with path.open("rb") as source:
-            payload = source.read(limit + 1)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+                raise SchoolContractError("school fixture file changed while opening")
+            with os.fdopen(descriptor, "rb") as source:
+                descriptor = -1  # The file object now owns and closes the descriptor.
+                payload = source.read(limit + 1)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
     except OSError as error:
         raise SchoolContractError("cannot read school fixture file") from error
     if len(payload) > limit:
