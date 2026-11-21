@@ -97,12 +97,37 @@ def trial(*, room, start, pulses, mode):
             "position_xy": list(outcome["position"]),
         })
         state = next_state
+    # A learner which suppresses every possible action can look 'good'
+    # on blocked counts while becoming immobile. Measure that failure mode
+    # explicitly; these are diagnostics, never rewards or survival goals.
+    rest_count = sum(frame["action"] == "rest" for frame in trace)
+    attempted_count = len(trace) - rest_count
+    successful_count = sum(
+        frame["action"] != "rest" and not frame["blocked"] for frame in trace
+    )
+    longest_rest, running_rest = 0, 0
+    for frame in trace:
+        running_rest = running_rest + 1 if frame["action"] == "rest" else 0
+        longest_rest = max(longest_rest, running_rest)
+    # Only a display-scale coverage diagnostic; this is NOT a world map
+    # supplied to either controller.
+    unique_positions = len({
+        tuple(round(v, 6) for v in frame["position_xy"]) for frame in trace
+    })
+    stalled = (len(pulses) >= 32 and
+               longest_rest >= max(8, len(pulses) // 4))
     return {
         "schema": SCHEMA,
         "mode": mode,
         "classification": "SYNTHETIC_POINT_ROOM_RESEARCH_ONLY",
         "ticks": len(pulses),
         "blocked_count": blocked_count,
+        "rest_count": rest_count,
+        "attempted_movement_count": attempted_count,
+        "successful_movement_count": successful_count,
+        "unique_positions_1um": unique_positions,
+        "longest_rest_streak": longest_rest,
+        "stalled_warning": stalled,
         "final_position_xy": [state.x, state.y],
         "trace": trace,
         "learned_state": learner.snapshot() if learner is not None else None,
@@ -121,6 +146,9 @@ def compare(*, room, start, pulses):
         "frozen": frozen,
         "blocked_difference_frozen_minus_adaptive":
             frozen["blocked_count"] - adaptive["blocked_count"],
+        "interpretation": ("STALLED_ADAPTIVE_NOT_SUCCESS"
+                           if adaptive["stalled_warning"]
+                           else "MEASURED_FIXTURE_DIFFERENCE_ONLY"),
     }
 
 
@@ -150,12 +178,18 @@ def main(argv=None):
             "adaptive_blocked": result["adaptive"]["blocked_count"],
             "frozen_blocked": result["frozen"]["blocked_count"],
             "blocked_difference": result["blocked_difference_frozen_minus_adaptive"],
+            "adaptive_rest": result["adaptive"]["rest_count"],
+            "frozen_rest": result["frozen"]["rest_count"],
+            "adaptive_stalled_warning": result["adaptive"]["stalled_warning"],
+            "interpretation": result["interpretation"],
             "classification": result["classification"],
         }
     else:
         summary = {
             "schema": SCHEMA, "ticks": args.ticks, "mode": args.mode,
             "blocked_count": result["blocked_count"],
+            "rest_count": result["rest_count"],
+            "stalled_warning": result["stalled_warning"],
             "classification": result["classification"],
         }
     print(json.dumps(summary, sort_keys=True, allow_nan=False))
