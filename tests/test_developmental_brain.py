@@ -1,9 +1,11 @@
 """Acceptance tests for the explicit synthetic controller boundary."""
 
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
 from mojum.developmental_brain import (
@@ -86,6 +88,51 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
             with self.assertRaises(AquariumError):
                 aquarium.step(dx=0.0)
             self.assertEqual(aquarium.checkpoint(), before)
+
+    def test_privileged_graph_brain_rejected_even_with_controller_enabled(self):
+        """An unexpected graph output cannot be masked by the synthetic adapter."""
+        from mojum.sim import Simulation
+
+        with self.aquarium() as aquarium:
+            prior = aquarium.checkpoint()
+            real_step = Simulation.step
+
+            def forged_output(sim):
+                output = real_step(sim)
+                output[aquarium.kind_ids["brain.placeholder"]]["observation"]["status"] = "ACTIVE"
+                return output
+
+            with patch.object(Simulation, "step", forged_output):
+                with self.assertRaisesRegex(AquariumError, "unexpected privileged brain behavior"):
+                    aquarium.step()
+            self.assertEqual(aquarium.checkpoint(), prior)
+
+    def test_rehashed_controller_safety_flag_rejects_bool_as_int(self):
+        """Recomputed local checksum cannot legitimize false -> numeric 0."""
+        from mojum.noosphere import _canonical, _sha
+
+        with self.aquarium() as aquarium:
+            aquarium.step()
+        with sqlite3.connect(self.db) as db:
+            row = db.execute(
+                "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.frame'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            seq, wire, previous = row
+            event = json.loads(wire)
+            self.assertIs(event["payload"]["brain"]["safety"]["real_actuation"], False)
+            event["payload"]["brain"]["safety"]["real_actuation"] = 0
+            # The production append-only trigger is disabled ONLY for this
+            # disposable corruption fixture.
+            db.execute("DROP TRIGGER noosphere_no_update")
+            db.execute(
+                "UPDATE events SET wire_json=?,event_hash=? WHERE seq=?",
+                (_canonical(event), _sha({"previous": previous, "event": event}), seq),
+            )
+            db.commit()
+        with self.assertRaisesRegex(AquariumError, "mismatched committed frame"):
+            with self.aquarium():
+                pass
 
     def test_direct_contract_rejects_future_stale_and_foreign_sensor_cues(self):
         brain = DevelopmentalBrain()
