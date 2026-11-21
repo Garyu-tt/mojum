@@ -6,6 +6,7 @@ import importlib.resources
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -73,13 +74,16 @@ def main():
                     assert "mode mismatch" in str(exc), str(exc)
                 assert db.read_bytes() == before, (name, mode)
             if expected_format == "legacy_coarse_v1":
-                # Reopen under the original policy after inspection and every
-                # incompatible selector. The original checkpoint must survive.
-                replayed = run(source.resolve(), db, *flags, ticks=0)
+                # The pinned runtime opens SQLite writable even at zero ticks.
+                # Replay a separate copy and preserve the original archive.
+                replay_db = db.with_name(f"{db.stem}-replay.sqlite3")
+                shutil.copyfile(db, replay_db)
+                replayed = run(source.resolve(), replay_db, *flags, ticks=0)
                 assert replayed == checkpoint, name
                 assert inspect_journal(
-                    db, external_expected_head=checkpoint["journal_head"],
+                    replay_db, external_expected_head=checkpoint["journal_head"],
                 ) == report, name
+                assert db.read_bytes() == before, name
             print(json.dumps(report, sort_keys=True))
 
 
