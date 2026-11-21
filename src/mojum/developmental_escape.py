@@ -121,10 +121,13 @@ class ZonedEscapePlay:
                 or type(raw["evicted_trials"]) is not int
                 or not 0 <= raw["evicted_trials"] <= MAX_OBSERVATIONS
                 or type(raw["rest_streak"]) is not int
-                or not 0 <= raw["rest_streak"] <= MAX_OBSERVATIONS):
+                or not 0 <= raw["rest_streak"] <= MAX_CONSECUTIVE_RESTS):
             raise EscapePolicyError("invalid zoned-escape snapshot header")
         instance = cls()
         instance._check_row(raw["rest"], raw["observations"])
+        if (raw["rest"]["blocked"] != 0
+                or raw["rest_streak"] > raw["rest"]["trials"]):
+            raise EscapePolicyError("invalid rest evidence or streak")
         last = raw["last_attempt"]
         if (type(last) is not dict or set(last) != set(ACTION_NAMES)
                 or any(type(v) is not int or not -1 <= v < raw["observations"]
@@ -213,6 +216,8 @@ class ZonedEscapePlay:
                 or self.observations >= MAX_OBSERVATIONS):
             raise EscapePolicyError("invalid or stale measured motor outcome")
         zone = _zone(_position(position))
+        if kind == REST[0] and self.rest_streak >= MAX_CONSECUTIVE_RESTS:
+            raise EscapePolicyError("rest streak cap exceeded")
         if kind == REST[0]:
             if blocked:
                 raise EscapePolicyError("rest cannot be blocked in the fixture")
@@ -238,10 +243,12 @@ class ZonedEscapePlay:
     def _hints(values, label):
         if type(values) not in (tuple, list):
             raise EscapePolicyError(f"{label} hints must be a bounded sequence")
-        if len(values) > len(MOVE_NAMES) or len(set(values)) != len(values):
+        if len(values) > len(MOVE_NAMES):
             raise EscapePolicyError(f"{label} hints must be unique and bounded")
         if any(type(v) is not str or v not in MOVE_NAMES for v in values):
             raise EscapePolicyError(f"unknown {label} hint")
+        if len(set(values)) != len(values):
+            raise EscapePolicyError(f"{label} hints must be unique and bounded")
         return tuple(values)
 
     def _row(self, zone, name):
