@@ -38,6 +38,10 @@ class SimulationGraphIdentityTests(unittest.TestCase):
         self.assertEqual(sim.graph_hash, digest(expected))
         self.assertEqual(sim.snapshot()["state"]["graph_sha256"], digest(sim.graph))
 
+        # Replay a non-empty history as well as the graph identity.
+        for _ in range(2):
+            sim.step()
+
         # A fresh runner with the original graph can cold-restore this state.
         restored = Simulation(expected)
         restored.restore(sim.snapshot())
