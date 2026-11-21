@@ -1,0 +1,33 @@
+name: Mojum R0.15 v4 portable host acceptance
+on:
+  push:
+    branches:
+      - qa/r015-v4-portable-host-acceptance-20261121
+  pull_request:
+    paths:
+      - ".github/workflows/r015-v4-portable-host-qa.yml"
+      - "src/mojum/portable_host.py"
+      - "tests/test_r015_v4_portable_host.py"
+permissions:
+  contents: read
+jobs:
+  v4-portable-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile synthetic host and tests
+        run: python -m compileall -q src tests
+      - name: Test opt-in epoch-v4 host and old host contract
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p 'test_r015_v4_portable_host.py' -v
+          python -m unittest discover -s tests -p 'test_portable_host.py' -v
