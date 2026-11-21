@@ -244,6 +244,19 @@ class NoosphereTests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "invalid event at row 1"):
             self.store.verify_chain()
 
+    def test_utf8_cyrillic_and_emoji_roundtrip_across_cold_reopen(self):
+        good = event("урок-🎨", topic="рисование",
+                     payload={"набросок": "цветной 🎨"})
+        anchor = self.store.append(good, expected_head=self.store.head())
+        self.assertEqual(self.store.verify_chain(external_expected_head=anchor)["count"], 1)
+        self.store.close()
+        self.store = LocalNoosphere(self.path, "dante-synthetic")
+        self.assertEqual(self.store.verify_chain(external_expected_head=anchor)["count"], 1)
+        self.assertEqual(
+            self.store.dataset(include_nonpublic=True)["projection"]["items"][0]["event"],
+            good,
+        )
+
     def test_json_encoder_recursion_failure_is_atomic_contract_error(self):
         # A fixed nesting depth is not a portable recursion failure on
         # Python 3.11-3.13. Inject the encoder exception deterministically.
