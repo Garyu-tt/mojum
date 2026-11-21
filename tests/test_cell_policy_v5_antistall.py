@@ -402,6 +402,44 @@ class TranscriptSummaryTests(unittest.TestCase):
                     summarize_transcript(bad)
 
 
+    def test_summary_rejects_disconnected_outcomes_and_forged_probe_counts(self):
+        # All pairs come from real policy decisions and measured outcomes,
+        # then exactly one field at a time is tampered with.
+        transcript = []
+        drive(CellExplorerV5(), 24, transcript=transcript)
+        self.assertGreater(summarize_transcript(transcript)["forced_probes"], 0)
+        ordinary = next(
+            pair for pair in transcript
+            if pair[0]["action"] != "rest" and not pair[0]["forced_probe"]
+        )
+        forced = next(pair for pair in transcript if pair[0]["forced_probe"])
+        rest = next(pair for pair in transcript if pair[0]["action"] == "rest")
+        invalid = (
+            (ordinary[0], {**ordinary[1], "action": "rest"}),
+            (ordinary[0], {**ordinary[1], "forced_probe": True}),
+            (forced[0], {**forced[1], "forced_probe": False}),
+            (ordinary[0], {
+                key: value for key, value in ordinary[1].items()
+                if key != "forced_probe"
+            }),
+        )
+        for intent, outcome in invalid:
+            with self.subTest(intent=intent, outcome=outcome):
+                with self.assertRaisesRegex(
+                    CellV5Error, "transcript intent/outcome provenance mismatch"
+                ):
+                    summarize_transcript([(intent, outcome)])
+        # Even matching forged intent/outcome flags cannot make rest
+        # masquerade as an active forced movement probe.
+        with self.assertRaisesRegex(
+            CellV5Error, "rest cannot be a forced movement probe"
+        ):
+            summarize_transcript([(
+                {**rest[0], "forced_probe": True},
+                {**rest[1], "forced_probe": True},
+            )])
+
+
 class V5AquariumVersionGateTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
