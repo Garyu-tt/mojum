@@ -150,6 +150,11 @@ def main(argv=None):
                         help="wall-clock delay 20..3600000 ms, not virtual dt")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
+    parser.add_argument(
+        "--brain-mode", choices=("placeholder", "developmental_controller"),
+        default="placeholder",
+        help="opt-in typed synthetic controller; old placeholder journals remain the default",
+    )
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
@@ -170,6 +175,7 @@ def main(argv=None):
                 args.db, seed, graph,
                 neural_mode=args.neural_mode,
                 motor_mode="developmental_fixture",
+                brain_mode=args.brain_mode,
                 sensory_mode="toy_probe",
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
@@ -190,6 +196,7 @@ def main(argv=None):
                     "journal_events": aquarium.store.count(),
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
+                    "brain_mode": args.brain_mode,
                     "temporal_mode": args.temporal_mode,
                     "wall_elapsed_seconds": round(time.monotonic() - started, 3),
                     "stop_reason": "signal" if stopped.is_set() else "completed",
