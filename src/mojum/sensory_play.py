@@ -270,3 +270,102 @@ class ContactAssociations:
             "evidence_count": prediction["observations"],
             "updates": self.updates, "status": "no_contact_observation",
         }
+
+
+MODEL_SCHEMA_V2 = "mojum.sensory-curiosity.association/2"
+MAX_UPDATES_V2 = 10**9
+CUE_WINDOW_V2 = 256
+
+
+class BoundedContactAssociations(ContactAssociations):
+    """Separately versioned association table with a bounded per-cue window.
+
+    Each cue keeps at most CUE_WINDOW_V2 effective observations; once full the
+    mean becomes an exponential moving average (alpha = 1/window) and older
+    evidence is accounted for in ``forgotten``. Invariant per cue:
+    retained(count) + forgotten == total observations; sum == ``updates``.
+    v1 snapshots are never converted implicitly.
+    """
+
+    def snapshot(self):
+        return {"schema": MODEL_SCHEMA_V2, "table": copy.deepcopy(self.table),
+                "updates": self.updates}
+
+    @classmethod
+    def from_snapshot(cls, snapshot):
+        if (not isinstance(snapshot, dict)
+                or set(snapshot) != {"schema", "table", "updates"}
+                or snapshot["schema"] != MODEL_SCHEMA_V2
+                or type(snapshot["updates"]) is not int
+                or not 0 <= snapshot["updates"] <= MAX_UPDATES_V2
+                or not isinstance(snapshot["table"], dict)
+                or len(snapshot["table"]) > MAX_CUES):
+            raise CuriosityError("invalid developmental model snapshot")
+        total = 0
+        for key, entry in snapshot["table"].items():
+            if not isinstance(key, str) or len(key) > 11:
+                raise CuriosityError("invalid numeric cue")
+            parts = key.split(":")
+            if (len(parts) != 3 or any(not v.isdecimal() or str(int(v)) != v
+                                        or not 0 <= int(v) <= 255 for v in parts)):
+                raise CuriosityError("invalid numeric cue")
+            if (not isinstance(entry, dict)
+                    or set(entry) != {"count", "forgotten", "mean_deflection"}
+                    or type(entry["count"]) is not int
+                    or type(entry["forgotten"]) is not int
+                    or not 1 <= entry["count"] <= CUE_WINDOW_V2
+                    or entry["forgotten"] < 0
+                    or (entry["forgotten"] and entry["count"] != CUE_WINDOW_V2)
+                    or not _finite(entry["mean_deflection"])
+                    or not 0 <= entry["mean_deflection"] <= 1):
+                raise CuriosityError("invalid learned association")
+            total += entry["count"] + entry["forgotten"]
+        if total != snapshot["updates"]:
+            raise CuriosityError("inconsistent association count")
+        m = cls()
+        m.table, m.updates = copy.deepcopy(snapshot["table"]), snapshot["updates"]
+        return m
+
+    def learn(self, sensor, measurement, prediction):
+        if prediction != self.predict(sensor):
+            raise CuriosityError("stale association prediction")
+        if (not isinstance(measurement, dict) or type(measurement.get("contact")) is not bool
+                or measurement.get("instrument") != "synthetic_probe_not_material_classifier"
+                or type(measurement.get("source_tick")) is not int
+                or measurement["source_tick"] != sensor["tick"]):
+            raise CuriosityError("invalid measured probe feedback")
+        if not measurement["contact"]:
+            if measurement.get("measured_deflection") is not None:
+                raise CuriosityError("no contact but response was supplied")
+            return {
+                "learned": False, "observed_deflection": None, "prediction_error": None,
+                "new_prediction": prediction["predicted_deflection"],
+                "evidence_count": prediction["observations"],
+                "updates": self.updates, "status": "no_contact_observation",
+            }
+        value = measurement.get("measured_deflection")
+        if not _finite(value) or not 0 <= value <= 1 or prediction["cue"] is None:
+            raise CuriosityError("invalid or unsupported contact response")
+        if self.updates >= MAX_UPDATES_V2:
+            raise CuriosityError("sensory association update budget reached")
+        key = prediction["cue"]
+        if key not in self.table:
+            if len(self.table) >= MAX_CUES:
+                raise CuriosityError("sensory association memory exhausted")
+            self.table[key] = {"count": 0, "forgotten": 0, "mean_deflection": 0.0}
+        entry = self.table[key]
+        if entry["count"] < CUE_WINDOW_V2:
+            entry["count"] += 1
+        else:
+            entry["forgotten"] += 1
+        entry["mean_deflection"] += (value - entry["mean_deflection"]) / entry["count"]
+        entry["mean_deflection"] = min(1.0, max(0.0, entry["mean_deflection"]))
+        self.updates += 1
+        return {
+            "learned": True, "observed_deflection": value,
+            "prediction_error": None if prediction["predicted_deflection"] is None
+            else value - prediction["predicted_deflection"],
+            "new_prediction": entry["mean_deflection"],
+            "evidence_count": entry["count"], "updates": self.updates,
+            "status": "empirical_measurement_not_object_semantics",
+        }
