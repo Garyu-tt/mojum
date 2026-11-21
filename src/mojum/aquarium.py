@@ -17,14 +17,17 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .neural import PulsePredictor
 from .developmental_policy import Explorer, Proprioception, SCHEMA as DEVELOPMENT_SCHEMA
-from .sensory_play import ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
+from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_bridge import (ToyContactBridge, validate_scene,
                              SCHEMA as TOY_CONTACT_SCHEMA,
                              OCCLUSION_SCHEMA)
 from .graph import validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
-from .world_room import Room, advance, initial_state
+from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
+from .verified_snapshot import (
+    STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
+)
 
 
 SCHEMA = "mojum.aquarium.frame/1"
@@ -73,6 +76,7 @@ class Aquarium:
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
         external_expected_head=None, neural_mode="shadow",
         exploration_mode="scripted", sensory_mode="none", sensory_scene=None,
+        replay_snapshot_file=None, replay_snapshot_key_file=None,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -88,6 +92,20 @@ class Aquarium:
             raise AquariumError("toy_probe requires goal_free exploration")
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("unused synthetic sensory scene")
+        if (replay_snapshot_file is None) != (replay_snapshot_key_file is None):
+            raise AquariumError("replay snapshot file and key file must be supplied together")
+        self._snapshot_file = replay_snapshot_file
+        self._snapshot_key_file = replay_snapshot_key_file
+        signed_state = None
+        if replay_snapshot_file is not None:
+            paths = [Path(db_path).resolve(), Path(replay_snapshot_file).resolve(),
+                     Path(replay_snapshot_key_file).resolve()]
+            if len(set(paths)) != 3:
+                raise AquariumError("snapshot, key and SQLite must be separate files")
+            # Verify the optional sidecar before any SQLite bootstrap/write.
+            signed_state = load_snapshot(replay_snapshot_file, replay_snapshot_key_file)
+            if signed_state is not None and not Path(db_path).is_file():
+                raise AquariumError("signed replay snapshot exists but SQLite source is missing")
         self.exploration_mode = exploration_mode
         self.sensory_mode = sensory_mode
         self.neural_mode = neural_mode
@@ -148,7 +166,7 @@ class Aquarium:
         try:
             if self._committed_event_count == 0:
                 self._append_record("aquarium.bootstrap", "aquarium-bootstrap", self.manifest, 0, self.graph_sha256)
-            self._replay(external_expected_head)
+            self._replay(external_expected_head, signed_state=signed_state)
         except BaseException:
             self.store.close()
             raise
@@ -313,19 +331,160 @@ class Aquarium:
         self._committed_head = committed
         return self.genome.revision
 
-    def _replay(self, external_expected_head):
-        # A bounded number of events can be replayed while keeping only the
-        # current deterministic Aquarium state and one SQLite fetchmany page
-        # in RAM. This is full CPU-linear replay, NOT snapshot fast-forward.
+    def _local_checkpoint(self):
+        """Derive exact checkpoint fields without reading current SQLite head.
+
+        This permits validating a signed *earlier* snapshot before replaying
+        the newer tail, without pretending its state is the current head.
+        """
+        result = {
+            "schema": "mojum.aquarium.checkpoint/1",
+            "agent_id": self.agent_id, "tick": self.tick,
+            "sim_time_ns": self.tick * self.dt_ns,
+            "genome_revision": self.genome.revision,
+            "world_revision": self.world.revision,
+            "journal_head": self._committed_head,
+            "neural_mode": self.neural_mode,
+            "neural_state": self.learner.snapshot() if self.learner is not None else None,
+            "manifest_sha256": digest(self.manifest),
+            "trust": "checksum_only_not_authenticated",
+        }
+        if self.explorer is not None:
+            result["developmental_state"] = self.explorer.snapshot()
+        if self.sensory_bridge is not None:
+            result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
+        return result
+
+    def _adopt_signed_replay_state(self, state, *, committed_count):
+        """Strictly validate HMAC-protected cache and pinned SQLite prefix."""
+        required = {
+            "schema", "agent_id", "manifest_sha256", "journal_events",
+            "journal_head", "tick", "world", "genome", "learner",
+            "explorer", "toy_contact_state", "checkpoint",
+        }
+        if type(state) is not dict or set(state) != required or state["schema"] != STATE_SCHEMA:
+            raise SnapshotError("invalid replay state field contract")
+        events, tick = state["journal_events"], state["tick"]
+        if (type(events) is not int or not 1 <= events <= committed_count
+                or type(tick) is not int or not 0 <= tick < MAX_REPLAY_EVENTS):
+            raise SnapshotError("invalid signed event count or tick")
+        if (state["agent_id"] != self.agent_id
+                or state["manifest_sha256"] != digest(self.manifest)):
+            raise SnapshotError("snapshot belongs to a different agent/room/mode/genome")
+        if self.store.event_at(events)["event_hash"] != state["journal_head"]:
+            raise SnapshotError("signed snapshot head is absent from SQLite prefix")
+        world = state["world"]
+        if (type(world) is not dict or set(world) !=
+                {"tick", "x", "y", "revision"}
+                or type(world["tick"]) is not int or world["tick"] != tick
+                or any(type(world[v]) not in (int, float) for v in ("x", "y"))
+                or not _valid(self.room, world["x"], world["y"])
+                or world["revision"] != _revision(
+                    self.room, tick, world["x"], world["y"])):
+            raise SnapshotError("signed point-room state is invalid")
+        ledger = GenomeLedger.from_snapshot(state["genome"])
+        if ledger.snapshot()["seed"] != self.seed:
+            raise SnapshotError("snapshot GENESIS seed differs from current organism")
+        if self.learner is None:
+            if state["learner"] is not None:
+                raise SnapshotError("unexpected saved shadow neural learner")
+            learner = None
+        else:
+            learner = PulsePredictor.from_snapshot(state["learner"])
+            expected_last_ns = (tick - 1) * self.dt_ns if tick else None
+            if learner.snapshot()["last_observed_at_ns"] != expected_last_ns:
+                raise SnapshotError("shadow learner time differs from saved tick")
+        if self.explorer is None:
+            if state["explorer"] is not None:
+                raise SnapshotError("unexpected developmental state")
+            explorer = None
+        else:
+            explorer = Explorer.from_snapshot(state["explorer"])
+            if explorer.updates != tick:
+                raise SnapshotError("developmental state tick count mismatch")
+        if self.sensory_bridge is None:
+            if state["toy_contact_state"] is not None:
+                raise SnapshotError("unexpected sensory model state")
+            contact = None
+        else:
+            contact = ContactAssociations.from_snapshot(state["toy_contact_state"])
+            if contact.updates > tick:
+                raise SnapshotError("sensory model has more measurements than ticks")
+
+        self.tick = tick
+        self.world = RoomState(tick, float(world["x"]), float(world["y"]),
+                               world["revision"])
+        self.genome, self.learner, self.explorer = ledger, learner, explorer
+        if self.sensory_bridge is not None:
+            self.sensory_bridge.model = contact
+        self._committed_head = state["journal_head"]
+        self._committed_event_count = events
+        # Validate that all components form the SAME pinned checkpoint.
+        if state["checkpoint"] != self._local_checkpoint():
+            raise SnapshotError("signed component snapshots disagree on checkpoint")
+
+    def save_replay_snapshot(self):
+        """Publish one *optional* HMAC PRIVATE sidecar of committed RAM state.
+
+        Snapshot is a speed cache, not the journal. At save time a full SQLite
+        hash-chain verification pins the current head/count before publication.
+        """
+        if self._snapshot_file is None:
+            raise SnapshotError("replay cache not enabled for this Aquarium")
+        checkpoint = self.checkpoint()
+        verified = self.store.verify_chain(external_expected_head=self._committed_head)
+        if verified["count"] != self._committed_event_count:
+            raise SnapshotError("journal count changed during snapshot creation")
+        if self.store.head() != self._committed_head:
+            raise SnapshotError("journal advanced while snapshot was prepared")
+        state = {
+            "schema": STATE_SCHEMA,
+            "agent_id": self.agent_id,
+            "manifest_sha256": digest(self.manifest),
+            "journal_events": self._committed_event_count,
+            "journal_head": self._committed_head,
+            "tick": self.tick,
+            "world": {
+                "tick": self.world.tick, "x": self.world.x, "y": self.world.y,
+                "revision": self.world.revision,
+            },
+            "genome": self.genome.snapshot(),
+            "learner": self.learner.snapshot() if self.learner is not None else None,
+            "explorer": self.explorer.snapshot() if self.explorer is not None else None,
+            "toy_contact_state": (
+                self.sensory_bridge.model.snapshot()
+                if self.sensory_bridge is not None else None
+            ),
+            "checkpoint": checkpoint,
+        }
+        return save_snapshot(self._snapshot_file, self._snapshot_key_file, state)
+
+    def _replay(self, external_expected_head, *, signed_state=None):
+        # Still audit the FULL SQLite journal hash chain and independent head.
+        # Only deterministic SIMULATION of the authenticated prefix is
+        # skipped when an explicit HMAC-protected sidecar is available.
         count = self.store.count()
         if count > MAX_REPLAY_EVENTS:
             raise AquariumError("journal exceeds bounded 100000-event replay budget")
         verified = self.store.verify_chain(external_expected_head=external_expected_head)
         if verified["count"] != count:
             raise AquariumError("journal changed during integrity verification")
-        seen = 0
-        replayed_head = None
-        for entry in self.store.iter_events(include_nonpublic=True):
+        if signed_state is not None:
+            bootstrap = self.store.event_at(1)["event"]
+            if bootstrap != self._record(
+                    "aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
+                    0, self.graph_sha256):
+                raise AquariumError("aquarium bootstrap differs from signed cache")
+            self._adopt_signed_replay_state(signed_state, committed_count=count)
+            seen = signed_state["journal_events"]
+            replayed_head = signed_state["journal_head"]
+            start_seq = seen
+        else:
+            seen = 0
+            replayed_head = None
+            start_seq = 0
+        for entry in self.store.iter_events(
+                include_nonpublic=True, after_seq=start_seq):
             seen += 1
             if entry["seq"] != seen:
                 raise AquariumError("journal sequence changed during streaming replay")
@@ -391,26 +550,9 @@ class Aquarium:
         self._committed_event_count = count
 
     def checkpoint(self):
-        # No mixed snapshot: the database may have advanced in another process,
-        # or our last event append may have succeeded before RAM adoption.
         if self._committed_head is None or self.store.head() != self._committed_head:
             raise AquariumError("stale or unadopted aquarium checkpoint; reopen")
-        result = {
-            "schema": "mojum.aquarium.checkpoint/1",
-            "agent_id": self.agent_id, "tick": self.tick,
-            "sim_time_ns": self.tick * self.dt_ns,
-            "genome_revision": self.genome.revision,
-            "world_revision": self.world.revision,
-            "journal_head": self._committed_head,
-            "neural_mode": self.neural_mode,
-            "neural_state": self.learner.snapshot() if self.learner is not None else None,
-            "manifest_sha256": digest(self.manifest),
-            "trust": "checksum_only_not_authenticated",
-        }
-        if self.explorer is not None:
-            result["developmental_state"] = self.explorer.snapshot()
-        if self.sensory_bridge is not None:
-            result["toy_contact_state"] = self.sensory_bridge.model.snapshot()
+        result = self._local_checkpoint()
         if self.store.head() != self._committed_head:
             raise AquariumError("journal advanced during checkpoint; reopen")
         return result
