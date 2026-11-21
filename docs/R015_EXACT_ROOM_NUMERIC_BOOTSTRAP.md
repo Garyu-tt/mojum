@@ -36,6 +36,8 @@ Signed 64-bit original integers and exact finite binary64 `float.hex()` values a
 
 Dedicated Python 3.11, 3.12, 3.13 workflow checks lossless room reconstruction, unchanged world revision through multiple advances, distinction of int vs float dimensions that the legacy bootstrap cannot represent, rejection of corrupt/ambiguous scalar records, binary float exactness and negative zero, actual multi-tick SQLite Aquarium cold replay using different scalar types, fail-closed attempts to open a typed journal as legacy (and vice versa), no unexpected event append after failed open, and CLI explicit opt-in.
 
+A second immutable-source CI control checks out the exact pre-change [#135](https://github.com/Garyu-tt/mojum/pull/135) SHA `961e9954248dc9fb3a2803a3ab4108c96606ff42`, runs the old and new Aquarium as **separate processes** in five default-format modes (scripted, goal-free legacy, v2B, v3B and goal-free toy-probe), and compares all SQLite event rows including literal `wire_json` and every event hash, as well as the final checkpoint JSON. This is a stronger historical ABI check than simply re-opening the new branch's own old-format journal.
+
 Old **v2A→v2B migration remains restricted to the original room**, because these new fields cannot be retrospectively reconstructed from an old ambiguous bootstrap. New typed histories can be used in a **future** separately reviewed importer; this PR does not claim arbitrary historical geometry recovery, compatible cross-version event hashes or full semantic portability.
 
 ## Limitations
