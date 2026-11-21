@@ -1,7 +1,12 @@
 name: Mojum R0.3 online-learning aquarium regression
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   aquarium-stdlib:
     runs-on: ubuntu-latest
@@ -17,6 +22,12 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
+      - name: Reject deferred unclosed SQLite handles on Python 3.13
+        if: matrix.python-version == '3.13'
+        env:
+          PYTHONPATH: src
+          PYTHONTRACEMALLOC: '1'
+        run: python tests/audit_sqlite_resource_warnings.py
       - name: Offline habitat smoke and restart
         env:
           PYTHONPATH: src

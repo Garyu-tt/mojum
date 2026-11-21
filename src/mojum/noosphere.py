@@ -18,7 +18,7 @@ EVENT_SCHEMA = "mojum.noosphere.event/1"
 STORE_SCHEMA = "mojum.noosphere.sqlite/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
 _ALLOWED_VISIBILITY = frozenset(("PUBLIC", "PRIVATE", "RESTRICTED"))
-_ZERO = "0" * 64
+EMPTY_HEAD = "0" * 64
 _MAX_PAYLOAD_BYTES = 128_000
 
 
@@ -105,18 +105,25 @@ class LocalNoosphere:
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
         self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.execute("PRAGMA trusted_schema=OFF")
-        self._db.execute("PRAGMA synchronous=FULL")
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA foreign_keys=ON")
-        if os.name == "posix":
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass  # Caller must enforce host filesystem policy.
-        self._setup()
+        # An exception inside __init__ never reaches __exit__/close() of a
+        # context manager. In particular a wrong owner/schema must not leave
+        # an unreachable live sqlite3.Connection for Python 3.13 GC to warn on.
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("PRAGMA trusted_schema=OFF")
+            self._db.execute("PRAGMA synchronous=FULL")
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA foreign_keys=ON")
+            if os.name == "posix":
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass  # Caller must enforce host filesystem policy.
+            self._setup()
+        except BaseException:
+            self._db.close()
+            raise
 
     def close(self):
         self._db.close()
@@ -168,7 +175,7 @@ class LocalNoosphere:
         self._db.execute("BEGIN IMMEDIATE")
         try:
             row = self._db.execute("SELECT seq,event_hash,recorded_at_ns FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-            previous = row["event_hash"] if row else _ZERO
+            previous = row["event_hash"] if row else EMPTY_HEAD
             if expected_head != previous:
                 raise NoosphereError("stale event head: CAS failed")
             if row and checked["recorded_at_ns"] < row["recorded_at_ns"]:
@@ -193,14 +200,14 @@ class LocalNoosphere:
 
     def head(self):
         row = self._db.execute("SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-        return row["event_hash"] if row else _ZERO
+        return row["event_hash"] if row else EMPTY_HEAD
 
     def count(self):
         return self._db.execute("SELECT count(*) FROM events").fetchone()[0]
 
     def verify_chain(self, *, external_expected_head=None):
         """Detect accidental DB corruption. Without an independent anchor this is NOT tamper-proof."""
-        prev = _ZERO
+        prev = EMPTY_HEAD
         last_recorded = -1
         expected_seq = 1
         sql = ("SELECT seq,event_id,agent_id,topic,visibility,observed_at_ns,"
