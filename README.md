@@ -84,6 +84,11 @@ browser and select the exported file. At tick 5 the selected move is north.
 The viewer reports a prediction based on one earlier observation and the
 recorded change from range bucket 0 to 1.
 
+Modern traces require SHA-256 frame proof and exact export-status metadata. The
+viewer rejects stripped or mismatched integrity metadata. Genuinely old JSONL
+without modern range/room metadata can be opened only through an explicit,
+unchecked-by-default legacy option and remains visibly unverified.
+
 The exporter verifies the complete journal on a temporary SQLite copy. Use the
 same mode flags as the recording. Add `--expected-head SHA256` when verifying
 against a separately recorded journal head. For longer histories, add
