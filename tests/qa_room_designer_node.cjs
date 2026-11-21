@@ -234,6 +234,31 @@ test("actual offline UI can draw, move start, erase and export valid JSON", () =
     assert.equal(nodes["room-json"].value, "");
     assert.equal(nodes.status.dataset.status, "error");
 
+    // A touch on the start tool must recover an invalid typed coordinate.
+    // Previously pointerdown called currentRoom() before setStart() and
+    // rejected the tap, leaving the editor unusable without typing.
+    tools[1].dispatch("click");
+    svg.dispatch("pointerdown", {
+      pointerType:"touch", clientX:25, clientY:300, pointerId:81
+    });
+    assert.equal(nodes.status.dataset.status, "ok");
+    assert.deepEqual(JSON.parse(nodes["room-json"].value).start, [0.25, 1]);
+
+    // A smaller valid room can invalidate the previous start. Tapping a
+    // valid new point should likewise repair the model directly on canvas.
+    nodes["start-x"].value = "4.4";
+    nodes["start-y"].value = "3.5";
+    nodes["start-x"].dispatch("input");
+    nodes["start-y"].dispatch("input");
+    nodes["room-width"].value = "3.5";
+    nodes["room-width"].dispatch("input");
+    assert.equal(nodes.status.dataset.status, "error");
+    svg.dispatch("pointerdown", {
+      pointerType:"touch", clientX:75, clientY:300, pointerId:82
+    });
+    assert.equal(nodes.status.dataset.status, "ok");
+    assert.deepEqual(JSON.parse(nodes["room-json"].value).start, [0.25, 1]);
+
     // Restore a valid dimension/coordinate while retaining the model.
     nodes["start-x"].value = "0.25";
     nodes["room-width"].value = "4.5";
