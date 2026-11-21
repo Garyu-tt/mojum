@@ -108,16 +108,28 @@ class Explorer:
     def _zone(sense):
         return f"{int(sense.x * 2)}:{int(sense.y * 2)}"
 
-    def decide(self, sense):
+    def decide(self, sense, *, avoid=(), prefer=()):
         if type(sense) is not Proprioception or sense.tick != self.last_tick + 1:
             raise DevelopmentError("stale or unexpected proprioception tick")
+        for suggestions in (avoid, prefer):
+            if (type(suggestions) is not tuple
+                    or len(suggestions) != len(set(suggestions))
+                    or any(type(a) is not str or a not in ACTIONS
+                           for a in suggestions)):
+                raise DevelopmentError("invalid learned motor affordances")
+        if "rest" in avoid:
+            raise DevelopmentError("cannot veto synthetic safe rest")
         zone = self._zone(sense)
         stored = self.records.get(zone, {})
-        # Rotating innate motor play, not a goal-seeking planner. Only learned
-        # blocked outcomes inhibit actions in that position neighborhood.
+        # Original rotating motor play is the fallback. The optional guidance
+        # comes solely from prior measured sensor/action outcomes; no obstacle
+        # geometry, future state or privileged toy metadata is provided.
         shift = (sense.tick + int(sense.pulse)) % len(ACTIONS)
         choices = ACTIONS[shift:] + ACTIONS[:shift]
-        action = next((a for a in choices if stored.get(a, [0, 0])[1] == 0), "rest")
+        permitted = [a for a in choices
+                     if a not in avoid and stored.get(a, [0, 0])[1] == 0]
+        preferred = [a for a in permitted if a in prefer]
+        action = (preferred or permitted or ["rest"])[0]
         delta = {"rest": (0., 0.), "x+": (STEP_METERS, 0.),
                  "x-": (-STEP_METERS, 0.), "y+": (0., STEP_METERS),
                  "y-": (0., -STEP_METERS)}
@@ -126,8 +138,9 @@ class Explorer:
                 "expected_revision": sense.revision, "tick": sense.tick,
                 "zone": zone, "source": "bounded_goal_free_motor_play"}
 
-    def observe(self, sense, intent, blocked):
-        if type(blocked) is not bool or intent != self.decide(sense):
+    def observe(self, sense, intent, blocked, *, avoid=(), prefer=()):
+        if type(blocked) is not bool or intent != self.decide(
+                sense, avoid=avoid, prefer=prefer):
             raise DevelopmentError("forged or stale measured motor outcome")
         zone, action = intent["zone"], intent["action"]
         if zone not in self.records and len(self.records) >= MAX_ZONES:
