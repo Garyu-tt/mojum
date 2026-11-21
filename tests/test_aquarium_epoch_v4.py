@@ -141,7 +141,7 @@ class EpochJournalV4Tests(unittest.TestCase):
             with self.subTest(sensory=sensory):
                 bogus = deepcopy(manifest)
                 bogus["sensory_mode"] = sensory
-                with self.assertRaisesRegex(NoosphereError, "requires sensory_mode none"):
+                with self.assertRaisesRegex(NoosphereError, "require sensory_mode none"):
                     _stored_policy(bogus)
 
     def test_v4_cli_omits_motor_arguments_and_commits_real_frames(self):
