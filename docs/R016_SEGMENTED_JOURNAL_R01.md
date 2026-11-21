@@ -104,5 +104,8 @@ is intentionally NOT automatically injected into Aquarium.
 4. Real Termux/Android CPU storage/suspend checks and independent
    review of failure, concurrency and security semantics.
 
-No main merge or rewrite of existing PRIVATE Noosphere histories.
-Keep Draft until actual exact-final-head CI and reviewer acceptance.
+The original stacked research PR #139 remains unmerged and is not a release target.
+This isolated direct-`main` forward-port #359 is eligible for acceptance only after
+successful CI on its final commit and independent code review. Merge affects
+new opt-in module/test/docs paths only; it never rewrites legacy Noosphere
+histories, deploys to production, or enables the backend in Aquarium.
