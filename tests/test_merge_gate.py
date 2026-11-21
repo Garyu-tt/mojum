@@ -424,12 +424,17 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "ready")
 
     def test_exact_full_label_requires_the_named_workflow(self):
-        result = evaluate_checks(
-            [run(name="Aquarium regression QA / linux", workflow="Other QA")],
-            required=("Aquarium regression QA / linux",),
+        required = ("Aquarium regression QA / linux",)
+        substitutions = (
+            run(name="linux", workflow="Other QA"),
+            run(name=required[0], workflow="Other QA"),
+            {"context": required[0], "state": "SUCCESS"},
         )
-        self.assertEqual(result.verdict, "defer")
-        self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
+        for check in substitutions:
+            with self.subTest(check=check):
+                result = evaluate_checks([check], required=required)
+                self.assertEqual(result.verdict, "defer")
+                self.assertEqual(result.code, "MISSING_REQUIRED_CHECK")
 
 
 class CliTests(unittest.TestCase):

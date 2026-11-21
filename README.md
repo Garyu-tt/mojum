@@ -17,11 +17,15 @@ verdict for one exact commit and never performs a merge. Pass the snapshot from
 ```sh
 SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require 'aquarium-stdlib (3.11)' --require 'aquarium-stdlib (3.12)' \
-  --require 'aquarium-stdlib (3.13)' --require 'motor-gate-stdlib (3.11)' \
-  --require 'motor-gate-stdlib (3.12)' --require 'motor-gate-stdlib (3.13)' \
-  --require 'mesh-stdlib (3.11)' --require 'mesh-stdlib (3.12)' \
-  --require 'mesh-stdlib (3.13)'
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)'
 ```
 
 The expected job list comes from the reviewed CI matrix, **not** the live

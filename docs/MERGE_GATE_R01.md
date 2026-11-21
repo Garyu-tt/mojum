@@ -26,8 +26,8 @@ failed `gh` call) is also a `reject` and never a `ready`.
 - **Explicit inventory required:** each `--require` names ONE concrete job
   (e.g. `aquarium-stdlib (3.12)`) or an exact `workflow / job` label.
   Repeat `--require` for **every expected job in every required matrix**.
-  Use `workflow / job` when names are reused across workflows. This syntax
-  checks the workflow as well as the job name.
+  Qualify GitHub Actions jobs with `workflow / job` to pin the workflow.
+  A bare name can match a check or commit status with that name.
 - Wildcards (`* ? [ ]`) are rejected with `AMBIGUOUS_REQUIRED_PATTERN`.
   Workflow-only names are not job selectors and cannot certify a partial
   matrix. Missing required jobs defer with `MISSING_REQUIRED_CHECK`.
@@ -58,15 +58,15 @@ gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeabl
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
   --expected-head-sha "$(git rev-parse HEAD)" \
-  --require 'aquarium-stdlib (3.11)' \
-  --require 'aquarium-stdlib (3.12)' \
-  --require 'aquarium-stdlib (3.13)' \
-  --require 'motor-gate-stdlib (3.11)' \
-  --require 'motor-gate-stdlib (3.12)' \
-  --require 'motor-gate-stdlib (3.13)' \
-  --require 'mesh-stdlib (3.11)' \
-  --require 'mesh-stdlib (3.12)' \
-  --require 'mesh-stdlib (3.13)'
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)'
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -91,15 +91,15 @@ be pointed at real PR data. Input is capped at 4 MiB.
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --pr "$PR" --expected-head-sha "$SHA" \
-  --require 'aquarium-stdlib (3.11)' \
-  --require 'aquarium-stdlib (3.12)' \
-  --require 'aquarium-stdlib (3.13)' \
-  --require 'motor-gate-stdlib (3.11)' \
-  --require 'motor-gate-stdlib (3.12)' \
-  --require 'motor-gate-stdlib (3.13)' \
-  --require 'mesh-stdlib (3.11)' \
-  --require 'mesh-stdlib (3.12)' \
-  --require 'mesh-stdlib (3.13)'
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.11)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.12)' \
+  --require 'Mojum R0.3 online-learning aquarium regression / aquarium-stdlib (3.13)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.11)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.12)' \
+  --require 'Mojum motor-gate independent QA / motor-gate-stdlib (3.13)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.11)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.12)' \
+  --require 'Mojum mesh contract independent QA / mesh-stdlib (3.13)'
 ```
 
 Treat a `ready` result as a prerequisite for the
