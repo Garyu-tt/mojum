@@ -10,7 +10,7 @@ const path = require("node:path");
 const cp = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
-const { dimension, validate, buildDraft, floatToken, pointerToWorld,
+const { dimension, startCoordinate, validate, buildDraft, floatToken, pointerToWorld,
         snap, withinRect } = require("../tools/room_designer.js");
 
 function sample() {
@@ -40,6 +40,11 @@ test("exact JSON numeric type tokens are not collapsed by JS JSON.stringify", ()
   assert.doesNotMatch(buildDraft(room), /"height": 4\.0,/);
   assert.equal(dimension("4.0").lexical, "4.0");
   assert.equal(dimension("4").lexical, "4");
+  assert.equal(startCoordinate("0.0"), 0);
+  assert.equal(startCoordinate("-0.0"), 0);
+  assert.throws(() => startCoordinate(""), /Координата/);
+  assert.throws(() => startCoordinate("  "), /Координата/);
+  assert.throws(() => startCoordinate("1e3"), /Координата/);
 });
 
 test("invalid dimensions, geometry, obstacle budget and start collisions fail closed", () => {
@@ -190,12 +195,32 @@ test("actual offline UI can draw, move start, erase and export valid JSON", () =
     nodes["obstacle-list"].children[0].children[1].dispatch("click");
     assert.equal(JSON.parse(nodes["room-json"].value).obstacles.length, 1);
 
+    // A rectangle covering the current start must not be adopted, and the
+    // failure should be visible instead of overwritten by the next render.
+    tools[0].dispatch("click");
+    svg.dispatch("pointerdown", {
+      pointerType:"touch", clientX:0, clientY:300, pointerId:3,
+      preventDefault() {}
+    });
+    svg.dispatch("pointermove", {clientX:50, clientY:250, pointerId:3});
+    svg.dispatch("pointerup", {clientX:50, clientY:250, pointerId:3});
+    assert.equal(JSON.parse(nodes["room-json"].value).obstacles.length, 1);
+    assert.equal(nodes.status.dataset.status, "error");
+
     // Type an invalid dimension; export is disabled fail-closed.
     nodes["room-width"].value = "99999";
     nodes["room-width"].dispatch("input");
     assert.equal(nodes["room-json"].value, "");
     assert.equal(nodes.status.dataset.status, "error");
-    // Restore a valid dimension while retaining the existing model.
+    nodes["room-width"].value = "4.5";
+    nodes["room-width"].dispatch("input");
+    nodes["start-x"].value = "";
+    nodes["start-x"].dispatch("input");
+    assert.equal(nodes["room-json"].value, "");
+    assert.equal(nodes.status.dataset.status, "error");
+
+    // Restore a valid dimension/coordinate while retaining the model.
+    nodes["start-x"].value = "0.25";
     nodes["room-width"].value = "4.5";
     nodes["room-width"].dispatch("input");
     assert.equal(nodes.status.dataset.status, "ok");
