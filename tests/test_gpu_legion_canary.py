@@ -151,8 +151,21 @@ class CanaryTests(LoopbackFixture):
         self.server.status_code = 503
         report = canary.run_canary([self.url], timeout=4)
         self.assertEqual(report["failed_responses"], 1)
-        self.assertEqual(report["peak_overlapping_http_calls"], 0)
+        self.assertEqual(report["peak_overlapping_http_calls"], 1)
+        self.assertEqual(report["peak_overlapping_successful_http_calls"], 0)
         self.assertFalse(report["results"][0]["content_logged"])
+
+    def test_overlapping_failed_http_calls_are_not_invisible(self):
+        self.server.status_code = 503
+        self.server.delay = 0.2
+        report = canary.run_canary([self.url], samples=2, parallel=2, timeout=5)
+        self.assertEqual(report["successful_responses"], 0)
+        self.assertEqual(report["failed_responses"], 2)
+        self.assertEqual(report["peak_overlapping_http_calls"], 2)
+        self.assertEqual(report["peak_overlapping_successful_http_calls"], 0)
+        for item in report["results"]:
+            self.assertLess(item["start_ns"], item["end_ns"])
+            self.assertFalse(item["content_logged"])
 
     def test_bad_parameters_fail_before_http_calls(self):
         invalid = [
@@ -166,6 +179,14 @@ class CanaryTests(LoopbackFixture):
         with self.assertRaises(canary.CanaryError):
             canary.run_canary([self.url, self.url])
         self.assertEqual(self.server.calls, 0)
+
+    def test_mixed_success_failure_overlap_is_two_attempts(self):
+        events = [
+            {"success": False, "start_ns": 100, "end_ns": 300},
+            {"success": True, "start_ns": 150, "end_ns": 250},
+        ]
+        self.assertEqual(canary.peak_overlap(events), 2)
+        self.assertEqual(canary.peak_overlap(events, successful_only=True), 1)
 
     def test_interval_validation(self):
         with self.assertRaisesRegex(canary.CanaryError, "interval"):
