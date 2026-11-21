@@ -249,6 +249,22 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
+    def test_failure_conclusion_wins_over_inconsistent_pending_status(self):
+        # GitHub snapshots can be consumed while a rollup is changing.
+        # Even if the status field is stale, a terminal failure is not safe
+        # to downgrade to an indefinite DEFER.
+        for status in ("IN_PROGRESS", "QUEUED", "WAITING", "bogus"):
+            with self.subTest(status=status):
+                checks = self.green() + [
+                    run(
+                        status=status, conclusion="FAILURE",
+                        workflow="Mesh contract",
+                    ),
+                ]
+                result = evaluate_checks(checks)
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_FAILED")
+
     def test_skipped_check_requires_a_waiver(self):
         checks = self.green()[:2] + [
             run(name="mesh", conclusion="SKIPPED", workflow="Mesh contract")
