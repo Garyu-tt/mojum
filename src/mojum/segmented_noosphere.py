@@ -366,28 +366,33 @@ class SegmentedNoosphere:
         They are NOT signatures, replicas, durable archives, encryption, or
         trustworthy on their own. A second independent device/service must
         record/compare the segment heads before using them as proof.
+        Exhaust the iterator to detect a concurrent append.
         """
         proven = self.verify_chain(
             external_expected_head=external_expected_head
         )
-        for bound in self._db.execute(
+        verified_count = proven["count"]
+        # A concurrent writer may have created another segment after verification.
+        with closing(self._db.execute(
             "SELECT segment_index,first_seq,prior_segment_head "
-            "FROM segments ORDER BY segment_index"
-        ):
-            first = bound["first_seq"]
-            last = min(first + self.segment_size - 1, proven["count"])
-            yield {
-                "schema": "mojum.noosphere.segment-receipt/1",
-                "agent_id": self.agent_id,
-                "segment_index": bound["segment_index"],
-                "first_seq": first,
-                "last_seq": last,
-                "events": last - first + 1,
-                "prior_segment_head": bound["prior_segment_head"],
-                "segment_head": self.event_at(last)["event_hash"],
-                "integrity": "metadata-only-verified-not-authenticated",
-            }
-        if self.count() != proven["count"] or self.head() != proven["head"]:
+            "FROM segments WHERE first_seq <= ? ORDER BY segment_index",
+            (verified_count,),
+        )) as boundaries:
+            for bound in boundaries:
+                first = bound["first_seq"]
+                last = min(first + self.segment_size - 1, verified_count)
+                yield {
+                    "schema": "mojum.noosphere.segment-receipt/1",
+                    "agent_id": self.agent_id,
+                    "segment_index": bound["segment_index"],
+                    "first_seq": first,
+                    "last_seq": last,
+                    "events": last - first + 1,
+                    "prior_segment_head": bound["prior_segment_head"],
+                    "segment_head": self.event_at(last)["event_hash"],
+                    "integrity": "metadata-only-verified-not-authenticated",
+                }
+        if self.count() != verified_count or self.head() != proven["head"]:
             raise NoosphereError("journal advanced during receipt generation")
 
     def event_at(self, seq):
