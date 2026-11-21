@@ -71,6 +71,21 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Bounded foreground host
+
+For a paced, restartable one-device session around the same canonical loop,
+use the bounded foreground host. It commits only real ticks, stops between
+SQLite appends, refuses runs beyond the fixed replay budget, and prints
+metadata rather than PRIVATE frames or learner state:
+
+```bash
+PYTHONPATH=src python -m mojum.portable_host --db ./host_PRIVATE.sqlite3 --ticks 20 --interval-ms 50
+```
+
+Repeat with the same path to resume. This is still a synthetic CPU fixture,
+not a neural brain, physical actuator, Android service, or 24/7 guarantee.
+See [bounded host details](docs/PORTABLE_CPU_HOST_R013.md).
+
 ### Replay a committed decision offline
 
 After the six-tick guided run above, export a local trace from the same journal.
