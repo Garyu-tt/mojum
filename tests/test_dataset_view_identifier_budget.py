@@ -50,6 +50,12 @@ class DatasetIdentifierBudgetTests(unittest.TestCase):
             project_episodes([event(source="x" * 257, visibility="PRIVATE")],
                              allowed_sources={"synthetic"})
 
+    def test_excluded_public_source_is_checked_before_filtering(self):
+        # A filtered-out source is still part of the input trust boundary.
+        with self.assertRaisesRegex(ValueError, "identifiers"):
+            project_episodes([event(source="x" * 257)],
+                             allowed_sources={"synthetic"})
+
     def test_existing_surrogate_contract_is_not_relaxed(self):
         with self.assertRaisesRegex(ValueError, "UTF-8"):
             project_episodes([event(id="bad\ud800")], allowed_sources={"synthetic"})
