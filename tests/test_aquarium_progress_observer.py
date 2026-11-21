@@ -5,7 +5,10 @@ physical archive -> owner HMAC -> recovered quarantine -> immutable view.
 Activity statistics never claim to measure a digital child's intelligence.
 """
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -159,6 +162,43 @@ class SyntheticProgressReadOnlyQA(unittest.TestCase):
             result["synthetic_association_updates"],
         )
         self.assertNotIn("toy.synthetic.fixture", json.dumps(result))
+
+    def test_cli_progress_is_opt_in_and_never_emits_private_event_payload(self):
+        digest, checkpoint = self._aquarium(toy=True)
+        env = dict(os.environ, PYTHONPATH=str(ROOT/"src"))
+        args = [
+            sys.executable, "-m", "mojum.segment_archive_cli",
+            "observe-replica", "--db", str(self.recovered),
+            "--receipt-file", str(self.receipt),
+            "--key-file", str(self.key),
+            "--expected-receipt-sha", digest,
+            "--expected-agent-id", OWNER,
+        ]
+        def cli(*more):
+            return subprocess.run(
+                args+list(more), cwd=ROOT, env=env,
+                text=True, capture_output=True, timeout=30,
+            )
+        default = cli()
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertNotIn("motor_frames", default.stdout)
+        data = json.loads(default.stdout)
+        self.assertEqual(data["journal_events"], 131)
+        private = cli("--include-private-progress", "--progress-bins", "8")
+        self.assertEqual(private.returncode, 0, private.stderr)
+        result = json.loads(private.stdout)
+        self.assertEqual(result["motor_frames"], 130)
+        self.assertEqual(result["source_head"], checkpoint["journal_head"])
+        self.assertEqual(len(result["histogram"]), 8)
+        self.assertGreater(result["synthetic_association_updates"], 0)
+        for secret in ("payload", "toy.synthetic.fixture", "genome_revision",
+                       "movement_request", str(self.key), str(self.recovered)):
+            self.assertNotIn(secret, private.stdout)
+        both = cli("--include-private-progress", "--include-private-metadata")
+        self.assertNotEqual(both.returncode, 0)
+        self.assertNotIn("motor_frames", both.stdout)
+        excessive = cli("--include-private-progress", "--progress-bins", "33")
+        self.assertNotEqual(excessive.returncode, 0)
 
     def test_non_aquarium_archive_is_not_represented_as_a_developmental_agent(self):
         with SegmentedNoosphere(self.original, OWNER, segment_size=64) as q:
