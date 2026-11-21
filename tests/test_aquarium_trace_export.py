@@ -271,6 +271,43 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
         self.assertEqual(footer["journal_head"], head)
         self.assertNotIn("temporal_range_state", footer)
 
+    def test_cli_exports_committed_developmental_controller_frames(self):
+        with self.aquarium(motor_mode="developmental_fixture",
+                           sensory_mode="toy_probe",
+                           brain_mode="developmental_controller") as aquarium:
+            recorded = [aquarium.step() for _ in range(4)]
+            head = aquarium.store.head()
+        before = self.db.read_bytes()
+        command = [
+            sys.executable, "-m", "mojum.aquarium_trace_export",
+            "--db", str(self.db), "--output", str(self.out),
+            "--motor-mode", "developmental_fixture", "--sensory-mode", "toy_probe",
+            "--expected-head", head, "--allow-private-export",
+        ]
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        refused = subprocess.run(command, cwd=self.root, env=env, encoding="utf-8",
+                                 capture_output=True, timeout=30)
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("mode mismatch", refused.stderr)
+        self.assertFalse(self.out.exists())
+        self.assertEqual(self.db.read_bytes(), before)
+
+        accepted = subprocess.run(
+            [*command, "--brain-mode", "developmental_controller"],
+            cwd=self.root, env=env, encoding="utf-8", capture_output=True, timeout=30,
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        report = json.loads(accepted.stdout)
+        self.assertEqual(report["frames"], len(recorded))
+        self.assertEqual(report["journal_head"], head)
+        self.assertNotIn("brain", report)
+        self.assertEqual(self.db.read_bytes(), before)
+        frames, footer = self.frames_and_summary()
+        self.assertEqual(frames, recorded)
+        self.assertEqual(frames[0]["brain"]["schema"], "mojum.neural.developmental-controller/1")
+        self.assertEqual(footer["journal_head"], head)
+        self.assertNotIn("brain", footer)
+
 
 if __name__ == "__main__":
     unittest.main()

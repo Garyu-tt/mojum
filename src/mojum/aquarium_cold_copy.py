@@ -95,12 +95,12 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
                      expected_journal_head, expected_sha256=None,
                      expected_tick=None, neural_mode="shadow",
                      room=None, start=(1.0, 2.0), dt_ns=10_000_000,
-                     motor_mode="scripted", sensory_mode="none", sensory_scene=None,
-                     temporal_mode="none", brain_mode="placeholder"):
+                     motor_mode="scripted", brain_mode="placeholder",
+                     sensory_mode="none", sensory_scene=None, temporal_mode="none"):
     """Verify a complete cold SQLite history against an independently held head.
 
     The optional byte hash detects any change in the exact artifact. Reopening
-    replays the complete PRIVATE log and validates all Aquarium events.
+    replays the complete PRIVATE log with the supplied Aquarium configuration.
     No physical actuators or motor gates are restored.
     """
     source = _source_file(path)
@@ -132,8 +132,8 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
             staged, seed, graph, agent_id=expected_agent_id,
             external_expected_head=expected_journal_head, neural_mode=neural_mode,
             room=room, start=start, dt_ns=dt_ns, motor_mode=motor_mode,
-            sensory_mode=sensory_mode, sensory_scene=sensory_scene,
-            temporal_mode=temporal_mode, brain_mode=brain_mode,
+            brain_mode=brain_mode, sensory_mode=sensory_mode,
+            sensory_scene=sensory_scene, temporal_mode=temporal_mode,
         ) as child:
             snapshot = child.checkpoint()
             if snapshot["journal_head"] != expected_journal_head:
@@ -151,13 +151,14 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
 def export_cold_copy(source_db, destination_db, seed, graph, *,
                      agent_id="dante-fixture-001", neural_mode="shadow",
                      room=None, start=(1.0, 2.0), dt_ns=10_000_000,
-                     motor_mode="scripted", sensory_mode="none", sensory_scene=None,
-                     temporal_mode="none", brain_mode="placeholder"):
+                     motor_mode="scripted", brain_mode="placeholder",
+                     sensory_mode="none", sensory_scene=None, temporal_mode="none"):
     """Make and replay-verify a no-clobber SQLite backup of a running journal.
 
     A read-only SQLite connection takes a consistent online backup, including
     committed WAL pages. Only the temporary backup is opened for full Aquarium
-    replay, so source history is never opened writable during export.
+    replay with the supplied Aquarium configuration. The source history is
+    never opened writable during export.
     Concurrent commits are reflected in the backup's verified snapshot.
     """
     source = _source_file(source_db)
@@ -205,8 +206,8 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
             temporary, seed, graph, agent_id=agent_id,
             external_expected_head=copied_head, neural_mode=neural_mode,
             room=room, start=start, dt_ns=dt_ns, motor_mode=motor_mode,
-            sensory_mode=sensory_mode, sensory_scene=sensory_scene,
-            temporal_mode=temporal_mode, brain_mode=brain_mode,
+            brain_mode=brain_mode, sensory_mode=sensory_mode,
+            sensory_scene=sensory_scene, temporal_mode=temporal_mode,
         ) as reopened:
             before = reopened.checkpoint()
             if before["journal_head"] != copied_head:
@@ -251,11 +252,11 @@ def main():
         p.add_argument("--agent-id", help="journal owner, defaults to the supplied genome ID")
         p.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
         p.add_argument("--motor-mode", choices=MOTOR_MODES, default="scripted")
+        p.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
+                       default="placeholder")
         p.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                        default="none")
         p.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
-        p.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
-                       default="placeholder")
         if mode == "export":
             p.add_argument("--output", type=Path, required=True)
         else:
@@ -263,22 +264,22 @@ def main():
             p.add_argument("--expected-sha256")
             p.add_argument("--expected-tick", type=int)
     args = parser.parse_args()
+    options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
+                   brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
+                   temporal_mode=args.temporal_mode)
     try:
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
         agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
-        profile = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
-                       sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
-                       brain_mode=args.brain_mode)
         if args.mode == "export":
             result = export_cold_copy(args.db, args.output, seed, graph,
-                                      agent_id=agent_id, **profile)
+                                      agent_id=agent_id, **options)
         else:
             result = verify_cold_copy(args.db, seed, graph,
                                       expected_agent_id=agent_id,
                                       expected_journal_head=args.expected_head,
                                       expected_sha256=args.expected_sha256,
-                                      expected_tick=args.expected_tick, **profile)
+                                      expected_tick=args.expected_tick, **options)
     except (ValueError, OSError, sqlite3.Error) as exc:
         parser.error(str(exc))
     print(json.dumps(result, sort_keys=True, allow_nan=False))
