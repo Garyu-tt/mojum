@@ -21,6 +21,9 @@ from .archive_root_receipt import (
 from .archive_device_transfer import (
     TransferError, copy_pinned_archive_to_device,
 )
+from .verified_replica_restore import recover_pinned_replica
+from .quarantined_observer import QuarantinedObserver, ObserverError
+from .aquarium_progress_observer import summarize_synthetic_progress
 from .segmented_noosphere import SegmentedNoosphere
 from .noosphere import NoosphereError
 
@@ -93,6 +96,33 @@ def main(argv=None):
     transport.add_argument("--key-file", type=Path, required=True)
     transport.add_argument("--expected-receipt-sha", required=True)
     transport.add_argument("--include-private", action="store_true")
+    cold = sub.add_parser(
+        "recover-replica",
+        help="owner-HMAC verified cold restoration into a NEW PRIVATE SQLite",
+    )
+    cold.add_argument("--archive-dir", type=Path, required=True)
+    cold.add_argument("--new-db", type=Path, required=True)
+    cold.add_argument("--receipt-file", type=Path, required=True)
+    cold.add_argument("--key-file", type=Path, required=True)
+    cold.add_argument("--expected-receipt-sha", required=True)
+    cold.add_argument("--expected-agent-id", required=True)
+    cold.add_argument("--include-private", action="store_true")
+    watch = sub.add_parser(
+        "observe-replica",
+        help="read HMAC-anchored quarantined history with immutable SQLite mode",
+    )
+    watch.add_argument("--db", type=Path, required=True)
+    watch.add_argument("--receipt-file", type=Path, required=True)
+    watch.add_argument("--key-file", type=Path, required=True)
+    watch.add_argument("--expected-receipt-sha", required=True)
+    watch.add_argument("--expected-agent-id", required=True)
+    watch.add_argument("--include-private-metadata", action="store_true")
+    watch.add_argument("--recent", type=int, default=12)
+    watch.add_argument(
+        "--include-private-progress", action="store_true",
+        help="explicitly reveal bounded synthetic activity aggregates only",
+    )
+    watch.add_argument("--progress-bins", type=int, default=16)
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -155,7 +185,7 @@ def main(argv=None):
                 args.receipt_file, args.key_file,
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
             )
-        else:
+        elif args.operation == "copy-device":
             if not args.include_private:
                 parser.error("PRIVATE cross-device copy requires --include-private")
             status = copy_pinned_archive_to_device(
@@ -164,7 +194,37 @@ def main(argv=None):
                 independently_pinned_receipt_sha256=args.expected_receipt_sha,
                 include_nonpublic=True,
             )
-    except (ArchiveError, NoosphereError, ReceiptError, TransferError) as exc:
+        elif args.operation == "recover-replica":
+            if not args.include_private:
+                parser.error("PRIVATE replica recovery requires --include-private")
+            status = recover_pinned_replica(
+                args.archive_dir, args.new_db,
+                args.receipt_file, args.key_file,
+                independently_pinned_receipt_sha256=args.expected_receipt_sha,
+                expected_agent_id=args.expected_agent_id,
+                allow_private_restore=True,
+            )
+        else:
+            if args.include_private_progress and args.include_private_metadata:
+                parser.error(
+                    "choose either private metadata or synthetic aggregate progress"
+                )
+            with QuarantinedObserver(
+                args.db, args.receipt_file, args.key_file,
+                independently_pinned_receipt_sha256=args.expected_receipt_sha,
+                expected_agent_id=args.expected_agent_id,
+            ) as view:
+                if args.include_private_progress:
+                    status = summarize_synthetic_progress(
+                        view, include_private_metrics=True,
+                        bins=args.progress_bins,
+                    )
+                else:
+                    status = view.summary(
+                        include_private_metadata=args.include_private_metadata,
+                        max_recent=args.recent,
+                    )
+    except (ArchiveError, NoosphereError, ReceiptError, TransferError, ObserverError) as exc:
         parser.error(str(exc))
     # Do not expose PRIVATE data or even absolute source/destination paths.
     status.pop("restored_path", None)
