@@ -22,6 +22,7 @@ from .segment_archive import ArchiveError, private_directory, publish_new
 from .live_tail_capsule import verify_point_in_time
 
 SCHEMA = "mojum.noosphere.owner-archive-receipt/1"
+_HMAC_DOMAIN = b"mojum.noosphere.owner-archive-receipt/1\x00"
 MAX_RECEIPT_BYTES = 4096
 _RECEIPT_FIELDS = {"schema", "statement", "hmac_sha256"}
 _STATEMENT_FIELDS = {
@@ -112,12 +113,15 @@ def sign_owner_receipt(archive_dir, receipt_file, key_file, *,
             raise ReceiptError("receipt may not be placed inside archive tree")
     except (OSError, RuntimeError) as exc:
         raise ReceiptError("receipt location cannot be resolved") from exc
+    secret_path = Path(key_file).resolve()
+    if secret_path.is_relative_to(archive.resolve()):
+        raise ReceiptError("owner signing key cannot be stored in archive tree")
     key = read_key(key_file)
     statement = _statement_for_archive(
         archive, source_events=source_events,
         external_expected_source_head=external_expected_source_head,
     )
-    mac = hmac.new(key, _canonical_bytes(statement), hashlib.sha256).hexdigest()
+    mac = hmac.new(key, _HMAC_DOMAIN + _canonical_bytes(statement), hashlib.sha256).hexdigest()
     envelope = {
         "schema": SCHEMA, "statement": statement, "hmac_sha256": mac,
     }
@@ -170,7 +174,7 @@ def verify_owner_receipt(receipt_file, key_file, *,
     if _canonical_bytes(envelope) != raw:
         raise ReceiptError("noncanonical signed receipt envelope")
     expected = hmac.new(
-        key, _canonical_bytes(statement), hashlib.sha256,
+        key, _HMAC_DOMAIN + _canonical_bytes(statement), hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, envelope["hmac_sha256"]):
         raise ReceiptError("HMAC owner signature mismatch")
