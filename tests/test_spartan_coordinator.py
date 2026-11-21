@@ -56,6 +56,27 @@ class SpartanTests(unittest.TestCase):
         self.assertIsNone(claim(self.db, 4, 203, 30))
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_worker_requeues_cannot_exceed_three_attempts(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        for attempt in range(1, 4):
+            now = 110 + attempt * 10
+            lease = claim(self.db, attempt, now, 30)
+            self.assertEqual(lease["attempts"], attempt)
+            self.assertTrue(finish(self.db, attempt, "a", "queued", now + 1))
+        self.assertIsNone(claim(self.db, 4, 200, 30))
+        row = self.db.execute(
+            "SELECT state, attempts, worker_id FROM tasks WHERE id='a'"
+        ).fetchone()
+        self.assertEqual(row["state"], "blocked")
+        self.assertEqual(row["attempts"], 3)
+        self.assertIsNone(row["worker_id"])
+
+    def test_exhausted_queued_row_is_fenced_before_claim(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        self.db.execute("UPDATE tasks SET attempts=3 WHERE id='a'")
+        self.assertIsNone(claim(self.db, 1, 110, 30))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+
     def test_review_requires_artifact_and_no_self_accept(self):
         enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
         claim(self.db, 1, 110)
