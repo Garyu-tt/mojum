@@ -174,6 +174,23 @@ PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
 never writes to the journal and rejects scripted or noncanonical journals.
 [Audit contract](docs/DEVELOPMENTAL_R013.md)
 
+## Explicit local-cell history compatibility
+
+Use `--motor-mode local_cell_v2b` for a new v2B journal. The historic
+`local_cell_v2` spelling resumes only existing v2B history. The exact
+v2B SQLite schema remains compatible with the original #115 runtime.
+For original #112 history, use `--motor-mode local_cell_v2_a_archive
+--ticks 0` and the original genome, graph, and neural mode. Both profiles
+use the exact built-in point-room and frame-only journals without toy sensing.
+
+To transfer a verified v2A history into a separate new v2B file, use
+`python -m mojum.migration_v2a_v2b` with the original genome and graph,
+an independently recorded `--expected-source-head`, and the explicit
+`--create-new-journal` flag. The transfer compares every frame and the
+learned state, with a limit of 1,000 frames. It refuses an existing
+destination and preserves the source file. Both modes can also produce
+replay-verified PRIVATE JSONL via the offline exporter.
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.

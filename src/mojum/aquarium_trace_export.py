@@ -20,7 +20,7 @@ import sqlite3
 import stat
 import tempfile
 
-from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
+from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA, MOTOR_MODES
 from .genesis import validate_seed
 from .graph import load_graph
 
@@ -273,7 +273,7 @@ def main():
     parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     parser.add_argument("--agent-id", help="override journal owner from the supplied genome ID")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
-    parser.add_argument("--motor-mode", choices=("scripted", "developmental_fixture"),
+    parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
                         default="none")
