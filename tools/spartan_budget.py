@@ -52,7 +52,8 @@ def schema(db: sqlite3.Connection) -> None:
     CREATE TABLE IF NOT EXISTS budget (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         token_limit INTEGER NOT NULL CHECK (token_limit BETWEEN 1 AND 1000000000000),
-        micro_usd_limit INTEGER NOT NULL CHECK (micro_usd_limit BETWEEN 0 AND 1000000000000)
+        micro_usd_limit INTEGER NOT NULL CHECK (micro_usd_limit BETWEEN 0 AND 1000000000000),
+        frozen INTEGER NOT NULL DEFAULT 0 CHECK (frozen IN (0, 1))
     );
     CREATE TABLE IF NOT EXISTS requests (
         request_id TEXT PRIMARY KEY,
@@ -94,6 +95,9 @@ def reserve(db: sqlite3.Connection, request_id: str, worker: int,
     _integer(micro_usd, "micro_usd", 0)
     db.execute("BEGIN IMMEDIATE")
     try:
+        policy = db.execute("SELECT frozen FROM budget WHERE id=1").fetchone()
+        if policy is None or policy["frozen"]:
+            raise BudgetError("budget missing or frozen after provider overrun")
         existing = db.execute("SELECT * FROM requests WHERE request_id=?", (request_id,)).fetchone()
         if existing is not None:
             if (existing["worker"], existing["reserved_tokens"],
@@ -134,7 +138,10 @@ def settle(db: sqlite3.Connection, request_id: str, worker: int,
             raise BudgetError("unknown request_id or wrong worker")
         if (actual_tokens > row["reserved_tokens"] or
                 actual_micro_usd > row["reserved_micro_usd"]):
-            raise BudgetError("reported usage exceeds reservation; investigate provider spend")
+            # Persist freeze before raising; never roll it back on the error path.
+            db.execute("UPDATE budget SET frozen=1 WHERE id=1")
+            db.execute("COMMIT")
+            raise BudgetError("reported usage exceeds reservation; ledger frozen")
         if row["state"] == "settled":
             if (row["actual_tokens"], row["actual_micro_usd"]) != (actual_tokens, actual_micro_usd):
                 raise BudgetError("settlement receipt changed")
@@ -147,12 +154,13 @@ def settle(db: sqlite3.Connection, request_id: str, worker: int,
         db.execute("COMMIT")
         return {"request_id": request_id, "new_settlement": new, "state": "settled"}
     except BaseException:
-        db.execute("ROLLBACK")
+        if db.in_transaction:
+            db.execute("ROLLBACK")
         raise
 
 
 def status(db: sqlite3.Connection) -> dict:
-    row = db.execute("SELECT token_limit, micro_usd_limit FROM budget WHERE id=1").fetchone()
+    row = db.execute("SELECT token_limit, micro_usd_limit, frozen FROM budget WHERE id=1").fetchone()
     if row is None:
         raise BudgetError("budget is not configured")
     sums = db.execute("""
@@ -165,6 +173,7 @@ def status(db: sqlite3.Connection) -> dict:
         FROM requests
     """).fetchone()
     return {"token_limit": row["token_limit"], "micro_usd_limit": row["micro_usd_limit"],
+            "frozen": bool(row["frozen"]),
             **dict(sums), "dispatch_active": False}
 
 
