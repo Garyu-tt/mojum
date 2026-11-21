@@ -60,7 +60,7 @@ def _destination(path):
         if (not stat.S_ISDIR(info.st_mode) or
                 info.st_uid != os.geteuid() or
                 stat.S_IMODE(info.st_mode) & 0o077 or
-                not stat.S_IMODE(info.st_mode) & 0o300 == 0o300):
+                (stat.S_IMODE(info.st_mode) & 0o300) != 0o300):
             raise PermissionError(
                 "PRIVATE trace output directory must be owner-owned, "
                 "owner-writable/searchable, and not accessible to group/other"
