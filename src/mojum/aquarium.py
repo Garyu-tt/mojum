@@ -383,6 +383,19 @@ class Aquarium:
             return min(MAX_REPLAY_EVENTS, MAX_MOTOR_REPLAY_EVENTS)
         return MAX_REPLAY_EVENTS
 
+    def required_events_for_steps(self, ticks):
+        """Reserve future frame and epoch marker events before any write."""
+        if type(ticks) is not int or ticks < 0:
+            raise AquariumError("steps must be a nonnegative integer")
+        if self.motor_mode != V4_MODE:
+            return ticks
+        end = self.tick + ticks
+        if end > MAX_ABSOLUTE_TICKS:
+            raise AquariumError("v4 absolute tick budget exhausted")
+        markers = (max(0, (end - 1) // EPOCH_TICKS - self.epoch_index)
+                   if ticks else 0)
+        return ticks + markers
+
     def _epoch_event(self, epoch_index):
         if self.motor_mode != V4_MODE or type(epoch_index) is not int or epoch_index < 1:
             raise AquariumError("epoch markers are only valid for local_cell_v4")
@@ -607,6 +620,9 @@ class Aquarium:
             raise AquariumError(
                 "local_cell_v4 absolute tick budget reached; "
                 "authenticated segmented continuation is not implemented")
+        if self.motor_mode == V4_MODE:
+            if self._committed_count + self.required_events_for_steps(1) > self.journal_event_budget:
+                raise AquariumError("v4 journal budget exhausted before epoch marker")
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
@@ -928,7 +944,11 @@ def main():
     with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
-        if aquarium.stored_events + args.ticks > aquarium.journal_event_budget:
+        try:
+            required_events = aquarium.required_events_for_steps(args.ticks)
+        except AquariumError as exc:
+            parser.error(str(exc))
+        if aquarium.stored_events + required_events > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=dx, dy=dy)
