@@ -6,12 +6,14 @@ on:
       - ".github/workflows/r016-native-epoch-export.yml"
       - "src/mojum/aquarium_trace_export.py"
       - "tests/test_r016_private_trace_export.py"
+      - "tests/test_r016_legacy_budget_compat.py"
       - "tests/qa_r016_epoch_export_browser.py"
   push:
     paths:
       - ".github/workflows/r016-native-epoch-export.yml"
       - "src/mojum/aquarium_trace_export.py"
       - "tests/test_r016_private_trace_export.py"
+      - "tests/test_r016_legacy_budget_compat.py"
       - "tests/qa_r016_epoch_export_browser.py"
   workflow_dispatch:
 
@@ -38,6 +40,10 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p test_r016_private_trace_export.py -v
+      - name: Reject legacy budget regressions without limiting segmented runtime
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_r016_legacy_budget_compat.py -v
 
   original-v4-epoch-sensory-to-chrome:
     name: native-v4-sensory2-real-chrome
