@@ -10,11 +10,16 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -139,6 +144,118 @@ def inspect_actual_browser(chrome, html, *, width, height):
         return result
 
 
+def inspect_actual_mobile_chromedriver(chrome, html, *, width, height):
+    """Emulate *exact CSS pixels* via Chrome DevTools, not window-size hint.
+
+    GitHub ubuntu-24.04 ships Chrome and ChromeDriver. Use only Python's
+    urllib over loopback WebDriver; no Selenium/Playwright/npm dependency.
+    """
+    binary = shutil.which("chromedriver")
+    if not binary:
+        hint = os.environ.get("CHROMEWEBDRIVER", "")
+        candidates = [Path(hint)] if hint else []
+        if hint:
+            candidates.append(Path(hint) / "chromedriver")
+        binary = next((str(p) for p in candidates if p.is_file()), None)
+    if not binary:
+        raise RuntimeError("ChromeDriver unavailable: cannot claim 390px mobile viewport")
+    with tempfile.TemporaryDirectory(prefix="mojum-actual-mobile-") as scratch:
+        file = Path(scratch) / "viewer.actual.mobile.html"
+        file.write_text(html, encoding="utf-8")
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        driver = subprocess.Popen(
+            [binary, "--port=" + str(port),
+             "--allowed-ips=127.0.0.1", "--log-level=SEVERE"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        prefix = "http://127.0.0.1:" + str(port)
+        session_id = None
+
+        def web_driver(method, suffix, body=None):
+            data = json.dumps(body).encode("utf-8") if body is not None else None
+            req = Request(prefix + suffix, data=data, method=method,
+                          headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=5) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            value = result.get("value")
+            if isinstance(value, dict) and value.get("error"):
+                raise RuntimeError("ChromeDriver API error: " + str(value["error"]))
+            return value
+
+        try:
+            for _ in range(70):
+                if driver.poll() is not None:
+                    raise RuntimeError("ChromeDriver failed to start")
+                try:
+                    web_driver("GET", "/status")
+                    break
+                except (URLError, ConnectionError):
+                    time.sleep(0.1)
+            else:
+                raise RuntimeError("ChromeDriver did not become ready")
+            response = web_driver("POST", "/session", {
+                "capabilities": {
+                    "alwaysMatch": {
+                        "browserName": "chrome",
+                        "goog:chromeOptions": {
+                            "binary": chrome,
+                            "args": [
+                                "--headless=new", "--no-sandbox",
+                                "--disable-gpu", "--disable-dev-shm-usage",
+                                "--no-first-run", "--disable-background-networking",
+                                "--disable-extensions", "--disable-sync",
+                                "--disable-component-update",
+                            ],
+                        },
+                    },
+                },
+            })
+            session_id = response["sessionId"]
+            route = "/session/" + session_id
+            web_driver("POST", route + "/goog/cdp/execute", {
+                "cmd": "Emulation.setDeviceMetricsOverride",
+                "params": {
+                    "width": width,
+                    "height": height,
+                    "deviceScaleFactor": 1,
+                    "mobile": True,
+                    "screenWidth": width,
+                    "screenHeight": height,
+                },
+            })
+            web_driver("POST", route + "/url", {"url": file.as_uri()})
+            for _ in range(70):
+                raw = web_driver("POST", route + "/execute/sync", {
+                    "script": (
+                        "return document.documentElement"
+                        ".getAttribute('data-real-chrome-smoke')"
+                    ),
+                    "args": [],
+                })
+                if raw:
+                    result = json.loads(raw)
+                    if "error" in result:
+                        raise AssertionError(result["error"])
+                    return result
+                time.sleep(0.1)
+            raise AssertionError("actual mobile browser never loaded JSONL telemetry")
+        finally:
+            if session_id:
+                try:
+                    web_driver("DELETE", "/session/" + session_id)
+                except Exception:
+                    pass
+            driver.terminate()
+            try:
+                driver.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                driver.kill()
+                driver.wait(timeout=5)
+
+
 def main():
     chrome = chrome_binary()  # No silent skip/fallback to JS VM.
     with tempfile.TemporaryDirectory(prefix="mojum-private-chrome-fixture-") as tmp:
@@ -158,9 +275,11 @@ def main():
         injected = instrumented_html(original, data)
         reports = []
         for width,height,mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
-            report = inspect_actual_browser(
+            report = (inspect_actual_mobile_chromedriver(
                 chrome, injected, width=width, height=height
-            )
+            ) if mode == "mobile" else inspect_actual_browser(
+                chrome, injected, width=width, height=height
+            ))
             first, second, viewport = (
                 report["first"], report["second"], report["viewport"]
             )
@@ -175,6 +294,10 @@ def main():
             assert second["counter"] == "2 / 2", (mode,"counter")
             assert "verified.synthetic.private.jsonl" in second["source"]
             assert viewport["width"] > 0
+            if mode == "mobile":
+                assert viewport["width"] == 390, (
+                    "Chrome must render actual 390 CSS-px mobile viewport", viewport
+                )
             assert viewport["canvasWidth"] >= 100
             assert viewport["canvasHeight"] >= 60
             assert viewport["controlsWidth"] > 0
@@ -190,6 +313,7 @@ def main():
                 "second_tick":second["tick"],
                 "measured_contact":first["measured"],
                 "next_prediction":second["prediction"],
+                "css_viewport_width_px":viewport["width"],
                 "canvas_width_px":round(viewport["canvasWidth"]),
                 "horizontal_overflow":False,
             })
