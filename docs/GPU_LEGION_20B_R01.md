@@ -7,9 +7,9 @@ GitHub Actions, secrets or merge rules.
 
 ## Intended model
 
-Use the open-weight \`openai/gpt-oss-20b\` (20.9B total parameters, roughly
+Use the open-weight `openai/gpt-oss-20b` (20.9B total parameters, roughly
 3.6B active parameters per token), with a **verified local GGUF** and
-\`llama.cpp\` CUDA backend. Official sources:
+`llama.cpp` CUDA backend. Official sources:
 
 - OpenAI: https://openai.com/index/introducing-gpt-oss/
 - GGUF llama.cpp guide: https://github.com/ggml-org/llama.cpp/discussions/15396
@@ -34,7 +34,7 @@ free-memory readings. The synthetic two-replica scenario applies only after
 resources have been safely released and remeasured.
 This is a capacity estimate, **not proof** of an executable model on Pascal.
 Older NVIDIA Pascal (compute capability 6.1) requires a compatible CUDA
-build, typically CUDA 12 and a llama.cpp build targeting \`sm_61\`.
+build, typically CUDA 12 and a llama.cpp build targeting `sm_61`.
 Native MXFP4 GPU acceleration is unavailable on this generation. Expect
 performance and layer/offload behavior to differ from modern GPUs; slow PCIe
 links can dominate. Never assume that 42 GiB on seven cards is one contiguous
@@ -69,38 +69,38 @@ remains active until a tested replacement exists.
 
 On a machine with NVIDIA drivers installed:
 
-\`\`\`sh
+```sh
 python3 tools/gpu_legion_plan.py --model /models/gpt-oss-20b-mxfp4.gguf \
   --require-replicas 2 > gpu-placement.json
-\`\`\`
+```
 
-The planner probes only local \`nvidia-smi\` and emits a machine-readable plan.
+The planner probes only local `nvidia-smi` and emits a machine-readable plan.
 It **never executes** the emitted commands or contacts an LLM endpoint.
 The default new endpoint is **127.0.0.1:18180** (next: 18181), deliberately
 avoiding the existing ALT factory service on port 18080. The output field
-\`hardware_verified\` is **always false**: even live \`nvidia-smi\` is an
+`hardware_verified` is **always false**: even live `nvidia-smi` is an
 observation, not authenticated device attestation or proof of model loading.
-Only a real direct probe sets \`observed_local_inventory=true\` in CLI output;
-an offline \`--inventory\` file cannot do so even if its JSON says
-\`source: nvidia-smi\`. No generated plan authorizes starting a service. If
-\`nvidia-smi\` is absent, invalid, or the required number of replicas cannot
+Only a real direct probe sets `observed_local_inventory=true` in CLI output;
+an offline `--inventory` file cannot do so even if its JSON says
+`source: nvidia-smi`. No generated plan authorizes starting a service. If
+`nvidia-smi` is absent, invalid, or the required number of replicas cannot
 be placed within the budget, it exits 2. If a host has fewer than two viable
-replicas, omit \`--require-replicas 2\` to see its actual proposal.
+replicas, omit `--require-replicas 2` to see its actual proposal.
 
 For a unit-tested, synthetic seven-card scenario without GPUs:
 
-\`\`\`sh
+```sh
 python3 tools/gpu_legion_plan.py \
   --inventory examples/gpu_legion_7xp106.synthetic.json \
   --require-replicas 2
 python3 -m unittest discover -s tests -p 'test_gpu_legion_plan.py' -v
-\`\`\`
+```
 
 Each proposed replica includes:
 
 - nonoverlapping GPU indices, unique loopback inference port, and usable VRAM
-- \`CUDA_VISIBLE_DEVICES\` mapping and an argument-vector for \`llama-server\`
-- bounded \`--ctx-size 2048\`, \`--parallel 1\` and layer splitting across GPUs
+- `CUDA_VISIBLE_DEVICES` mapping and an argument-vector for `llama-server`
+- bounded `--ctx-size 2048`, `--parallel 1` and layer splitting across GPUs
 
 The model source is revision-pinned above. Hugging Face's current default
 branch may expose a different case-sensitive filename and byte count than
@@ -112,7 +112,7 @@ The plan uses the **current index order** reported by nvidia-smi. Index order
 can change across reboots or GPU resets. An actual launcher must re-probe and
 verify physical GPU UUIDs immediately before launch, avoid sharing devices
 between replicas, and reject changed inventory. Never feed an untrusted
-JSON-derived command to \`eval\` or a shell. No launcher is implemented here.
+JSON-derived command to `eval` or a shell. No launcher is implemented here.
 
 ## Activation gate
 
@@ -120,7 +120,7 @@ JSON-derived command to \`eval\` or a shell. No launcher is implemented here.
    This change does not contact or administer any node.
 2. Capture trusted real GPU inventory, UUIDs, NVIDIA driver and CUDA version,
    compute capability, power draw, PCIe links, and available memory. A
-   \`source: synthetic\` snapshot never authorizes placement.
+   `source: synthetic` snapshot never authorizes placement.
 3. Compile/verify a known llama.cpp CUDA build with support for the target
    architecture; securely stage a SHA-pinned GGUF. For Pascal, validate MXFP4
    compatibility in the actual installed runtime.
@@ -137,3 +137,40 @@ JSON-derived command to \`eval\` or a shell. No launcher is implemented here.
 If the GPUs are unavailable, stop. Do not silently deploy CPU-only processes
 or switch to a remote cloud endpoint. The model servers should never have
 GitHub publish/merge rights or secrets from Noosphere.
+
+
+## Local GGUF integrity gate (read-only)
+
+Before any GPU execution, verify the staged file against **one selected
+revision**, without altering ALT. The stdlib-only verifier rejects changed
+bytes, wrong GGUF magic, symlinks, pipes and size mismatches. It reads the
+whole model in bounded chunks, without downloading it or launching a model.
+
+For the **immutable ccd6794... revision listed above only**:
+
+```sh
+python3 tools/gpu_legion_artifact_check.py \
+  --file /srv/alt/models/gpt-oss-20b-mxfp4.gguf \
+  --bytes 12109566560 \
+  --sha256 be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935
+```
+
+The separate **current upstream main snapshot** observed 2026-11-22 uses
+the case-sensitive filename `gpt-oss-20b-MXFP4.gguf`, size 12109566624 and
+LFS SHA-256
+`27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901`.
+Those values must **never** be mixed with the older immutable revision.
+Pin its own full repository revision before creating a production manifest:
+`https://huggingface.co/api/models/ggml-org/gpt-oss-20b-GGUF/tree/main`
+is a **mutable** source, not a stable deployment pin.
+
+A passing verifier means only that bytes match the chosen expected digest.
+It does not prove the source of the supplied digest, CUDA compatibility,
+model quality, throughput, VRAM sufficiency or launch readiness. Require
+separate isolated llama.cpp tests and the independent CI/QA gate.
+
+Run the new unit tests without any GPU or model download:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_gpu_legion_artifact_check.py' -v
+```
