@@ -64,6 +64,10 @@ def evaluate_checks(checks, **overrides):
     kwargs.setdefault("expected_head_sha", HEAD)
     kwargs.setdefault("expected_base", "main")
     kwargs.setdefault("required", REQUIRED)
+    kwargs.setdefault(
+        "required_counts",
+        {pattern: 1 for pattern in kwargs["required"] if pattern in REQUIRED},
+    )
     parsed = parse_snapshot(
         {
             "headRefOid": HEAD,
@@ -249,6 +253,22 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
 
+    def test_failure_conclusion_wins_over_inconsistent_pending_status(self):
+        # GitHub snapshots can be consumed while a rollup is changing.
+        # Even if the status field is stale, a terminal failure is not safe
+        # to downgrade to an indefinite DEFER.
+        for status in ("IN_PROGRESS", "QUEUED", "WAITING", "bogus"):
+            with self.subTest(status=status):
+                checks = self.green() + [
+                    run(
+                        status=status, conclusion="FAILURE",
+                        workflow="Mesh contract",
+                    ),
+                ]
+                result = evaluate_checks(checks)
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_FAILED")
+
     def test_skipped_check_requires_a_waiver(self):
         checks = self.green()[:2] + [
             run(name="mesh", conclusion="SKIPPED", workflow="Mesh contract")
@@ -336,6 +356,56 @@ class GateVerdictTests(unittest.TestCase):
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "NO_REQUIRED_CHECKS")
 
+    def test_wildcard_requires_pinned_job_inventory(self):
+        # The rollup can expose one successful Python job before its siblings
+        # register. A generic matching wildcard must not mark it ready.
+        checks = [run(name="aquarium-stdlib (3.11)", workflow="Aquarium QA")]
+        without_inventory = evaluate_checks(
+            checks,
+            required=("Aquarium*",),
+            required_counts={},
+        )
+        self.assertEqual(without_inventory.verdict, "reject")
+        self.assertEqual(without_inventory.code, "REQUIRED_INVENTORY_MISSING")
+
+        partial = evaluate_checks(
+            checks,
+            required=("Aquarium*",),
+            required_counts={"Aquarium*": 3},
+        )
+        self.assertEqual(partial.verdict, "defer")
+        self.assertEqual(partial.code, "REQUIRED_INVENTORY_MISMATCH")
+
+        all_three = checks + [
+            run(name="aquarium-stdlib (3.12)", workflow="Aquarium QA"),
+            run(name="aquarium-stdlib (3.13)", workflow="Aquarium QA"),
+        ]
+        complete = evaluate_checks(
+            all_three, required=("Aquarium*",),
+            required_counts={"Aquarium*": 3},
+        )
+        self.assertEqual(complete.verdict, "ready")
+
+    def test_workflow_name_also_requires_inventory(self):
+        checks = [run(name="py311", workflow="Aquarium QA")]
+        result = evaluate_checks(
+            checks, required=("Aquarium QA",), required_counts={},
+        )
+        self.assertEqual(result.code, "REQUIRED_INVENTORY_MISSING")
+
+    def test_duplicate_job_names_do_not_satisfy_inventory(self):
+        checks = [
+            run(name="py311", workflow="Aquarium QA"),
+            run(name="py311", workflow="Aquarium QA"),
+            run(name="py313", workflow="Aquarium QA"),
+        ]
+        result = evaluate_checks(
+            checks, required=("Aquarium QA",),
+            required_counts={"Aquarium QA": 3},
+        )
+        self.assertEqual(result.verdict, "defer")
+        self.assertEqual(result.code, "REQUIRED_INVENTORY_MISMATCH")
+
     def test_exact_full_label_requirement(self):
         checks = [run(name="linux", workflow="Aquarium regression QA")]
         result = evaluate_checks(
@@ -386,6 +456,9 @@ class CliTests(unittest.TestCase):
             "--require", "Aquarium*",
             "--require", "Motor Gate",
             "--require", "Mesh contract",
+            "--require-count", "Aquarium*=1",
+            "--require-count", "Motor Gate=1",
+            "--require-count", "Mesh contract=1",
         ]
 
     def test_ready_exit_zero_and_never_merges(self):
@@ -448,6 +521,26 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, EXIT_REJECT)
         self.assertEqual(result["code"], "INVALID_INPUT")
 
+    def test_broad_requirement_without_inventory_rejects_partial_green(self):
+        args = [
+            "--input", str(self.write(self.snapshot([
+                run(name="aquarium-stdlib (3.11)", workflow="Aquarium regression QA")
+            ]))),
+            "--expected-head-sha", HEAD,
+            "--require", "Aquarium*",
+        ]
+        code, result, _ = self.invoke(*args)
+        self.assertEqual(code, EXIT_REJECT)
+        self.assertEqual(result["code"], "REQUIRED_INVENTORY_MISSING")
+
+    def test_malformed_inventory_is_invalid_input(self):
+        args = self.base_args(self.write(self.snapshot())) + [
+            "--require-count", "Aquarium*=two",
+        ]
+        code, result, _ = self.invoke(*args)
+        self.assertEqual(code, EXIT_REJECT)
+        self.assertEqual(result["code"], "INVALID_INPUT")
+
     def test_usage_error_has_distinct_exit_code(self):
         err = io.StringIO()
         with redirect_stderr(err):
@@ -471,6 +564,9 @@ class CliTests(unittest.TestCase):
                 "--require", "Aquarium*",
                 "--require", "Motor Gate",
                 "--require", "Mesh contract",
+                "--require-count", "Aquarium*=1",
+                "--require-count", "Motor Gate=1",
+                "--require-count", "Mesh contract=1",
             )
         self.assertEqual(code, EXIT_READY)
         self.assertEqual(result["number"], 999)
