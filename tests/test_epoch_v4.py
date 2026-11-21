@@ -213,6 +213,13 @@ class EpochJournalTests(unittest.TestCase):
             self.assertEqual((q.tick, q.epoch_index, q.store.count()),
                              (EPOCH_TICKS, 0, EPOCH_TICKS + 1))
             self.assertEqual(q.required_events_for_steps(1), 2)
+            before_invalid = q.checkpoint()
+            for supplied in ({"dx": 0.04}, {"dy": 0.0}, {"dx": 0.0, "dy": 0.0}):
+                with self.subTest(supplied=supplied):
+                    with self.assertRaisesRegex(AquariumError, "rejects external dx/dy"):
+                        q.step(**supplied)
+                    self.assertEqual(q.checkpoint(), before_invalid)
+                    self.assertEqual(q.store.count(), EPOCH_TICKS + 1)
             with patch.object(q, "_calculate_frame",
                               side_effect=RuntimeError("before boundary frame")):
                 with self.assertRaisesRegex(RuntimeError, "before boundary frame"):
