@@ -1,0 +1,178 @@
+"""Bounded v4 epoch continuation on the synthetic CPU Aquarium.
+
+These tests prove only a versioned SQLite/replay contract.  They do not prove
+neural cognition, consciousness, physical actuation, Android reliability, or
+an authenticated snapshot.
+"""
+
+from copy import deepcopy
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+from contextlib import closing
+from unittest.mock import patch
+
+from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE
+from mojum.aquarium_wire import inspect_journal
+from mojum.cell_policy_v4 import CellExplorerV4, CellV4Error, SCHEMA as V4_SCHEMA
+from mojum.epoch_sense_v2 import (
+    EPOCH_TICKS,
+    EpochProprioception,
+    EpochSenseError,
+    MAX_ABSOLUTE_TICKS,
+    SCHEMA as EPOCH_SCHEMA,
+)
+from mojum.local_cell_sense import Proprioception
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
+GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
+
+
+class EpochSenseV4Tests(unittest.TestCase):
+    def sense(self, tick):
+        return EpochProprioception(
+            tick, tick // EPOCH_TICKS, tick % EPOCH_TICKS,
+            "a" * 64, .16, .16, bool(tick % 2),
+        )
+
+    def test_absolute_tick_boundary_and_old_contract_remain_distinct(self):
+        for tick, epoch, offset in (
+            (0, 0, 0), (EPOCH_TICKS - 1, 0, EPOCH_TICKS - 1),
+            (EPOCH_TICKS, 1, 0), (EPOCH_TICKS + 1, 1, 1),
+        ):
+            with self.subTest(tick=tick):
+                cue = self.sense(tick)
+                self.assertEqual((cue.epoch_index, cue.epoch_tick), (epoch, offset))
+                self.assertEqual(cue.tick, tick)
+                self.assertEqual(cue.public()["schema"], EPOCH_SCHEMA)
+        for values in (
+            (EPOCH_TICKS, 0, 0),
+            (EPOCH_TICKS, 1, 1),
+            (0, True, 0),
+            (0, 0, False),
+            (-1, 0, 0),
+            (MAX_ABSOLUTE_TICKS, 10, 9),
+        ):
+            with self.subTest(values=values), self.assertRaises(EpochSenseError):
+                EpochProprioception(*values, "a" * 64, .16, .16, False)
+        with self.assertRaises(EpochSenseError):
+            EpochProprioception(0, 0, 0, "a" * 64, 10 ** 1000, .16, False)
+        with self.assertRaises(ValueError):
+            Proprioception(EPOCH_TICKS, "a" * 64, .16, .16, False)
+
+    def test_v4_snapshot_rejects_schema_and_epoch_forgery(self):
+        model = CellExplorerV4()
+        cue = self.sense(0)
+        model.observe(cue, model.decide(cue), False)
+        good = model.snapshot()
+        self.assertEqual(CellExplorerV4.from_snapshot(good).snapshot(), good)
+        for field, replacement in (
+            ("schema", "mojum.developmental.local-cell/3"),
+            ("last_epoch_index", True),
+            ("last_epoch_index", 1),
+            ("updates", True),
+        ):
+            with self.subTest(field=field, replacement=replacement):
+                bad = deepcopy(good)
+                bad[field] = replacement
+                with self.assertRaises(CellV4Error):
+                    CellExplorerV4.from_snapshot(bad)
+
+
+class EpochJournalV4Tests(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.db = Path(scratch.name) / "v4-private.sqlite3"
+
+    def open(self):
+        return Aquarium(
+            self.db, SEED, GRAPH,
+            motor_mode=V4_MODE,
+            neural_mode="disabled",
+        )
+
+    def test_preflight_counts_epoch_marker_without_partial_write(self):
+        with self.open() as aquarium:
+            self.assertEqual(aquarium.required_events_for_steps(9_999), 9_999)
+            self.assertEqual(aquarium.required_events_for_steps(10_000), 10_001)
+            self.assertEqual(aquarium.required_events_for_steps(10_050), 10_051)
+            before = aquarium.checkpoint()
+            with patch("mojum.aquarium.MAX_REPLAY_EVENTS", aquarium.stored_events):
+                with self.assertRaisesRegex(AquariumError, "remaining journal event budget"):
+                    aquarium.step()
+            self.assertEqual(aquarium.checkpoint(), before)
+            self.assertEqual(aquarium.store.count(), 1)
+
+    def test_real_sqlite_crosses_epoch_and_replays_after_durable_marker(self):
+        with self.open() as aquarium:
+            for _ in range(EPOCH_TICKS):
+                aquarium.step()
+            self.assertEqual((aquarium.tick, aquarium.epoch_index), (EPOCH_TICKS, 0))
+            self.assertEqual(aquarium.store.count(), EPOCH_TICKS + 1)
+            before = aquarium.checkpoint()
+            with patch.object(
+                aquarium, "_calculate_frame", side_effect=RuntimeError("boundary frame")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "boundary frame"):
+                    aquarium.step()
+            self.assertEqual((aquarium.tick, aquarium.epoch_index), (EPOCH_TICKS, 1))
+            self.assertEqual(aquarium.store.count(), EPOCH_TICKS + 2)
+            marker = next(
+                row["event"] for row in aquarium.store.iter_events(include_nonpublic=True)
+                if row["seq"] == EPOCH_TICKS + 2
+            )
+            self.assertEqual(marker["topic"], "aquarium.epoch")
+            self.assertEqual(marker["event_id"], "epoch-00000001")
+            self.assertEqual(marker["payload"]["absolute_tick"], EPOCH_TICKS)
+            self.assertEqual(marker["observed_at_ns"], EPOCH_TICKS * aquarium.dt_ns)
+            after_marker = aquarium.checkpoint()
+            self.assertNotEqual(before["journal_head"], after_marker["journal_head"])
+
+        with self.open() as resumed:
+            self.assertEqual(resumed.checkpoint(), after_marker)
+            first = resumed.step()
+            self.assertEqual(first["tick"], EPOCH_TICKS)
+            observation = first["developmental"]["observation"]
+            self.assertEqual(observation["schema"], EPOCH_SCHEMA)
+            self.assertEqual(observation["absolute_tick"], EPOCH_TICKS)
+            self.assertEqual(observation["epoch_index"], 1)
+            self.assertEqual(observation["epoch_tick"], 0)
+            for _ in range(50):
+                resumed.step()
+            expected = resumed.checkpoint()
+            self.assertEqual((resumed.tick, resumed.epoch_index), (10_050, 1))
+            self.assertEqual(resumed.store.count(), 10_052)
+            self.assertEqual(expected["epoch_tick"], 51)
+
+        with self.open() as cold:
+            self.assertEqual(cold.checkpoint(), expected)
+            self.assertEqual(cold.store.verify_chain()["head"], expected["journal_head"])
+            wire = inspect_journal(self.db, external_expected_head=expected["journal_head"])
+            self.assertEqual(wire["format"], V4_MODE)
+            self.assertEqual(wire["frames"], 10_050)
+            self.assertEqual(wire["events"], 10_052)
+            self.assertEqual(wire["epoch_schema"], EPOCH_SCHEMA)
+            self.assertEqual(wire["epoch_ticks"], EPOCH_TICKS)
+
+    def test_v4_journal_is_not_reinterpreted_as_v3(self):
+        with self.open() as aquarium:
+            aquarium.step()
+        with closing(sqlite3.connect(self.db)) as connection:
+            self.assertEqual(
+                connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0],
+                "delete",
+            )
+        before = self.db.read_bytes()
+        with self.assertRaisesRegex(AquariumError, "mode mismatch"):
+            with Aquarium(self.db, SEED, GRAPH, motor_mode=V3_MODE, neural_mode="disabled"):
+                pass
+        self.assertEqual(self.db.read_bytes(), before)
+
+
+if __name__ == "__main__":
+    unittest.main()

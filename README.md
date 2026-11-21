@@ -71,6 +71,23 @@ usual 0.125 m virtual steps and scheduled exploration. Its coarse distance
 predictions can disagree across positions or rooms. Checkpoints report
 `temporal_range_state` for this mode.
 
+### Versioned epoch continuation (opt-in)
+
+For a separate bounded long-run motor journal, use the new `local_cell_v4`
+policy. It carries an absolute logical tick and commits an explicit epoch
+marker at the 9,999-tick boundary; existing scripted, v2 and v3 journals are
+not reinterpreted. Use `sensory_mode=none` and repeat bounded batches:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./local_cell_v4_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --neural-mode disabled
+```
+
+The v4 path is still bounded by the 100,000-event local journal budget and the
+current checksum-only replay contract. It is not a neural brain, an
+authenticated segment archive, a physical device runtime, or proof of
+conscious experience. See [the epoch contract](docs/LOCAL_CELL_V4_EPOCH_R01.md).
+
 ### Bounded foreground host
 
 For a paced, restartable one-device session around the same canonical loop,
