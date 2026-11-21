@@ -52,5 +52,16 @@ stale file read losing to the latest file selection:
 PYTHONPATH=src python -m unittest -v tests.test_private_trace_integrity
 ```
 
+Navigation and timer behavior has a separate deterministic test using three
+frames exported from an actual synthetic SQLite Aquarium journal:
+
+```sh
+PYTHONPATH=src python -m unittest discover -s tests \
+  -p 'test_offline_viewer_navigation_qa.py' -v
+```
+
+It drives the unmodified viewer in a Node VM with virtual interval callbacks
+and verifies playback/reset state. It does not replace the real Chromium smoke.
+
 These are offline synthetic-fixture checks, not manual browser/mobile
 acceptance and not evidence of a trained brain or a complete digital organism.
