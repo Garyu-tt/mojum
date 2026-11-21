@@ -116,7 +116,15 @@ class SegmentedNoosphere:
                 ) from exc
             else:
                 os.close(descriptor)
-        self._db = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
+        # The file may disappear between schema preflight/private precreate and
+        # SQLite open. Never silently resurrect a historical PRIVATE journal
+        # or create a replacement with the process default file permissions.
+        # Windows has no POSIX O_EXCL/0600 precreate in this implementation.
+        mode = "rw" if preexisting or os.name == "posix" else "rwc"
+        db_uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=" + mode
+        self._db = sqlite3.connect(
+            db_uri, uri=True, timeout=5.0, isolation_level=None
+        )
         self._db.row_factory = sqlite3.Row
         try:
             self._db.execute("PRAGMA busy_timeout=5000")
