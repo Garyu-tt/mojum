@@ -12,6 +12,16 @@ def displacement_within_budget(dx: float, dy: float) -> bool:
     return math.hypot(dx, dy) <= MAX_DISPLACEMENT_M
 
 
+def _finite_scalar(value):
+    """Strict finite JSON-compatible numeric scalar; bool is not geometry."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
+
+
 @dataclass(frozen=True)
 class Room:
     width: float
@@ -19,13 +29,25 @@ class Room:
     obstacles: tuple[tuple[float, float, float, float], ...] = ()
 
     def __post_init__(self):
-        if not all(math.isfinite(v) and v > 0 for v in (self.width, self.height)):
+        if not all(_finite_scalar(v) and v > 0 for v in (self.width, self.height)):
             raise ValueError("invalid dimensions")
-        for x, y, w, h in self.obstacles:
-            if not all(math.isfinite(v) for v in (x, y, w, h)) or w <= 0 or h <= 0:
+        if type(self.obstacles) not in (tuple, list) or len(self.obstacles) > 4096:
+            raise ValueError("invalid obstacle collection")
+        frozen = []
+        for rect in self.obstacles:
+            if type(rect) not in (tuple, list) or len(rect) != 4:
+                raise ValueError("invalid obstacle")
+            x, y, w, h = rect
+            if not all(_finite_scalar(v) for v in rect) or w <= 0 or h <= 0:
                 raise ValueError("invalid obstacle")
             if x < 0 or y < 0 or x + w > self.width or y + h > self.height:
                 raise ValueError("obstacle outside room")
+            # Do not coerce int to float: existing room manifests distinguish
+            # exact JSON number spellings, and replay depends on preserving them.
+            frozen.append(tuple(rect))
+        # Frozen dataclasses do not recursively freeze nested list inputs.
+        # Detach from caller-owned lists so geometry cannot change mid-run.
+        object.__setattr__(self, "obstacles", tuple(frozen))
 
 @dataclass(frozen=True)
 class RoomState:
@@ -35,7 +57,7 @@ class RoomState:
     revision: str
 
 def _valid(room, x, y):
-    return (math.isfinite(x) and math.isfinite(y)
+    return (_finite_scalar(x) and _finite_scalar(y)
             and 0 <= x <= room.width and 0 <= y <= room.height
             and not any(a <= x <= a+w and b <= y <= b+h
                         for a, b, w, h in room.obstacles))
@@ -79,7 +101,7 @@ def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
     """One logical tick; exact segment-vs-AABB test prevents tunneling."""
     if state.revision != expected_revision or state.revision != _revision(room, state.tick, state.x, state.y):
         raise ValueError("stale or corrupted revision")
-    if tick != state.tick + 1 or not all(math.isfinite(v) for v in (dx, dy)):
+    if type(tick) is not int or tick != state.tick + 1 or not all(_finite_scalar(v) for v in (dx, dy)):
         raise ValueError("invalid tick or displacement")
     # Sampling in 1 cm increments can miss any thinner obstacle. Test the
     # whole movement segment against closed rectangle boundaries instead.
