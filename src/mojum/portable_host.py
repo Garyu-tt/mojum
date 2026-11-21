@@ -20,6 +20,7 @@ import threading
 import time
 
 from .aquarium import Aquarium, MAX_REPLAY_EVENTS
+from .developmental_policy import MAX_EPISODE_TICKS
 
 
 SCHEMA = "mojum.portable-host.run/1"
@@ -87,10 +88,24 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
         raise PortableHostError("stop_event must support wait(timeout)")
     if aquarium.exploration_mode != "goal_free":
         raise PortableHostError("portable host requires opt-in goal_free Aquarium")
+    # Every current v1/v2/v3 policy uses the strict episode-tick contract.
+    # Refuse the ENTIRE requested run before the first SQLite append instead
+    # of failing halfway through on the 9999th proprioceptive observation.
+    # Test-only paced runners may expose only an event counter, not the
+    # canonical Aquarium.tick property. Production always has tick.
+    current_tick = getattr(aquarium, "tick", None)
+    if current_tick is None:
+        current_tick = aquarium.store.count() - 1
+    if current_tick + ticks > MAX_EPISODE_TICKS:
+        raise PortableHostError(
+            "requested run exceeds %d goal-free episode ticks; "
+            "explicit versioned epoch rollover is not implemented"
+            % MAX_EPISODE_TICKS
+        )
     if aquarium.store.count() + ticks > MAX_REPLAY_EVENTS:
         raise PortableHostError(
-            "requested ticks exceed bounded %d-event replay budget; "
-            "use a smaller run; snapshot acceleration is not implemented"
+            "requested ticks exceed bounded %d-event source journal budget; "
+            "signed snapshot caching does not remove this hard limit"
             % MAX_REPLAY_EVENTS
         )
 
@@ -131,6 +146,10 @@ def main(argv=None):
     parser.add_argument("--exploration-mode", choices=("goal_free",), default="goal_free")
     parser.add_argument("--sensory-mode", choices=("toy_probe", "none"),
                         default="toy_probe")
+    parser.add_argument("--developmental-policy",
+                        choices=("legacy", "local_cell_v2", "local_cell_v3"),
+                        default="legacy",
+                        help="version-pin motor policy in a NEW PRIVATE journal")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"),
                         default="shadow")
     parser.add_argument("--expected-head",
@@ -157,6 +176,7 @@ def main(argv=None):
             exploration_mode=args.exploration_mode,
             sensory_mode=args.sensory_mode,
             neural_mode=args.neural_mode,
+            developmental_policy=args.developmental_policy,
             external_expected_head=args.expected_head,
             replay_snapshot_file=args.snapshot_file,
             replay_snapshot_key_file=args.snapshot_key_file,
