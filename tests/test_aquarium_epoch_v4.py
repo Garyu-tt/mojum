@@ -16,6 +16,7 @@ from mojum.epoch_sense_v2 import (
     SCHEMA as EPOCH_SCHEMA,
 )
 from mojum.local_cell_sense import Proprioception
+from mojum.noosphere import NoosphereError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +129,17 @@ class EpochSQLiteTests(unittest.TestCase):
             self.assertEqual(inspect_journal(self.db)["frames"], 10050)
             restored.step()
             self.assertEqual(restored.tick, 10051)
+
+    def test_wire_inspector_rejects_missing_epoch_marker(self):
+        # Exercise the boundary validator with a shorter synthetic threshold.
+        # SQLite remains a genuine canonical 3-frame v4 event/hash chain;
+        # only the read-only checker threshold is reduced for this test.
+        with self.open() as aquarium:
+            for _ in range(3):
+                aquarium.step()
+        with patch("mojum.aquarium_wire.EPOCH_TICKS", 2):
+            with self.assertRaisesRegex(NoosphereError, "missing durable epoch marker"):
+                inspect_journal(self.db)
 
     def test_v4_rejects_sensory_upgrade_before_creating_database(self):
         with self.assertRaisesRegex(AquariumError, "sensory_mode=none"):
