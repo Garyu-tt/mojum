@@ -308,6 +308,15 @@ class RetentionTests(unittest.TestCase):
                 "last_seen_at": {"1:1": 512},
                 "evictions": 1, "forgotten_observations": 512,
             },
+            "cell_measured_more_often_than_ticks": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {
+                    "0:0": {"rest": [5, 0]},
+                    "2500:0": {"rest": [95, 0]},
+                },
+                "last_seen_at": {"0:0": 0, "2500:0": 99},
+                "evictions": 0, "forgotten_observations": 0,
+            },
             "updates_without_any_live_cell": {
                 **common, "last_tick": 0, "updates": 1,
                 "records": {}, "last_seen_at": {},
@@ -380,6 +389,9 @@ class TranscriptSummaryTests(unittest.TestCase):
 
     def test_summary_rejects_malformed_rows(self):
         for bad in (
+            17,  # A non-iterable must raise CellV5Error, not TypeError.
+            [17],  # A non-sequence row must not reach len(row).
+            [None],
             [("x+", {"measured_blocked": False})],
             [({"action": "up"}, {"measured_blocked": False})],
             [({"action": "x+"}, {"measured_blocked": 1})],
