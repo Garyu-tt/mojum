@@ -174,8 +174,13 @@ class Aquarium:
             raise AquariumError("explicit pulse summation requires shadow mode")
         if type(sensory_mode) is not str or sensory_mode not in ("none", "toy_probe", "toy_probe_v2"):
             raise AquariumError("sensory_mode must be none, toy_probe, or toy_probe_v2")
-        if sensory_mode in ("toy_probe", "toy_probe_v2") and motor_mode != "developmental_fixture":
-            raise AquariumError(f"{sensory_mode} requires developmental_fixture motor mode")
+        if motor_mode in (V4_MODE, V5_MODE) and sensory_mode == "toy_probe":
+            raise AquariumError("epoch motor requires sensory_mode none or toy_probe_v2")
+        if sensory_mode == "toy_probe" and motor_mode != "developmental_fixture":
+            raise AquariumError("toy_probe requires developmental_fixture motor mode")
+        if sensory_mode == "toy_probe_v2" and motor_mode not in (
+                "developmental_fixture", V4_MODE):
+            raise AquariumError("toy_probe_v2 requires developmental_fixture or local_cell_v4")
         if sensory_mode == "none" and sensory_scene is not None:
             raise AquariumError("sensory_scene requires toy_probe or toy_probe_v2 mode")
         if type(temporal_mode) is not str or temporal_mode not in ("none", "range_guided"):
@@ -930,8 +935,13 @@ def main():
         parser.error("--brain-mode developmental_controller requires --motor-mode developmental_fixture")
     if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
         parser.error("developmental motor play does not accept --dx/--dy")
-    if args.sensory_mode in ("toy_probe", "toy_probe_v2") and args.motor_mode != "developmental_fixture":
-        parser.error(f"--sensory-mode {args.sensory_mode} requires --motor-mode developmental_fixture")
+    if args.motor_mode in (V4_MODE, V5_MODE) and args.sensory_mode == "toy_probe":
+        parser.error("epoch motor requires --sensory-mode none or toy_probe_v2")
+    if args.sensory_mode == "toy_probe" and args.motor_mode != "developmental_fixture":
+        parser.error("--sensory-mode toy_probe requires --motor-mode developmental_fixture")
+    if args.sensory_mode == "toy_probe_v2" and args.motor_mode not in (
+            "developmental_fixture", V4_MODE):
+        parser.error("--sensory-mode toy_probe_v2 requires developmental_fixture or local_cell_v4")
     if args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
     if not 0 <= args.ticks <= 1000:
