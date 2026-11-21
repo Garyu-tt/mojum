@@ -62,6 +62,8 @@ def encode_room_exact(room: Room, start):
         raise RoomContractError("exact Room fixture required")
     if type(start) not in (tuple, list) or len(start) != 2:
         raise RoomContractError("invalid typed room starting coordinates")
+    if len(room.obstacles) > 4096:
+        raise RoomContractError("typed room obstacle count exceeds bounded decoder")
     if not _valid(room, start[0], start[1]):
         raise RoomContractError("room start lies outside the legal point fixture")
     return {
