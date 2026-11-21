@@ -7,6 +7,7 @@ on:
       - "tests/qa_r014_cross_branch_journal.py"
       - "tests/qa_r014_readonly_wire_probe.py"
       - "docs/R014_CROSS_BRANCH_ABI_GATE.md"
+      - "docs/R014_READONLY_FORMAT_REGISTRY.md"
   workflow_dispatch:
 
 permissions:
