@@ -251,6 +251,14 @@ with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
 observation matches, with zero evictions during the transfer.
 
+### Local Cell/3-escape (isolated, library-only)
+
+`mojum.cell_policy_v3_escape` is an opt-in profile that re-probes its own
+blocked evidence after a bounded pause instead of resting forever once every
+move in a cell was blocked (issue #106). It is **not** wired into the
+Aquarium manifest, CLI motor modes, SQLite wire format or existing journals.
+[Escape profile contract](docs/R014_LOCAL_CELL_REST_ESCAPE.md)
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
