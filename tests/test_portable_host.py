@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium
+from mojum.aquarium import Aquarium, V4_MODE
 from mojum.portable_host import (
     PortableHostError, main as host_main, run_paced, validate_plan,
 )
@@ -84,6 +84,64 @@ class PortableHostTests(unittest.TestCase):
             motor_mode="developmental_fixture", sensory_mode="toy_probe",
             temporal_mode="range_guided", **options,
         )
+
+    def test_v4_cli_defaults_to_no_sensory_and_replays_same_private_journal(self):
+        options = ("--motor-mode", V4_MODE)
+        first = self.invoke(*options)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        one = json.loads(first.stdout)
+        self.assertEqual((one["start_tick"], one["end_tick"], one["journal_events"]),
+                         (0, 4, 5))
+        self.assertEqual((one["motor_mode"], one["sensory_mode"], one["temporal_mode"]),
+                         (V4_MODE, "none", "none"))
+        self.assertNotIn("developmental_state", first.stdout)
+        with Aquarium(self.db, SEED, GRAPH, motor_mode=V4_MODE,
+                      sensory_mode="none", temporal_mode="none") as aquarium:
+            self.assertEqual(aquarium.tick, 4)
+            head = aquarium.checkpoint()["journal_head"]
+        second = self.invoke(*options)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        two = json.loads(second.stdout)
+        self.assertEqual((two["start_tick"], two["end_tick"], two["journal_events"]),
+                         (4, 8, 9))
+        self.assertNotEqual(two["journal_head"], head)
+
+    def test_v4_cli_rejects_incompatible_modes_before_creating_a_journal(self):
+        for options in (
+            ("--motor-mode", V4_MODE, "--sensory-mode", "toy_probe"),
+            ("--motor-mode", V4_MODE, "--temporal-mode", "range_guided"),
+            ("--sensory-mode", "none"),
+        ):
+            with self.subTest(options=options):
+                result = self.invoke(*options)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.db.exists(), result.stderr)
+
+    def test_v4_pacer_admission_counts_extra_boundary_marker(self):
+        fake = Clock()
+
+        class AtEpochBoundary(SyntheticRunner):
+            motor_mode = V4_MODE
+            sensory_mode = "none"
+            journal_event_budget = 100000
+
+            def __init__(self):
+                super().__init__(fake)
+                self.sensory_bridge = None
+
+            def count(self):
+                return 99999
+
+            def required_events_for_steps(self, ticks):
+                return ticks + 1
+
+        runner = AtEpochBoundary()
+        with self.assertRaisesRegex(PortableHostError, "100000-event"):
+            run_paced(runner, ticks=1, interval_ms=20,
+                      stop_event=threading.Event(),
+                      monotonic=fake.read, wait=fake.sleep)
+        self.assertEqual(runner.starts, [])
+        self.assertEqual(fake.waits, [])
 
     def test_clock_paces_without_backlog_or_busy_loop(self):
         fake = Clock()
