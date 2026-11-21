@@ -18,6 +18,11 @@ From the checkout:
 PYTHONPATH=src python -m mojum.portable_host --db ./dante-host.sqlite3 --ticks 20 --interval-ms 50
 ```
 
+For a new journal, the explicit synthetic controller boundary can be selected
+with `--brain-mode developmental_controller`. The same mode is required when
+resuming that journal; the default `placeholder` mode remains compatible with
+older developmental-fixture journals.
+
 An installed package also exposes `mojum-host`. Re-run the same command with
 the same database to resume at the committed tick instead of creating a
 second organism. Stdout contains metadata only: tick range, journal head,
