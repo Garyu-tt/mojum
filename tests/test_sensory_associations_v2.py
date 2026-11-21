@@ -13,6 +13,7 @@ import unittest
 
 from mojum.aquarium import Aquarium, AquariumError, V4_MODE
 from mojum.aquarium_wire import inspect_journal
+from mojum.noosphere import EMPTY_HEAD, LocalNoosphere, NoosphereError
 from mojum.cell_policy_v4 import SCHEMA as V4_SCHEMA
 from mojum.developmental_brain import SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
 from mojum.epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SCHEMA
@@ -355,6 +356,36 @@ class CanonicalV4SensoryV2Tests(unittest.TestCase):
                 sensory_mode="none",
             )
         self.assertEqual(inspect_journal(self.db)["journal_head"], before)
+
+    def test_v4_sensory_wire_rejects_forged_bootstrap_clocks(self):
+        """Both v4 selectors must reject impossible, hash-valid clocks."""
+        with self.open() as aquarium:
+            bootstrap = deepcopy(next(
+                aquarium.store.iter_events(include_nonpublic=True)
+            )["event"])
+
+        for label, bad in (
+            ("missing", None),
+            ("zero", 0),
+            ("below", 999),
+            ("above", 1_000_000_001),
+            ("boolean", True),
+            ("string", "10000000"),
+        ):
+            with self.subTest(label=label):
+                forged = deepcopy(bootstrap)
+                if label == "missing":
+                    del forged["payload"]["dt_ns"]
+                else:
+                    forged["payload"]["dt_ns"] = bad
+                path = self.db.with_name("forged-" + label + ".sqlite3")
+                with LocalNoosphere(path, forged["agent_id"]) as store:
+                    store.append(forged, expected_head=EMPTY_HEAD)
+                    before = store.verify_chain()
+                with self.assertRaisesRegex(NoosphereError, "invalid v4 bootstrap dt_ns"):
+                    inspect_journal(path)
+                with LocalNoosphere(path, forged["agent_id"], read_only=True) as store:
+                    self.assertEqual(store.verify_chain(), before)
 
     @unittest.skipUnless(
         V4_SENSORY_STRESS_ENABLED,
