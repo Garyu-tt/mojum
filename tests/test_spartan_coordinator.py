@@ -151,6 +151,17 @@ class SpartanTests(unittest.TestCase):
         self.assertIsNone(claim(self.db, 4, 133))
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
+    def test_legacy_exhausted_queued_task_is_quarantined(self):
+        enqueue(self.db, [{"id": "a", "scope": "room"}], 101)
+        # A previous coordinator allowed attempt three to be requeued. Such a
+        # persisted row must be fenced on upgrade, never claimed a fourth time.
+        self.db.execute("UPDATE tasks SET attempts=3 WHERE id='a'")
+        self.assertIsNone(claim(self.db, 1, 110))
+        row = self.db.execute(
+            "SELECT state, attempts, worker_id, lease_until FROM tasks WHERE id='a'"
+        ).fetchone()
+        self.assertEqual(tuple(row), ("blocked", 3, None, None))
+
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
             enqueue(self.db, [{"id": "x", "scope": "s"}, {"id": "x", "scope": "s"}], 111)
