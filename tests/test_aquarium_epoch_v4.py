@@ -87,6 +87,20 @@ class EpochSQLiteTests(unittest.TestCase):
             self.db, SEED, GRAPH, neural_mode="disabled", motor_mode=V4_MODE,
         )
 
+    def test_rejected_external_motor_input_cannot_append_epoch_marker(self):
+        """Validation precedes durable epoch transition even at a boundary."""
+        with self.open() as aquarium:
+            old_head, old_count = aquarium.store.head(), aquarium.store.count()
+            with patch.object(aquarium, "_epoch_event",
+                              side_effect=AssertionError("invalid input reached epoch marker")):
+                for request in ({"dx": 0.01}, {"dy": -0.01}):
+                    with self.subTest(request=request):
+                        with self.assertRaisesRegex(AquariumError, "rejects external"):
+                            aquarium.step(**request)
+            self.assertEqual(aquarium.store.head(), old_head)
+            self.assertEqual(aquarium.store.count(), old_count)
+            self.assertEqual(aquarium.tick, 0)
+
     def test_durable_boundary_recovery_and_10050_tick_cold_replay(self):
         with self.open() as aquarium:
             for _ in range(EPOCH_TICKS):
