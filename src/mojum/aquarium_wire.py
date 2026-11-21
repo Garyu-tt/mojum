@@ -56,11 +56,11 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
-    # V4 cannot be paired with a sensory bridge. Besides rejecting an
-    # impossible runtime manifest, this preserves the exact v4 policy ID
-    # used for strict epoch-marker and frame-topic inspection below.
-    if policy_id == "local_cell_v4" and sensory_mode is not None:
-        raise NoosphereError("local_cell_v4 journals require sensory_mode none")
+    # The legacy /1 contact table is capped at 4,000 updates and is not a
+    # valid continuation of the v4 long-run contract.  The explicit /2
+    # sensory selector is versioned and may be combined with v4 below.
+    if policy_id == "local_cell_v4" and sensory_mode == "toy_probe":
+        raise NoosphereError("local_cell_v4 journals require sensory_mode none or toy_probe_v2")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,
@@ -177,10 +177,9 @@ def inspect_journal(path, *, external_expected_head=None):
             manifest = event["payload"]
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             dt_ns = manifest.get("dt_ns")
-            # Runtime creation accepts only this bounded virtual-clock interval.
-            # A read-only wire pass must not certify a bootstrap that cold
-            # Aquarium replay rejects for a forged or missing clock period.
-            if policy == "local_cell_v4" and (
+            # Canonical v4 and its versioned sensory composition share the
+            # same strict bootstrap clock contract as runtime Aquarium.
+            if policy in ("local_cell_v4", "local_cell_v4+toy_probe_v2") and (
                     type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
                 raise NoosphereError("invalid v4 bootstrap dt_ns")
             if manifest.get("agent_id") != event["agent_id"]:
@@ -189,7 +188,7 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
-            if policy == "local_cell_v4":
+            if policy in ("local_cell_v4", "local_cell_v4+toy_probe_v2"):
                 if (event["event_id"] != f"frame-{frames:012d}"
                         or type(dt_ns) is not int
                         or type(event.get("observed_at_ns")) is not int
@@ -206,7 +205,7 @@ def inspect_journal(path, *, external_expected_head=None):
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
-            if policy != "local_cell_v4":
+            if policy not in ("local_cell_v4", "local_cell_v4+toy_probe_v2"):
                 raise NoosphereError("epoch marker is not allowed by stored policy")
             payload = event["payload"]
             expected_index = epoch_index + 1
@@ -231,7 +230,7 @@ def inspect_journal(path, *, external_expected_head=None):
                     or event["observed_at_ns"] != frames * dt_ns):
                 raise NoosphereError("invalid or noncanonical epoch marker")
             epoch_index = expected_index
-        elif policy == "local_cell_v4":
+        elif policy in ("local_cell_v4", "local_cell_v4+toy_probe_v2"):
             # V4 Aquarium replay accepts only frames and durable epoch markers.
             # A valid SQLite hash chain is not proof of a valid motor-wire ABI.
             raise NoosphereError("unsupported local-cell v4 journal topic")
@@ -263,7 +262,7 @@ def inspect_journal(path, *, external_expected_head=None):
     }
     if sensory_mode == "toy_probe_v2":
         result["sensory_schema"] = SENSORY_MODEL_V2
-    if policy == "local_cell_v4":
+    if policy in ("local_cell_v4", "local_cell_v4+toy_probe_v2"):
         result["epoch_schema"] = EPOCH_SENSE_SCHEMA
         result["epoch_ticks"] = EPOCH_TICKS
         result["max_absolute_ticks"] = MAX_ABSOLUTE_TICKS

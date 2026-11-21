@@ -2,6 +2,8 @@
 
 V1 remains the sole executable Universal Graph IR. Visibility labels are
 information-flow metadata, not permissions or access-control enforcement.
+``upgrade_v1`` and ``downgrade_v2`` are the two deterministic migration
+directions; neither executes a v2 graph.
 """
 
 import copy
@@ -74,6 +76,21 @@ def upgrade_v1(graph, *, labels=None):
     return upgraded
 
 
+def _v1_projection(checked):
+    """Drop the additive v2 metadata to reconstruct the recorded v1 wire.
+
+    Only call this after verifying the v2 envelope and each node's required
+    metadata. The full validator subsequently checks projected v1 provenance.
+    """
+    legacy = copy.deepcopy(checked)
+    legacy["schema"] = V1_SCHEMA
+    del legacy["origin"]
+    for node in legacy["nodes"]:
+        del node["visibility"]
+        del node["ports"]
+    return legacy
+
+
 def validate_v2(graph):
     """Validate v2 labels and v1 provenance, returning a read-only audit.
 
@@ -91,9 +108,6 @@ def validate_v2(graph):
     nodes = checked.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         raise GraphError("graph-v2 requires nodes")
-    legacy = copy.deepcopy(checked)
-    legacy["schema"] = V1_SCHEMA
-    del legacy["origin"]
     levels = {}
     for node in nodes:
         if not isinstance(node, dict):
@@ -111,9 +125,9 @@ def validate_v2(graph):
                 or declared["inputs"] != inputs or declared["outputs"] != outputs):
             raise GraphError("graph-v2 ports do not match registered node kind")
         levels[node_id] = _VISIBILITY_LEVEL[node["visibility"]]
-    for node in legacy["nodes"]:
-        del node["visibility"]
-        del node["ports"]
+    # Project only after all node envelopes and required v2 metadata are checked.
+    # Otherwise malformed input could leak KeyError/TypeError instead of GraphError.
+    legacy = _v1_projection(checked)
     validate_v1(legacy)  # Same canonical endpoints, type checking, DAG, and limits.
     if _sha(legacy) != origin["sha256"]:
         raise GraphError("v1 provenance checksum mismatch")
@@ -131,3 +145,25 @@ def validate_v2(graph):
         "execution": "NOT_SUPPORTED",
         "security": "labels-only-not-access-control",
     }
+
+
+def downgrade_v2(graph):
+    """Return the canonical executable v1 wire recorded in v2 provenance.
+
+    This is the explicit reverse migration for audit and offline interop:
+    ``upgrade_v1`` -> ``downgrade_v2`` is byte-for-byte lossless for any v2
+    graph that ``validate_v2`` accepts. The v2 metadata is dropped only after
+    the full v2 checks pass, so a tampered configuration, a forged information-
+    flow label or a non-additive field fails closed instead of being silently
+    discarded.
+
+    No journal, checkpoint or runtime object is modified. The returned dict is
+    the original v1 graph, which is the sole schema any Mojum runtime executes.
+    """
+    checked = _json_copy(graph)
+    validate_v2(checked)
+    legacy = _v1_projection(checked)
+    validate_v1(legacy)
+    if _sha(legacy) != checked["origin"]["sha256"]:
+        raise GraphError("v1 provenance checksum mismatch")
+    return legacy

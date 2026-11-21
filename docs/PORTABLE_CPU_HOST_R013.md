@@ -33,10 +33,15 @@ The interval never changes Aquarium's virtual `dt_ns`. If the process wakes
 late, it does not create catch-up ticks. Ctrl-C or POSIX TERM stops between
 commits; a completed SQLite append is replayed on the next invocation.
 
-The host refuses a run that would exceed Aquarium's fixed 10,000-event replay
-budget, or that changes the persisted temporal mode / expected journal head.
-Those failures happen without appending a new frame. The journal checksum is
-integrity evidence, not authentication.
+The default `developmental_fixture` profile requires a toy sensory bridge and
+uses its fixed motor-play budget. The opt-in `local_cell_v4` profile accepts
+either sensorless (`--sensory-mode none`) or versioned numeric sensory
+(`--sensory-mode toy_probe_v2`) operation, always with
+`--temporal-mode none`. It uses the versioned epoch marker at tick 9,999 and
+preflights both frames and markers against the 100,000-event journal ceiling.
+The legacy `toy_probe` selector is rejected for v4. A rejected plan never
+appends a new frame. The journal checksum is integrity evidence, not
+authentication.
 
 ## Verification
 

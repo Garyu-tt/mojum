@@ -116,6 +116,19 @@ class CellExplorerV3:
             raise CellV3Error("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3Error("unobserved stored cells")
+        if state["updates"] and not state["records"]:
+            raise CellV3Error("learned observations without a retained cell")
+        # One observation per tick, so two live cells cannot share a
+        # last-seen tick and the newest stamp must be the current tick.
+        stamps = list(state["last_seen_at"].values())
+        if len(set(stamps)) != len(stamps):
+            raise CellV3Error("multiple v3 cells observed on one tick")
+        if state["updates"] and max(stamps) != state["last_tick"]:
+            raise CellV3Error("latest v3 cell observation does not match tick")
+        # Every eviction needs at least one observation of a distinct cell,
+        # so a full table plus E evictions requires MAX_CELLS + E updates.
+        if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
+            raise CellV3Error("impossible v3 eviction history")
 
         model = cls()
         model.last_tick = state["last_tick"]
