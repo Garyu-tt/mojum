@@ -8,6 +8,7 @@ Legacy non-strict journals would accept such a row, so verification must
 reject duplicate keys at the wire boundary instead of collapsing them.
 """
 import json
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -55,7 +56,7 @@ class DuplicateJSONKeyJournalTests(unittest.TestCase):
         """
         self.assertIn(old, raw)
         forged = raw.replace(old, new, 1)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db:
             db.execute("DROP TRIGGER noosphere_no_update")
             db.execute("UPDATE events SET wire_json = ? WHERE seq = 1", (forged,))
             db.commit()
@@ -119,7 +120,7 @@ class DuplicateJSONKeyJournalTests(unittest.TestCase):
                 '"source":"decoy","source":"duplicate-key-fixture"',
             )
             self.assertEqual(json.loads(forged)["source"], OWNER)
-            with sqlite3.connect(self.path) as db:
+            with closing(sqlite3.connect(self.path)) as db:
                 self.assertEqual(db.execute(
                     "SELECT json_extract(wire_json, '$.source') FROM events"
                 ).fetchone()[0], "decoy")
