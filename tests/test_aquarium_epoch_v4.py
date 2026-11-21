@@ -74,6 +74,16 @@ class CellV4Tests(unittest.TestCase):
             CellExplorerV4.from_snapshot(forged)
         self.assertEqual(model.snapshot(), snapshot)
 
+    def test_runtime_rejects_blocked_rest_without_mutating_state(self):
+        model = CellExplorerV4()
+        sense = EpochProprioception(0, 0, 0, "0" * 64, .16, .16, False)
+        intent = model.decide(sense)
+        self.assertEqual(intent["action"], "rest")
+        before = model.snapshot()
+        with self.assertRaisesRegex(CellV4Error, "blocked invariant"):
+            model.observe(sense, intent, True)
+        self.assertEqual(model.snapshot(), before)
+
 
 class EpochSQLiteTests(unittest.TestCase):
     def setUp(self):
@@ -85,6 +95,15 @@ class EpochSQLiteTests(unittest.TestCase):
         return Aquarium(
             self.db, SEED, GRAPH, neural_mode="disabled", motor_mode=V4_MODE,
         )
+
+    def test_step_batch_reserves_epoch_marker_events(self):
+        with self.open() as aquarium:
+            self.assertEqual(aquarium.required_events_for_steps(0), 0)
+            self.assertEqual(aquarium.required_events_for_steps(9_999), 9_999)
+            self.assertEqual(aquarium.required_events_for_steps(10_000), 10_001)
+
+            with self.assertRaisesRegex(AquariumError, "absolute tick budget"):
+                aquarium.required_events_for_steps(100_000)
 
     def test_durable_boundary_recovery_and_10050_tick_cold_replay(self):
         with self.open() as aquarium:
@@ -126,6 +145,9 @@ class EpochSQLiteTests(unittest.TestCase):
             self.assertEqual(restored.checkpoint(), expected)
             self.assertEqual(inspect_journal(self.db)["format"], V4_MODE)
             self.assertEqual(inspect_journal(self.db)["frames"], 10050)
+            self.assertEqual(inspect_journal(self.db)["epoch_transition_schema"],
+                             "mojum.aquarium.epoch/1")
+            self.assertEqual(inspect_journal(self.db)["epoch_index"], 1)
             restored.step()
             self.assertEqual(restored.tick, 10051)
 

@@ -7,7 +7,10 @@ import json
 from pathlib import Path
 import re
 
-from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
+from .aquarium import (
+    EPOCH_EVENT_SCHEMA, MANIFEST_SCHEMA, MAX_REPLAY_EVENTS,
+    SCHEMA as FRAME_SCHEMA,
+)
 from .cell_policy_v4 import LEARNING_SCHEMA as V4_OUTCOME, SCHEMA as V4_SCHEMA
 from .epoch_sense_v2 import (
     EPOCH_TICKS, MAX_ABSOLUTE_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA,
@@ -77,6 +80,8 @@ def _stored_policy(manifest):
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
         raise NoosphereError("ambiguous or unknown stored sensory policy")
+    if policy_id == "local_cell_v4" and sensory_mode is not None:
+        raise NoosphereError("local_cell_v4 cannot carry a sensory policy")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,
@@ -126,10 +131,29 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
         else:
             motor = _object_field(frame, "developmental")
+            intent = _object_field(motor, "intent")
+            learning = _object_field(motor, "learning")
             if ("developmental_controller" in frame or motor.get("schema") != state_schema
-                    or _object_field(motor, "intent").get("source") != action_source
-                    or _object_field(motor, "learning").get("schema") != learning_schema):
+                    or intent.get("source") != action_source
+                    or learning.get("schema") != learning_schema):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
+            if state_schema == V4_SCHEMA:
+                observation = _object_field(motor, "observation")
+                frame_tick = frame.get("tick")
+                if (
+                    observation.get("schema") != EPOCH_SENSE_SCHEMA
+                    or type(observation.get("absolute_tick")) is not int
+                    or observation["absolute_tick"] != frame_tick
+                    or type(observation.get("epoch_index")) is not int
+                    or type(observation.get("epoch_tick")) is not int
+                    or observation["epoch_index"] != frame_tick // EPOCH_TICKS
+                    or observation["epoch_tick"] != frame_tick % EPOCH_TICKS
+                    or intent.get("epoch_index") != observation["epoch_index"]
+                    or intent.get("epoch_tick") != observation["epoch_tick"]
+                    or learning.get("epoch_index") != observation["epoch_index"]
+                    or learning.get("epoch_tick") != observation["epoch_tick"]
+                ):
+                    raise NoosphereError("frame disagrees with its pinned epoch schema")
     if temporal_schema is not None:
         if _object_field(frame, "range_guidance").get("schema") != _GUIDANCE:
             raise NoosphereError("frame disagrees with its pinned temporal schema")
@@ -159,9 +183,11 @@ def inspect_journal(path, *, external_expected_head=None):
         raise NoosphereError("expected head must be a lowercase SHA-256")
     policy = contract = temporal = sensory_mode = None
     frames = 0
+    epoch_index = 0
+    dt_ns = None
 
     def inspect_event(seq, event):
-        nonlocal policy, contract, temporal, sensory_mode, frames
+        nonlocal policy, contract, temporal, sensory_mode, frames, epoch_index, dt_ns
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -174,35 +200,43 @@ def inspect_journal(path, *, external_expected_head=None):
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
+            dt_ns = manifest.get("dt_ns")
+            if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
+                raise NoosphereError("invalid Aquarium virtual clock")
         elif topic == "aquarium.frame":
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
             if policy == "local_cell_v4" and frames >= MAX_ABSOLUTE_TICKS:
                 raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
+            if event["observed_at_ns"] != frames * dt_ns:
+                raise NoosphereError("Aquarium frame time is not synchronized")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
             if policy != "local_cell_v4":
                 raise NoosphereError("unknown Aquarium epoch event")
             payload = event.get("payload")
-            epoch_index = frames // EPOCH_TICKS
+            expected_epoch = frames // EPOCH_TICKS
             if (frames == 0 or frames % EPOCH_TICKS != 0
                     or type(payload) is not dict
                     or set(payload) != {"schema", "absolute_tick", "from_epoch",
                                          "to_epoch", "epoch_tick", "source"}
-                    or payload["schema"] != "mojum.aquarium.epoch/1"
+                    or payload["schema"] != EPOCH_EVENT_SCHEMA
                     or type(payload["absolute_tick"]) is not int
                     or type(payload["from_epoch"]) is not int
                     or type(payload["to_epoch"]) is not int
                     or type(payload["epoch_tick"]) is not int
                     or payload["absolute_tick"] != frames
-                    or payload["from_epoch"] != epoch_index - 1
-                    or payload["to_epoch"] != epoch_index
+                    or payload["from_epoch"] != expected_epoch - 1
+                    or payload["to_epoch"] != expected_epoch
                     or payload["epoch_tick"] != 0
                     or payload["source"] != "explicit_monotonic_synthetic_epoch_boundary"
-                    or event["event_id"] != f"epoch-{epoch_index:08d}"):
+                    or event["event_id"] != f"epoch-{expected_epoch:08d}"
+                    or event["observed_at_ns"] != frames * dt_ns
+                    or expected_epoch != epoch_index + 1):
                 raise NoosphereError("invalid Aquarium epoch boundary")
+            epoch_index = expected_epoch
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
@@ -231,6 +265,9 @@ def inspect_journal(path, *, external_expected_head=None):
     }
     if sensory_mode == "toy_probe_v2":
         result["sensory_schema"] = SENSORY_MODEL_V2
+    if policy == "local_cell_v4":
+        result["epoch_transition_schema"] = EPOCH_EVENT_SCHEMA
+        result["epoch_index"] = epoch_index
     return result
 
 

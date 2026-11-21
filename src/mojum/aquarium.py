@@ -383,6 +383,36 @@ class Aquarium:
             return min(MAX_REPLAY_EVENTS, MAX_MOTOR_REPLAY_EVENTS)
         return MAX_REPLAY_EVENTS
 
+    def required_events_for_steps(self, ticks):
+        """Return the committed events needed for a contiguous step batch.
+
+        V4 writes one durable epoch marker before the first frame in each
+        later epoch. Callers such as the CLI must reserve those markers as
+        well as frames, otherwise a batch can pass its preflight and fail
+        after partially committing a boundary.
+        """
+        if type(ticks) is not int or ticks < 0:
+            raise AquariumError("step count must be a non-negative integer")
+        if self.motor_mode != V4_MODE:
+            return ticks
+        end = self.tick + ticks
+        if end > MAX_ABSOLUTE_TICKS:
+            raise AquariumError(
+                "local_cell_v4 absolute tick budget reached; "
+                "authenticated segmented continuation is not implemented")
+        if ticks == 0:
+            return 0
+        first_boundary = max(
+            EPOCH_TICKS,
+            ((self.tick + EPOCH_TICKS - 1) // EPOCH_TICKS) * EPOCH_TICKS,
+        )
+        last_boundary = end - 1
+        markers = sum(
+            boundary // EPOCH_TICKS > self.epoch_index
+            for boundary in range(first_boundary, last_boundary + 1, EPOCH_TICKS)
+        )
+        return ticks + markers
+
     def _epoch_event(self, epoch_index):
         if self.motor_mode != V4_MODE or type(epoch_index) is not int or epoch_index < 1:
             raise AquariumError("epoch markers are only valid for local_cell_v4")
@@ -604,16 +634,19 @@ class Aquarium:
             raise AquariumError(
                 "local_cell_v4 absolute tick budget reached; "
                 "authenticated segmented continuation is not implemented")
+        if self.motor is not None and (dx is not None or dy is not None):
+            raise AquariumError("developmental motor play rejects external dx/dy")
+        required_events = self.required_events_for_steps(1)
+        if self._committed_count + required_events > self.journal_event_budget:
+            raise AquariumError(
+                f"journal event budget reached ({self.journal_event_budget:,}); "
+                "export verified history and start a new journal")
         if self.motor is None:
             dx = 0.02 if dx is None else dx
             dy = 0.0 if dy is None else dy
         if (self.motor_mode == V4_MODE and self.tick > 0
                 and self.tick % EPOCH_TICKS == 0
                 and self.epoch_index < self.tick // EPOCH_TICKS):
-            if self._committed_count >= self.journal_event_budget:
-                raise AquariumError(
-                    f"journal event budget reached ({self.journal_event_budget:,}); "
-                    "export verified history and start a new journal")
             marker = self._epoch_event(self.tick // EPOCH_TICKS)
             self._committed_head = self.store.append(
                 marker, expected_head=self._committed_head,
@@ -712,8 +745,10 @@ class Aquarium:
             raise AquariumError("unexpected journal ownership or visibility")
         if event["observed_at_ns"] != self.tick * self.dt_ns:
             raise AquariumError("unsynchronized event time")
-        if (self._local_cell and event["topic"] not in
-                {"aquarium.frame", "aquarium.epoch"}):
+        allowed_topics = {"aquarium.frame"}
+        if self.motor_mode == V4_MODE:
+            allowed_topics.add("aquarium.epoch")
+        if self._local_cell and event["topic"] not in allowed_topics:
             raise AquariumError("local-cell compatibility journals contain only frames")
         if event["topic"] == "aquarium.epoch":
             expected_epoch = self.tick // EPOCH_TICKS
@@ -925,7 +960,11 @@ def main():
     with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
-        if aquarium.stored_events + args.ticks > aquarium.journal_event_budget:
+        try:
+            required_events = aquarium.required_events_for_steps(args.ticks)
+        except AquariumError as exc:
+            parser.error(str(exc))
+        if aquarium.stored_events + required_events > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=dx, dy=dy)

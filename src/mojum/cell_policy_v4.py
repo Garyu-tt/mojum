@@ -169,6 +169,9 @@ class CellExplorerV4:
         if type(blocked) is not bool or intent != self.decide(sense):
             raise CellV4Error("stale, forged or unmeasured v4 motor outcome")
         cell, action = intent["zone"], intent["action"]
+        if (action == "rest" and blocked) or (
+                self.records.get(cell, {}).get(action, [0, 0])[1] and blocked):
+            raise CellV4Error("v4 motor outcome violates bounded blocked invariant")
         evicted = None
         dropped = 0
         if cell not in self.records and len(self.records) >= MAX_CELLS:
