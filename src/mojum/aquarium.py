@@ -35,6 +35,19 @@ class AquariumError(ValueError):
     """Nonrecoverable mismatch, invalid command or unsupported fixture."""
 
 
+def _start_coordinate(value):
+    """Validate an initial world position, not a per-step displacement."""
+    if type(value) not in (int, float):
+        raise AquariumError("start must be a numeric scalar")
+    try:
+        numeric = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise AquariumError("start coordinate exceeds numeric range") from exc
+    if not math.isfinite(numeric):
+        raise AquariumError("start coordinate must be finite")
+    return numeric
+
+
 def _movement(value):
     if type(value) not in (int, float):
         raise AquariumError("movement must be a numeric scalar, not bool or string")
@@ -91,7 +104,7 @@ class Aquarium:
         if not isinstance(self.room, Room) or type(start) not in (tuple, list) or len(start) != 2:
             raise AquariumError("invalid room or start")
         try:
-            self.start = (_movement(start[0]), _movement(start[1]))
+            self.start = (_start_coordinate(start[0]), _start_coordinate(start[1]))
         except AquariumError as exc:
             raise AquariumError("invalid room start coordinates") from exc
         self.manifest = {
@@ -104,7 +117,10 @@ class Aquarium:
             "source_classification": "synthetic_only_brain_unimplemented_no_mujoco",
         }
         self.genome = GenomeLedger(self.seed)
-        self.world = initial_state(self.room, *self.start)
+        try:
+            self.world = initial_state(self.room, *self.start)
+        except ValueError as exc:
+            raise AquariumError("invalid room start coordinates") from exc
         self.tick = 0
         self.store = LocalNoosphere(db_path, agent_id)
         try:
