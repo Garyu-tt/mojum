@@ -203,7 +203,7 @@ def main(argv=None):
             parse_constant=_reject_nonfinite_json,
         )
         report = scan_queue(payload, args.require)
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         print(json.dumps({"schema": SCHEMA, "error": str(exc),
                           "merge_authorized": False, "merge_performed": False}))
         return 2
