@@ -85,6 +85,10 @@ class SegmentedNoosphere:
                 raise NoosphereError(
                     "wrong owner/schema/segment size; old journal unchanged"
                 )
+            if os.name == "posix" and path.stat().st_mode & 0o077:
+                raise NoosphereError(
+                    "existing segmented PRIVATE database must be owner-only"
+                )
         # Create PRIVATE files with owner-only mode *before* SQLite opens
         # them. sqlite3.connect normally creates mode 0666 & umask; applying
         # chmod after WAL setup permits a temporary read-exposure window.
