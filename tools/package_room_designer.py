@@ -16,7 +16,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 HTML = ROOT / "tools" / "room_designer.html"
 JS = ROOT / "tools" / "room_designer_core.js"
+HISTORY_JS = ROOT / "tools" / "room_designer_history.js"
+WALK_JS = ROOT / "tools" / "room_walk_preview.js"
 SCRIPT_TAG = '<script src="./room_designer_core.js"></script>'
+HISTORY_TAG = '<script src="./room_designer_history.js"></script>'
+WALK_TAG = '<script src="./room_walk_preview.js"></script>'
 MAX_SOURCE_BYTES = 1_048_576
 
 
@@ -37,29 +41,35 @@ def _read_small_source(path: Path) -> str:
         raise PackagingError("room designer source is not UTF-8") from exc
 
 
-def standalone_html(*, html_path=HTML, js_path=JS) -> bytes:
-    """Compile exact adjacent JS into one portable HTML, without HTML eval."""
+def standalone_html(*, html_path=HTML, js_path=JS,
+                    history_path=HISTORY_JS, walk_path=WALK_JS) -> bytes:
+    """Bundle every pinned local classic script; no sibling JS required."""
     html = _read_small_source(Path(html_path))
-    js = _read_small_source(Path(js_path))
-    if html.count(SCRIPT_TAG) != 1:
-        raise PackagingError("expected exactly one local classic core script tag")
-    if "</script" in js.lower() or "<!--" in js:
-        raise PackagingError("embedded JavaScript contains an unsafe HTML delimiter")
-    if 'MojumRoomDesignerCore' not in js:
-        raise PackagingError("wrong room editor JavaScript source")
-    # The editor's own script is kept in HTML unchanged; only the adjacent
-    # dependency is inlined. The result runs via file:// without file fetches.
-    bundled = html.replace(
-        SCRIPT_TAG,
-        "<script>\n" + js.rstrip() + "\n</script>",
-        1,
+    scripts = (
+        (SCRIPT_TAG, js_path, "MojumRoomDesignerCore"),
+        (HISTORY_TAG, history_path, "MojumRoomHistory"),
+        (WALK_TAG, walk_path, "MojumWalkPreview"),
     )
-    if SCRIPT_TAG in bundled:
-        raise PackagingError("room editor still requires a sibling script")
-    if len(bundled.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
+    # Fail closed if the template changes dependencies without updating
+    # the bundler; external scripts would break file:// offline portability.
+    if html.count('<script src="') != len(scripts):
+        raise PackagingError("unexpected external editor script dependency")
+    for tag, source, global_name in scripts:
+        if html.count(tag) != 1:
+            raise PackagingError("expected exactly one pinned local script tag")
+        js = _read_small_source(Path(source))
+        if "</script" in js.lower() or "<!--" in js:
+            raise PackagingError("embedded JavaScript contains an unsafe HTML delimiter")
+        if global_name not in js:
+            raise PackagingError("wrong room editor JavaScript source")
+        html = html.replace(
+            tag, "<script>\n" + js.rstrip() + "\n</script>", 1
+        )
+    if '<script src="' in html:
+        raise PackagingError("portable editor still requires a sibling script")
+    if len(html.encode("utf-8")) > 2 * MAX_SOURCE_BYTES:
         raise PackagingError("single file exceeds bounded portable HTML budget")
-    return bundled.encode("utf-8")
-
+    return html.encode("utf-8")
 
 def write_standalone(destination, *, html_path=HTML, js_path=JS):
     """Publish via durable temp + exclusive hard link; never clobber a file."""
