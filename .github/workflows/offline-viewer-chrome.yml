@@ -37,6 +37,12 @@ jobs:
       - name: Require preinstalled real Google Chrome
         run: |
           command -v google-chrome-stable || command -v google-chrome || command -v chromium
+      - name: Require Node and run real viewer JS integrity/playback regression
+        env:
+          PYTHONPATH: src
+        run: |
+          command -v node
+          python -m unittest -v tests.test_private_trace_integrity
       - name: Real local SQLite to PRIVATE JSONL to Chrome DOM and canvas
         run: |
           python tests/smoke_real_chromium_viewer.py
