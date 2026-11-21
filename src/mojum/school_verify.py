@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import errno
 import json
 import os
 from itertools import islice
@@ -77,6 +78,8 @@ def _read_regular_bounded(path: Path, limit: int, *, directory_fd: int | None = 
             with path.open("rb") as source:
                 payload = source.read(limit + 1)
     except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise SchoolContractError("school fixture contains a nonregular file") from error
         raise SchoolContractError("cannot read school fixture file") from error
     if len(payload) > limit:
         raise SchoolContractError("school fixture file exceeds byte budget")
