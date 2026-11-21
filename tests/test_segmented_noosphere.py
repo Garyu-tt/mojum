@@ -66,7 +66,7 @@ class AtomicSegmentQA(unittest.TestCase):
         seen = []
 
         def check_mode_before_connect(database, *args, **kwargs):
-            if str(database) == str(self.db):
+            if kwargs.get("uri") is True and str(database).endswith("?mode=rw"):
                 self.assertTrue(self.db.is_file(), "secure file must preexist connect")
                 self.assertEqual(self.db.stat().st_mode & 0o777, 0o600)
                 seen.append(True)
