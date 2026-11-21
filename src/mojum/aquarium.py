@@ -19,6 +19,7 @@ from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, valida
 from .body_genetics import (compile_body, compile_body_at_month,
                             validate_human_name)
 from .neural import PulsePredictor
+from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .graph import validate as validate_graph
 from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
@@ -52,6 +53,19 @@ def _safe_event_text(value, field, limit=256):
     return value
 
 
+def _start_coordinate(value):
+    """Validate an initial world position, not a per-step displacement."""
+    if type(value) not in (int, float):
+        raise AquariumError("start must be a numeric scalar")
+    try:
+        numeric = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise AquariumError("start coordinate exceeds numeric range") from exc
+    if not math.isfinite(numeric):
+        raise AquariumError("start coordinate must be finite")
+    return numeric
+
+
 def _movement(value):
     if type(value) not in (int, float):
         raise AquariumError("movement must be a numeric scalar, not bool or string")
@@ -82,7 +96,7 @@ class Aquarium:
     def __init__(
         self, db_path, seed, graph, *, agent_id="dante-fixture-001",
         room=None, start=(1.0, 2.0), dt_ns=10_000_000,
-        external_expected_head=None, neural_mode="shadow",
+        external_expected_head=None, neural_mode="shadow", motor_mode="scripted",
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -90,6 +104,10 @@ class Aquarium:
             raise AquariumError("invalid agent ID")
         if neural_mode not in ("shadow", "disabled"):
             raise AquariumError("neural_mode must be shadow or disabled")
+        if motor_mode not in ("scripted", "developmental_fixture"):
+            raise AquariumError("motor_mode must be scripted or developmental_fixture")
+        self.motor_mode = motor_mode
+        self.motor = MotorPlay() if motor_mode == "developmental_fixture" else None
         self.neural_mode = neural_mode
         self.learner = PulsePredictor() if neural_mode == "shadow" else None
         self.dt_ns = dt_ns
@@ -105,9 +123,12 @@ class Aquarium:
         self.kind_ids = {node["kind"]: node["id"] for node in self.graph["nodes"]}
         self.graph_sha256 = digest(self.graph)
         self.room = room if room is not None else Room(4, 4, ((2, 1, .1, 2),))
-        if not isinstance(self.room, Room) or len(start) != 2:
+        if not isinstance(self.room, Room) or type(start) not in (tuple, list) or len(start) != 2:
             raise AquariumError("invalid room or start")
-        self.start = (float(start[0]), float(start[1]))
+        try:
+            self.start = (_start_coordinate(start[0]), _start_coordinate(start[1]))
+        except AquariumError as exc:
+            raise AquariumError("invalid room start coordinates") from exc
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
@@ -117,8 +138,15 @@ class Aquarium:
             "room": _room_manifest(self.room, self.start),
             "source_classification": "synthetic_only_brain_unimplemented_no_mujoco",
         }
+        # Do not modify the legacy scripted bootstrap for existing journals.
+        if self.motor is not None:
+            self.manifest["motor_mode"] = self.motor_mode
+            self.manifest["motor_policy_schema"] = MOTOR_SCHEMA
         self.genome = GenomeLedger(self.seed)
-        self.world = initial_state(self.room, *self.start)
+        try:
+            self.world = initial_state(self.room, *self.start)
+        except ValueError as exc:
+            raise AquariumError("invalid room start coordinates") from exc
         self.tick = 0
         self.development_months = 72  # chronological fixture age: six years
         self.identity = None  # never auto-generated from chromosomes
@@ -158,7 +186,21 @@ class Aquarium:
         return self.store.append(event, expected_head=self._committed_head)
 
     def _calculate(self, dx, dy):
-        dx, dy = _movement(dx), _movement(dy)
+        """Preserve the existing three-value scripted fixture test contract."""
+        payload, world, learner, _ = self._calculate_frame(dx, dy)
+        return payload, world, learner
+
+    def _calculate_frame(self, dx, dy):
+        # The policy sees only its own history, never Room internals.
+        next_motor = (MotorPlay.from_snapshot(self.motor.snapshot())
+                      if self.motor is not None else None)
+        if next_motor is None:
+            dx, dy = _movement(dx), _movement(dy)
+        else:
+            if dx is not None or dy is not None:
+                raise AquariumError("developmental motor play rejects external dx/dy")
+            intent = next_motor.choose(self.tick)
+            dx, dy = intent["dx"], intent["dy"]
         pheno = self.genome.phenotype(self.tick)
         bpm = pheno["parameters"]["heartbeat_bpm"]
         adapted = copy.deepcopy(self.graph)
@@ -193,7 +235,18 @@ class Aquarium:
             "movement_request": {"dx": dx, "dy": dy},
             "physical_model": "NONE_FIXTURE_ONLY",
         }
-        return payload, new_world, next_learner
+        if next_motor is not None:
+            outcome = next_motor.observe(
+                tick=self.tick, kind=intent["kind"], blocked=world_obs["blocked"],
+            )
+            payload["developmental_controller"] = {
+                "schema": MOTOR_SCHEMA,
+                "status": "SYNTHETIC_GOAL_FREE_TABULAR_MOTOR_PLAY",
+                "intent": intent, "outcome": outcome,
+                "action_source": "internal_committed_prior_outcomes_only",
+                "real_actuation": False,
+            }
+        return payload, new_world, next_learner, next_motor
 
     def body_preview(self, somatic_chromosome, age_years=None):
         """Project genetic body dimensions without modifying journal or learning.
@@ -249,12 +302,16 @@ class Aquarium:
         self._committed_head = head
         return copy.deepcopy(self.identity)
 
-    def step(self, *, dx=0.02, dy=0.0):
-        payload, next_world, next_learner = self._calculate(dx, dy)
+    def step(self, *, dx=None, dy=None):
+        if self.motor is None:
+            dx = 0.02 if dx is None else dx
+            dy = 0.0 if dy is None else dy
+        payload, next_world, next_learner, next_motor = self._calculate_frame(dx, dy)
         head = self._append_record("aquarium.frame", f"frame-{self.tick:012d}", payload,
                                    self.tick * self.dt_ns, self.genome.revision)
         self.world = next_world
         self.learner = next_learner
+        self.motor = next_motor
         self.tick += 1
         self._committed_head = head
         return copy.deepcopy(payload)
@@ -354,12 +411,22 @@ class Aquarium:
                 move = event["payload"].get("movement_request")
                 if not isinstance(move, dict) or set(move) != {"dx", "dy"}:
                     raise AquariumError("invalid replayed movement")
-                payload, next_world, next_learner = self._calculate(move["dx"], move["dy"])
+                if self.motor is None:
+                    payload, next_world, next_learner, next_motor = self._calculate_frame(
+                        move["dx"], move["dy"],
+                    )
+                else:
+                    # Re-derive internal choice. Never trust a recorded action
+                    # to stand in for the controller's committed history.
+                    payload, next_world, next_learner, next_motor = self._calculate_frame(
+                        None, None,
+                    )
                 if event != self._record("aquarium.frame", event["event_id"], payload,
                                          self.tick * self.dt_ns, self.genome.revision):
                     raise AquariumError("non-deterministic or mismatched committed frame")
                 self.world = next_world
                 self.learner = next_learner
+                self.motor = next_motor
                 self.tick += 1
             else:
                 raise AquariumError("unexpected aquarium journal topic")
@@ -386,6 +453,9 @@ class Aquarium:
                                 if self.identity is not None else "not_assigned"),
             "trust": "checksum_only_not_authenticated",
         }
+        if self.motor is not None:
+            state["motor_mode"] = self.motor_mode
+            state["motor_state"] = self.motor.snapshot()
         if self.store.head() != state["journal_head"]:
             raise AquariumError("stale aquarium checkpoint, reopen the journal")
         return state
@@ -398,24 +468,33 @@ def main():
     parser.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
     parser.add_argument("--ticks", type=int, default=120)
-    parser.add_argument("--dx", type=float, default=0.02)
-    parser.add_argument("--dy", type=float, default=0.0)
+    parser.add_argument("--dx", type=float)
+    parser.add_argument("--dy", type=float)
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
+    parser.add_argument("--motor-mode", choices=("scripted", "developmental_fixture"),
+                        default="scripted")
     args = parser.parse_args()
+    if args.motor_mode != "scripted" and (args.dx is not None or args.dy is not None):
+        parser.error("developmental motor play does not accept --dx/--dy")
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
     # Validate command-line movement before Aquarium can create a bootstrap
     # journal. Invalid requests must not leave behind a new organism fixture.
-    try:
-        dx, dy = _movement(args.dx), _movement(args.dy)
-    except AquariumError as exc:
-        parser.error(str(exc))
-    if not displacement_within_budget(dx, dy):
-        parser.error(f"movement length must be finite and at most {MAX_DISPLACEMENT_M:g} m")
+    if args.motor_mode == "scripted":
+        try:
+            dx = _movement(0.02 if args.dx is None else args.dx)
+            dy = _movement(0.0 if args.dy is None else args.dy)
+        except AquariumError as exc:
+            parser.error(str(exc))
+        if not displacement_within_budget(dx, dy):
+            parser.error(f"movement length must be finite and at most {MAX_DISPLACEMENT_M:g} m")
+    else:
+        # The internal controller selects each action from committed history.
+        dx, dy = None, None
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
-        neural_mode=args.neural_mode,
+        neural_mode=args.neural_mode, motor_mode=args.motor_mode,
     ) as aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
@@ -432,6 +511,8 @@ def main():
             if aquarium.neural_mode == "shadow"
             else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"
         )
+        if aquarium.motor is not None:
+            checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"
         print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
 
 

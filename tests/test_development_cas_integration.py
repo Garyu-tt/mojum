@@ -34,6 +34,24 @@ class DevelopmentCasIntegrationTests(unittest.TestCase):
                 self.assertEqual(recovered.tick, 1)
                 self.assertNotEqual(recovered.checkpoint()["journal_head"], checkpoint["journal_head"])
 
+    def test_dev_and_name_interleave_with_developmental_motor_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "fixture.sqlite3"
+            with Aquarium(db, SEED, GRAPH, neural_mode="shadow",
+                          motor_mode="developmental_fixture") as writer:
+                writer.step()
+                writer.advance_development(3, reason="optional lesson")
+                writer.assign_human_name(IDENTITY, actor_id="human-owner")
+                writer.step()
+                expected = writer.checkpoint()
+                self.assertEqual(expected["development_months"], 75)
+                self.assertEqual(expected["motor_state"]["observations"], 2)
+            with Aquarium(db, SEED, GRAPH, neural_mode="shadow",
+                          motor_mode="developmental_fixture") as reopened:
+                self.assertEqual(reopened.checkpoint(), expected)
+                reopened.step()
+                self.assertEqual(reopened.motor.observations, 3)
+
     def test_name_commit_rejects_stale_development_writer(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Path(directory) / "fixture.sqlite3"
