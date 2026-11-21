@@ -134,12 +134,22 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
                 bad_cue = dict(cue, **overrides)
                 with self.assertRaises(DevelopmentalBrainError):
                     brain.decide(
-                        motor, tick=0, interoception=heartbeat,
+                        motor, tick=0, expected_at_ns=0, interoception=heartbeat,
                         proprioception=proprioception, near_field=bad_cue,
                     )
                 self.assertEqual(motor.snapshot(), original)
+        # A syntactically valid pulse cannot come from a future virtual instant.
+        future_heartbeat = dict(heartbeat, observed_at_ns=10_000_000)
+        with self.assertRaises(DevelopmentalBrainError):
+            brain.decide(
+                motor, tick=0, expected_at_ns=0,
+                interoception=future_heartbeat,
+                proprioception=proprioception, near_field=cue,
+            )
+        self.assertEqual(motor.snapshot(), original)
+
         accepted = brain.decide(
-            motor, tick=0, interoception=heartbeat,
+            motor, tick=0, expected_at_ns=0, interoception=heartbeat,
             proprioception=proprioception, near_field=cue,
         )
         self.assertEqual(accepted["input"]["near_field"], cue)
@@ -169,7 +179,7 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
         }
         with self.assertRaises(DevelopmentalBrainError):
             brain.decide(
-                MotorPlay(), tick=0, interoception=interoception,
+                MotorPlay(), tick=0, expected_at_ns=0, interoception=interoception,
                 proprioception=proprioception, near_field=hidden,
             )
 
