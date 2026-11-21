@@ -5,6 +5,7 @@ streaming chain verification. This is an actual disk journal workload,
 not invented numerical capacity metadata; no real user records.
 """
 import os
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,6 +18,10 @@ from test_segmented_noosphere import OWNER, ZERO, record
 @unittest.skipUnless(
     os.environ.get("MOJUM_SEGMENTED_100K_STRESS") == "1",
     "100k-event SQLite stress runs only in the dedicated CI job",
+)
+@unittest.skipUnless(
+    os.environ.get("MOJUM_R016_STRESS") == "1",
+    "100k workload is verified by the dedicated R0.16 stress job",
 )
 class Beyond100KActualSQLiteTest(unittest.TestCase):
     def test_100001_durable_frames_across_25_explicit_linked_segments(self):
