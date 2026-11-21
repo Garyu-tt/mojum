@@ -1,13 +1,23 @@
 """Executable, bounded scripted school tests (not learner-quality tests)."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from mojum.school import SchoolContractError, load_catalog, run_scripted_activity, write_fixture
+from mojum.school import (
+    MAX_ARTIFACT_BYTES,
+    MAX_CATALOG_BYTES,
+    SchoolContractError,
+    load_catalog,
+    run_scripted_activity,
+    validate_catalog,
+    write_fixture,
+)
 
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "examples" / "school_catalog_r01.json"
 
@@ -67,7 +77,7 @@ class SchoolRunnerTests(unittest.TestCase):
         for tick in (True, -1, 2**63 - 4, 1.5, "5"):
             with self.subTest(tick=tick), self.assertRaises(SchoolContractError):
                 run_scripted_activity(self.catalog, "music", start_tick=tick)
-        for section in ("dance", "bogus"):
+        for section in ("dance", "bogus", [], {}, True, None):
             with self.subTest(section=section), self.assertRaises(SchoolContractError):
                 run_scripted_activity(self.catalog, section)
         with self.assertRaises(SchoolContractError):
@@ -82,6 +92,47 @@ class SchoolRunnerTests(unittest.TestCase):
                 path.write_bytes(content)
                 with self.subTest(content=content[:20]), self.assertRaises(SchoolContractError):
                     load_catalog(path)
+
+    def test_catalog_file_rejects_nonfinite_numbers_and_invalid_unicode(self):
+        catalog_json = json.dumps(self.catalog)
+        with tempfile.TemporaryDirectory() as dirname:
+            path = Path(dirname) / "catalog.json"
+            for value in ("NaN", "Infinity", "-Infinity", "1e999", r'"\ud800"'):
+                path.write_text(catalog_json[:-1] + ', "metadata": ' + value + "}",
+                                encoding="utf-8")
+                with self.subTest(value=value), self.assertRaises(SchoolContractError):
+                    load_catalog(path)
+
+    def test_in_memory_catalog_uses_the_same_json_and_size_contract(self):
+        values = {
+            "nonfinite": float("nan"),
+            "invalid-unicode": "\ud800",
+            "non-json": object(),
+            "oversized": "a" * MAX_CATALOG_BYTES,
+        }
+        for label, value in values.items():
+            catalog = {**self.catalog, "metadata": value}
+            with self.subTest(label=label):
+                with self.assertRaises(SchoolContractError):
+                    validate_catalog(catalog)
+                with self.assertRaises(SchoolContractError):
+                    run_scripted_activity(catalog, "music")
+
+    def test_canonical_json_exact_byte_limit(self):
+        def canonical_bytes(value):
+            return (json.dumps(value, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+
+        catalog = {**self.catalog, "metadata": ""}
+        filler = MAX_CATALOG_BYTES + 1 - len(canonical_bytes(catalog))
+        self.assertGreater(filler, 0)
+        catalog["metadata"] = "x" * filler
+        self.assertEqual(len(canonical_bytes(catalog)), MAX_CATALOG_BYTES + 1)
+        with self.assertRaises(SchoolContractError):
+            validate_catalog(catalog)
+        catalog["metadata"] = catalog["metadata"][:-1]
+        self.assertEqual(len(canonical_bytes(catalog)), MAX_CATALOG_BYTES)
+        self.assertIs(validate_catalog(catalog), catalog)
 
     def test_malformed_structure_and_resource_budgets(self):
         import copy
@@ -101,6 +152,9 @@ class SchoolRunnerTests(unittest.TestCase):
             dest = Path(dirname) / "output"
             write_fixture(run, dest)
             manifest = json.loads((dest / "events.json").read_bytes())
+            self.assertEqual(manifest["schema"], "mojum.school-scripted-run/1")
+            self.assertEqual({event["schema"] for event in manifest["events"]},
+                             {"mojum.school-scripted-event/1"})
             self.assertNotIn("artifacts", manifest)
             self.assertEqual(manifest["visibility"], "PRIVATE")
             self.assertEqual(sorted(p.name for p in dest.iterdir()),
@@ -110,6 +164,41 @@ class SchoolRunnerTests(unittest.TestCase):
             if sys.platform != "win32":
                 self.assertEqual(dest.stat().st_mode & 0o777, 0o700)
                 self.assertTrue(all(p.stat().st_mode & 0o777 == 0o600 for p in dest.iterdir()))
+
+    def test_write_fixture_validates_output_before_creating_directory(self):
+        run = run_scripted_activity(self.catalog, "music")
+        invalid_runs = {
+            "filename": {**run, "artifacts": {"unexpected.json": b"{}"}},
+            "payload-type": {**run, "artifacts": {"baseline.json": "{}"}},
+            "payload-size": {**run, "artifacts": {"baseline.json": b"x" * (MAX_ARTIFACT_BYTES + 1)}},
+            "manifest": {**run, "feedback": object()},
+        }
+        with tempfile.TemporaryDirectory() as dirname:
+            for label, invalid in invalid_runs.items():
+                dest = Path(dirname) / label
+                with self.subTest(label=label):
+                    with self.assertRaises(SchoolContractError):
+                        write_fixture(invalid, dest)
+                    self.assertFalse(dest.exists())
+
+    def test_failed_manifest_write_leaves_directory_available_for_retry(self):
+        run = run_scripted_activity(self.catalog, "music")
+        real_chmod = os.chmod
+        with tempfile.TemporaryDirectory() as dirname:
+            dest = Path(dirname) / "output"
+
+            def fail_manifest(path, mode):
+                if path == dest / "events.json":
+                    raise PermissionError("simulated manifest permission failure")
+                real_chmod(path, mode)
+
+            with patch("mojum.school.os.chmod", side_effect=fail_manifest):
+                with self.assertRaisesRegex(PermissionError, "simulated manifest"):
+                    write_fixture(run, dest)
+            self.assertFalse(dest.exists())
+            self.assertEqual(write_fixture(run, dest), dest)
+            self.assertEqual(sorted(path.name for path in dest.iterdir()),
+                             ["baseline.json", "events.json", "revised.json"])
 
     def test_real_cli_subprocess(self):
         with tempfile.TemporaryDirectory() as dirname:
