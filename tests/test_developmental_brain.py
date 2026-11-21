@@ -107,6 +107,32 @@ class DevelopmentalBrainContractTests(unittest.TestCase):
                     aquarium.step()
             self.assertEqual(aquarium.checkpoint(), prior)
 
+    def test_controller_bootstrap_rejects_forged_bool_coordinate(self):
+        """A rehashed bootstrap must preserve exact start-coordinate JSON type."""
+        from mojum.noosphere import _canonical, _sha
+
+        with self.aquarium():
+            pass
+        with sqlite3.connect(self.db) as db:
+            seq, raw, previous = db.execute(
+                "SELECT seq,wire_json,prev_hash FROM events WHERE topic='aquarium.bootstrap'"
+            ).fetchone()
+            event = json.loads(raw)
+            coordinate = event["payload"]["room"]["start"][0]
+            self.assertEqual(coordinate, 1.0)
+            self.assertIs(type(coordinate), float)
+            event["payload"]["room"]["start"][0] = True
+            self.assertEqual(event["payload"]["room"]["start"][0], coordinate)
+            db.execute("DROP TRIGGER noosphere_no_update")
+            db.execute(
+                "UPDATE events SET wire_json=?,event_hash=? WHERE seq=?",
+                (_canonical(event), _sha({"previous": previous, "event": event}), seq),
+            )
+            db.commit()
+        with self.assertRaisesRegex(AquariumError, "seed, room, graph, clock or mode mismatch"):
+            with self.aquarium():
+                pass
+
     def test_rehashed_controller_safety_flag_rejects_bool_as_int(self):
         """Recomputed local checksum cannot legitimize false -> numeric 0."""
         from mojum.noosphere import _canonical, _sha
