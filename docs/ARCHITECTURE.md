@@ -12,14 +12,14 @@ Universal Graph IR defines versioned, typed topology. Adamantium-node is an opti
 
 | Component | Released synthetic-alpha behavior | Not yet provided |
 | --- | --- | --- |
-| Universal Graph IR | `mechanicus.universal-graph/1`, registered kinds, typed ports, DAG validation and deterministic ordering | Executable arbitrary plugin code, nested/cyclic scheduling, enforced per-node privacy labels |
+| Universal Graph IR | Executable `mechanicus.universal-graph/1` DAG with typed ports; an isolated opt-in v2 graph audit that does **not** execute | Executable arbitrary plugin code, nested/cyclic scheduling, enforced per-node privacy labels |
 | GENESIS | Deterministic inherited/acquired seed ledger, versioned phenotype and replay of acquired-gene events | Full neuron-population development, physiological brain regions, body growth |
 | Neural | A bounded three-feature delayed-pulse predictor with genuine **shadow-only** online updates; `brain.placeholder` returns `UNIMPLEMENTED` | Learning-driven motor intentions, general perception or autonomous organism |
-| World/body | Deterministic 2D point-room and swept obstacle rejection; pure-data motor-safety contract exists separately | MuJoCo, coupled articulated body, force/contact calibration or physical actuation |
+| World/body | Deterministic 2D point-room and swept obstacle rejection; opt-in developmental motor-play policy based on committed prior action outcomes; separate pure-data motor-safety contract | MuJoCo, coupled articulated body, force/contact calibration or physical actuation |
 | Noosphere | Local **PRIVATE SQLite** append-only event journal, compare-and-append, hash-chain replay, recorded/observed/valid times, and default PUBLIC-only dataset projection | Encrypted storage, authenticated writer enrollment, independently durable distributed replicas, quorum or partition-safe failover |
 | Checkpoint | Hash/checksum-based metadata of current fixture state and journal head | Atomic multi-component snapshot, authenticated portable recovery or running-state migration |
 
-The aquarium simulation uses the original six typed fixture nodes: `genesis.seed`, `body.heartbeat`, `sensory.interoception`, `world.room`, `brain.placeholder`, and `memory.episode`. The world's motion request is **scripted `dx/dy`**, not proposed by a learned brain. A shadow pulse prediction is observational; it must not be advertised as motor intelligence.
+The aquarium simulation uses the original six typed fixture nodes: `genesis.seed`, `body.heartbeat`, `sensory.interoception`, `world.room`, `brain.placeholder`, and `memory.episode`. By default motion is **scripted `dx/dy`**. The separately opt-in `--motor-mode developmental_fixture` selects virtual movements from its own previously committed success/block history, not from a learned neural brain or privileged room geometry. The `brain.placeholder` node remains `UNIMPLEMENTED`; the shadow pulse predictor remains observational. See [developmental motor-play contract](DEVELOPMENTAL_R013.md).
 
 The SQLite journal is authoritative for committed synthetic events. Reopening the same journal reconstructs the fixture through replay, checks the bootstrap against the same genotype/graph/room/clock, and rejects divergent history. Local hash chains and checkpoint metadata **do not authenticate** an attacker-controlled file: independent trusted anchors and authenticated replication are separate work. Existing synthetic journal replay is intentionally capped at **10,000 events**.
 
@@ -46,6 +46,12 @@ From the repository root with Python 3.11+:
 PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120 --neural-mode shadow
 PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 30 --neural-mode shadow
 PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+For a separate **new** PRIVATE journal, the opt-in synthetic motor-play fixture is:
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./motor_fixture_PRIVATE.sqlite3 --ticks 20 --motor-mode developmental_fixture
 ```
 
 On a **new** database, 120 frames produce 121 events (bootstrap + frames), then 30 further frames give 151. Use another DB for a different organism or `--neural-mode disabled` control. Avoid uploading the PRIVATE journal. See [README](../README.md) for CLI/Windows details and [issue #11](https://github.com/Garyu-tt/mojum/issues/11) for the incomplete one-device product release gate.
