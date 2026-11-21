@@ -159,9 +159,10 @@ def inspect_journal(path, *, external_expected_head=None):
         raise NoosphereError("expected head must be a lowercase SHA-256")
     policy = contract = temporal = sensory_mode = None
     frames = 0
+    epoch_index = 0
 
     def inspect_event(seq, event):
-        nonlocal policy, contract, temporal, sensory_mode, frames
+        nonlocal policy, contract, temporal, sensory_mode, frames, epoch_index
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -178,15 +179,18 @@ def inspect_journal(path, *, external_expected_head=None):
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
                 raise NoosphereError("invalid Aquarium frame sequence")
-            if policy == "local_cell_v4" and frames >= MAX_ABSOLUTE_TICKS:
-                raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
+            if policy == "local_cell_v4":
+                if frames >= MAX_ABSOLUTE_TICKS:
+                    raise NoosphereError("local_cell_v4 absolute tick budget exceeded")
+                if frames // EPOCH_TICKS != epoch_index:
+                    raise NoosphereError("missing durable epoch marker before v4 frame")
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
             if policy != "local_cell_v4":
                 raise NoosphereError("unknown Aquarium epoch event")
             payload = event.get("payload")
-            epoch_index = frames // EPOCH_TICKS
+            expected_epoch = frames // EPOCH_TICKS
             if (frames == 0 or frames % EPOCH_TICKS != 0
                     or type(payload) is not dict
                     or set(payload) != {"schema", "absolute_tick", "from_epoch",
@@ -197,12 +201,14 @@ def inspect_journal(path, *, external_expected_head=None):
                     or type(payload["to_epoch"]) is not int
                     or type(payload["epoch_tick"]) is not int
                     or payload["absolute_tick"] != frames
-                    or payload["from_epoch"] != epoch_index - 1
-                    or payload["to_epoch"] != epoch_index
+                    or payload["from_epoch"] != expected_epoch - 1
+                    or payload["to_epoch"] != expected_epoch
+                    or expected_epoch != epoch_index + 1
                     or payload["epoch_tick"] != 0
                     or payload["source"] != "explicit_monotonic_synthetic_epoch_boundary"
-                    or event["event_id"] != f"epoch-{epoch_index:08d}"):
+                    or event["event_id"] != f"epoch-{expected_epoch:08d}"):
                 raise NoosphereError("invalid Aquarium epoch boundary")
+            epoch_index = expected_epoch
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
