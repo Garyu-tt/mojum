@@ -48,7 +48,7 @@ aging mechanism, cognition, developmental learning or real neural plasticity.
 ## QA
 
 ```sh
-PYTHONPATH=src python -m unittest discover -s tests -p 'test_development.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_development_clock.py' -v
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
