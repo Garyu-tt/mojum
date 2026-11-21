@@ -1,0 +1,47 @@
+name: Mojum exact typed-room JSON CLI acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-typed-room-json-cli.yml"
+      - "src/mojum/room_input.py"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/room_contract.py"
+      - "src/mojum/typed_room_resume.py"
+      - "tests/test_new_room_json_cli.py"
+      - "examples/room_exact_mixed.json"
+      - "examples/room_simple_mixed.json"
+      - "docs/R015_TYPED_ROOM_CLI_QUICKSTART.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typed-room-cli:
+    name: custom mixed scalar room -> real SQLite -> safe reopen (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Verify explicit opt-in, full cold resume and no-birth JSON failures
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: always::ResourceWarning
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p test_new_room_json_cli.py -v 2>&1 | tee new-room-qa.log
+          if grep -q 'ResourceWarning: unclosed database' new-room-qa.log; then
+            echo "FAIL: SQLite connection leak in custom room QA" >&2
+            exit 1
+          fi
