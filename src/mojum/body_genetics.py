@@ -59,6 +59,10 @@ def _str(value, path, limit=128):
         raise BodyContractError(f"{path} must be nonempty text (<= {limit} chars)")
     if any(unicodedata.category(c) in ("Cc", "Cf") for c in value):
         raise BodyContractError(f"{path} has control/invisible characters")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise BodyContractError(f"{path} must be valid UTF-8") from exc
     return value
 
 
@@ -66,9 +70,9 @@ def _digest(value):
     try:
         raw = json.dumps(value, sort_keys=True, ensure_ascii=False,
                          separators=(",", ":"), allow_nan=False)
-    except (ValueError, TypeError, OverflowError) as exc:
-        raise BodyContractError("Noncanonical JSON") from exc
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return hashlib.sha256(raw.encode("utf-8", errors="strict")).hexdigest()
+    except (ValueError, TypeError, OverflowError, UnicodeError) as exc:
+        raise BodyContractError("Noncanonical UTF-8 JSON") from exc
 
 
 def _sha(value, path):
