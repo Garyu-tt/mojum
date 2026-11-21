@@ -263,8 +263,13 @@
   function render() {
     let room;
     try {
+      // A valid resize must update the SVG coordinate space even if the
+      // old start or an obstacle now fails geometry validation. Otherwise
+      // touch hit-testing and the displayed room disagree during recovery.
+      const width = dimension(refs.width.value);
+      const height = dimension(refs.height.value);
+      state.lastValidSize = [width.value, height.value];
       room = currentRoom();
-      state.lastValidSize = [room.width.value, room.height.value];
       state.latest = buildDraft(state);
       refs.preview.value = state.latest;
       refs.dimensions.textContent = room.width.lexical + " × " + room.height.lexical + " м";
