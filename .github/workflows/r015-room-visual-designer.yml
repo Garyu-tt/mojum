@@ -5,8 +5,10 @@ on:
     paths:
       - ".github/workflows/r015-room-visual-designer.yml"
       - "tools/room_designer_core.js"
+      - "tools/room_designer_history.js"
       - "tools/room_designer.html"
       - "tests/room_designer_core.test.cjs"
+      - "tests/room_designer_history.test.cjs"
       - "tests/room_designer_browser_smoke.cjs"
       - "tests/test_visual_room_cross_language.py"
       - "src/mojum/room_input.py"
@@ -40,7 +42,7 @@ jobs:
       - name: Node pure-model and static no-network UI contract
         run: |
           set -euo pipefail
-          node --test tests/room_designer_core.test.cjs
+          node --test tests/room_designer_core.test.cjs tests/room_designer_history.test.cjs
       - name: Real offline Chrome SVG pointer and DOM acceptance
         run: |
           set -euo pipefail

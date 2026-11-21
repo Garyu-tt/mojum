@@ -82,6 +82,8 @@
         <div class="toolbar">
           <button id="add-obstacle" type="button">+ Препятствие</button>
           <button id="delete-obstacle" class="danger" type="button">Удалить выбранное</button>
+          <button id="undo" type="button" title="Отменить последнее изменение">↶ Отменить</button>
+          <button id="redo" type="button" title="Вернуть отменённое изменение">↷ Повторить</button>
           <button id="reset-room" type="button">Сбросить пример</button>
         </div>
         <p class="sub instructions">Перетаскивайте зелёную точку старта и прямоугольники.
@@ -143,15 +145,17 @@
     </section>
   </main>
   <script src="./room_designer_core.js"></script>
+  <script src="./room_designer_history.js"></script>
   <script>
     (() => {
       "use strict";
       const C = window.MojumRoomDesignerCore;
+      const H = window.MojumRoomHistory;
       const $ = id => document.getElementById(id);
       const NS = "http://www.w3.org/2000/svg";
       const svg = $("scene"), floor = $("floor");
       let state = C.clone(C.DEFAULT), selected = 0, lastValid = null;
-      let pointer = null;
+      let history = H.create(state), pointer = null;
 
       function message(text, isError = false) {
         $("status").textContent = text;
@@ -253,14 +257,20 @@
           state=pointer.kind==="start"
             ? C.dragStart(state,p.x-pointer.dx,p.y-pointer.dy)
             : C.dragObstacle(state,pointer.index,p.x-pointer.dx,p.y-pointer.dy);
-          syncFields();render();
+          syncFields();render(false);
         }catch(err){message(err.message,true);}
       });
-      function stopDrag(e){if(pointer&&pointer.id===e.pointerId){pointer=null;if(svg.hasPointerCapture(e.pointerId))svg.releasePointerCapture(e.pointerId);}}
+      function stopDrag(e){
+        if(pointer&&pointer.id===e.pointerId){
+          pointer=null;
+          if(svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
+          render(); // One history entry for the complete pointer gesture.
+        }
+      }
       svg.addEventListener("pointerup",stopDrag);
       svg.addEventListener("pointercancel",stopDrag);
 
-      function syncFields(){
+      function syncFields(force = false){
         const values={
           width:state.width,height:state.height,
           "start-x":state.start.x,"start-y":state.start.y,
@@ -271,7 +281,7 @@
         }
         Object.entries(values).forEach(([key,value])=>{
           const input=$(key);
-          if(document.activeElement!==input) input.value=value;
+          if(force || document.activeElement!==input) input.value=value;
         });
       }
       function updateList() {
@@ -295,8 +305,36 @@
       function choose(i){
         selected=i;updateList();syncFields();render();
       }
-      function render(){
-        const valid=updateStatus();if(valid)sceneDraw(valid);
+      function updateHistoryButtons(valid) {
+        $("undo").disabled = !(H.canUndo(history) || !valid);
+        $("redo").disabled = !valid || !H.canRedo(history);
+      }
+      function render(track = true) {
+        const valid=updateStatus();
+        if(valid){
+          if(track) history=H.record(history,state);
+          sceneDraw(valid);
+        }
+        updateHistoryButtons(Boolean(valid));
+      }
+      function useHistory(direction) {
+        if(pointer) return;
+        if(direction==="redo" && !lastValid) return;
+        // When a user has typed an incomplete/invalid number, Undo first
+        // restores the last valid room instead of skipping a snapshot.
+        const result = !lastValid
+          ? {history, state:H.current(history), changed:true}
+          : direction==="undo" ? H.undo(history) : H.redo(history);
+        if(!result.changed) return;
+        history=result.history;
+        state=result.state;
+        const focus=document.activeElement;
+        if(focus && (focus.tagName==="INPUT" || focus.tagName==="TEXTAREA")) focus.blur();
+        selected=Math.min(selected,state.obstacles.length-1);
+        updateList();
+        syncFields(true);
+        render(false);
+        message(direction==="undo"?"Изменение отменено":"Изменение восстановлено");
       }
       const bind = (id,apply) => $(id).addEventListener("input",()=>{
         apply($(id).value);render();
@@ -332,6 +370,19 @@
       });
       $("reset-room").addEventListener("click",()=>{
         state=C.clone(C.DEFAULT);choose(0);
+      });
+      $("undo").addEventListener("click",()=>useHistory("undo"));
+      $("redo").addEventListener("click",()=>useHistory("redo"));
+      document.addEventListener("keydown",e=>{
+        if(!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        // Preserve native text-field undo; numeric input events are tracked.
+        const active=e.target;
+        if(active && (active.isContentEditable || /^(INPUT|TEXTAREA)$/.test(active.tagName))) return;
+        const key=e.key.toLowerCase();
+        if(key==="z" || key==="y") {
+          e.preventDefault();
+          useHistory(key==="y" || e.shiftKey ? "redo" : "undo");
+        }
       });
       $("import-button").addEventListener("click",()=>{
         $("import-file").click();
