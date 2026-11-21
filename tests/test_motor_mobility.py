@@ -1,5 +1,6 @@
 """Independent QA for the read-only mobility audit over committed motor frames."""
 
+import copy
 from contextlib import closing
 from importlib.resources import files
 import json
@@ -9,7 +10,7 @@ import tempfile
 import unittest
 
 from mojum.aquarium import Aquarium, AquariumError
-from mojum.motor_mobility import MobilityAuditError, audit_journal, summarize
+from mojum.motor_mobility import MobilityAuditError, audit_journal, summarize, _verify_motion_transitions
 from mojum.noosphere import NoosphereError
 
 DATA = files("mojum").joinpath("data")
@@ -132,6 +133,47 @@ class SummarizeTests(unittest.TestCase):
                 self.assertEqual(report["path_length_m"], 0.0)
                 self.assertEqual(report["verdict"], "NO_MEASURED_DISPLACEMENT")
 
+    def test_committed_trajectory_must_match_action_and_initial_position(self):
+        data = {**manifest(), "room": {"start": [1.0, 2.0]}}
+
+        def action(tick, kind, blocked, position, dx, dy):
+            item = frame(tick, kind, blocked, position)
+            item["movement_request"] = {"dx": dx, "dy": dy}
+            item["developmental_controller"]["intent"].update(dx=dx, dy=dy)
+            return item
+
+        first = action(0, "east", False, (1.125, 2.0), 0.125, 0.0)
+        second = action(1, "north", False, (1.125, 2.125), 0.0, 0.125)
+        _verify_motion_transitions(data, [first, second])
+        report = summarize(data, [first, second])
+        self.assertEqual(report["path_length_m"], 0.25)
+
+        for position in ((100.0, 2.0), (0.875, 2.0), (1.0, 2.0)):
+            with self.subTest(first_position=position):
+                wrong = copy.deepcopy(first)
+                wrong["world"]["position"] = list(position)
+                with self.assertRaisesRegex(MobilityAuditError, "world position"):
+                    _verify_motion_transitions(data, [wrong])
+
+        blocked = action(0, "east", True, (1.125, 2.0), 0.125, 0.0)
+        resting = action(0, "rest", False, (1.125, 2.0), 0.0, 0.0)
+        for bad in (blocked, resting):
+            with self.assertRaisesRegex(MobilityAuditError, "world position"):
+                _verify_motion_transitions(data, [bad])
+
+        for field in ("movement_request", "intent"):
+            wrong = copy.deepcopy(first)
+            if field == "movement_request":
+                wrong[field]["dx"] = 0.5
+            else:
+                wrong["developmental_controller"]["intent"]["dx"] = 0.0
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(MobilityAuditError, "displacement"):
+                    _verify_motion_transitions(data, [wrong])
+
+        with self.assertRaisesRegex(MobilityAuditError, "room start"):
+            _verify_motion_transitions(manifest(), [first])
+
     def test_empty_history_is_explicitly_not_averaged(self):
         report = summarize(manifest(), [])
         self.assertEqual(report["frames"], 0)
@@ -196,6 +238,7 @@ class JournalAuditTests(unittest.TestCase):
             "motor_mode": report["motor_mode"],
             "motor_policy_schema": report["motor_policy_schema"],
             "temporal_schema": report["temporal_schema"],
+            "room": aquarium.manifest["room"],
         }
         expected = summarize(stored_manifest, payloads)
         for key in ("frames", "rest_actions", "move_actions", "blocked_attempts",

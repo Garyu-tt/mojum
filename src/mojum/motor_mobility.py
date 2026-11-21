@@ -115,6 +115,41 @@ def _manifest_policy(manifest):
     }
 
 
+
+def _verify_motion_transitions(manifest, frames):
+    """Check each measured position against the bootstrap start and motor intent.
+
+    Integrity of the SQLite hash chain does not establish that movement fields
+    inside a consistently hashed event are semantically possible.
+    """
+    room = manifest.get("room") if type(manifest) is dict else None
+    if type(room) is not dict:
+        raise MobilityAuditError("committed room start is missing")
+    previous = _position(room.get("start"))
+    steps = {
+        "east": (0.125, 0.0), "north": (0.0, 0.125),
+        "west": (-0.125, 0.0), "south": (0.0, -0.125),
+        "rest": (0.0, 0.0),
+    }
+    schema = _manifest_policy(manifest)["motor_policy_schema"]
+    for frame in frames:
+        kind, blocked, position = _action_fields(frame, schema)
+        dx, dy = steps[kind]
+        intent = frame["developmental_controller"]["intent"]
+        request = frame["movement_request"]
+        if (type(request) is not dict or set(request) != {"dx", "dy"}
+                or not {"dx", "dy"} <= intent.keys()
+                or any(not _finite(value) for value in
+                       (intent["dx"], intent["dy"], request["dx"], request["dy"]))
+                or (intent["dx"], intent["dy"]) != (dx, dy)
+                or (request["dx"], request["dy"]) != (dx, dy)):
+            raise MobilityAuditError("committed motor displacement mismatch")
+        expected = previous if blocked else (previous[0] + dx, previous[1] + dy)
+        if position != expected:
+            raise MobilityAuditError("committed world position disagrees with motor action")
+        previous = position
+
+
 def summarize(manifest, frames):
     """Compute bounded mobility metrics from ordered committed frame payloads."""
     policy = _manifest_policy(manifest)
@@ -127,7 +162,8 @@ def summarize(manifest, frames):
     longest_rest_streak = streak = 0
     positions = set()
     path_length = 0.0
-    previous = None
+    room = manifest.get("room")
+    previous = _position(room["start"]) if type(room) is dict and "start" in room else None
     for expected_tick, frame in enumerate(frames):
         if type(frame) is not dict or type(frame.get("tick")) is not int:
             raise MobilityAuditError("invalid frame tick")
@@ -259,6 +295,7 @@ def audit_journal(path, *, external_expected_head=None):
         )
     if manifest is None:
         raise MobilityAuditError("no committed Aquarium bootstrap")
+    _verify_motion_transitions(manifest, frames)
     report = summarize(manifest, frames)
     report.update({
         "events": verified["count"],
