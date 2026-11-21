@@ -24,6 +24,7 @@ from .world_room import Room, _segment_hits_rect, advance, initial_state
 SCHEMA = "mojum.sensory-curiosity.frame/1"
 MODEL_SCHEMA = "mojum.sensory-curiosity.association/1"
 SENSE_SCHEMA = "mojum.sensor.synthetic-near-field/1"
+DIRECTION_SENSE_SCHEMA = "mojum.sensor.synthetic-near-field-bearing/1"
 ACTIONS = ("rest", "x+", "x-", "y+", "y-", "probe")
 SEED = 2029
 MAX_EVENTS = 4000
@@ -132,6 +133,30 @@ class ToyScene:
             "reflectance_rgb": list(t.rgb) if visible else None,
             "range_bucket_10cm": int(distance / 0.1) if visible else None,
             "source": "synthetic_local_proximity_not_camera",
+        }
+
+    def sense_direction(self, state, *, occluding_obstacles=()):
+        """Low-resolution toy direction in world X/Y axes, never a toy ID.
+
+        Only the chosen *visible*, wall-unoccluded near-field candidate
+        contributes. The core legacy cue and journal schema are untouched.
+        This reports coarse horizontal/vertical sectors, NOT egocentric
+        heading, optical vision, a coordinate oracle or physical contact.
+        """
+        cue = self.sense(state, occluding_obstacles=occluding_obstacles)
+        bearing = None
+        if cue["visible"]:
+            toy = self._nearest(state, occluding_obstacles)
+            dx, dy = toy.x - state.x, toy.y - state.y
+            if dx == 0 and dy == 0:
+                bearing = "center"
+            elif abs(dx) >= abs(dy):
+                bearing = "x+" if dx > 0 else "x-"
+            else:
+                bearing = "y+" if dy > 0 else "y-"
+        return {
+            **cue, "schema": DIRECTION_SENSE_SCHEMA,
+            "bearing_bin": bearing,
         }
 
     def probe(self, state, sensor, *, occluding_obstacles=()):
