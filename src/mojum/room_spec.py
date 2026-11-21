@@ -16,6 +16,7 @@ import argparse
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -94,6 +95,17 @@ def _as_number(value, label, errors):
         return None
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
+        return None
+    # Room consumes Python numeric scalars, not arbitrary Decimal magnitudes.
+    # Fail closed on JSON tokens which overflow to infinity or silently
+    # underflow to zero when read by the runtime float representation.
+    try:
+        runtime_value = float(number)
+    except (OverflowError, ValueError):
+        errors.append("%s is outside the runtime float range" % (label,))
+        return None
+    if not math.isfinite(runtime_value) or (number != 0 and runtime_value == 0):
+        errors.append("%s is outside the runtime float range" % (label,))
         return None
     return number
 
