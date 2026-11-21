@@ -15,6 +15,7 @@ from mojum.sensory_bridge import (
     ToyContactBridge, SensoryBridgeError, PROBE_CAPABILITY, SCHEMA as CONTACT_SCHEMA,
 )
 from mojum.sensory_play import ContactAssociations, CuriosityError, Toy, ToyScene
+from mojum.world_room import Room
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
@@ -184,6 +185,47 @@ class CanonicalToyContactIntegrationTests(unittest.TestCase):
                      sensory_scene=ToyScene())
         with self.assertRaises(SensoryBridgeError):
             self.aquarium(sensory_scene=ToyScene(width=5., height=5.))
+
+    def test_toy_disc_inside_or_overlapping_motor_obstacle_rejected_pre_birth(self):
+        # Motor room contains the solid vertical barrier x=2.0..2.1,
+        # y=1..3. Geometry shared only by dimensions was not sufficient.
+        for label, x, radius in (
+            ("inside", 2.05, .05),
+            ("edge_intersection", 1.97, .05),
+            ("far_edge_intersection", 2.13, .05),
+        ):
+            with self.subTest(label=label):
+                scene = ToyScene(toys=(
+                    Toy("spectator." + label, x, 2.0,
+                        radius, (100, 120, 140), .5),
+                ))
+                with self.assertRaisesRegex(
+                    SensoryBridgeError, "intersects motor-room obstacle",
+                ):
+                    self.aquarium(sensory_scene=scene)
+                self.assertFalse(self.db.exists())
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
+
+    def test_clear_toy_scene_and_custom_obstacle_free_room_still_replay(self):
+        # The same toy is legal in an obstacle-free room, and the normal
+        # fixture remains fully usable with the motor-room wall present.
+        inside_default_wall = ToyScene(toys=(
+            Toy("spectator.unblocked", 2.05, 2.0, .05, (90, 110, 130), .4),
+        ))
+        with Aquarium(self.second, SEED, GRAPH, room=Room(4, 4),
+                      exploration_mode="goal_free", sensory_mode="toy_probe",
+                      sensory_scene=inside_default_wall) as no_wall:
+            self.assertEqual(no_wall.store.count(), 1)
+            no_wall.step()
+            expected = no_wall.checkpoint()
+        with Aquarium(self.second, SEED, GRAPH, room=Room(4, 4),
+                      exploration_mode="goal_free", sensory_mode="toy_probe",
+                      sensory_scene=inside_default_wall) as restored:
+            self.assertEqual(restored.checkpoint(), expected)
+        with self.aquarium() as default:
+            self.assertEqual(default.store.count(), 1)
+            default.step()
+            self.assertEqual(default.sensory_bridge.model.updates, 1)
 
     def test_forged_contact_frame_rejected_without_model_update(self):
         with self.aquarium() as a:
