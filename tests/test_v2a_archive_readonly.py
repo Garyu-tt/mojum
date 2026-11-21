@@ -7,6 +7,7 @@ external-source tests explicitly rather than pretending interoperability.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -52,7 +53,7 @@ def run_cli(source, db, *, policy, ticks, extra=()):
 
 def rows_fingerprint(db):
     # Check immutable logical event rows, not SQLite WAL/checkpoint page layout.
-    with sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True) as cx:
+    with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as cx:
         data = cx.execute(
             "SELECT seq,event_id,prev_hash,event_hash,wire_json "
             "FROM events ORDER BY seq"
@@ -170,16 +171,18 @@ class V2AArchivedSQLiteInterop(unittest.TestCase):
         self.create_source_a()
         original = rows_fingerprint(self.db)
         dirty = self.root / "tampered.sqlite3"
-        with sqlite3.connect(self.db.resolve().as_uri() + "?mode=ro", uri=True) as src:
-            with sqlite3.connect(dirty) as dest:
+        with closing(sqlite3.connect(self.db.resolve().as_uri() + "?mode=ro",
+                                     uri=True)) as src:
+            with closing(sqlite3.connect(dirty)) as dest:
                 src.backup(dest)
-        with sqlite3.connect(dirty) as cx:
+        with closing(sqlite3.connect(dirty)) as cx:
             cx.execute("DROP TRIGGER noosphere_no_update")
             wire = cx.execute("SELECT wire_json FROM events WHERE seq=1").fetchone()[0]
             cx.execute(
                 "UPDATE events SET wire_json=? WHERE seq=1",
                 ('{"event_id":"forged-first",' + wire[1:],),
             )
+            cx.commit()
         with self.assertRaisesRegex(NoosphereError, "noncanonical stored JSON"):
             with Aquarium(dirty, SEED, GRAPH, exploration_mode="goal_free",
                           developmental_policy=ARCHIVE_MODE):
