@@ -68,6 +68,8 @@ def _check_key(key):
     pulse, rgb, distance = key.split("|")
     if rgb == "none":
         return distance == "-"
+    if rgb == "-":
+        return False
     if distance == "-":
         return False
     values = rgb.split(":")
