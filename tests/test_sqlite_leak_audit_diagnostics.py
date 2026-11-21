@@ -27,6 +27,7 @@ class SQLiteLeakDiagnosticTests(unittest.TestCase):
                     )
                     message = _audit["_leak_diagnostic"](leaked)
                     self.assertIn("later_gc.py:99", message)
+                    self.assertIn("SQLITE_LEAK_ALLOCATION_TRACE", message)
                     self.assertIn("SQLite connection allocation (oldest first)", message)
                     self.assertIn("test_sqlite_leak_audit_diagnostics.py:", message)
                 finally:

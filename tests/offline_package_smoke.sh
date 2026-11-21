@@ -52,6 +52,21 @@ run("mojum-aquarium", "--db", "other.sqlite3", "--ticks", "120", "--pulse-sum", 
 continued = run("mojum-aquarium", "--db", "other.sqlite3", "--ticks", "30", *motor)
 assert continued == run("mojum-aquarium", "--db", "other-control.sqlite3", "--ticks", "150", "--pulse-sum", other, *motor)
 assert continued["motor_state"]["observations"] == 150
+contact = (*motor, "--sensory-mode", "toy_probe")
+measured = run("mojum-aquarium", "--db", "contact.sqlite3", "--ticks", "1", *contact)
+predicted = run("mojum-aquarium", "--db", "contact.sqlite3", "--ticks", "1", *contact)
+assert (predicted["tick"], predicted["stored_events"]) == (2, 3)
+assert measured["toy_contact_state"] == predicted["toy_contact_state"]
+assert predicted["toy_contact_state"]["table"]["220:70:30"] == {
+    "count": 1, "mean_deflection": 0.75,
+}
+guided = (*contact, "--temporal-mode", "range_guided")
+trained = run("mojum-aquarium", "--db", "guided.sqlite3", "--ticks", "5", *guided)
+guided_resume = run("mojum-aquarium", "--db", "guided.sqlite3", "--ticks", "1", *guided)
+assert (guided_resume["tick"], guided_resume["stored_events"]) == (6, 7)
+assert guided_resume["temporal_range_state"]["updates"] == 6
+assert trained["motor_state"]["samples"]["north"]["trials"] == 1
+assert guided_resume["motor_state"]["samples"]["north"]["trials"] == 2
 disabled = run("mojum-aquarium", "--db", "disabled.sqlite3", "--ticks", "2", "--neural-mode", "disabled")
 assert (disabled["neural_mode"], disabled["neural_state"], disabled["stored_events"]) == ("disabled", None, 3)
 

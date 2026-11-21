@@ -28,7 +28,7 @@ def _leak_diagnostic(warning: warnings.WarningMessage) -> str:
                 f"    {frame.filename}:{frame.lineno}"
                 for frame in allocation
             )
-            return f"{diagnostic}\n  SQLite connection allocation (oldest first):\n{frames}"
+            return f"{diagnostic}\nSQLITE_LEAK_ALLOCATION_TRACE\n{allocation}\n  SQLite connection allocation (oldest first):\n{frames}"
     return f"{diagnostic}\n  SQLite connection allocation traceback unavailable in this interpreter"
 
 

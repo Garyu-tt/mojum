@@ -240,11 +240,96 @@ def run_scripted_activity(
             "feedback": evidence[-1]}
 
 
+def _verify_scripted_export(run: Any) -> None:
+    """Fail closed before touching disk if a caller altered fixture evidence.
+
+    This checks the deterministic SCRIPTED_FIXTURE contract, not who supplied
+    the catalog digest. A SHA-256 checksum is not a signature or consent proof.
+    """
+    keys = {"schema", "section_id", "mode", "visibility", "events",
+            "artifacts", "feedback"}
+    if type(run) is not dict or set(run) != keys:
+        raise SchoolContractError("invalid scripted run envelope")
+    section, mode = run["section_id"], run["mode"]
+    if (run["schema"] != RUN_SCHEMA or run["visibility"] != "PRIVATE"
+            or type(section) is not str or section not in _SUPPORTED
+            or type(mode) is not str or mode not in ("revision", "frozen_control")):
+        raise SchoolContractError("unsupported scripted run identity")
+
+    events, artifacts = run["events"], run["artifacts"]
+    if (type(events) is not list or len(events) != len(PHASES)
+            or type(events[0]) is not dict):
+        raise SchoolContractError("invalid scripted event sequence")
+    first_tick = events[0].get("sim_tick")
+    if type(first_tick) is not int or not 0 <= first_tick <= MAX_TICK - 4:
+        raise SchoolContractError("invalid scripted event tick")
+    provenance = events[0].get("provenance")
+    if (type(provenance) is not dict
+            or set(provenance) != {"runtime", "kind", "catalog_sha256",
+                                  "mode", "physical_actuation"}
+            or provenance["runtime"] != "mojum.school-scripted-r02/1"
+            or provenance["kind"] != "SCRIPTED_FIXTURE"
+            or provenance["mode"] != mode
+            or provenance["physical_actuation"] is not False
+            or type(provenance["catalog_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", provenance["catalog_sha256"]) is None):
+        raise SchoolContractError("invalid scripted provenance")
+
+    if section == "visual_arts":
+        baseline, revised, before, after = _paint()
+        metric, direction, suffix = "mirror_equal_pairs_of_288", "higher", "ppm"
+    else:
+        baseline, revised, before, after = _rhythm()
+        metric, direction, suffix = "sum_absolute_timing_error_ms", "lower", "json"
+    if mode == "frozen_control":
+        revised, after = baseline, before
+    expected_artifacts = {f"baseline.{suffix}": baseline,
+                          f"revised.{suffix}": revised}
+    if (type(artifacts) is not dict
+            or set(artifacts) != set(expected_artifacts)
+            or any(type(value) is not bytes or len(value) > MAX_ARTIFACT_BYTES
+                   for value in artifacts.values())
+            or artifacts != expected_artifacts):
+        raise SchoolContractError("scripted artifact differs from deterministic fixture")
+
+    def artifact_meta(name: str) -> dict[str, Any]:
+        data = expected_artifacts[name]
+        return {"filename": name, "sha256": _digest(data), "size_bytes": len(data)}
+
+    evidence = [
+        {"stimulus": "fixed public synthetic template"},
+        {"control": "fixed scripted edits, no agent policy"},
+        {"artifact": artifact_meta(f"baseline.{suffix}"), "metric": metric,
+         "measured": before},
+        {"artifact": artifact_meta(f"revised.{suffix}"), "metric": metric,
+         "measured": after},
+        {"metric": metric, "baseline": before, "revised": after,
+         "delta": after - before, "better_direction": direction,
+         "inference": "SCRIPTED_DEMO_NOT_LEARNING"},
+    ]
+    expected_events = [
+        {"schema": EVENT_SCHEMA, "phase": phase, "sim_tick": first_tick + index,
+         "section_id": section, "activity_id": _SUPPORTED[section],
+         "learner_ref": "anonymous-scripted-fixture", "visibility": "PRIVATE",
+         "provenance": provenance, "evidence": evidence[index]}
+        for index, phase in enumerate(PHASES)
+    ]
+    # Python value equality collapses 43.0 and 43 (also True and 1).
+    # Canonical JSON keeps the serialized types distinct and rejects NaN.
+    try:
+        if (_canonical_json(events) != _canonical_json(expected_events)
+                or _canonical_json(run["feedback"]) != _canonical_json(evidence[-1])):
+            raise SchoolContractError("scripted events or feedback do not match artifacts")
+    except (TypeError, ValueError, RecursionError) as error:
+        raise SchoolContractError("invalid scripted JSON evidence") from error
+
+
 def write_fixture(run: dict[str, Any], output_dir: str | Path) -> Path:
     """Write a new owner-private directory and roll back on a write error.
 
     No assertion of security against malicious same-UID filesystem races.
     """
+    _verify_scripted_export(run)
     artifacts = list(run["artifacts"].items())
     for name, payload in artifacts:
         if name not in ("baseline.ppm", "revised.ppm", "baseline.json", "revised.json"):
@@ -284,7 +369,9 @@ def main(argv: list[str] | None = None) -> int:
         run = run_scripted_activity(load_catalog(args.catalog), args.section,
                                     start_tick=args.start_tick, mode=args.mode)
         write_fixture(run, args.out)
-    except (SchoolContractError, FileExistsError, OSError) as error:
+    except FileExistsError:
+        parser.error("school output already exists. Choose a new output directory.")
+    except (SchoolContractError, OSError) as error:
         parser.error(str(error))
     print(_canonical_json({"status": "SYNTHETIC_FIXTURE_ONLY", "visibility": "PRIVATE",
                            "mode": args.mode, "phase_count": len(run["events"])}).decode("utf-8").strip())

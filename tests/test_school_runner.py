@@ -181,6 +181,67 @@ class SchoolRunnerTests(unittest.TestCase):
                         write_fixture(invalid, dest)
                     self.assertFalse(dest.exists())
 
+    def test_private_export_rejects_forged_artifacts_and_evidence_before_io(self):
+        import copy
+
+        for section in ("music", "visual_arts"):
+            for mode in ("revision", "frozen_control"):
+                valid = run_scripted_activity(self.catalog, section, start_tick=42, mode=mode)
+
+                def altered(change):
+                    result = copy.deepcopy(valid)
+                    change(result)
+                    return result
+
+                baseline = next(iter(valid["artifacts"]))
+                cases = {
+                    "modified bytes": altered(
+                        lambda r: r["artifacts"].__setitem__(
+                            baseline, r["artifacts"][baseline] + b"x")),
+                    "removed artifact": altered(
+                        lambda r: r["artifacts"].pop(baseline)),
+                    "fake digest": altered(
+                        lambda r: r["events"][2]["evidence"]["artifact"].__setitem__(
+                            "sha256", "0" * 64)),
+                    "fake measurement": altered(
+                        lambda r: r["events"][3]["evidence"].__setitem__(
+                            "measured", -1)),
+                    "renumbered tick": altered(
+                        lambda r: r["events"][4].__setitem__("sim_tick", 100)),
+                    "public event": altered(
+                        lambda r: r["events"][1].__setitem__("visibility", "PUBLIC")),
+                    "missing evidence": altered(
+                        lambda r: r["events"].pop(3)),
+                    "forged feedback": altered(
+                        lambda r: r["feedback"].__setitem__("delta", 999)),
+                    "false provenance": altered(
+                        lambda r: r["events"][0]["provenance"].__setitem__(
+                            "physical_actuation", True)),
+                    "float event tick": altered(
+                        lambda r: r["events"][1].__setitem__("sim_tick", 43.0)),
+                    "float event metric": altered(
+                        lambda r: r["events"][3]["evidence"].__setitem__(
+                            "measured", float(r["events"][3]["evidence"]["measured"]))),
+                    "float feedback metric": altered(
+                        lambda r: r["feedback"].__setitem__(
+                            "baseline", float(r["feedback"]["baseline"]))),
+                    "nonfinite feedback": altered(
+                        lambda r: r["feedback"].__setitem__("baseline", float("nan"))),
+                    "untrusted catalog checksum": altered(
+                        lambda r: r["events"][0]["provenance"].__setitem__(
+                            "catalog_sha256", "not-a-sha256")),
+                }
+                with tempfile.TemporaryDirectory() as dirname:
+                    for label, bad in cases.items():
+                        output = Path(dirname) / label
+                        with self.subTest(section=section, mode=mode, case=label):
+                            with self.assertRaises(SchoolContractError):
+                                write_fixture(bad, output)
+                            self.assertFalse(output.exists())
+                    good = Path(dirname) / "valid"
+                    self.assertEqual(write_fixture(valid, good), good)
+                    self.assertTrue((good / "events.json").is_file())
+
     def test_failed_manifest_write_leaves_directory_available_for_retry(self):
         run = run_scripted_activity(self.catalog, "music")
         real_chmod = os.chmod
@@ -209,11 +270,13 @@ class SchoolRunnerTests(unittest.TestCase):
                 capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(completed.stdout)["phase_count"], 5)
             self.assertEqual(json.loads((dest / "events.json").read_text())["events"][0]["sim_tick"], 80)
+            saved_files = {path.name: path.read_bytes() for path in dest.iterdir()}
             again = subprocess.run(
                 [sys.executable, "-m", "mojum.school", "--catalog", str(CATALOG_PATH),
                  "--section", "visual_arts", "--out", str(dest)], capture_output=True, text=True)
-            self.assertNotEqual(again.returncode, 0)
-            self.assertIn("exists", again.stderr)
+            self.assertEqual(again.returncode, 2)
+            self.assertIn("school output already exists", again.stderr)
+            self.assertEqual({path.name: path.read_bytes() for path in dest.iterdir()}, saved_files)
 
 
 if __name__ == "__main__":
