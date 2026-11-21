@@ -178,6 +178,11 @@ def summarize(manifest, frames):
         verdict = "NO_FRAMES"
     elif rest_gate:
         verdict = "REST_COLLAPSE_SUSPECTED"
+    elif path_length == 0.0:
+        # No two committed positions demonstrate movement. In particular,
+        # an all-blocked trace must not report mobility merely because the
+        # policy attempted many actions.
+        verdict = "NO_MEASURED_DISPLACEMENT"
     elif revisit_gate:
         verdict = "REVISIT_CONCENTRATION_SUSPECTED"
     else:
