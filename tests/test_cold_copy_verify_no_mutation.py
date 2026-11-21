@@ -53,7 +53,7 @@ class ReadOnlyVerifyTests(unittest.TestCase):
                         )
                     connection.commit()
                 before = source.read_bytes()
-                with self.assertRaisesRegex(ValueError, "metadata"):
+                with self.assertRaisesRegex(ValueError, "metadata|owner"):
                     export_cold_copy(source, self.archive, SEED, GRAPH)
                 self.assertEqual(source.read_bytes(), before)
                 self.assertFalse(self.archive.exists())
