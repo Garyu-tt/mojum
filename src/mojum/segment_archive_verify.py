@@ -274,6 +274,14 @@ def restore_into_new_sqlite(directory, destination, *, external_expected_head):
             if (report["count"] != verified["archived_events"]
                     or report["segments"] != verified["sealed_segments"]):
                 raise ArchiveError("reconstruction differed from verified prefix")
+            # Materialize all committed WAL pages into the independent
+            # scratch DB before we publish a one-file restored source.
+            wal = journal._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if wal is None or wal[0] != 0:
+                raise ArchiveError("restored SQLite WAL checkpoint was blocked")
+        leftover_wal = Path(temp + "-wal")
+        if leftover_wal.is_file() and leftover_wal.stat().st_size:
+            raise ArchiveError("restored SQLite has unapplied WAL pages")
         if dest.exists() or dest.is_symlink():
             raise ArchiveError("restore destination appeared during import")
         try:
