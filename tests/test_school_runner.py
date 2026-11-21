@@ -270,11 +270,13 @@ class SchoolRunnerTests(unittest.TestCase):
                 capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(completed.stdout)["phase_count"], 5)
             self.assertEqual(json.loads((dest / "events.json").read_text())["events"][0]["sim_tick"], 80)
+            saved_files = {path.name: path.read_bytes() for path in dest.iterdir()}
             again = subprocess.run(
                 [sys.executable, "-m", "mojum.school", "--catalog", str(CATALOG_PATH),
                  "--section", "visual_arts", "--out", str(dest)], capture_output=True, text=True)
-            self.assertNotEqual(again.returncode, 0)
-            self.assertIn("exists", again.stderr)
+            self.assertEqual(again.returncode, 2)
+            self.assertIn("school output already exists", again.stderr)
+            self.assertEqual({path.name: path.read_bytes() for path in dest.iterdir()}, saved_files)
 
 
 if __name__ == "__main__":
