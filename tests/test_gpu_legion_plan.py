@@ -26,11 +26,14 @@ class GpuLegionPlanTests(unittest.TestCase):
         self.assertEqual(report["live_replicas"], 0)
         self.assertFalse(report["deploy_performed"])
         self.assertFalse(report["hardware_verified"])
+        self.assertFalse(report["observed_local_inventory"])
         self.assertEqual([x["gpu_indices"] for x in report["replicas"]],
                          [[0, 1, 2], [3, 4, 5]])
         self.assertEqual(report["unused_gpu_indices"], [6])
         self.assertEqual(report["replicas"][0]["env"]["CUDA_VISIBLE_DEVICES"], "0,1,2")
         self.assertEqual(report["replicas"][0]["argv"][0], "llama-server")
+        self.assertIn(":18180/", report["replicas"][0]["endpoint"])
+        self.assertNotIn(":18080/", report["replicas"][0]["endpoint"])
         self.assertIn("--jinja", report["replicas"][0]["argv"])
         self.assertIn("Pascal", " ".join(report["warnings"]))
 
@@ -45,7 +48,8 @@ class GpuLegionPlanTests(unittest.TestCase):
         ]}
         report = gpu.plan(data, gpu.validate_inventory(data))
         self.assertEqual(report["replicas"][0]["gpu_indices"], [2])
-        self.assertTrue(report["hardware_verified"])
+        self.assertFalse(report["hardware_verified"])
+        self.assertFalse(report["observed_local_inventory"])
         self.assertEqual(report["live_replicas"], 0)
 
     def test_replicas_never_share_card_and_ports_unique(self):
@@ -106,6 +110,37 @@ class GpuLegionPlanTests(unittest.TestCase):
             file.write_bytes(b" " * (gpu.MAX_INPUT_BYTES + 1))
             with self.assertRaisesRegex(gpu.InventoryError, "exceeds"):
                 gpu.load_inventory(file)
+
+
+    def test_imported_json_cannot_claim_hardware_verification(self):
+        data, _ = p106_inventory(3)
+        data["source"] = "nvidia-smi"  # Attacker-controlled label
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / "forged.json"
+            file.write_text(json.dumps(data))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                rc = gpu.main(["--inventory", str(file), "--require-replicas", "1"])
+        self.assertEqual(rc, 0)
+        report = json.loads(output.getvalue())
+        self.assertFalse(report["hardware_verified"])
+        self.assertFalse(report["observed_local_inventory"])
+        self.assertEqual(report["live_replicas"], 0)
+
+    def test_actual_probe_marks_observation_not_attestation(self):
+        data, devices = p106_inventory(3)
+        data["source"] = "nvidia-smi"
+        output = io.StringIO()
+        with patch.object(gpu, "probe_nvidia_smi", return_value=(data, devices)):
+            with contextlib.redirect_stdout(output):
+                rc = gpu.main(["--require-replicas", "1"])
+        self.assertEqual(rc, 0)
+        report = json.loads(output.getvalue())
+        self.assertFalse(report["hardware_verified"])
+        self.assertTrue(report["observed_local_inventory"])
+        self.assertFalse(report["deploy_performed"])
+        self.assertEqual(report["replicas"][0]["endpoint"],
+                         "http://127.0.0.1:18180/v1/chat/completions")
 
     def test_nvidia_smi_csv_probe_mock(self):
         class Completed:
