@@ -311,6 +311,9 @@ class SensoryPlay:
             if first != expected:
                 raise CuriosityError("incompatible sensory play bootstrap")
         self.store = LocalNoosphere(db_path, self.agent_id)
+        # Pin the head corresponding to this instance's in-memory state.
+        # Do not re-read the shared SQLite head to authorize stale writes.
+        self._committed_head = self.store.head()
         try:
             if self.store.count() == 0:
                 self._append("sensory.bootstrap", "sensory-bootstrap", self.manifest, 0)
@@ -340,8 +343,9 @@ class SensoryPlay:
     def _append(self, topic, eid, payload, clock_ns):
         if self.store.count() >= MAX_EVENTS:
             raise CuriosityError("synthetic sensory journal budget exhausted")
-        self.store.append(self._event(topic, eid, payload, clock_ns),
-                          expected_head=self.store.head())
+        new_head = self.store.append(self._event(topic, eid, payload, clock_ns),
+                                     expected_head=self._committed_head)
+        self._committed_head = new_head
 
     def _calculate(self):
         runtime = Simulation(self.graph, dt_ns=self.dt_ns)
@@ -421,12 +425,14 @@ class SensoryPlay:
             self.tick += 1
 
     def checkpoint(self):
+        if self.store.head() != self._committed_head:
+            raise CuriosityError("stale sensory checkpoint: journal head advanced")
         return {
             "schema": "mojum.sensory-curiosity.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "world_revision": self.world.revision,
             "association_model": self.model.snapshot(),
-            "rng": self.rng, "head": self.store.head(),
+            "rng": self.rng, "head": self._committed_head,
             "integrity": "local_checksum_not_authenticated",
         }
 
