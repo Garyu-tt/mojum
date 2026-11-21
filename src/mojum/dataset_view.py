@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping
 
 SCHEMA = "mojum.dataset-view/1"
+_MAX_TICK = 2**63 - 1  # Match the integer range used by Noosphere timestamps.
 # Bound the serialized PUBLIC view, not merely the number of records. The
 # encoder streams into SHA-256 so a large export need not make a second copy.
 _MAX_CANONICAL_BYTES = 16 * 1024 * 1024
@@ -66,7 +67,7 @@ def project_episodes(episodes, *, allowed_sources, max_records=1000):
         _require_utf8(src, "episode source")
         if visibility not in ("PUBLIC", "PRIVATE", "RESTRICTED"):
             raise ValueError("invalid visibility")
-        if not isinstance(tick, int) or isinstance(tick, bool) or tick < 0:
+        if not isinstance(tick, int) or isinstance(tick, bool) or not 0 <= tick <= _MAX_TICK:
             raise ValueError("invalid tick")
         if not isinstance(obs, str) or len(obs) > 4096:
             raise ValueError("invalid observation")
@@ -78,18 +79,17 @@ def project_episodes(episodes, *, allowed_sources, max_records=1000):
         if eid in identities and identities[eid] != identity:
             raise ValueError("conflicting duplicate id")
         identities[eid] = identity
-        if visibility != "PUBLIC" or src not in allowed_sources:
+        if visibility != "PUBLIC" or src not in allowed_sources or eid in seen:
             continue
+        if len(seen) >= max_records:
+            raise ValueError("record budget exceeded")
         record = {"id": eid, "source": src, "tick": tick, "observation": obs}
-        if eid not in seen:
-            wire = json.dumps(record, ensure_ascii=False, sort_keys=True,
-                              separators=(",", ":")).encode("utf-8")
-            projected_bytes += len(wire) + (1 if seen else 0)
-            if projected_bytes > _MAX_CANONICAL_BYTES:
-                raise ValueError("canonical PUBLIC view byte budget exceeded")
+        wire = json.dumps(record, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":")).encode("utf-8")
+        projected_bytes += len(wire) + (1 if seen else 0)
+        if projected_bytes > _MAX_CANONICAL_BYTES:
+            raise ValueError("canonical PUBLIC view byte budget exceeded")
         seen[eid] = record
     records = sorted(seen.values(), key=lambda r: (r["tick"], r["id"]))
-    if len(records) > max_records:
-        raise ValueError("record budget exceeded")
     payload = {"schema": SCHEMA, "records": records}
     return {"schema": SCHEMA, "records": records, "sha256": _hash_canonical_bounded(payload)}
