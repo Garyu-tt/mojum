@@ -122,7 +122,7 @@ class DevelopmentFixtureTests(unittest.TestCase):
 
     def test_reject_unpaired_surrogate_identities_before_bootstrap_or_snapshot(self):
         for field in ("organism_id", "genome_revision"):
-            for bad in ("\\ud800", "\\udfff"):
+            for bad in ("\ud800", "\udfff"):
                 with self.subTest(field=field, bad=repr(bad)):
                     args = {"organism_id": "fixture", "genome_revision": "synthetic-rev"}
                     args[field] = bad
