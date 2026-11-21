@@ -270,6 +270,27 @@ class RetentionTests(unittest.TestCase):
         with self.assertRaises(CellV5Error):
             CellExplorerV5.from_snapshot(dict(good, **{"extra": 1}))
 
+    def test_snapshot_rejects_aggregate_observations_before_deadline(self):
+        # Three distinct last-seen ticks, individually valid cell counters,
+        # and a current newest timestamp still cannot fit eight observations
+        # into the first five ticks. Must reject this forged causal history.
+        forged = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "last_tick": 9, "last_epoch_index": 0, "updates": 10,
+            "records": {
+                "0:0": {"x+": [4, 0]},
+                "1:0": {"x+": [4, 0]},
+                "2:0": {"x+": [2, 0]},
+            },
+            "last_seen_at": {"0:0": 3, "1:0": 4, "2:0": 9},
+            "evictions": 0, "forgotten_observations": 0,
+            "rest_streak": 0, "forced_probes": 0,
+        }
+        with self.assertRaisesRegex(
+            CellV5Error, "combined v5 cell observations exceed elapsed ticks"
+        ):
+            CellExplorerV5.from_snapshot(forged)
+
     def test_snapshot_rejects_impossible_retention_and_tick_history(self):
         # Mirrored v3/v4 invariants: each observation belongs to exactly one
         # absolute tick and a 512-cell table must precede every eviction.
