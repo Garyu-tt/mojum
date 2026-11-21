@@ -133,8 +133,6 @@ class MotorPlayV2:
                 raise MotorPlayV2Error("invalid measured action counts")
         if sum(row["trials"] for row in raw["samples"].values()) != raw["observations"]:
             raise MotorPlayV2Error("motor observations do not match action history")
-        if raw["samples"]["rest"]["blocked"] != 0:
-            raise MotorPlayV2Error("rest cannot be blocked in the point-room fixture")
         if raw["rest_streak"] > raw["samples"]["rest"]["trials"]:
             raise MotorPlayV2Error("rest streak exceeds recorded rests")
         if raw["samples"]["rest"]["blocked"] != 0:
@@ -213,8 +211,6 @@ class MotorPlayV2:
             raise MotorPlayV2Error("rest cannot be blocked in the point-room fixture")
         if kind == "rest" and self.rest_streak >= MAX_CONSECUTIVE_REST:
             raise MotorPlayV2Error("rest streak cap violated by recorded outcome")
-        if kind == "rest" and blocked:
-            raise MotorPlayV2Error("rest cannot be blocked in point-room fixture")
         self.samples[kind]["trials"] += 1
         self.samples[kind]["blocked"] += int(blocked)
         self.observations += 1
