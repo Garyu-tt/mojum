@@ -1,0 +1,45 @@
+name: Mojum R0.15 real v4 epoch-crossing offline Chrome QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-v4-epoch-viewer.yml"
+      - "examples/aquarium_trace_viewer.html"
+      - "tests/qa_real_epoch_v4_chrome.py"
+      - "tests/smoke_real_chromium_viewer.py"
+  push:
+    paths:
+      - ".github/workflows/r015-v4-epoch-viewer.yml"
+      - "examples/aquarium_trace_viewer.html"
+      - "tests/qa_real_epoch_v4_chrome.py"
+      - "tests/smoke_real_chromium_viewer.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-v4-epoch-chrome:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout read-only viewer QA
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable original epoch v4 peer source
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 51d21f77b887f72cb68960a194e529d6073e3187
+          path: original-epoch-v4
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Require actual local Google Chrome
+        run: command -v google-chrome-stable
+      - name: Real 10003-tick SQLite marker and offline desktop/mobile browser
+        env:
+          PYTHONPATH: src
+        run: python tests/qa_real_epoch_v4_chrome.py original-epoch-v4

@@ -52,11 +52,13 @@ def chrome_binary():
     raise RuntimeError("Google Chrome/Chromium not installed; cannot claim browser smoke")
 
 
-def instrumented_html(original_html, source_text, *, expected_rejection=None):
+def instrumented_html(original_html, source_text, *, expected_rejection=None,
+                      expected_first_tick="0"):
     # Only a *test-owned, synthetic* local SQLite history is placed here.
     # Escaping '<' prevents any accidental closing of the inline script.
     literal = json.dumps(source_text, ensure_ascii=True).replace("<", "\\u003c")
     rejection = json.dumps(expected_rejection, ensure_ascii=True).replace("<", "\\u003c")
+    first_tick = json.dumps(expected_first_tick, ensure_ascii=True).replace("<", "\\u003c")
     boot = r"""
 <script>
 window.addEventListener("load", async () => {
@@ -87,7 +89,7 @@ window.addEventListener("load", async () => {
     }
     let loaded = false;
     for (let retry=0;retry<100;retry++) {
-      if (el("tick").textContent === "0") {loaded=true;break;}
+      if (el("tick").textContent === __FIRST_TICK__) {loaded=true;break;}
       await new Promise(resolve=>setTimeout(resolve,10));
     }
     if (!loaded) throw Error("local JSONL import did not finish");
@@ -125,7 +127,7 @@ window.addEventListener("load", async () => {
   }
 });
 </script>
-""".replace("__TRACE__", literal).replace("__REJECTION__", rejection)
+""".replace("__TRACE__", literal).replace("__REJECTION__", rejection).replace("__FIRST_TICK__", first_tick)
     if original_html.count("</body>") != 1:
         raise AssertionError("viewer page missing unique body end")
     return original_html.replace("</body>", boot + "\n</body>")
