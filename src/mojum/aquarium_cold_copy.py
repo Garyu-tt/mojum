@@ -18,6 +18,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError, MOTOR_MODES
+from .genesis import validate_seed
 from .graph import load_graph
 from .noosphere import STORE_SCHEMA, _open_readonly
 from .noosphere import _read_first_event
@@ -248,7 +249,7 @@ def main():
         p.add_argument("--db", type=Path, required=True)
         p.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
         p.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
-        p.add_argument("--agent-id", default="dante-fixture-001")
+        p.add_argument("--agent-id", help="journal owner (defaults to the supplied genome ID)")
         p.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
         p.add_argument("--motor-mode", choices=MOTOR_MODES, default="scripted")
         p.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
@@ -267,14 +268,15 @@ def main():
                    brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
                    temporal_mode=args.temporal_mode)
     try:
-        seed = json.loads(args.genome.read_text(encoding="utf-8"))
+        seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
+        agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
         if args.mode == "export":
             result = export_cold_copy(args.db, args.output, seed, graph,
-                                      agent_id=args.agent_id, **options)
+                                      agent_id=agent_id, **options)
         else:
             result = verify_cold_copy(args.db, seed, graph,
-                                      expected_agent_id=args.agent_id,
+                                      expected_agent_id=agent_id,
                                       expected_journal_head=args.expected_head,
                                       expected_sha256=args.expected_sha256,
                                       expected_tick=args.expected_tick, **options)
