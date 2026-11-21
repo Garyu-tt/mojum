@@ -91,13 +91,6 @@ against a separately recorded journal head. For longer histories, add
 Use a new output filename in a directory with private access. The JSONL is
 plaintext and its checksum detects accidental corruption.
 
-Modern trace files must contain their full exporter metadata and matching
-SHA-256 digest: removing the proof, status, range or room metadata is rejected.
-The viewer rejects unverified legacy JSONL by default. To inspect a genuinely
-old trace with no modern metadata, explicitly check the legacy opt-in box;
-playback is clearly labelled as **unverified**. This opt-in does not authenticate
-the source or make its private contents safe to share.
-
 Run regression tests (Python 3.11–3.13 are the CI target):
 
 ```sh
@@ -144,3 +137,7 @@ journal with the matching runtime for deterministic replay.
 Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
 
 **License:** undecided; repository visibility does not grant a license.
+
+## Offline trace import safety
+
+The viewer verifies the SHA-256 of frames in modern Aquarium JSONL exports and fails closed if the checksum, export status, room or range metadata is incomplete. Truly older traces without proof metadata are **rejected by default**; a user must explicitly enable the unchecked `legacy` checkbox to view them. Such traces are visibly marked **unverified**, and SHA-256 integrity is not authentication or an authorization to disclose PRIVATE history.
