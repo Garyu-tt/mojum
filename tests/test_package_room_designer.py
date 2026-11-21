@@ -70,12 +70,17 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
             if tag not in template:
                 template = template.replace(SCRIPT_TAG, SCRIPT_TAG + "\n  " + tag, 1)
             (self.tmp / name).write_text(
-                f"globalThis.BUNDLE_{name.replace('.js', '').upper()} = true;\n",
+                ("globalThis." + ("MojumRoomHistory" if name == extras[0]
+                 else "MojumWalkPreview") + " = true;\n"
+                 + f"globalThis.BUNDLE_{name.replace('.js', '').upper()} = true;\n"),
                 encoding="utf-8",
             )
         source = self.tmp / "template.html"
         source.write_text(template, encoding="utf-8")
-        packed = standalone_html(html_path=source, js_path=core).decode("utf-8")
+        packed = standalone_html(
+                html_path=source, js_path=core,
+                history_path=self.tmp / extras[0], walk_path=self.tmp / extras[1],
+            ).decode("utf-8")
         self.assertNotIn("<script src=", packed)
         self.assertIn("BUNDLE_ROOM_DESIGNER_HISTORY", packed)
         self.assertIn("BUNDLE_ROOM_WALK_PREVIEW", packed)
@@ -86,11 +91,17 @@ class StandaloneDesignerPackagingTests(unittest.TestCase):
         )
         source.write_text(unknown, encoding="utf-8")
         with self.assertRaisesRegex(PackagingError, "unexpected"):
-            standalone_html(html_path=source, js_path=core)
+            standalone_html(
+                html_path=source, js_path=core,
+                history_path=self.tmp / extras[0], walk_path=self.tmp / extras[1],
+            )
         source.write_text(template, encoding="utf-8")
         (self.tmp / extras[1]).unlink()
         with self.assertRaisesRegex(PackagingError, "nonsymlink"):
-            standalone_html(html_path=source, js_path=core)
+            standalone_html(
+                html_path=source, js_path=core,
+                history_path=self.tmp / extras[0], walk_path=self.tmp / extras[1],
+            )
 
     def test_can_write_exactly_once_with_sha_and_owner_only_permissions(self):
         expected = standalone_html()
