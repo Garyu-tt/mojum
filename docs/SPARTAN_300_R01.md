@@ -28,10 +28,19 @@ scheduled tasks and not a claim that 300 model inference processes are live.
 python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 init --slots 300
 python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 enqueue --json tasks.json
 python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 claim --worker 1
-python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 heartbeat --worker 1 --task issue-123
-python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 finish --worker 1 --task issue-123 --result review --artifact "https://github.com/Garyu-tt/mojum/pull/123"
+python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 heartbeat --worker 1 --task issue-123 --attempt 1
+python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 finish --worker 1 --task issue-123 --attempt 1 --result review --artifact "https://github.com/Garyu-tt/mojum/pull/123"
 python3 tools/spartan_coordinator.py --db /var/lib/mojum/spartan.sqlite3 status
 ```
+
+`claim` returns the task's `attempts` value. Supply that value as the mandatory
+`--attempt` fencing token on every `heartbeat` or `finish`. Do **not** reuse
+an old attempt after its lease expires, even if the same numbered worker slot
+reclaims the task. This fencing token prevents stale processes from changing a
+new lease; it is **not authentication** and must never replace worker identity
+verification. A worker that exhausted all three attempts must finish `blocked`,
+not requeue. Re-enqueueing an existing task ID is idempotent only if its scope,
+priority and payload match exactly; conflicting batches roll back atomically.
 
 `tasks.json` is an array such as:
 ```json
