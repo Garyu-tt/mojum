@@ -131,7 +131,7 @@ def _sealed_prefix(root, segment_size, sealed_count):
         if any(root.glob("segment-*.events.jsonl")) or any(
                 root.glob("segment-*.manifest.json")):
             raise ArchiveError("unexpected sealed files for genesis-only tail")
-        return _ZERO
+        return _ZERO, False
     last = read_manifest(root, sealed_count-1)
     if (last["segment_size"] != segment_size
             or last["segment_index"] != sealed_count-1):
@@ -144,7 +144,7 @@ def _sealed_prefix(root, segment_size, sealed_count):
     if (prefix["sealed_segments"] != sealed_count
             or prefix["segment_size"] != segment_size):
         raise ArchiveError("sealed prefix length or size mismatch")
-    return prefix["sealed_head"]
+    return prefix["sealed_head"], prefix["contains_private"]
 
 
 def verify_point_in_time(directory, *, source_events, external_expected_source_head):
@@ -153,7 +153,9 @@ def verify_point_in_time(directory, *, source_events, external_expected_source_h
     if not _digest(external_expected_source_head):
         raise ArchiveError("independently trusted source SHA256 head required")
     m = _tail_manifest(root, source_events)
-    sealed_head = _sealed_prefix(root, m["segment_size"], m["segment_index"])
+    sealed_head, prefix_private = _sealed_prefix(
+        root, m["segment_size"], m["segment_index"]
+    )
     if m["prior_segment_head"] != sealed_head:
         raise ArchiveError("live tail is not attached to sealed prefix")
     for _ in _verify_tail_data(root, m):
@@ -173,7 +175,7 @@ def verify_point_in_time(directory, *, source_events, external_expected_source_h
         "archived_events": source_events,
         "sealed_head": sealed_head,
         "source_head": m["snapshot_head"],
-        "contains_private": m["contains_private"],
+        "contains_private": (m["contains_private"] or prefix_private),
         "trust": "explicit-external-source-head-required",
     }
 
@@ -197,7 +199,7 @@ def capture_live_tail(store, directory, *, include_nonpublic=False,
     sealed, tail_count = divmod(total, store.segment_size)
     if not tail_count:
         raise ArchiveError("no unsealed tail at this source head")
-    previous = _sealed_prefix(root, store.segment_size, sealed)
+    previous, _ = _sealed_prefix(root, store.segment_size, sealed)
     if sealed:
         prior_source = store.event_at(sealed*store.segment_size)["event_hash"]
         if prior_source != previous:
