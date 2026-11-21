@@ -32,7 +32,7 @@ const wire=fs.readFileSync(process.argv[2],"utf8");
 const script=html.match(/<script>([\s\S]*?)<\/script>/);
 if(!script)throw Error("missing viewer script");
 const {TextDecoder,TextEncoder}=require("node:util");
-function openDOM(){
+function openDOM(timers=null){
  const registry=new Map();
  const make=id=>({
    id,disabled:false,checked:false,value:"0",max:"0",textContent:"",
@@ -66,7 +66,8 @@ function openDOM(){
  vm.runInNewContext(script[1],{
     document,Number,Math,JSON,Array,String,Promise,Set,
     crypto:require("node:crypto").webcrypto,TextEncoder,TextDecoder,
-    clearInterval(){},setInterval(){throw Error("unexpected timer")},
+    clearInterval(id){if(timers)timers.clear(id)},
+    setInterval(fn,ms){if(!timers)throw Error("unexpected timer");return timers.start(fn,ms)},
     fetch(){throw Error("forbidden fetch")},
     WebSocket(){throw Error("forbidden websocket")}
  },{timeout:3000});
@@ -130,6 +131,57 @@ async function race(source){
    reusableInput:input.value
  };
 }
+async function controlSmoke(source){
+ // Fake clock: real button handlers run, no wall-clock timing or sockets.
+ let active=null, delay=null, issued=0, cleared=0;
+ const timers={
+   start(fn,ms){active=fn;delay=ms;return ++issued;},
+   clear(id){active=null;cleared++;}
+ };
+ const get=openDOM(timers), input=get("file");
+ input.files=[{name:"verified.jsonl",size:Buffer.byteLength(source),
+   arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
+ await input.listeners.change.call(input);
+ if(get("play").disabled)throw Error("verified trace did not enable playback");
+ const snapshot=()=>({
+   tick:get("tick").textContent,counter:get("counter").textContent,
+   play:get("play").textContent,seek:get("seek").value
+ });
+ const initial=snapshot();
+ get("next").listeners.click();
+ const next=snapshot();
+ get("prev").listeners.click();
+ const prev=snapshot();
+ get("end").listeners.click();
+ const end=snapshot();
+ get("play").listeners.click(); // Rewind from the last frame.
+ const restarted={...snapshot(),delay,active:active!==null};
+ const firstInterval=active;
+ firstInterval();
+ const advanced=snapshot();
+ get("speed").value="4";
+ get("speed").listeners.change(); // Must replace the 400ms interval.
+ const faster={...snapshot(),delay,active:active!==null};
+ const secondInterval=active;
+ secondInterval(); // Last frame must stop the interval.
+ const finished={...snapshot(),active:active!==null};
+ get("play").listeners.click(); // Restart from end and pause manually.
+ get("play").listeners.click();
+ const paused={...snapshot(),active:active!==null};
+ get("seek").value="2";
+ get("seek").listeners.input();
+ const seeked=snapshot();
+ get("start").listeners.click();
+ const start=snapshot();
+ get("play").listeners.click();
+ input.files=[{name:"invalid.jsonl",size:4,
+   arrayBuffer:async()=>Uint8Array.from(Buffer.from("nope")).buffer}];
+ await input.listeners.change.call(input);
+ const invalid={disabled:get("play").disabled,active:active!==null,
+   status:get("status").textContent,cleared,issued};
+ return {initial,next,prev,end,restarted,advanced,faster,finished,
+         paused,seeked,start,invalid};
+}
 (async()=>{
  const valid=await attempt(wire);
  const altered=await attempt(wire.replace('"measured_deflection":0.75',
@@ -185,6 +237,7 @@ async function race(source){
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
  const trailingBlank=await attempt(wire + "\n");
  const encoding=await attempt(Buffer.concat([Buffer.from(wire),Buffer.from([255])]));
+ const controls=await controlSmoke(wire);
  process.stdout.write(JSON.stringify({valid,altered,truncated,mismatch,
                                       brokenProof,missingProof,strippedModern,
                                       strippedRange,missingStatus,missingRange,
@@ -193,7 +246,7 @@ async function race(source){
                                       legacyDefault,legacyOptIn,
                                       safe,gap,oversized,longLine,manyFrames,raced,
                                       blankLine,whitespaceLine,trailingBlank,
-                                      encoding})+"\n");
+                                      encoding,controls})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
@@ -338,6 +391,31 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertEqual(values["raced"]["tick"], "0")
         self.assertIn("current.jsonl", values["raced"]["status"])
         self.assertEqual(values["raced"]["reusableInput"], "")
+
+        # A former #74 gap: actual navigation, seek, pause, playback
+        # boundaries and speed changes on the current verified JSONL wire.
+        c = values["controls"]
+        self.assertEqual((c["initial"]["tick"], c["initial"]["counter"]), ("0", "1 / 3"))
+        self.assertEqual((c["next"]["tick"], c["next"]["counter"]), ("1", "2 / 3"))
+        self.assertEqual((c["prev"]["tick"], c["prev"]["seek"]), ("0", "0"))
+        self.assertEqual((c["end"]["tick"], c["end"]["seek"]), ("2", "2"))
+        self.assertEqual((c["restarted"]["tick"], c["restarted"]["delay"]), ("0", 400))
+        self.assertTrue(c["restarted"]["active"])
+        self.assertEqual(c["advanced"]["tick"], "1")
+        self.assertEqual((c["faster"]["tick"], c["faster"]["delay"]), ("1", 100))
+        self.assertTrue(c["faster"]["active"])
+        self.assertEqual(c["finished"]["tick"], "2")
+        self.assertFalse(c["finished"]["active"])
+        self.assertIn("Воспроизвести", c["finished"]["play"])
+        self.assertEqual(c["paused"]["tick"], "0")
+        self.assertFalse(c["paused"]["active"])
+        self.assertIn("Воспроизвести", c["paused"]["play"])
+        self.assertEqual((c["seeked"]["tick"], c["seeked"]["seek"]), ("2", "2"))
+        self.assertEqual((c["start"]["tick"], c["start"]["seek"]), ("0", "0"))
+        self.assertTrue(c["invalid"]["disabled"])
+        self.assertFalse(c["invalid"]["active"])
+        self.assertIn("Не удалось открыть", c["invalid"]["status"])
+        self.assertEqual((c["invalid"]["issued"], c["invalid"]["cleared"]), (4, 4))
 
 
 class OfflineViewerRegressionQA(unittest.TestCase):
