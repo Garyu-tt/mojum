@@ -30,6 +30,11 @@ class ContactRichStressTests(unittest.TestCase):
         report = evaluate()
         exposure = report["evidence_quality"]
         self.assertEqual(report["classification"], CLASSIFICATION)
+        # Source-visible suite, locked after the first exact-head CI run.
+        self.assertEqual(
+            report["suite_sha256"],
+            "fc415f03ca89348aad2fadf3605c512af0df5790a6cf40e5aaf5f89a522848bf",
+        )
         self.assertTrue(exposure["not_blind_or_held_out"])
         self.assertTrue(exposure["no_generalization_claim"])
         actual = [
@@ -41,6 +46,7 @@ class ContactRichStressTests(unittest.TestCase):
         self.assertTrue(exposure["passes_contact_gate"])
         self.assertGreaterEqual(len(actual), MIN_CONTACT_SCENES)
         self.assertEqual(exposure["status"], "PURPOSEFUL_CONTACT_EXPOSURE")
+        self.assertEqual(len(actual), 12)  # Fixture stress, not generalization.
 
     def test_each_arm_invariant_and_unflattering_findings_allowed(self):
         result = evaluate()
