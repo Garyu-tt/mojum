@@ -13,7 +13,9 @@ const binary = process.env.CHROME_BINARY ||
   ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"]
     .find(f => fs.existsSync(f));
 if (!binary) throw new Error("Chrome/Chromium required; browser acceptance cannot be faked");
-const HTML = path.resolve(__dirname, "../tools/room_designer.html");
+const HTML = process.env.MOJUM_ROOM_HTML
+  ? path.resolve(process.env.MOJUM_ROOM_HTML)
+  : path.resolve(__dirname, "../tools/room_designer.html");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function waitPort(dir, child) {
