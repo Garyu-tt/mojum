@@ -95,6 +95,29 @@ class V2Test(unittest.TestCase):
         with self.assertRaises(CuriosityError):
             ContactAssociationsV2.from_snapshot(forged)
 
+    def test_contact_clock_is_monotonic_and_restorable(self):
+        model = ContactAssociationsV2()
+        feed(model, 8, (1, 2, 3), 0.25)
+        before = model.snapshot()
+        for duplicate_or_stale_tick in (8, 7):
+            with self.subTest(tick=duplicate_or_stale_tick):
+                with self.assertRaisesRegex(CuriosityError, "stale or exhausted"):
+                    feed(model, duplicate_or_stale_tick, (4, 5, 6), 0.5)
+                self.assertEqual(model.snapshot(), before)
+        for invalid_clock in (True, -2, 2**63):
+            with self.subTest(invalid_clock=invalid_clock):
+                forged = model.snapshot()
+                forged["last_contact_tick"] = invalid_clock
+                with self.assertRaises(CuriosityError):
+                    ContactAssociationsV2.from_snapshot(forged)
+        feed(model, 9, (4, 5, 6), 0.5)
+        restored = ContactAssociationsV2.from_snapshot(
+            json.loads(json.dumps(model.snapshot()))
+        )
+        self.assertEqual(restored.snapshot(), model.snapshot())
+        with self.assertRaises(CuriosityError):
+            feed(restored, 9, (4, 5, 6), 0.5)
+
     def test_duplicate_last_update_rejected(self):
         m = ContactAssociationsV2()
         feed(m, 0, (1, 1, 1), 0.5)
