@@ -16,4 +16,4 @@ Repeat with `--section music` and a fresh `--out` directory. For a no-change bas
 
 This is a **local integrity/reproducibility check**, not an authentic digital signature, filesystem race hardening, consent verification, independent evaluation of creative skill, or crash-durable replica protocol. Use a trusted catalog and a directory owned by the operator. The verifier does not change source files or create journal entries.
 
-Targeted tests: `PYTHONPATH=src python -m unittest -v tests.test_school_fixture_verify`. The repository CI matrix is the source of multi-version execution results.
+Targeted tests: `PYTHONPATH=src python -m unittest discover -s tests -p 'test_school_fixture_verify.py' -v`. The repository CI matrix is the source of multi-version execution results.
