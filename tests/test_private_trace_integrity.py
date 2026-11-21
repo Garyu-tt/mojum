@@ -57,16 +57,34 @@ function openDOM(){
    }
    return registry.get(id);
  };
+ const docListeners={};
  const document={
    getElementById:get,
    createElement:()=>make("created"),
-   addEventListener(){},
+   addEventListener(name,fn){docListeners[name]=fn;},
    hidden:false
+ };
+ const timers=new Map();
+ let nextTimer=0;
+ get.timerState=()=>{
+   const first=[...timers.values()][0];
+   return {active:timers.size,delay:first?first.delay:null};
+ };
+ get.advanceTimer=()=>{
+   if(timers.size!==1)throw Error("expected exactly one playback timer");
+   [...timers.values()][0].fn();
+ };
+ get.hide=()=>{
+   document.hidden=true;
+   docListeners.visibilitychange();
  };
  vm.runInNewContext(script[1],{
     document,Number,Math,JSON,Array,String,Promise,Set,
     crypto:require("node:crypto").webcrypto,TextEncoder,TextDecoder,
-    clearInterval(){},setInterval(){throw Error("unexpected timer")},
+    clearInterval(id){timers.delete(id);},
+    setInterval(fn,delay){
+      const id=++nextTimer;timers.set(id,{fn,delay});return id;
+    },
     fetch(){throw Error("forbidden fetch")},
     WebSocket(){throw Error("forbidden websocket")}
  },{timeout:3000});
@@ -84,6 +102,7 @@ async function attempt(source, allowLegacy=false, size=Buffer.byteLength(source)
    tick:get("tick").textContent,
    probe:get("probe").textContent,
    pred:get("prediction").textContent,
+   range:get("range").textContent,
    brain:get("brain").textContent,
    rows:get("events").children.length,
    reusableInput:input.value
@@ -129,6 +148,50 @@ async function race(source){
    tick:get("tick").textContent,
    reusableInput:input.value
  };
+}
+async function playbackControls(source){
+  // Drive real viewer handlers with a verified SQLite-exported trace.
+  // Manual timer advancement makes the test deterministic and offline.
+  const get=openDOM(),input=get("file");
+  input.files=[{name:"verified.private.jsonl",size:Buffer.byteLength(source),
+    arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
+  await input.listeners.change.call(input);
+  if(get("play").disabled)throw Error("verified fixture did not load");
+  const initial={tick:get("tick").textContent,enabled:!get("play").disabled};
+  get("next").listeners.click();
+  const next=get("tick").textContent;
+  get("prev").listeners.click();
+  const prev=get("tick").textContent;
+  get("seek").value="2";get("seek").listeners.input();
+  const seek={tick:get("tick").textContent,counter:get("counter").textContent};
+  get("start").listeners.click();
+  get("play").listeners.click();
+  const playing={tick:get("tick").textContent,
+    label:get("play").textContent,timer:get.timerState()};
+  get.advanceTimer();
+  const advanced=get("tick").textContent;
+  get("speed").value="2";get("speed").listeners.change();
+  const changedSpeed={tick:get("tick").textContent,timer:get.timerState()};
+  get.advanceTimer();
+  const atEnd={tick:get("tick").textContent,timer:get.timerState(),
+    label:get("play").textContent};
+  get("play").listeners.click();
+  const restarted={tick:get("tick").textContent,timer:get.timerState()};
+  get("play").listeners.click();
+  const paused=get.timerState();
+  get("end").listeners.click();
+  get("prev").listeners.click();
+  const backward=get("tick").textContent;
+  get("play").listeners.click();
+  get.hide();
+  const hidden=get.timerState();
+  input.files=[{name:"broken.private.jsonl",size:6,
+    arrayBuffer:async()=>Uint8Array.from(Buffer.from("broken")).buffer}];
+  await input.listeners.change.call(input);
+  const rejected={disabled:get("play").disabled,tick:get("tick").textContent,
+    timer:get.timerState(),status:get("status").textContent};
+  return {initial,next,prev,seek,playing,advanced,changedSpeed,
+    atEnd,restarted,paused,backward,hidden,rejected};
 }
 (async()=>{
  const valid=await attempt(wire);
@@ -181,6 +244,13 @@ async function race(source){
    stored_events:5002}));
  const manyFrames=await attempt(manyRows.join("\n")+"\n", true);
  const raced=await race(legacyVariant(wire, f=>{f.brain.status="current"}));
+ const controls=await playbackControls(wire);
+ const rays=await attempt(legacyVariant(wire, (f,i)=>{
+   if(i===0){
+     f.developmental=f.developmental||{};
+     f.developmental.observation={range_bucket_5cm_ewns:[0,12,5,6]};
+   }
+ }), true);
  const blankLine=await attempt(wire.replace("\n", "\n\n"));
  const whitespaceLine=await attempt(wire.replace("\n", "\n \n"));
  const trailingBlank=await attempt(wire + "\n");
@@ -192,7 +262,7 @@ async function race(source){
                                       byteLengthMismatch,afterCheckpoint,
                                       legacyDefault,legacyOptIn,
                                       safe,gap,oversized,longLine,manyFrames,raced,
-                                      blankLine,whitespaceLine,trailingBlank,
+                                      controls,rays,blankLine,whitespaceLine,trailingBlank,
                                       encoding})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
@@ -338,6 +408,30 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertEqual(values["raced"]["tick"], "0")
         self.assertIn("current.jsonl", values["raced"]["status"])
         self.assertEqual(values["raced"]["reusableInput"], "")
+        # Recovered #74 UI coverage against the current verified viewer.
+        controls = values["controls"]
+        self.assertEqual(controls["initial"], {"tick": "0", "enabled": True})
+        self.assertEqual(controls["next"], "1")
+        self.assertEqual(controls["prev"], "0")
+        self.assertEqual(controls["seek"], {"tick": "2", "counter": "3 / 3"})
+        self.assertEqual(controls["playing"]["timer"], {"active": 1, "delay": 400})
+        self.assertIn("Пауза", controls["playing"]["label"])
+        self.assertEqual(controls["advanced"], "1")
+        self.assertEqual(controls["changedSpeed"],
+                         {"tick": "1", "timer": {"active": 1, "delay": 200}})
+        self.assertEqual(controls["atEnd"]["tick"], "2")
+        self.assertEqual(controls["atEnd"]["timer"]["active"], 0)
+        self.assertEqual(controls["restarted"]["tick"], "0")
+        self.assertEqual(controls["restarted"]["timer"]["active"], 1)
+        self.assertEqual(controls["paused"]["active"], 0)
+        self.assertEqual(controls["backward"], "1")
+        self.assertEqual(controls["hidden"]["active"], 0)
+        self.assertTrue(controls["rejected"]["disabled"])
+        self.assertEqual(controls["rejected"]["tick"], "—")
+        self.assertEqual(controls["rejected"]["timer"]["active"], 0)
+        self.assertIn("Неверный JSON", controls["rejected"]["status"])
+        self.assertTrue(values["rays"]["enabled"])
+        self.assertEqual(values["rays"]["range"], "0 / 12 / 5 / 6 × 5 см")
 
 
 class OfflineViewerRegressionQA(unittest.TestCase):
