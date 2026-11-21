@@ -157,7 +157,7 @@ class SchoolColdVerifyTests(unittest.TestCase):
                 return real_open(path, flags, *args, **kwargs)
 
             with patch.object(school_verify.os, "open", side_effect=swap_during_open):
-                with self.assertRaisesRegex(SchoolContractError, "cannot read"):
+                with self.assertRaisesRegex(SchoolContractError, "nonregular"):
                     verify_scripted_fixture(target, self.catalog)
             self.assertTrue(switched)
             self.assertEqual(outside.read_bytes(), original_bytes)
