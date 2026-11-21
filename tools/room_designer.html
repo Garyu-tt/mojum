@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Mojum · Конструктор комнаты</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b111d;
+      --panel: #151e2c;
+      --panel-2: #19283a;
+      --text: #ecf4ff;
+      --muted: #b2c1d5;
+      --border: #3c4d63;
+      --accent: #65e4bd;
+      --accent-ink: #081b1b;
+      --canvas: #101b2c;
+      --grid: #293b50;
+      --wall: #486c92;
+      --wall-stroke: #a5c7ed;
+      --ghost: #256753;
+      --error: #ffa8a8;
+      --ok: #a7f3d0;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); }
+    button, input, textarea { font: inherit; }
+    button, input, textarea { border: 1px solid var(--border); border-radius: 12px; }
+    button { min-height: 44px; padding: 10px 14px; background: var(--panel-2); color: var(--text); cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, svg:focus-visible {
+      outline: 3px solid var(--accent); outline-offset: 2px;
+    }
+    .wrap { width: min(1440px, 100%); margin: 0 auto; padding: 20px clamp(14px, 3vw, 36px) 40px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 6px 0 24px; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; font-weight: 750; letter-spacing: .03em; font-size: 14px; }
+    .mark { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px;
+      border: 1px solid var(--accent); border-radius: 14px; font-size: 23px; color: var(--accent); }
+    h1 { font-size: clamp(21px, 2.5vw, 30px); margin: 8px 0 4px; letter-spacing: -.035em; }
+    h2 { font-size: 16px; margin: 0 0 14px; font-weight: 680; }
+    p { line-height: 1.55; }
+    .intro, .small { color: var(--muted); font-size: 13px; margin: 0; }
+    .status-tag { font-size: 12px; color: var(--ok); border: 1px solid #416b62; padding: 8px 12px; border-radius: 999px; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(294px, .8fr); gap: 18px; align-items: start; }
+    .panel { min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+    .panel-inner { padding: 18px; }
+    .canvas-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .canvas-toolbar button.is-selected { border-color: var(--accent); background: #1c5148; color: #ecfff8; }
+    .canvas-toolbar button { min-height: 44px; flex: 0 1 auto; }
+    .canvas-wrap { padding: 14px; background: #0c1624; }
+    #room-canvas { width: 100%; height: min(62vh, 570px); min-height: 320px; background: var(--canvas);
+      border-radius: 12px; border: 1px solid var(--border); display: block; touch-action: none; cursor: crosshair; }
+    .under-canvas { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      padding: 12px 18px 15px; color: var(--muted); font-size: 12px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+    .metric { background: var(--panel-2); border-radius: 12px; padding: 12px; min-width: 0; }
+    .metric span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+    .metric strong { font-size: 14px; overflow-wrap: anywhere; }
+    .side { display: grid; gap: 18px; }
+    label { display: block; color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 7px; }
+    input[type="text"] { width: 100%; min-height: 44px; padding: 10px 12px; background: #0e1725; color: var(--text); }
+    input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px; }
+    .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+    .check-row { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+    .check-row label { margin: 0; font-size: 13px; }
+    .obstacle-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .danger { color: #ffd0d0; font-size: 12px; }
+    #obstacle-list { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow: auto; }
+    #obstacle-list li { display: flex; gap: 9px; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-top: 1px solid var(--border); font-size: 12px; }
+    #obstacle-list li span { color: var(--muted); }
+    #obstacle-list button { font-size: 12px; padding: 8px; min-height: 44px; }
+    .codebox { width: 100%; min-height: 180px; resize: vertical; padding: 12px; color: #d5f8ed; background: #091521;
+      border: 1px solid var(--border); font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .actions { display: flex; gap: 9px; margin-top: 12px; flex-wrap: wrap; }
+    .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 750; }
+    #status { color: var(--muted); min-height: 20px; margin-top: 13px; font-size: 13px; }
+    #status[data-status="error"] { color: var(--error); }
+    #status[data-status="ok"] { color: var(--ok); }
+    .steps { font-size: 12px; color: var(--muted); margin-top: 16px; }
+    .steps code { color: #d4fff0; overflow-wrap: anywhere; }
+    footer { padding: 24px 2px 0; color: var(--muted); font-size: 12px; }
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: minmax(0, 1fr); }
+      #room-canvas { height: min(48vh, 490px); }
+    }
+    @media (max-width: 470px) {
+      .wrap { padding: 12px 10px 30px; }
+      .panel-inner { padding: 13px; }
+      .canvas-toolbar button { flex: 1 1 28%; font-size: 12px; padding-inline: 7px; }
+      .metrics { gap: 6px; }
+      .metric { padding: 9px; }
+      .metric strong { font-size: 12px; }
+      #room-canvas { min-height: 260px; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      button { transition: border-color .14s ease, background .14s ease; }
+    }
+  </style>
+  <script src="room_designer.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand"><span class="mark" aria-hidden="true">◈</span> MOJUM · GENESIS</div>
+      <h1>Конструктор виртуальной комнаты</h1>
+      <p class="intro">Нарисуй препятствия, выбери старт и экспортируй комнату для CPU-аквариума.</p>
+    </div>
+    <span class="status-tag">Локально · без сервера</span>
+  </header>
+  <main class="workspace">
+    <section class="panel" aria-labelledby="editor-title">
+      <div class="panel-inner">
+        <h2 id="editor-title">Поле симуляции</h2>
+        <div class="canvas-toolbar" role="group" aria-label="Инструменты редактирования">
+          <button type="button" data-tool="draw" aria-pressed="true" class="is-selected">▱ Препятствие</button>
+          <button type="button" data-tool="start" aria-pressed="false">◎ Старт</button>
+          <button type="button" data-tool="erase" aria-pressed="false">⌫ Стереть</button>
+        </div>
+      </div>
+      <div class="canvas-wrap">
+        <svg id="room-canvas" viewBox="0 0 4.5 4" preserveAspectRatio="xMidYMid meet"
+             role="img" tabindex="0" aria-label="План комнаты: протяни для создания препятствия; инструмент старт позволяет двигать стартовую точку стрелками клавиатуры">
+          <rect x="0" y="0" width="4.5" height="4" fill="#101b2c"></rect>
+        </svg>
+      </div>
+      <div class="under-canvas">
+        <span>Начало координат — снизу слева · метры</span>
+        <span>Палец / мышь — рисовать · стрелки — переместить старт</span>
+      </div>
+      <div class="panel-inner">
+        <div class="metrics" aria-label="Состояние комнаты">
+          <div class="metric"><span>Размер</span><strong id="room-dimensions">4.5 × 4 м</strong></div>
+          <div class="metric"><span>Препятствий</span><strong id="obstacle-count">1</strong></div>
+          <div class="metric"><span>Старт (x, y)</span><strong id="start-position">1.25, 2.50</strong></div>
+        </div>
+      </div>
+    </section>
+    <div class="side">
+      <section class="panel panel-inner" aria-labelledby="geometry-title">
+        <h2 id="geometry-title">Геометрия и позиция</h2>
+        <div class="fields">
+          <div><label for="room-width">Ширина, м</label><input id="room-width" type="text" inputmode="decimal" value="4.5" autocomplete="off"></div>
+          <div><label for="room-height">Высота, м</label><input id="room-height" type="text" inputmode="decimal" value="4" autocomplete="off"></div>
+          <div><label for="start-x">Старт X, м</label><input id="start-x" type="text" inputmode="decimal" value="1.25" autocomplete="off"></div>
+          <div><label for="start-y">Старт Y, м</label><input id="start-y" type="text" inputmode="decimal" value="2.5" autocomplete="off"></div>
+        </div>
+        <div class="check-row">
+          <input id="snap-grid" type="checkbox" checked>
+          <label for="snap-grid">Привязка к сетке 0.25 м</label>
+        </div>
+        <p class="small" style="margin-top:14px">Числа <code>4</code> и <code>4.0</code> сохраняют разные типы. Максимум 1000 м по каждой оси.</p>
+      </section>
+      <section class="panel panel-inner" aria-labelledby="obstacle-title">
+        <div class="obstacle-head">
+          <h2 id="obstacle-title">Препятствия</h2>
+          <button type="button" id="clear-obstacles" class="danger">Очистить</button>
+        </div>
+        <ol id="obstacle-list" aria-label="Добавленные прямоугольники"></ol>
+        <p class="small" style="margin-top:12px">До 128 прямоугольников в редакторе. Сложная физика и 3D пока не моделируются.</p>
+      </section>
+      <section class="panel panel-inner" aria-labelledby="export-title">
+        <h2 id="export-title">Экспорт в Mojum</h2>
+        <label for="room-json">Совместимый <code>point-room-draft/1</code></label>
+        <textarea id="room-json" class="codebox" readonly spellcheck="false" aria-label="JSON комнаты для локального Aquarium"></textarea>
+        <div class="actions">
+          <button type="button" id="download-json" class="primary">Сохранить JSON</button>
+          <button type="button" id="copy-json">Копировать</button>
+        </div>
+        <div id="status" role="status" aria-live="polite" data-status="ok">Модель готова</div>
+        <p class="steps">После сохранения проверь файл:<br>
+          <code>PYTHONPATH=src python -m mojum.room_input mojum-room-draft.json</code>
+        </p>
+      </section>
+    </div>
+  </main>
+  <footer>Экспериментальная 2D-среда. Браузер ничего не отправляет и не создаёт SQLite. Запуск агента выполняется отдельно через проверенный CLI Mojum.</footer>
+</div>
+</body>
+</html>
