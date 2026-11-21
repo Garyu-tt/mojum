@@ -44,7 +44,33 @@ def _integer(value, field, minimum=0, maximum=2**63 - 1):
     return value
 
 
+_MAX_JSON_DEPTH = 256
+
+
+def _check_json_depth(value):
+    """Reject excessive JSON container nesting independently of CPython limits.
+
+    Iterator frames use memory proportional to nesting depth, not width, so a
+    large flat payload does not require a second materialized traversal stack.
+    """
+    frames = [(iter((value,)), 0)]
+    while frames:
+        items, parent_depth = frames[-1]
+        try:
+            item = next(items)
+        except StopIteration:
+            frames.pop()
+            continue
+        if isinstance(item, (dict, list, tuple)):
+            depth = parent_depth + 1
+            if depth > _MAX_JSON_DEPTH:
+                raise NoosphereError("event JSON nesting limit exceeded")
+            values = item.values() if isinstance(item, dict) else item
+            frames.append((iter(values), depth))
+
+
 def _canonical(value):
+    _check_json_depth(value)
     try:
         wire = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
         # json.dumps(ensure_ascii=False) can retain lone UTF-16 surrogates:
