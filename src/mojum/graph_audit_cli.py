@@ -1,4 +1,4 @@
-"""Offline, bounded v1/v2 graph audit and explicit no-clobber v1 -> v2 export.
+"""Offline, bounded v1/v2 graph audit and explicit no-clobber v1 <-> v2 export.
 
 No graph execution, journal mutation, permission grant, or PRIVATE-data export
 occurs without the operator explicitly choosing a new output path.
@@ -12,8 +12,8 @@ import os
 from pathlib import Path
 import tempfile
 
-from .graph import GraphError, SCHEMA as V1_SCHEMA
-from .graph_v2 import V2_SCHEMA, upgrade_v1, validate_v2
+from .graph import GraphError, SCHEMA as V1_SCHEMA, _check_json_depth
+from .graph_v2 import V2_SCHEMA, downgrade_v2, upgrade_v1, validate_v2
 
 REPORT_SCHEMA = "mojum.graph-audit-report/1"
 MAX_INPUT_BYTES = 256 * 1024
@@ -35,14 +35,16 @@ def _nonfinite_constant(value):
 
 
 def _read_json(path: Path, limit: int):
-    """Bound bytes before UTF-8/JSON parsing, with no silent key collapsing."""
+    """Bound bytes and nesting before UTF-8/JSON parsing, with no silent key collapsing."""
     with path.open("rb") as stream:
         raw = stream.read(limit + 1)
     if len(raw) > limit:
         raise GraphError("graph or labels file exceeds byte limit")
     try:
+        text = raw.decode("utf-8", errors="strict")
+        _check_json_depth(text)
         return json.loads(
-            raw.decode("utf-8", errors="strict"),
+            text,
             object_pairs_hook=_no_duplicate_keys,
             parse_constant=_nonfinite_constant,
         )
@@ -99,21 +101,22 @@ def _write_new_private(path: Path, payload: bytes):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Bounded offline graph audit and explicit v1 -> v2 metadata-only export"
+        description="Bounded offline graph audit and explicit v1 <-> v2 metadata-only export"
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("audit", "upgrade"):
+    for command in ("audit", "upgrade", "downgrade"):
         sub = commands.add_parser(command)
         sub.add_argument("--input", type=Path, required=True)
-        if command == "upgrade":
+        if command in ("upgrade", "downgrade"):
             sub.add_argument("--output", type=Path, required=True)
+        if command == "upgrade":
             sub.add_argument("--labels", type=Path, help="optional private JSON node-ID to visibility map")
     args = parser.parse_args(argv)
     try:
         graph = _read_json(args.input, MAX_INPUT_BYTES)
         if args.command == "audit":
             result = _audit(graph)
-        else:
+        elif args.command == "upgrade":
             if not isinstance(graph, dict) or graph.get("schema") != V1_SCHEMA:
                 raise GraphError("upgrade requires canonical v1 graph input")
             labels = _read_json(args.labels, MAX_LABEL_BYTES) if args.labels is not None else None
@@ -130,6 +133,27 @@ def main(argv: list[str] | None = None) -> int:
                 "output_schema": V2_SCHEMA,
                 "input_sha256": checked["origin_sha256"],
                 "output_sha256": checked["graph_sha256"],
+                "node_count": checked["node_count"],
+                "edge_count": checked["edge_count"],
+                "execution": "NOT_PERFORMED",
+                "visibility_security": "METADATA_ONLY_NOT_ACCESS_CONTROL",
+            }
+        else:
+            if not isinstance(graph, dict) or graph.get("schema") != V2_SCHEMA:
+                raise GraphError("downgrade requires canonical v2 graph input")
+            checked = validate_v2(graph)
+            downgraded = downgrade_v2(graph)
+            payload = (json.dumps(
+                downgraded, sort_keys=True, ensure_ascii=False,
+                separators=(",", ":"), allow_nan=False,
+            ) + "\n").encode("utf-8")
+            _write_new_private(args.output, payload)
+            result = {
+                "schema": REPORT_SCHEMA,
+                "input_schema": V2_SCHEMA,
+                "output_schema": V1_SCHEMA,
+                "input_sha256": checked["graph_sha256"],
+                "output_sha256": checked["origin_sha256"],
                 "node_count": checked["node_count"],
                 "edge_count": checked["edge_count"],
                 "execution": "NOT_PERFORMED",

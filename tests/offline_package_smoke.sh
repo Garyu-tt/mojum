@@ -77,29 +77,31 @@ assert trace_meta["frames"] == 1 and trace_meta["journal_head"] == guided_resume
 frame, footer = map(json.loads, Path("guided.private.jsonl").read_text(encoding="utf-8").splitlines())
 assert frame["developmental_controller"]["intent"]["kind"] == "north"
 assert footer["trace_integrity"]["frame_count"] == 1
-
 seed = json.loads(files("mojum").joinpath("data", "genesis_seed.json").read_text(encoding="utf-8"))
-seed["genome_id"] = "cold-copy-wheel-fixture"
-Path("custom-genome.json").write_text(json.dumps(seed), encoding="utf-8")
-epoch = ("--genome", "custom-genome.json", "--motor-mode", "local_cell_v4",
-         "--sensory-mode", "toy_probe_v2")
-epoch_state = run("mojum-aquarium", "--db", "epoch.sqlite3", "--ticks", "8", *epoch)
+seed["genome_id"] = "wheel-smoke-custom-genesis"
+Path("epoch-genesis.json").write_text(json.dumps(seed), encoding="utf-8")
+epoch = ("--motor-mode", "local_cell_v4", "--sensory-mode", "toy_probe_v2",
+         "--genome", "epoch-genesis.json")
+epoch_state = run("mojum-host", "--db", "epoch.sqlite3", "--ticks", "8",
+                  "--interval-ms", "20", "--temporal-mode", "none", *epoch)
 cold_copy = (sys.executable, "-I", "-m", "mojum.aquarium_cold_copy")
 backup = json.loads(subprocess.check_output([
     *cold_copy, "export", "--db", "epoch.sqlite3", "--output", "backup.sqlite3", *epoch,
 ], text=True))
-assert (backup["agent_id"], backup["tick"], backup["journal_head"]) == (
-    seed["genome_id"], 8, epoch_state["journal_head"],
+assert (backup["tick"], backup["event_count"], backup["journal_head"]) == (
+    8, 9, epoch_state["journal_head"],
 )
+assert backup["agent_id"] == seed["genome_id"]
 verified = json.loads(subprocess.check_output([
-    *cold_copy, "verify", "--db", "backup.sqlite3", "--expected-head", backup["journal_head"],
+    *cold_copy, "verify", "--db", "backup.sqlite3", "--expected-head", epoch_state["journal_head"],
     "--expected-sha256", backup["db_sha256"], "--expected-tick", "8", *epoch,
 ], text=True))
-assert verified["agent_id"] == seed["genome_id"]
+assert (verified["agent_id"], verified["journal_head"]) == (
+    seed["genome_id"], backup["journal_head"],
+)
 resumed_backup = run("mojum-aquarium", "--db", "backup.sqlite3", "--ticks", "1",
                      "--expected-head", verified["journal_head"], *epoch)
 assert resumed_backup == run("mojum-aquarium", "--db", "epoch.sqlite3", "--ticks", "1", *epoch)
-
 disabled = run("mojum-aquarium", "--db", "disabled.sqlite3", "--ticks", "2", "--neural-mode", "disabled")
 assert (disabled["neural_mode"], disabled["neural_state"], disabled["stored_events"]) == ("disabled", None, 3)
 
