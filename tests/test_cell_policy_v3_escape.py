@@ -194,6 +194,21 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         ):
             CellExplorerV3Escape.from_snapshot(forged)
 
+    def test_snapshot_rejects_jointly_impossible_cell_timestamps(self):
+        policy = CellExplorerV3Escape()
+        # Visit the final cell first so dictionary order differs from tick order.
+        for tick, cell in enumerate((2, 0, 0, 1, 1, 2)):
+            sense = Proprioception(tick, "0" * 64, cell * STEP_METERS, 1.0, False)
+            policy.observe(sense, policy.decide(sense), False)
+        snapshot = policy.snapshot()
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot)
+
+        # Both early cells have two outcomes. Together they cannot finish
+        # by tick two, although each count fits its individual deadline.
+        snapshot["last_seen_at"].update({"0:25": 1, "1:25": 2})
+        with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
     def test_tampered_escape_snapshot_is_rejected(self):
         room, start = sealed_cell()
         policy = CellExplorerV3Escape()
@@ -369,7 +384,14 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             + snapshot["forgotten_observations"],
             snapshot["updates"],
         )
-        CellExplorerV3Escape.from_snapshot(snapshot)
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot)
+
+        stamps = snapshot["last_seen_at"]
+        earliest_cell = min(stamps, key=stamps.__getitem__)
+        # The eight forgotten outcomes must predate even this retained cell.
+        stamps[earliest_cell] = 0
+        with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
 
 
 class ComparisonTests(unittest.TestCase):
