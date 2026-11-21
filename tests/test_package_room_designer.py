@@ -15,12 +15,28 @@ import sys
 import tempfile
 import unittest
 
-from tools.package_room_designer import (
-    HTML, JS, SCRIPT_TAG, HISTORY_JS, HISTORY_TAG, WALK_JS, WALK_TAG,
-    PackagingError, standalone_html, write_standalone,
-)
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[1]
+# The repository's SQLite leak auditor loads test modules directly from
+# tests/ with PYTHONPATH=src; repo-root 'tools' is not on sys.path there.
+# Load the pinned local standalone packager by absolute source path without
+# mutating sys.path or weakening the independent audit.
+_spec = importlib.util.spec_from_file_location(
+    "_mojum_room_packager", ROOT / "tools" / "package_room_designer.py"
+)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError("cannot load local room packager")
+_packager = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_packager)
+HTML, JS, SCRIPT_TAG, HISTORY_JS, HISTORY_TAG, WALK_JS, WALK_TAG = (
+    _packager.HTML, _packager.JS, _packager.SCRIPT_TAG,
+    _packager.HISTORY_JS, _packager.HISTORY_TAG,
+    _packager.WALK_JS, _packager.WALK_TAG,
+)
+PackagingError = _packager.PackagingError
+standalone_html = _packager.standalone_html
+write_standalone = _packager.write_standalone
 
 
 class StandaloneDesignerPackagingTests(unittest.TestCase):
