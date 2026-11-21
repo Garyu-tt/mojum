@@ -91,6 +91,13 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
 
 
 def expire(db: sqlite3.Connection, now: int) -> None:
+    # Older versions could leave exhausted tasks queued after worker requeue.
+    # Quarantine them inside the same claim transaction before choosing work.
+    db.execute(
+        "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
+        "updated_at=? WHERE state='queued' AND attempts>=?",
+        (now, MAX_ATTEMPTS),
+    )
     db.execute(
         "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
         "updated_at=? WHERE state='running' AND lease_until<=? AND attempts>=?",
@@ -166,11 +173,14 @@ def finish(db: sqlite3.Connection, worker_id: int, task_id: str, result: str,
         raise ValueError("artifact too long")
     db.execute("BEGIN IMMEDIATE")
     try:
+        # Requeue consumes an attempt, just like an expired lease.  Otherwise
+        # a worker can bypass MAX_ATTEMPTS forever with finish(..., "queued").
         changed = db.execute(
-            "UPDATE tasks SET state=?, worker_id=NULL, lease_until=NULL, "
+            "UPDATE tasks SET state=CASE WHEN ?='queued' AND attempts>=? "
+            "THEN 'blocked' ELSE ? END, worker_id=NULL, lease_until=NULL, "
             "artifact=?, updated_at=? WHERE id=? AND worker_id=? "
             "AND state='running' AND lease_until>?",
-            (result, artifact or None, now, task_id, worker_id, now),
+            (result, MAX_ATTEMPTS, result, artifact or None, now, task_id, worker_id, now),
         ).rowcount
         db.execute("COMMIT")
         return changed == 1
