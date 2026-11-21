@@ -129,6 +129,9 @@
       <textarea id="output" rows="12" readonly spellcheck="false" aria-label="Готовый файл конфигурации комнаты"></textarea>
       <div class="footer-actions">
         <button id="download" type="button" class="primary">Сохранить JSON</button>
+        <button id="import-button" type="button">Открыть сохранённый JSON</button>
+        <input id="import-file" type="file" accept=".json,application/json" hidden
+               aria-label="Выберите ранее сохранённую комнату Mojum">
         <button id="copy" type="button">Копировать JSON</button>
         <span class="sub">Сохраните как <code>room.json</code></span>
       </div>
@@ -329,6 +332,24 @@
       });
       $("reset-room").addEventListener("click",()=>{
         state=C.clone(C.DEFAULT);choose(0);
+      });
+      $("import-button").addEventListener("click",()=>{
+        $("import-file").click();
+      });
+      $("import-file").addEventListener("change",async e=>{
+        const file=e.target.files && e.target.files[0];
+        if(!file)return;
+        try{
+          if(file.size>1_048_576) throw new Error("JSON-файл больше 1 МБ");
+          const recovered=C.fromDraftJSON(await file.text());
+          state=recovered;
+          choose(state.obstacles.length?0:-1);
+          message("Комната загружена локально. SQLite не затронут.");
+        }catch(err){
+          message("Импорт отклонён: "+err.message,true);
+        }finally{
+          e.target.value="";
+        }
       });
       $("copy").addEventListener("click",async()=>{
         if(!lastValid)return;
