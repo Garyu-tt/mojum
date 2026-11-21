@@ -233,6 +233,21 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(CellV3EscapeError):
                 CellExplorerV3Escape.from_snapshot(snapshot)
 
+    def test_valid_repeated_escape_probes_restore_without_reinterpretation(self):
+        # Escape legitimately re-probes a blocked move more than once.
+        room, start = sealed_cell()
+        model = CellExplorerV3Escape()
+        _tick_room(model, room, start, 40)
+        snapshot = model.snapshot()
+        self.assertTrue(any(
+            blocked > 1
+            for actions in snapshot["records"].values()
+            for _, blocked in actions.values()
+        ))
+        self.assertEqual(
+            CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot,
+        )
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
