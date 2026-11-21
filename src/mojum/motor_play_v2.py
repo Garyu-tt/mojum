@@ -143,6 +143,13 @@ class MotorPlayV2:
         instance.observations = raw["observations"]
         instance.rest_streak = raw["rest_streak"]
         instance.pending = raw["pending"]
+        # A pending action is a promise made by choose(), not an arbitrary
+        # caller-supplied label. Recompute against the restored counters so a
+        # forged snapshot cannot manufacture an impossible action history.
+        if instance.pending is not None:
+            if (instance.observations >= MAX_OBSERVATIONS
+                    or instance.choose(instance.observations)["kind"] != raw["pending"]):
+                raise MotorPlayV2Error("pending action does not match deterministic choice")
         return instance
 
     # -- decisions -------------------------------------------------------
