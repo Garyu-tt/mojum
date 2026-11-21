@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import sqlite3
 import stat
 import tempfile
@@ -50,7 +51,141 @@ def _destination(path):
             or dest.parent.is_symlink()
             or os.path.lexists(dest)):
         raise ValueError("output must be a new filename in an existing trusted directory")
+    if os.name == "posix":
+        # PRIVATE JSONL is 0600, but a shared parent leaks filenames and
+        # enables other accounts to race source/target directory entries.
+        # Match the independent read-only orphan inspector's owner-only
+        # directory requirement. Never silently chmod an operator's folder.
+        parent = dest.parent
+        info = parent.stat(follow_symlinks=False)
+        if (not stat.S_ISDIR(info.st_mode) or
+                info.st_uid != os.geteuid() or
+                stat.S_IMODE(info.st_mode) & 0o077 or
+                (stat.S_IMODE(info.st_mode) & 0o700) != 0o700):
+            raise PermissionError(
+                "PRIVATE trace output directory must be owner-owned, "
+                "owner-readable/writable/searchable, and inaccessible to group/other"
+            )
+        # Check the entire provided parent path, not just the last
+        # component. This is a fail-closed PREFLIGHT check, not a promise
+        # that an adversary cannot rename it after validation.
+        if parent.resolve(strict=True) != parent.absolute():
+            raise PermissionError(
+                "PRIVATE trace output directory has a symlink or alias ancestor"
+            )
     return dest
+
+
+def _open_owner_only_directory_fd(directory):
+    """Anchor an explicitly trusted POSIX parent without following ANY symlink.
+
+    Traverses each component under O_NOFOLLOW|O_DIRECTORY, using only an
+    already-open parent fd. An attacker swapping a path between a separate
+    preflight and publication cannot redirect stage writes to a symlink.
+    The caller OWNS the returned fd and must close it in every code path.
+    """
+    parent = Path(directory)
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
+    flags |= os.O_NOFOLLOW
+    fd = os.open(parent.anchor if parent.is_absolute() else ".", flags)
+    try:
+        components = (parent.parts[1:] if parent.is_absolute()
+                      else parent.parts)
+        for part in components:
+            if part in ("", "."):
+                continue
+            if part == "..":
+                raise PermissionError("PRIVATE output directory cannot traverse ..")
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        identity = os.fstat(fd)
+        mode = stat.S_IMODE(identity.st_mode)
+        if (not stat.S_ISDIR(identity.st_mode)
+                or identity.st_uid != os.geteuid()
+                or mode & 0o077 or mode & 0o700 != 0o700):
+            raise PermissionError(
+                "PRIVATE trace output directory must remain owner-only 0700"
+            )
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _confirm_directory_identity(directory, fd):
+    """Detect renamed/replaced parent paths before acknowledging success.
+
+    A directory moved during publishing can still contain a complete
+    PRIVATE file through our pinned fd; never claim that the user-visible
+    *pathname* was successfully published if it now names another inode.
+    """
+    confirm = _open_owner_only_directory_fd(directory)
+    try:
+        before, now = os.fstat(fd), os.fstat(confirm)
+        if (before.st_dev, before.st_ino) != (now.st_dev, now.st_ino):
+            raise PermissionError(
+                "PRIVATE export directory was replaced during publication; "
+                "final pathname requires manual reconciliation"
+            )
+    finally:
+        os.close(confirm)
+
+
+def _publish_private_posix(payload, dest):
+    """No-clobber PRIVATE JSONL publication anchored to one trusted dirfd.
+
+    Every filesystem-changing syscall is relative to the same validated
+    directory descriptor, not a mutable string pathname. Do not suppress
+    errors after publication: a complete file may already exist.
+    """
+    directory_fd = _open_owner_only_directory_fd(dest.parent)
+    try:
+        try:
+            os.stat(dest.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("output must be a new filename in an existing trusted directory")
+
+        open_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                      os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+        stage_name = None
+        stage_fd = None
+        for _ in range(8):
+            candidate = ".mojum-private-trace-" + secrets.token_urlsafe(12) + ".jsonl"
+            try:
+                stage_fd = os.open(
+                    candidate, open_flags, 0o600, dir_fd=directory_fd
+                )
+                stage_name = candidate
+                break
+            except FileExistsError:
+                continue
+        if stage_fd is None:
+            raise FileExistsError("could not allocate a new PRIVATE stage name")
+
+        try:
+            with os.fdopen(stage_fd, "wb") as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            _confirm_directory_identity(dest.parent, directory_fd)
+            # Atomic no-clobber and symlink-safe within one private inode.
+            os.link(stage_name, dest.name,
+                    src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                    follow_symlinks=False)
+        finally:
+            try:
+                os.unlink(stage_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+
+        _fsync_published_directory(directory_fd)
+        _confirm_directory_identity(dest.parent, directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def _fsync_published_directory(directory):
@@ -69,6 +204,12 @@ def _fsync_published_directory(directory):
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    if type(directory) is int:
+        # The caller owns the ANCHORED descriptor; never close it here.
+        if not stat.S_ISDIR(os.fstat(directory).st_mode):
+            raise OSError("expected an anchored output directory for fsync")
+        os.fsync(directory)
+        return True
     fd = os.open(str(directory), flags)
     try:
         if not stat.S_ISDIR(os.fstat(fd).st_mode):
@@ -311,35 +452,26 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
 
     # Atomic, no-clobber publication, with restrictive private permissions.
     # Only the completed validated bytes receive their final output filename.
-    fd, stage_out = tempfile.mkstemp(
-        prefix=".mojum-private-trace-", suffix=".jsonl", dir=dest.parent,
-    )
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            # The temp inode is 0600 from mkstemp. Reinforce that promise
-            # on its OWN open descriptor *before* flushing inode metadata;
-            # changing mode after file fsync would leave new permissions
-            # outside that explicit durability boundary.
-            if os.name == "posix":
-                os.fchmod(stream.fileno(), 0o600)
-            else:
-                os.chmod(stage_out, 0o600)
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.link(stage_out, dest)  # EEXIST rather than overwrite; same FS.
-    finally:
+    if os.name == "posix":
+        _publish_private_posix(payload, dest)
+    else:
+        # Compatibility fallback; no directory-fsync or POSIX path-race
+        # guarantee is claimed for Windows/other non-POSIX hosts.
+        fd, stage_out = tempfile.mkstemp(
+            prefix=".mojum-private-trace-", suffix=".jsonl", dir=dest.parent,
+        )
         try:
-            os.unlink(stage_out)
-        except FileNotFoundError:
-            pass
-
-    # File fsync alone is not enough to request persistence of the directory
-    # entry. Sync AFTER the stage unlink so successful POSIX publication
-    # includes both the new hard-link and removal of its PRIVATE temp name.
-    # If this fails, the final file MAY ALREADY EXIST. Propagate failure;
-    # do not claim success, delete/overwrite the output, or hide the error.
-    _fsync_published_directory(dest.parent)
+            with os.fdopen(fd, "wb") as stream:
+                os.chmod(stage_out, 0o600)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(stage_out, dest)  # Still no-clobber.
+        finally:
+            try:
+                os.unlink(stage_out)
+            except FileNotFoundError:
+                pass
 
     return {
         "schema": SCHEMA,
