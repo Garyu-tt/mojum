@@ -314,7 +314,14 @@ def _verify_scripted_export(run: Any) -> None:
          "provenance": provenance, "evidence": evidence[index]}
         for index, phase in enumerate(PHASES)
     ]
-    if events != expected_events or run["feedback"] != evidence[-1]:
+    # Python dict/list equality treats True == 1 and 1.0 == 1. PRIVATE
+    # event evidence must match its exact JSON wire types, not just values.
+    try:
+        actual_wire = _canonical_json({"events": events, "feedback": run["feedback"]})
+        expected_wire = _canonical_json({"events": expected_events, "feedback": evidence[-1]})
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise SchoolContractError("invalid scripted evidence encoding") from exc
+    if actual_wire != expected_wire:
         raise SchoolContractError("scripted events or feedback do not match artifacts")
 
 
