@@ -30,6 +30,7 @@ Exactly these four keys, no more and no fewer:
 ```
 
 - `width`, `height` — finite JSON numbers greater than zero.
+- Every geometry number token is limited to 128 characters and must be representable as a finite non-underflowing Python float, matching the point-room runtime's numeric domain. The report preserves original token spelling, including `start` coordinates.
 - `obstacles` — list of at most 4096 rectangles, each exactly four finite
   JSON numbers `[x, y, w, h]` with `w > 0`, `h > 0`, inside the room.
 - `start` — exactly two finite numbers inside `[0, width] × [0, height]`, and
