@@ -61,3 +61,41 @@ encrypted distributed memory, or a claim of no subjective experience.
 A real algorithm promotion still requires independent review, additional
 held-out contact-generalization tests (#108) and explicit authorization.
 No automatic old-journal migration, merges or closing #106/#55/#51.
+
+## Browser motor policy lineage (review candidate)
+
+The one-file offline observer now displays the persisted developmental
+policy version directly next to measured telemetry:
+
+- `coarse_v1` — historical half-meter zones;
+- `local_cell_v2` — explicitly opted-in 4 cm cells;
+- external-script mode — no learned developmental policy in the frame.
+
+A single imported JSONL trace may **not mix** developmental policy schemas.
+The real Chrome smoke checks both policy labels on desktop (1280 CSS px)
+and emulated mobile (390 CSS px). It also splices v1 and v2 frame bytes
+from two actual locally generated synthetic SQLite histories, recomputes
+their frame SHA-256 footer, and verifies the viewer still refuses playback
+on cross-policy mixing, with controls disabled.
+
+This policy check is *consistency validation*, not origin authentication.
+A file hash contained in the same untrusted file is not a signature.
+No private journal is sent to the browser over a network or to CI as an
+artifact; synthetic local frames only are used for the smoke test.
+
+## Full canonical, not just isolated controller, regression
+
+`tests/test_motor_policy_v2_canonical_integration.py` uses the actual
+R0.14 Aquarium with two distinct SQLite files to run v1 and v2 through
+a contact-rich 16 cm room, comparing successful motion and longest
+rest streak instead of rewarding zero collisions. New v2 is also tested
+as 60 committed ticks + cold restart + 60 ticks against an uninterrupted
+120-tick control organism with identical heartbeat, source revisions,
+policy state and final journal head. Wrong-policy reopen and wrong-policy
+PRIVATE export must refuse before creating a public export; the original
+SQLite history remains untouched. Legacy v1 history continues to replay
+after the additional v2 implementation is installed.
+
+These are deterministic synthetic tests, not a claim that 4 cm is the
+optimal grid, that a neural brain is present, or that every environment
+has accessible movement.
