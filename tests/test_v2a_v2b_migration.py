@@ -29,6 +29,8 @@ SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-
 GRAPH = json.loads((ROOT / "examples/first_loop.json").read_text(encoding="utf-8"))
 SOURCE112 = Path(os.environ["MOJUM_ARCHIVE112_SOURCE"]).resolve() if os.environ.get(
     "MOJUM_ARCHIVE112_SOURCE") else None
+SOURCE115 = Path(os.environ["MOJUM_ARCHIVE115_SOURCE"]).resolve() if os.environ.get(
+    "MOJUM_ARCHIVE115_SOURCE") else None
 
 
 def fingerprint(path):
@@ -123,6 +125,48 @@ class ExplicitSQLiteV2TransferQA(unittest.TestCase):
                       external_expected_head=expected) as archived:
             self.assertEqual(archived.tick, 120)
             self.assertEqual(archived.store.head(), expected)
+
+    @unittest.skipUnless(SOURCE115 is not None, "original #115 target runtime required")
+    def test_original_v2b_runtime_resumes_new_journal(self):
+        head = self.create_source(120)
+        original = self.source.read_bytes()
+        transfer = self.migrate(head)
+
+        def original_v2b(db, ticks):
+            proc = subprocess.run(
+                [sys.executable, "-m", "mojum.aquarium", "--db", str(db),
+                 "--ticks", str(ticks), "--exploration-mode", "goal_free",
+                 "--developmental-policy", "local_cell_v2"],
+                cwd=SOURCE115, env=dict(os.environ, PYTHONPATH=str(SOURCE115 / "src")),
+                encoding="utf-8", capture_output=True, check=True, timeout=45,
+            )
+            return json.loads(proc.stdout)
+
+        prior = original_v2b(self.target, 0)
+        self.assertEqual((prior["tick"], prior["stored_events"]), (120, 121))
+        self.assertEqual(prior["journal_head"], transfer["destination_head"])
+        after = original_v2b(self.target, 1)
+        self.assertEqual((after["tick"], after["stored_events"]), (121, 122))
+        self.assertNotEqual(after["journal_head"], prior["journal_head"])
+        self.assertEqual(after, original_v2b(self.root / "native-control.sqlite3", 121))
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(fingerprint(self.source)[2], head)
+
+    def test_json_type_change_cannot_publish_new_journal(self):
+        head = self.create_source(4)
+        original = self.source.read_bytes()
+        original_step = Aquarium.step
+
+        def return_type_changed_frame(instance, *args, **kwargs):
+            frame = original_step(instance, *args, **kwargs)
+            frame["world"]["blocked"] = int(frame["world"]["blocked"])
+            return frame
+
+        with patch.object(Aquarium, "step", return_type_changed_frame):
+            with self.assertRaisesRegex(TransferError, "observations diverge"):
+                self.migrate(head)
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.source.read_bytes(), original)
 
     def test_wrong_head_or_missing_explicit_optin_cannot_create_destination(self):
         actual = self.create_source(9)

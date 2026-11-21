@@ -22,6 +22,7 @@ from .cell_policy_v2 import SCHEMA as TARGET_SCHEMA
 from .archived_policy_v2a import SCHEMA as SOURCE_SCHEMA
 from .developmental_policy import STEP_METERS
 from .noosphere import LocalNoosphere, NoosphereError
+from .sim import canonical
 from .world_room import Room
 
 
@@ -124,7 +125,7 @@ def _matching_policy_states(source, target):
             or target.get("cell_size_m") != STEP_METERS):
         raise TransferError("unexpected policy state version")
     for key in ("last_tick", "updates", "records"):
-        if source.get(key) != target.get(key):
+        if canonical(source.get(key)) != canonical(target.get(key)):
             raise TransferError("policy experience differs at " + key)
 
 
@@ -133,7 +134,7 @@ def _matching_checkpoints(source, target):
     omitted = {"manifest_sha256", "journal_head", "developmental_state"}
     left = {key: value for key, value in source.items() if key not in omitted}
     right = {key: value for key, value in target.items() if key not in omitted}
-    if left != right:
+    if canonical(left) != canonical(right):
         raise TransferError("non-policy organism checkpoint differs after conversion")
     _matching_policy_states(source["developmental_state"],
                             target["developmental_state"])
@@ -228,7 +229,7 @@ def transfer_v2a_to_v2b(
                         raise TransferError("only contiguous goal-free frame events supported")
                     original = entry["event"]["payload"]
                     replayed = replacement.step()
-                    if _normalized_frame(original) != _normalized_frame(replayed):
+                    if canonical(_normalized_frame(original)) != canonical(_normalized_frame(replayed)):
                         raise TransferError(
                             "v2A and v2B observations diverge at frame " + str(matched))
                     matched += 1
@@ -269,7 +270,9 @@ def transfer_v2a_to_v2b(
         # os.link() is exclusive-create, never os.replace(): even if another
         # process creates a different output filename in this interval, this
         # migration will not overwrite it. Both paths are on the same FS.
-        with staged.open("rb") as ready:
+        # Windows requires a writable descriptor for fsync. The validated
+        # private staging file is opened without truncation and is not edited.
+        with staged.open("r+b") as ready:
             os.fsync(ready.fileno())
         try:
             os.link(staged, dest)
