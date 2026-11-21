@@ -43,6 +43,8 @@ def invoke(source: Path, database: Path, *, kind: str, ticks: int):
         command += ["--motor-policy", "local_cell_v2"]
     elif kind == "v2-b":
         command += ["--developmental-policy", "local_cell_v2"]
+    elif kind == "v3-b":
+        command += ["--developmental-policy", "local_cell_v3"]
     elif kind != "legacy":
         raise AssertionError("unknown test policy kind")
     result = subprocess.run(
@@ -210,19 +212,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-a", type=Path, required=True)
     parser.add_argument("--source-b", type=Path, required=True)
+    parser.add_argument("--source-v3", type=Path, required=True)
     parser.add_argument("--require-compatible", action="store_true")
     args = parser.parse_args()
     a, b = args.source_a.resolve(), args.source_b.resolve()
+    v3 = args.source_v3.resolve()
     check((a / "src/mojum/developmental_policy_v2.py").is_file(),
           "source A is not the pinned #112 implementation")
     check((b / "src/mojum/cell_policy_v2.py").is_file(),
           "source B is not the pinned #115 implementation")
+    check((v3 / "src/mojum/cell_policy_v3.py").is_file(),
+          "v3 source is not the pinned #122 implementation")
     with tempfile.TemporaryDirectory(prefix="mojum-r014-wire-private-") as tmp:
         scratch = Path(tmp)
         legacy_cross_test(a, b, scratch)
         a_db, b_db = scratch / "a.private.sqlite3", scratch / "b.private.sqlite3"
         a_self, a_state = self_reopen(a, a_db, "v2-a")
         b_self, b_state = self_reopen(b, b_db, "v2-b")
+        v3_db = scratch / "v3.private.sqlite3"
+        v3_self, v3_state = self_reopen(v3, v3_db, "v3-b")
+        v3_probed = inspect_journal(v3_db, external_expected_head=v3_state["head"])
+        check(v3_probed["format"] == "local_cell_v3_b_unreleased",
+              "read-only registry confused v3 format with v2")
         a_contract = public_contract(a_state, a_self)
         b_contract = public_contract(b_state, b_self)
         # Exact stored wire ABI, not the alias "local_cell_v2", is identity.
@@ -262,6 +273,8 @@ def main():
             "schema": "mojum.qa.r014.cross-wire/1",
             "legacy_two_way_replay_and_append": "PASS",
             "v2_self_reopen": {"112": "PASS", "115": "PASS"},
+            "separate_v3_self_reopen": ("PASS" if
+                v3_probed["format"] == "local_cell_v3_b_unreleased" else "FAIL"),
             "v2_foreign_reopen": {
                 "112_journal_under_115": "PASS" if a_to_b else "REJECTED",
                 "115_journal_under_112": "PASS" if b_to_a else "REJECTED",
@@ -270,6 +283,7 @@ def main():
             "read_only_registry": {
                 "112": a_probed["format"],
                 "115": b_probed["format"],
+                "122_v3": v3_probed["format"],
                 "full_hash_chain_and_head": "PASS",
                 "tamper_and_unknown_abi_rejection": probe_fails,
                 "event_content_exported": False,
