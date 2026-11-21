@@ -440,6 +440,28 @@ class TranscriptSummaryTests(unittest.TestCase):
             )])
 
 
+    def test_summary_refuses_reordered_duplicate_or_forged_receipt_clocks(self):
+        transcript = []
+        drive(CellExplorerV5(), 16, transcript=transcript)
+        self.assertEqual(summarize_transcript(transcript)["ticks"], 16)
+        first_intent, first_outcome = transcript[0]
+        forged = (
+            list(reversed(transcript)),
+            transcript[1:],
+            transcript + transcript[-1:],
+            [(dict(first_intent, tick=True), first_outcome)],
+            [(first_intent, dict(first_outcome, total_updates=True))],
+            [(first_intent, dict(first_outcome, total_updates=2))],
+            [(dict(first_intent, tick=1), first_outcome)],
+        )
+        for case in forged:
+            with self.subTest(ticks=len(case)):
+                with self.assertRaisesRegex(
+                    CellV5Error, "transcript ticks|transcript receipt clock"
+                ):
+                    summarize_transcript(case)
+
+
 class V5AquariumVersionGateTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
