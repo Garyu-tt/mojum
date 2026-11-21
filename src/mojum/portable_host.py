@@ -23,6 +23,7 @@ from .aquarium import MAX_REPLAY_EVENTS as AQUARIUM_REPLAY_EVENTS
 from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
+from .noosphere import NoosphereError
 
 
 SCHEMA = "mojum.portable-host.run/2"
@@ -224,7 +225,7 @@ def main(argv=None):
     with termination_signals(stopped):
         try:
             with Aquarium(
-                args.db, seed, graph,
+                args.db, seed, graph, agent_id=seed["genome_id"],
                 neural_mode=args.neural_mode,
                 motor_mode=args.motor_mode,
                 brain_mode=args.brain_mode,
@@ -263,7 +264,7 @@ def main(argv=None):
                         "motor_mode": aquarium.motor_mode,
                         "sensory_mode": aquarium.sensory_mode,
                     })
-        except (AquariumError, PortableHostError) as exc:
+        except (AquariumError, NoosphereError, PortableHostError) as exc:
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
     # measurements or learner state.

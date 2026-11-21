@@ -175,7 +175,7 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
                          agent_id="dante-fixture-001",
                          neural_mode="shadow",
                          room=None, start=(1.0, 2.0),
-                         motor_mode="scripted", sensory_mode="none",
+                         motor_mode="scripted", brain_mode="placeholder", sensory_mode="none",
                          temporal_mode="none", sensory_scene=None, dt_ns=10_000_000,
                          start_tick=None, frame_limit=None):
     """Export verified SQLite events to a fresh local file (0600 on POSIX).
@@ -206,7 +206,7 @@ def export_private_trace(source_db, output_jsonl, seed, graph, *,
     # Never downgrade a developmental journal to scripted playback or derive
     # hidden toy truth from private records to bypass bootstrap validation.
     options = {"agent_id": agent_id, "neural_mode": neural_mode,
-               "motor_mode": motor_mode, "sensory_mode": sensory_mode,
+               "motor_mode": motor_mode, "brain_mode": brain_mode, "sensory_mode": sensory_mode,
                "temporal_mode": temporal_mode,
                "sensory_scene": sensory_scene, "room": room,
                "start": start, "dt_ns": dt_ns}
@@ -275,6 +275,8 @@ def main():
     parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     parser.add_argument("--agent-id", help="override journal owner from the supplied genome ID")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
+    parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
+                        default="placeholder", help="brain mode used to create the journal")
     parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
@@ -292,7 +294,7 @@ def main():
         meta = export_private_trace(
             args.db, args.output, seed, graph,
             agent_id=seed["genome_id"] if args.agent_id is None else args.agent_id,
-            neural_mode=args.neural_mode, motor_mode=args.motor_mode,
+            neural_mode=args.neural_mode, motor_mode=args.motor_mode, brain_mode=args.brain_mode,
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
             expected_journal_head=args.expected_head,
             allow_private_export=args.allow_private_export,
