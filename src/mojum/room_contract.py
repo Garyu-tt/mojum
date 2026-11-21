@@ -6,6 +6,7 @@ contract, not an in-place migration of older ambiguous geometry records.
 from __future__ import annotations
 
 import math
+import json
 
 from .world_room import Room, _valid
 
@@ -113,8 +114,22 @@ def decode_room_exact(contract, *, legacy_room=None):
         raise RoomContractError("invalid typed room geometry") from exc
     if encode_room_exact(room, start) != contract:
         raise RoomContractError("typed room failed canonical roundtrip")
-    if legacy_room is not None and (
-            type(legacy_room) is not dict
-            or _legacy_room(room, start) != legacy_room):
-        raise RoomContractError("typed room disagrees with legacy room projection")
+    if legacy_room is not None:
+        if type(legacy_room) is not dict:
+            raise RoomContractError("invalid legacy room projection")
+        # Python dict equality would accept 4 == 4.0 and -0.0 == 0.0,
+        # exactly the ambiguities this new contract must reject.
+        try:
+            old_wire = json.dumps(
+                legacy_room, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            )
+            expected_wire = json.dumps(
+                _legacy_room(room, start), sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            )
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise RoomContractError("invalid legacy room JSON projection") from exc
+        if old_wire != expected_wire:
+            raise RoomContractError("typed room disagrees with legacy room projection")
     return room, start
