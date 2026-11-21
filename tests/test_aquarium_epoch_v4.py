@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE
 from mojum.aquarium_wire import inspect_journal
+from mojum.noosphere import NoosphereError
 from mojum.cell_policy_v4 import CellExplorerV4, CellV4Error, MAX_CELLS
 from mojum.epoch_sense_v2 import (
     EPOCH_TICKS, EpochProprioception, EpochSenseError,
@@ -88,6 +89,26 @@ class EpochJournalTests(unittest.TestCase):
             self.db, SEED, GRAPH,
             neural_mode="disabled", motor_mode=V4_MODE,
         )
+
+    def test_readonly_inspector_refuses_missing_marker_on_valid_hash_chain(self):
+        """A coherent SQLite event hash chain is not an epoch-transition proof."""
+        # Shrink the epoch solely in this disposable test fixture: runtime,
+        # typed sense and read-only inspector must agree on its pinned wire.
+        with (patch("mojum.aquarium.EPOCH_TICKS", 2),
+              patch("mojum.aquarium_wire.EPOCH_TICKS", 2),
+              patch("mojum.epoch_sense_v2.EPOCH_TICKS", 2),
+              patch("mojum.cell_policy_v4.EPOCH_TICKS", 2)):
+            with self.open() as aquarium:
+                aquarium.step()
+                aquarium.step()
+                self.assertEqual(aquarium.tick, 2)
+                # Forge an internally consistent next frame that improperly
+                # skips its durable epoch event. No SQL or SHA corruption.
+                aquarium.epoch_index = 1
+                aquarium.step()
+                self.assertEqual(aquarium.stored_events, 4)
+            with self.assertRaisesRegex(NoosphereError, "missing durable epoch"):
+                inspect_journal(self.db)
 
     def test_real_sqlite_boundary_marker_replays_after_interrupted_frame(self):
         with self.open() as aquarium:
