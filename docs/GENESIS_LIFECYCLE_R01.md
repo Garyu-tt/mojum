@@ -1,6 +1,6 @@
 # GENESIS lifecycle R0.1 — opt-in synthetic maturation
 
-This isolated stdlib component is a candidate toward issue #154, **not** the live brain or a biological prediction. It does **not** change the released Aquarium SQLite schema, historical events, or default runtime. No new body, neuron backend, intelligence, subjective experience or welfare claim is made.
+This isolated stdlib component in `mojum.lifecycle_ledger` is a candidate toward issue #154, **not** the live brain or a biological prediction. It does **not** change the released Aquarium SQLite schema, historical events, or default runtime. No new body, neuron backend, intelligence, subjective experience or welfare claim is made.
 
 ## Contract
 
@@ -15,11 +15,11 @@ This isolated stdlib component is a candidate toward issue #154, **not** the liv
 
 ```sh
 PYTHONPATH=src python examples/lifecycle_demo.py
-PYTHONPATH=src python -m unittest discover -s tests -p test_lifecycle.py -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_lifecycle_ledger*.py' -v
 ```
 
 The demo artificially matures three regions, advances a billion virtual ticks with **no age-triggered decline**, then records extra learning units for cortex and replays the snapshot. This demonstrates **contract behavior only**.
 
-## Before integrating with Aquarium
+The existing canonical `mojum.lifecycle` and `mojum.development` modules remain untouched. This is an independent event-ledger experiment, not a drop-in replacement for either public API.\n\n## Before integrating with Aquarium
 
 Require independent QA on this PR, strict main-head CI and explicit versioned bootstrap/journal migration design. To satisfy #154 fully, still need genotype-driven per-cell trajectories, evidence provenance rather than synthetic unit counts, nontrivial synaptic learning/retention tasks, birth/migration/apoptosis model calibration, private multi-copy checkpoints and replay in the canonical organism runtime. Do not present this proposal as a finished continuous life.
