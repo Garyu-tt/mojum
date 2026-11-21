@@ -99,11 +99,15 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     deadline = clock()
     completed = 0
     while completed < ticks and not stop_event.is_set():
-        remaining = deadline - clock()
-        if remaining > 0:
-            sleep_interruptible(remaining)
-            if stop_event.is_set():
+        # Early wakeups are not deadlines: recheck a monotonic clock before
+        # the next committed tick and stay interruptible by SIGTERM/Ctrl-C.
+        while not stop_event.is_set():
+            remaining = deadline - clock()
+            if remaining <= 0:
                 break
+            sleep_interruptible(remaining)
+        if stop_event.is_set():
+            break
         # A failed SQLite CAS/append leaves committed state unchanged and is
         # never silently skipped. No synthetic user dx/dy is injected.
         aquarium.step()
