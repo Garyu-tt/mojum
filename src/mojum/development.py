@@ -47,6 +47,10 @@ def _integer(value, label, low=0, high=MAX_COUNTER):
 def _identity(value, label):
     if type(value) is not str or not value.strip() or len(value) > 128:
         raise DevelopmentError(f"invalid {label}")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise DevelopmentError(f"invalid {label}: not UTF-8 encodable") from exc
     return value
 
 
