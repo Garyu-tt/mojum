@@ -10,6 +10,13 @@
 
 GitHub Actions checks out the immutable exact SHAs into *different* folders. The Python stdlib harness creates only synthetic SQLite files inside a disposable temporary directory, with their own normal source-local genome and graph. It never connects to real personal Noosphere data, services, network nodes, virtual machines, or Android.
 
+Before the cross-journal comparison, the harness runs `git rev-parse --verify HEAD`
+inside each supplied source and requires the exact SHA above. A separate
+regression creates a disposable real Git checkout and verifies both acceptance
+of its exact HEAD and rejection of a wrong expected SHA. This prevents a manual
+source-path mistake from being reported under a trusted historical #112/#115
+label.
+
 ## Test matrix and what its statuses mean
 
 1. **Backward compatible legacy**: birth 4 ticks in A; cold-reopen in B; append one tick in B; reopen in A and check exact hash-head and tick. Repeat B→A. Existing journals must not be silently modified on a zero-tick reopen.

@@ -12,6 +12,7 @@ are compatible. Never interpret a green characterization as release approval.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -73,7 +74,9 @@ def invoke(source: Path, database: Path, *, kind: str, ticks: int):
 def database_state(database: Path):
     # Do not invoke an Aquarium opener to inspect failed foreign migrations.
     # Reading through SQLite's read-only URI preserves the data by design.
-    with sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(
+        "file:" + str(database) + "?mode=ro", uri=True,
+    )) as conn:
         conn.execute("PRAGMA query_only=ON")
         rows = conn.execute(
             "SELECT seq,event_id,prev_hash,event_hash,wire_json "
