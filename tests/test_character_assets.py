@@ -118,6 +118,24 @@ class CharacterAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(CharacterAssetError, "size"):
                 verify_files(data, root)
 
+    def test_rejects_duplicate_glb_bin_chunks_but_accepts_one(self):
+        original = glb_fixture()
+        bin_chunk = struct.pack("<I4s", 4, b"BIN\x00") + b"\x00" * 4
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "keyframes").mkdir()
+            for count in (1, 2):
+                size = len(original) + count * len(bin_chunk)
+                candidate = original[:8] + struct.pack("<I", size) + original[12:] + bin_chunk * count
+                data = manifest(candidate)
+                data["forms"] = data["forms"][:1]
+                (root / data["forms"][0]["glb_path"]).write_bytes(candidate)
+                if count == 1:
+                    self.assertTrue(verify_files(data, root))
+                else:
+                    with self.assertRaisesRegex(CharacterAssetError, "duplicate GLB BIN"):
+                        verify_files(data, root)
+
     def test_verify_rejects_symlinked_file(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
