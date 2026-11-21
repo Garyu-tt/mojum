@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/workflows/neutral-probe-control.yml"
       - "src/mojum/neutral_probe_trial.py"
+      - "src/mojum/neutral_probe_eval.py"
+      - "tests/test_neutral_probe_eval.py"
       - "tests/test_neutral_probe_trial.py"
       - "src/mojum/developmental_policy.py"
       - "src/mojum/world_room.py"
@@ -29,8 +31,12 @@ jobs:
       - name: Verify deterministic neutral-probe arm and frozen control
         env:
           PYTHONPATH: src
-        run: python -m unittest discover -s tests -p test_neutral_probe_trial.py -v
+        run: python -m unittest discover -s tests -p 'test_neutral_probe*.py' -v
       - name: Inspect bounded synthetic CLI summary
         env:
           PYTHONPATH: src
         run: python -m mojum.neutral_probe_trial --ticks 120 --mode compare
+      - name: Evaluate ten predeclared synthetic scenes
+        env:
+          PYTHONPATH: src
+        run: python -m mojum.neutral_probe_eval
