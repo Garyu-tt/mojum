@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
@@ -743,6 +744,22 @@ def main():
         except RoomContractError as exc:
             parser.error(str(exc))
         geometry = {"room": room, "start": start}
+        # Two independent processes may both pass the earlier existence
+        # preflight. O_EXCL atomically reserves *one* new name, and must
+        # never truncate an older or concurrently created private journal.
+        # A crash may leave an empty reserved stub; intentionally refuse
+        # later reuse instead of deleting possibly owned data.
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(args.db, flags, 0o600)
+        except FileExistsError:
+            parser.error("--new-room-contract destination already exists (no overwrite)")
+        except OSError as exc:
+            parser.error("cannot reserve a NEW SQLite path: " + str(exc))
+        else:
+            os.close(fd)
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
