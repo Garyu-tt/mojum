@@ -25,8 +25,12 @@ failed `gh` call) is also a `reject` and never a `ready`.
 
 - A requirement is a check name, a `workflow / job` label, a workflow name, or
   an `fnmatch` pattern (`Aquarium*`). Repeat `--require` for each gate.
-- Every check matching a requirement must pass. Requiring a workflow name
-  therefore requires all of that workflow's jobs.
+- Every check matching a requirement must pass. A workflow name or wildcard
+  cannot prove that jobs not yet registered are absent. Require a separately
+  verified inventory with `--require-count 'PATTERN=N'`, or require each exact
+  `workflow / job` identity separately. Without a count, such requirements
+  always defer. Counts are minimums over **distinct** job labels, not a guarantee
+  of which versions ran. Explicit per-version identities are stronger.
 - `success` and `neutral` are passing. `skipped` is rejected unless the same
   pattern appears in `--waive PATTERN=REASON`.
 - A waiver never masks `failure`, `cancelled`, `timed_out`, `action_required`,
@@ -49,7 +53,9 @@ gh pr view 419 --json number,headRefOid,baseRefName,headRefName,isDraft,mergeabl
 PYTHONPATH=src python3 -m mojum.merge_gate \
   --input pr.json \
   --expected-head-sha "$(git rev-parse HEAD)" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+  --require '*aquarium*' --require-count '*aquarium*=3' \
+  --require '*motor-gate*' --require-count '*motor-gate*=1' \
+  --require '*mesh*' --require-count '*mesh*=1'
 ```
 
 `--input -` reads the snapshot from stdin. `--pr N` fetches it through `gh`
@@ -73,8 +79,10 @@ be pointed at real PR data. Input is capped at 4 MiB.
 ```sh
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 PYTHONPATH=src python3 -m mojum.merge_gate \
-  --pr "$PR" --expected-head-sha "$SHA" --require '*aquarium*' \
-  --require '*motor-gate*' --require '*mesh*' || exit $?
+  --pr "$PR" --expected-head-sha "$SHA" \
+  --require '*aquarium*' --require-count '*aquarium*=3' \
+  --require '*motor-gate*' --require-count '*motor-gate*=1' \
+  --require '*mesh*' --require-count '*mesh*=1' || exit $?
 gh pr merge "$PR" --squash --match-head-commit "$SHA"
 ```
 
@@ -93,4 +101,7 @@ does not replace repository rulesets, which remain authoritative.
   entries without `headSha` are trusted to belong to the rollup's head.
 - Skipped-check waivers are caller-supplied and are only as honest as the
   caller. They are echoed in the output for audit.
+- Before setting a count, inspect the pinned workflow matrix: three Aquarium
+  Python versions (3.11/3.12/3.13) require at least three distinct successful jobs.
+  A rollup containing only 3.11 must defer, even when GitHub says CLEAN.
 - The module performs no merge and has no write path.
