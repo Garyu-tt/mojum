@@ -46,7 +46,8 @@ authentication/read-only statuses. **PRIVATE topics, timestamps,
 event identifiers and payloads are redacted by default.**
 
 The operator may explicitly set `include_private_metadata=True`
-to see bounded topic counts plus 0–64 recent
+to see the **64 most frequent topic buckets**, with an exact
+`other_topics_event_count` for remaining event types, plus 0–64 recent
 `seq/topic/recorded_at_ns/visibility` metadata records. Even then,
 **no event payload, raw learning state, genome, key, memory or PRIVATE
 object content** is emitted. Metrics count recorded events;
@@ -91,6 +92,13 @@ quarantined database. The viewer must:
   or modify SQLite bytes during observation;
 - reject changed signed digest/key, wrong actor, tampered custody
   triggers, a world-readable parent, symlinks and active WAL sidecar;
+- exercise 130 distinct synthetic PRIVATE topic names; even then
+  the response exposes no more than 64 topic buckets, with exactly
+  66 events reported in the remaining-topic overflow counter;
+- inspect a real **130-frame v4 Aquarium** (plus bootstrap event)
+  through the owner-HMAC verified historical replica: the authorized
+  summary reports precisely 130 `aquarium.frame` and one
+  `aquarium.bootstrap`, whereas default output does not expose topics;
 - run the offline CLI with default redaction and bounded private
   metadata, without exposing PRIVATE event payloads to stdout.
 
