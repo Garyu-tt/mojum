@@ -1,0 +1,145 @@
+"""Offline, bounded v1/v2 graph audit and explicit no-clobber v1 -> v2 export.
+
+No graph execution, journal mutation, permission grant, or PRIVATE-data export
+occurs without the operator explicitly choosing a new output path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import tempfile
+
+from .graph import GraphError, SCHEMA as V1_SCHEMA
+from .graph_v2 import V2_SCHEMA, upgrade_v1, validate_v2
+
+REPORT_SCHEMA = "mojum.graph-audit-report/1"
+MAX_INPUT_BYTES = 256 * 1024
+MAX_LABEL_BYTES = 16 * 1024
+MAX_OUTPUT_BYTES = 1024 * 1024
+
+
+def _no_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise GraphError("duplicate graph JSON key")
+        result[key] = value
+    return result
+
+
+def _nonfinite_constant(value):
+    raise GraphError("non-finite JSON number is not permitted")
+
+
+def _read_json(path: Path, limit: int):
+    """Bound bytes before UTF-8/JSON parsing, with no silent key collapsing."""
+    with path.open("rb") as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise GraphError("graph or labels file exceeds byte limit")
+    try:
+        return json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_no_duplicate_keys,
+            parse_constant=_nonfinite_constant,
+        )
+    except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        if isinstance(exc, GraphError):
+            raise
+        raise GraphError("invalid UTF-8 JSON input") from exc
+
+
+def _audit(graph):
+    """Return non-sensitive shape/provenance statistics, never graph contents."""
+    if not isinstance(graph, dict):
+        raise GraphError("graph must be a JSON object")
+    if graph.get("schema") == V1_SCHEMA:
+        checked = validate_v2(upgrade_v1(graph))
+        wire_sha = checked["origin_sha256"]
+    elif graph.get("schema") == V2_SCHEMA:
+        checked = validate_v2(graph)
+        wire_sha = checked["graph_sha256"]
+    else:
+        raise GraphError("unsupported graph schema")
+    return {
+        "schema": REPORT_SCHEMA,
+        "input_schema": graph["schema"],
+        "input_sha256": wire_sha,
+        "origin_v1_sha256": checked["origin_sha256"],
+        "node_count": checked["node_count"],
+        "edge_count": checked["edge_count"],
+        "execution": "NOT_PERFORMED",
+        "visibility_security": "METADATA_ONLY_NOT_ACCESS_CONTROL",
+    }
+
+
+def _write_new_private(path: Path, payload: bytes):
+    """Stage 0600, fsync, then atomically create final name without replacing it.
+
+    Hard-link publication is atomic for the target name and fails if it exists.
+    The operator controls the parent directory; this is not a hostile-UID
+    directory-security boundary or a durable distributed transaction.
+    """
+    if len(payload) > MAX_OUTPUT_BYTES:
+        raise GraphError("upgraded graph exceeds byte limit")
+    fd, staging = tempfile.mkstemp(prefix=".mojum-graph-v2-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Atomic no-clobber publication: never replace a previous export.
+        os.link(staging, path)
+    finally:
+        os.unlink(staging)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Bounded offline graph audit and explicit v1 -> v2 metadata-only export"
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("audit", "upgrade"):
+        sub = commands.add_parser(command)
+        sub.add_argument("--input", type=Path, required=True)
+        if command == "upgrade":
+            sub.add_argument("--output", type=Path, required=True)
+            sub.add_argument("--labels", type=Path, help="optional private JSON node-ID to visibility map")
+    args = parser.parse_args(argv)
+    try:
+        graph = _read_json(args.input, MAX_INPUT_BYTES)
+        if args.command == "audit":
+            result = _audit(graph)
+        else:
+            if not isinstance(graph, dict) or graph.get("schema") != V1_SCHEMA:
+                raise GraphError("upgrade requires canonical v1 graph input")
+            labels = _read_json(args.labels, MAX_LABEL_BYTES) if args.labels is not None else None
+            upgraded = upgrade_v1(graph, labels=labels)
+            checked = validate_v2(upgraded)
+            payload = (json.dumps(
+                upgraded, sort_keys=True, ensure_ascii=False,
+                separators=(",", ":"), allow_nan=False,
+            ) + "\n").encode("utf-8")
+            _write_new_private(args.output, payload)
+            result = {
+                "schema": REPORT_SCHEMA,
+                "input_schema": V1_SCHEMA,
+                "output_schema": V2_SCHEMA,
+                "input_sha256": checked["origin_sha256"],
+                "output_sha256": checked["graph_sha256"],
+                "node_count": checked["node_count"],
+                "edge_count": checked["edge_count"],
+                "execution": "NOT_PERFORMED",
+                "visibility_security": "METADATA_ONLY_NOT_ACCESS_CONTROL",
+            }
+    except (GraphError, OSError) as exc:
+        parser.exit(2, f"graph audit rejected: {exc}\n")
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
