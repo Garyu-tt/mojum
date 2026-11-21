@@ -169,6 +169,53 @@ class VersionedCellV3MemoryTests(unittest.TestCase):
         alias.last_seen_at.clear()
         self.assertEqual(m.snapshot(), checkpoint)
 
+    def test_strict_v3_snapshot_rejects_impossible_tick_and_eviction_history(self):
+        # One observation per tick means live cells cannot share a last-seen
+        # tick, the newest stamp must be the current tick, and an eviction
+        # cannot happen before the 512-cell table is full.
+        model = CellExplorerV3()
+        for tick in range(2):
+            cue = Proprioception(
+                tick, "0"*64, (tick+1)*STEP_METERS, STEP_METERS, False,
+            )
+            model.observe(cue, model.decide(cue), False)
+        self.assertEqual(
+            CellExplorerV3.from_snapshot(model.snapshot()).snapshot(),
+            model.snapshot(),
+        )
+        common = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "evictions": 0, "forgotten_observations": 0,
+        }
+        forged = {
+            "two_cells_on_one_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {
+                    "1:1": {"rest": [1, 0]}, "2:1": {"rest": [1, 0]},
+                },
+                "last_seen_at": {"1:1": 1, "2:1": 1},
+            },
+            "newest_stamp_before_last_tick": {
+                **common, "last_tick": 2, "updates": 3,
+                "records": {"1:1": {"rest": [3, 0]}},
+                "last_seen_at": {"1:1": 1},
+            },
+            "eviction_before_table_full": {
+                **common, "last_tick": 1, "updates": 2,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {"2:1": {"rest": [1, 0]}},
+                "last_seen_at": {"2:1": 1},
+            },
+            "learned_but_no_retained_cell": {
+                **common, "last_tick": 0, "updates": 1,
+                "evictions": 1, "forgotten_observations": 1,
+                "records": {}, "last_seen_at": {},
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name), self.assertRaises(CellV3Error):
+                CellExplorerV3.from_snapshot(snapshot)
+
 
 class VersionedV3SQLiteTests(unittest.TestCase):
     def setUp(self):
