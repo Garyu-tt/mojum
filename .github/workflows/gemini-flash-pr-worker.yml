@@ -20,6 +20,7 @@ jobs:
       pull-requests: read
     outputs:
       changed: ${{ steps.patch.outputs.changed }}
+      patch_sha256: ${{ steps.patch.outputs.patch_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,6 +145,7 @@ jobs:
             echo 'Patch exceeds 200 KiB.' >&2
             exit 1
           fi
+          echo "patch_sha256=$(sha256sum "$RUNNER_TEMP/worker.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo 'changed=true' >> "$GITHUB_OUTPUT"
 
       - name: Export untrusted candidate patch
@@ -173,8 +175,11 @@ jobs:
           name: candidate-patch
           path: ${{ runner.temp }}/candidate
       - name: Apply candidate in credential-isolated runner
+        env:
+          EXPECTED_SHA256: ${{ needs.propose.outputs.patch_sha256 }}
         run: |
           set -euo pipefail
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$RUNNER_TEMP/candidate/worker.patch" | sha256sum -c -
           git apply --check --binary "$RUNNER_TEMP/candidate/worker.patch"
           git apply --binary "$RUNNER_TEMP/candidate/worker.patch"
       - name: Compile and run the complete repository suite
@@ -183,14 +188,6 @@ jobs:
         run: |
           python -m compileall -q src tests
           python -m unittest discover -s tests -v
-      - name: Export tested patch
-        uses: actions/upload-artifact@v4
-        with:
-          name: verified-change
-          path: ${{ runner.temp }}/candidate/worker.patch
-          if-no-files-found: error
-          retention-days: 2
-
   publish:
     needs: [propose, test]
     if: needs.propose.outputs.changed == 'true' && needs.test.result == 'success'
@@ -205,14 +202,19 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: verified-change
+          # Fetch the immutable original from propose, NOT the copy exposed to
+          # arbitrary code in the test job.
+          name: candidate-patch
           path: ${{ runner.temp }}/approved
       - name: Create isolated branch and draft PR
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA256: ${{ needs.propose.outputs.patch_sha256 }}
         run: |
           set -euo pipefail
           patch="$RUNNER_TEMP/approved/worker.patch"
+          # Reject any cross-job artifact substitution before write-scoped work.
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$patch" | sha256sum -c -
           git apply --check --binary "$patch"
           git apply --binary "$patch"
           branch="automation/gemini-flash-${GITHUB_RUN_ID}"
