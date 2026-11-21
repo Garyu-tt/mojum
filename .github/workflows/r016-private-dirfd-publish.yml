@@ -7,12 +7,20 @@ on:
       - "src/mojum/aquarium_trace_export.py"
       - "tests/test_r016_private_dirfd_publish.py"
       - "tests/test_r016_export_crash_atomicity.py"
+      - "src/mojum/noosphere.py"
+      - "tests/test_noosphere_init_close.py"
+      - "tests/test_segmented_noosphere.py"
+      - "tests/audit_sqlite_resource_warnings.py"
   push:
     paths:
       - ".github/workflows/r016-private-dirfd-publish.yml"
       - "src/mojum/aquarium_trace_export.py"
       - "tests/test_r016_private_dirfd_publish.py"
       - "tests/test_r016_export_crash_atomicity.py"
+      - "src/mojum/noosphere.py"
+      - "tests/test_noosphere_init_close.py"
+      - "tests/test_segmented_noosphere.py"
+      - "tests/audit_sqlite_resource_warnings.py"
   workflow_dispatch:
 
 permissions:
@@ -42,3 +50,23 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p 'test_r016_*.py' -v
+      - name: LocalNoosphere constructor errors must close real SQLite connections
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_noosphere_init_close.py -v
+
+  sqlite-full-leak-audit:
+    name: full-suite-sqlite-resource-audit (3.13)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run ALL disposable synthetic tests and reject unclosed databases after GC
+        env:
+          PYTHONPATH: src
+        run: python tests/audit_sqlite_resource_warnings.py
