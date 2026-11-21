@@ -106,7 +106,7 @@ class SensorGuidedMotorTests(unittest.TestCase):
         # makes x+ preferred over the otherwise innate rest on the first tick.
         room = Room(4, 4)
         scene = ToyScene(toys=(
-            Toy("experiment.other", 1.25, 2.0, .1, (200, 30, 40), .5),
+            Toy("experiment.other", 1.22, 2.0, .1, (200, 30, 40), .5),
         ))
         with self.baby(room=room, sensory_scene=scene) as child:
             state = child.world
@@ -114,10 +114,9 @@ class SensorGuidedMotorTests(unittest.TestCase):
                                  expected_revision=state.revision)
             before = scene.sense(state)
             after = scene.sense(shifted)
-            # Choose a starting point for which the real 4cm move crosses
-            # a quantized 10cm distance threshold.
-            if before["range_bucket_10cm"] == after["range_bucket_10cm"]:
-                self.skipTest("scene did not cross a numeric 10cm boundary")
+            # The actual 4cm step crosses a 10cm bucket boundary.
+            self.assertNotEqual(before["range_bucket_10cm"],
+                                after["range_bucket_10cm"])
             trained = RangeOutcomeMemory()
             trained.observe(before, "x+", after, False,
                             trained.predict(before, "x+"))
