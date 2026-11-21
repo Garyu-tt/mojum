@@ -52,11 +52,11 @@ def standalone_html(*, html_path=HTML, js_path=JS,
     )
     # Fail closed if the template changes dependencies without updating
     # the bundler; external scripts would break file:// offline portability.
+    if any(html.count(tag) != 1 for tag, _, _ in scripts):
+        raise PackagingError("expected exactly one pinned local script tag")
     if html.count('<script src="') != len(scripts):
         raise PackagingError("unexpected external editor script dependency")
     for tag, source, global_name in scripts:
-        if html.count(tag) != 1:
-            raise PackagingError("expected exactly one pinned local script tag")
         js = _read_small_source(Path(source))
         if "</script" in js.lower() or "<!--" in js:
             raise PackagingError("embedded JavaScript contains an unsafe HTML delimiter")
