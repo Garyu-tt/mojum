@@ -7,8 +7,13 @@ import json
 from pathlib import Path
 import re
 
-from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
+from .aquarium import (
+    EPOCH_EVENT_SCHEMA, MANIFEST_SCHEMA, MAX_REPLAY_EVENTS,
+    V4_MODE, V4_SCHEMA, SCHEMA as FRAME_SCHEMA,
+)
+from .cell_policy_v4 import LEARNING_SCHEMA as V4_LEARNING_SCHEMA
 from .developmental import SCHEMA as MOTOR_PLAY
+from .epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
 from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2, LEARNING_SCHEMA as SENSORY_LEARNING_V2
 from .sensory_bridge import OCCLUSION_SCHEMA
@@ -28,6 +33,7 @@ _HEAD = re.compile(r"[0-9a-f]{64}\Z")
 _MOTOR_KEYS = {
     "exploration_mode", "developmental_schema", "developmental_policy",
     "motor_policy", "motor_mode", "motor_policy_schema",
+    "epoch_transition_schema", "epoch_ticks", "proprioception_schema",
 }
 _POLICY_SELECTORS = (
     ({}, "scripted_v1", None),
@@ -43,6 +49,14 @@ _POLICY_SELECTORS = (
       "developmental_policy": "local_cell_v2"},
      "local_cell_v2_b_unreleased",
      (_LOCAL_CELL_B, _V2B_OUTCOME, "bounded_goal_free_local_cell_motor_play_v2")),
+    ({"exploration_mode": "goal_free", "developmental_schema": V4_SCHEMA,
+      "developmental_policy": V4_MODE,
+      "epoch_transition_schema": EPOCH_EVENT_SCHEMA,
+      "epoch_ticks": EPOCH_TICKS,
+      "proprioception_schema": EPOCH_SENSE_SCHEMA},
+     V4_MODE,
+     (V4_SCHEMA, V4_LEARNING_SCHEMA,
+      "bounded_goal_free_local_cell_motor_play_v4")),
     ({"exploration_mode": "goal_free", "developmental_schema": "mojum.developmental.local-cell/3",
       "developmental_policy": "local_cell_v3"}, "local_cell_v3",
      ("mojum.developmental.local-cell/3", "mojum.developmental.local-cell.outcome/3",
@@ -117,9 +131,22 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
         else:
             motor = _object_field(frame, "developmental")
-            if ("developmental_controller" in frame or motor.get("schema") != state_schema
-                    or _object_field(motor, "intent").get("source") != action_source
-                    or _object_field(motor, "learning").get("schema") != learning_schema):
+            intent = _object_field(motor, "intent")
+            learning = _object_field(motor, "learning")
+            invalid_v4_observation = False
+            if state_schema == V4_SCHEMA:
+                observation = _object_field(motor, "observation")
+                invalid_v4_observation = (
+                    observation.get("schema") != EPOCH_SENSE_SCHEMA
+                    or intent.get("tick") != observation.get("absolute_tick")
+                    or intent.get("epoch_index") != observation.get("epoch_index")
+                    or intent.get("epoch_tick") != observation.get("epoch_tick")
+                )
+            if ("developmental_controller" in frame
+                    or motor.get("schema") != state_schema
+                    or intent.get("source") != action_source
+                    or learning.get("schema") != learning_schema
+                    or invalid_v4_observation):
                 raise NoosphereError("frame disagrees with its pinned policy schema")
     if temporal_schema is not None:
         if _object_field(frame, "range_guidance").get("schema") != _GUIDANCE:
@@ -149,10 +176,11 @@ def inspect_journal(path, *, external_expected_head=None):
     ):
         raise NoosphereError("expected head must be a lowercase SHA-256")
     policy = contract = temporal = sensory_mode = None
+    epoch_index = 0
     frames = 0
 
     def inspect_event(seq, event):
-        nonlocal policy, contract, temporal, sensory_mode, frames
+        nonlocal policy, contract, temporal, sensory_mode, frames, epoch_index
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("Aquarium inspection exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -165,6 +193,29 @@ def inspect_journal(path, *, external_expected_head=None):
             policy, contract, temporal, sensory_mode = _stored_policy(manifest)
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
+        elif topic == "aquarium.epoch":
+            payload = event["payload"]
+            expected_index = epoch_index + 1
+            if (policy != V4_MODE or type(payload) is not dict
+                    or set(payload) != {
+                        "schema", "absolute_tick", "epoch_index",
+                        "previous_epoch_index", "epoch_tick", "source",
+                    }
+                    or payload["schema"] != EPOCH_EVENT_SCHEMA
+                    or type(payload["absolute_tick"]) is not int
+                    or payload["absolute_tick"] != frames
+                    or frames <= 0 or frames % EPOCH_TICKS != 0
+                    or type(payload["epoch_index"]) is not int
+                    or payload["epoch_index"] != expected_index
+                    or payload["epoch_index"] != frames // EPOCH_TICKS
+                    or type(payload["previous_epoch_index"]) is not int
+                    or payload["previous_epoch_index"] != expected_index - 1
+                    or type(payload["epoch_tick"]) is not int
+                    or payload["epoch_tick"] != 0
+                    or payload["source"] != "explicit_bounded_epoch_rollover_without_reset"
+                    or event["event_id"] != f"epoch-{expected_index:08d}"):
+                raise NoosphereError("invalid or unexpected Aquarium epoch marker")
+            epoch_index = expected_index
         elif topic == "aquarium.frame":
             frame = event["payload"]
             if type(frame) is not dict or type(frame.get("tick")) is not int or frame["tick"] != frames:
@@ -199,6 +250,12 @@ def inspect_journal(path, *, external_expected_head=None):
     }
     if sensory_mode == "toy_probe_v2":
         result["sensory_schema"] = SENSORY_MODEL_V2
+    if policy == V4_MODE:
+        result.update({
+            "epoch_transition_schema": EPOCH_EVENT_SCHEMA,
+            "epoch_markers": epoch_index,
+            "proprioception_schema": EPOCH_SENSE_SCHEMA,
+        })
     return result
 
 

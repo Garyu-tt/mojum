@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import re
 
-from .developmental_policy import ACTIONS, STEP_METERS
+from .local_cell_sense import ACTIONS, STEP_METERS
 from .epoch_sense_v2 import (
     EpochProprioception, EPOCH_TICKS, MAX_ABSOLUTE_TICKS,
 )

@@ -1,0 +1,38 @@
+name: Mojum R0.15 synthetic epoch-v4 continuation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r015-epoch-v4.yml"
+      - "src/mojum/aquarium.py"
+      - "src/mojum/aquarium_wire.py"
+      - "src/mojum/cell_policy_v4.py"
+      - "src/mojum/epoch_sense_v2.py"
+      - "src/mojum/portable_host.py"
+      - "tests/test_epoch_v4.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  epoch-v4:
+    name: epoch-v4 synthetic SQLite (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run typed epoch and real cold-replay QA
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m unittest discover -s tests -p 'test_epoch_v4.py' -v

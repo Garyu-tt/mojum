@@ -207,6 +207,22 @@ with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
 observation matches, with zero evictions during the transfer.
 
+For an explicitly new, longer bounded synthetic episode, use the separate
+`local_cell_v4` policy with no toy sensing:
+
+```bash
+PYTHONPATH=src python -m mojum.aquarium --db ./epoch_v4_PRIVATE.sqlite3 \
+  --ticks 1000 --motor-mode local_cell_v4 --sensory-mode none --neural-mode disabled
+```
+
+Repeat the command to continue the same journal. At the 9,999-to-10,000
+boundary Mojum commits a separate `aquarium.epoch` marker before the first
+frame in the next epoch; the frame clock remains absolute and old v1/v2/v3
+journals are not reinterpreted. This is a bounded synthetic CPU experiment:
+the source journal remains finite, the checkpoint is not authenticated, and
+it is not evidence of a neural brain or an always-on organism. See
+`docs/R015_EXPLICIT_EPOCH_V4.md`.
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.

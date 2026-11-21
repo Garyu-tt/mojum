@@ -38,9 +38,14 @@ class EpochProprioception:
                 or _REVISION.fullmatch(self.revision) is None
                 or type(self.x) not in (int, float)
                 or type(self.y) not in (int, float)
-                or not math.isfinite(self.x) or not math.isfinite(self.y)
-                or not 0 <= self.x <= 1000 or not 0 <= self.y <= 1000
                 or type(self.pulse) is not bool):
+            raise EpochSenseError("invalid absolute/epoch proprioception")
+        try:
+            x, y = float(self.x), float(self.y)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise EpochSenseError("invalid absolute/epoch proprioception") from exc
+        if (not math.isfinite(x) or not math.isfinite(y)
+                or not 0 <= x <= 1000 or not 0 <= y <= 1000):
             raise EpochSenseError("invalid absolute/epoch proprioception")
 
     @property
