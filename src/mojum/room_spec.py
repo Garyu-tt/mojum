@@ -16,6 +16,7 @@ import argparse
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -94,6 +95,17 @@ def _as_number(value, label, errors):
         return None
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
+        return None
+    # The point-room runtime consumes Python int/float geometry, not Decimal.
+    # Reject values that would overflow or underflow to zero at that boundary.
+    # Otherwise the report can say VALID for geometry the runtime cannot use,
+    # and huge Decimal exponents can crash the area calculation with Overflow.
+    try:
+        runtime_number = float(number)
+    except (OverflowError, ValueError):
+        runtime_number = math.inf
+    if not math.isfinite(runtime_number) or (number != 0 and runtime_number == 0.0):
+        errors.append("%s is outside the finite runtime numeric range" % (label,))
         return None
     return number
 
