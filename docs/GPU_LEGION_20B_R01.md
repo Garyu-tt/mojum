@@ -41,6 +41,26 @@ CUDA/model compatibility, load the exact GGUF, verify layer placement, test
 sample coding prompts, check throughput, GPU power and thermal behavior and
 confirm no OOM during sustained two-server operation.
 
+## Pinned GGUF provenance (verified from upstream HTTP metadata)
+
+Source repository: `ggml-org/gpt-oss-20b-GGUF` on Hugging Face.
+Use this exact immutable repository revision when staging files:
+
+```text
+Revision: ccd679448b30b7438e83f3662ea0108c4b6011c3
+File: gpt-oss-20b-mxfp4.gguf
+Expected bytes: 12109566560
+Expected SHA-256: be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935
+URL: https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/ccd679448b30b7438e83f3662ea0108c4b6011c3/gpt-oss-20b-mxfp4.gguf
+```
+
+Check file size and `sha256sum` before renaming a downloaded `.part`
+file into place. Never overwrite the existing ALT 120B checkpoint. The model
+is intentionally **not** stored inside this GitHub repository. The observed
+Mikoshi VM200 mount `/srv/alt` has its own filesystem; however, remote
+model staging has **not completed**, and the old `alt-factory-3.service`
+remains active until a tested replacement exists.
+
 ## Read-only planning
 
 On a machine with NVIDIA drivers installed:
