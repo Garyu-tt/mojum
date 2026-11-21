@@ -277,7 +277,7 @@ def main():
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
-    parser.add_argument("--sensory-mode", choices=("none", "toy_probe"),
+    parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                         default="none")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
     parser.add_argument("--expected-head", default=None)
