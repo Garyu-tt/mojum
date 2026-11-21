@@ -128,6 +128,16 @@ is not an encryption layer and is not required for cold replay.
   source unavailable, verifies and reconstructs the exact
   100001-event SHA-linked history from physical files.
 
+- A second **full end-to-end Aquarium** 3.13 stress: 10,050
+  actual v4 goal-free motor frames, a durable epoch event at 9999,
+  more than 4,000 measured `toy_probe_v2` contacts and **10,052**
+  source journal events. Archive **8,192 sealed records** plus
+  **1,860 live-tail records**, make the source disposable SQLite
+  unavailable and reconstruct a new database from physical files.
+  A complete cold resimulation must produce an identical Aquarium
+  checkpoint, epoch, sensory association counts and motor memory
+  before continuation to tick 10,051.
+
 **Important exclusions:** no automatic source replication, no
 encrypted authenticated multi-device transport, no anti-rollback
 guarantee without a separately trusted head, no two actual
