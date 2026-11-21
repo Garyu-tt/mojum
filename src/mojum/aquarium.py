@@ -37,6 +37,7 @@ from .verified_snapshot import (
 
 SCHEMA = "mojum.aquarium.frame/1"
 MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/1"
+EXACT_ROOM_MANIFEST_SCHEMA = "mojum.aquarium.bootstrap/2"
 MAX_REPLAY_EVENTS = 100_000  # Still bounded; full replay is CPU-linear.
 ARCHIVE_MODE = "local_cell_v2_a_archive"  # Identifies #112 ABI; never creates a new journal.
 _OMITTED_MOVEMENT = object()  # Distinguish omitted dx/dy from explicit None.
@@ -152,7 +153,9 @@ class Aquarium:
             raise AquariumError("invalid room or start")
         self.start = (float(start[0]), float(start[1]))
         self.manifest = {
-            "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
+            "schema": (EXACT_ROOM_MANIFEST_SCHEMA
+                       if self.room_numeric_contract == "typed_v1" else MANIFEST_SCHEMA),
+            "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
             "graph_sha256": self.graph_sha256,
             "neural_mode": self.neural_mode,
