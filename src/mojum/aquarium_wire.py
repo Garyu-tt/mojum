@@ -14,73 +14,34 @@ from .aquarium import (
     MAX_REPLAY_EVENTS,
     SCHEMA as FRAME_SCHEMA,
 )
-from .cell_policy_v4 import LEARNING_SCHEMA as V4_LEARNING_SCHEMA
 from .cell_policy_v4 import SCHEMA as V4_SCHEMA
-from .cell_policy_v5 import LEARNING_SCHEMA as V5_LEARNING_SCHEMA
-from .cell_policy_v5 import SCHEMA as V5_SCHEMA
 from .developmental import SCHEMA as MOTOR_PLAY
 from .epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
+from .policy_identity import (
+    MOTOR_SELECTOR_KEYS, POLICIES, SCHEMA as IDENTITY_SCHEMA,
+    PolicyIdentityError, as_public_record, by_selector,
+)
 from .sensory_associations_v2 import SCHEMA as SENSORY_MODEL_V2, LEARNING_SCHEMA as SENSORY_LEARNING_V2
 from .sensory_bridge import OCCLUSION_SCHEMA
 from .sensory_bridge_v2 import SCHEMA as SENSORY_BRIDGE_V2
 from .sensory_play import SENSE_SCHEMA
 
 
-_COARSE_V1 = "mojum.developmental.explorer/1"
-_LOCAL_CELL_A = "mojum.developmental.explorer.local-cell/2"
-_LOCAL_CELL_B = "mojum.developmental.local-cell/2"
-_V2B_OUTCOME = "mojum.developmental.local-cell.outcome/2"
-_V4_OUTCOME = V4_LEARNING_SCHEMA
-_V5_OUTCOME = V5_LEARNING_SCHEMA
-# Epoch-scoped policies share the explicit marker and frame-envelope ABI.
-_EPOCH_POLICIES = ("local_cell_v4", "local_cell_v5")
 _GUIDANCE = "mojum.developmental.range-guidance/1"
 _HEAD = re.compile(r"[0-9a-f]{64}\Z")
+# Epoch-scoped identities share the explicit marker and frame-envelope ABI.
+_EPOCH_POLICIES = ("local_cell_v4", "local_cell_v5")
+
+
+def _epoch_tag(policy):
+    return "v5" if policy == "local_cell_v5" else "v4"
 
 # The two draft runtimes both used the spelling local_cell_v2. Their
-# persisted selector sets differ, as do their intent and outcome contracts.
-_MOTOR_KEYS = {
-    "exploration_mode", "developmental_schema", "developmental_policy",
-    "motor_policy", "motor_mode", "motor_policy_schema",
-    "epoch_transition_schema", "epoch_ticks", "proprioception_schema",
-    "max_absolute_ticks",
-}
-_POLICY_SELECTORS = (
-    ({}, "scripted_v1", None),
-    ({"motor_mode": "developmental_fixture", "motor_policy_schema": MOTOR_PLAY},
-     "motor_play_v1", (MOTOR_PLAY, None, None)),
-    ({"exploration_mode": "goal_free", "developmental_schema": _COARSE_V1},
-     "legacy_coarse_v1", (_COARSE_V1, _COARSE_V1, "bounded_goal_free_motor_play")),
-    ({"exploration_mode": "goal_free", "developmental_schema": _LOCAL_CELL_A,
-      "motor_policy": "local_cell_v2", "motor_policy_schema": _LOCAL_CELL_A},
-     "local_cell_v2_a_unreleased",
-     (_LOCAL_CELL_A, _LOCAL_CELL_A, "bounded_local_cell_motor_play_v2")),
-    ({"exploration_mode": "goal_free", "developmental_schema": _LOCAL_CELL_B,
-      "developmental_policy": "local_cell_v2"},
-     "local_cell_v2_b_unreleased",
-     (_LOCAL_CELL_B, _V2B_OUTCOME, "bounded_goal_free_local_cell_motor_play_v2")),
-    ({"exploration_mode": "goal_free", "developmental_schema": "mojum.developmental.local-cell/3",
-      "developmental_policy": "local_cell_v3"}, "local_cell_v3",
-     ("mojum.developmental.local-cell/3", "mojum.developmental.local-cell.outcome/3",
-      "bounded_goal_free_local_cell_motor_play_v3")),
-    ({"exploration_mode": "goal_free", "developmental_schema": V4_SCHEMA,
-      "developmental_policy": "local_cell_v4",
-      "epoch_transition_schema": EPOCH_EVENT_SCHEMA,
-      "epoch_ticks": EPOCH_TICKS,
-      "proprioception_schema": EPOCH_SENSE_SCHEMA,
-      "max_absolute_ticks": MAX_ABSOLUTE_TICKS}, "local_cell_v4",
-     (V4_SCHEMA, _V4_OUTCOME,
-      "bounded_goal_free_local_cell_motor_play_v4")),
-    ({"exploration_mode": "goal_free", "developmental_schema": V5_SCHEMA,
-      "developmental_policy": "local_cell_v5",
-      "epoch_transition_schema": EPOCH_EVENT_SCHEMA,
-      "epoch_ticks": EPOCH_TICKS,
-      "proprioception_schema": EPOCH_SENSE_SCHEMA,
-      "max_absolute_ticks": MAX_ABSOLUTE_TICKS}, "local_cell_v5",
-     (V5_SCHEMA, _V5_OUTCOME,
-      "bounded_goal_free_local_cell_motor_play_v5")),
-)
+# persisted selector sets differ, as do their intent and outcome contracts;
+# both facts are declared once in mojum.policy_identity so this reader and
+# the CLI cannot drift apart. Never widen one identity to cover the other.
+_MOTOR_KEYS = MOTOR_SELECTOR_KEYS
 _TEMPORAL_FIELDS = {
     "temporal_mode": "range_guided",
     "temporal_schema": "mojum.temporal.motor-play-range/1",
@@ -92,11 +53,11 @@ def _stored_policy(manifest):
     if type(manifest) is not dict or manifest.get("schema") != MANIFEST_SCHEMA:
         raise NoosphereError("unknown Aquarium bootstrap schema")
     selectors = {key: manifest[key] for key in _MOTOR_KEYS & manifest.keys()}
-    for known, policy_id, frame_contract in _POLICY_SELECTORS:
-        if selectors == known:
-            break
-    else:
-        raise NoosphereError("ambiguous or unknown stored Aquarium policy")
+    try:
+        identity = by_selector(selectors)
+    except PolicyIdentityError as error:
+        raise NoosphereError(str(error)) from None
+    policy_id, frame_contract = identity.inspection_id, identity.frame_contract
 
     sensory_mode = manifest.get("sensory_mode")
     if sensory_mode not in (None, "toy_probe", "toy_probe_v2"):
@@ -104,8 +65,8 @@ def _stored_policy(manifest):
     # V4 cannot be paired with a sensory bridge. Besides rejecting an
     # impossible runtime manifest, this preserves the exact v4 policy ID
     # used for strict epoch-marker and frame-topic inspection below.
-    if policy_id in _EPOCH_POLICIES and sensory_mode is not None:
-        raise NoosphereError("epoch local-cell journals require sensory_mode none")
+    if policy_id == "local_cell_v4" and sensory_mode is not None:
+        raise NoosphereError("local_cell_v4 journals require sensory_mode none")
     if sensory_mode == "toy_probe_v2":
         if {
             "sensory_mode": sensory_mode,
@@ -228,8 +189,7 @@ def inspect_journal(path, *, external_expected_head=None):
             if policy in _EPOCH_POLICIES and (
                     type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000):
                 raise NoosphereError(
-                    "invalid %s bootstrap dt_ns" %
-                    ("v5" if policy == "local_cell_v5" else "v4"))
+                    "invalid %s bootstrap dt_ns" % _epoch_tag(policy))
             if manifest.get("agent_id") != event["agent_id"]:
                 raise NoosphereError("Aquarium bootstrap owner mismatch")
         elif topic == "aquarium.frame":
@@ -242,12 +202,19 @@ def inspect_journal(path, *, external_expected_head=None):
                         or type(event.get("observed_at_ns")) is not int
                         or event["observed_at_ns"] != frames * dt_ns):
                     raise NoosphereError(
-                        "noncanonical %s frame envelope" %
-                        ("v5" if policy == "local_cell_v5" else "v4"))
+                        "noncanonical %s frame envelope" % _epoch_tag(policy))
                 if frames // EPOCH_TICKS != epoch_index:
                     raise NoosphereError(
-                        "missing durable %s epoch marker before frame" %
-                        ("v5" if policy == "local_cell_v5" else "v4"))
+                        "missing durable %s epoch marker before frame"
+                        % _epoch_tag(policy))
+                # The manifest pins max_absolute_ticks.  The event ceiling
+                # normally runs out first, but inspection must fail closed on
+                # a frame at or beyond the pinned cap instead of certifying a
+                # tick the runtime can never write.
+                if frames >= MAX_ABSOLUTE_TICKS:
+                    raise NoosphereError(
+                        "%s frame exceeds the pinned absolute-tick cap"
+                        % _epoch_tag(policy))
             _check_policy_frame(frame, contract, temporal, sensory_mode)
             frames += 1
         elif topic == "aquarium.epoch":
@@ -280,8 +247,7 @@ def inspect_journal(path, *, external_expected_head=None):
             # Epoch Aquarium replay accepts only frames and durable markers.
             # A valid SQLite hash chain is not proof of a valid motor-wire ABI.
             raise NoosphereError(
-                "unsupported local-cell %s journal topic" %
-                ("v5" if policy == "local_cell_v5" else "v4"))
+                "unsupported local-cell %s journal topic" % _epoch_tag(policy))
         elif topic not in {"genesis.acquisition", "development.advance", "identity.assigned"}:
             raise NoosphereError("unknown Aquarium event topic")
 
@@ -317,11 +283,28 @@ def inspect_journal(path, *, external_expected_head=None):
     return result
 
 
+def list_policies():
+    """Describe every distinct persisted identity without opening a journal."""
+    return {
+        "schema": IDENTITY_SCHEMA,
+        "identities": [as_public_record(item) for item in POLICIES],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path, required=True)
+    parser.add_argument("--db", type=Path)
     parser.add_argument("--expected-head")
+    parser.add_argument(
+        "--list-policies", action="store_true",
+        help="print every distinct persisted policy identity and exit",
+    )
     args = parser.parse_args()
+    if args.list_policies:
+        print(json.dumps(list_policies(), sort_keys=True))
+        return
+    if args.db is None:
+        parser.error("--db is required unless --list-policies is used")
     try:
         info = inspect_journal(args.db, external_expected_head=args.expected_head)
     except NoosphereError as error:
