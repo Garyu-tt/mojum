@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mojum.graph import GraphError, validate
+from mojum.graph import GraphError, load_graph, validate
 from mojum.sim import Simulation, digest
 
 
@@ -58,6 +58,33 @@ class GraphV1LosslessWireTests(unittest.TestCase):
         self.assertEqual(sim.graph_hash, expected)
         self.assertEqual(len(sim.step()), len(FIXTURE["nodes"]))
         self.assertEqual(graph["nodes"][0]["notes"]["localization"]["ru"], "аквариум")
+
+    def test_loader_rejects_nonfinite_json_numbers(self):
+        raw = json.dumps(FIXTURE)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "invalid.json"
+            for token in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999"):
+                with self.subTest(token=token):
+                    path.write_text(raw.replace('"bpm": 60', f'"bpm": {token}'), encoding="utf-8")
+                    with self.assertRaisesRegex(GraphError, "graph JSON numeric constant|finite float"):
+                        load_graph(path)
+
+    def test_int_over_parser_limit_does_not_create_private_journal(self):
+        raw = json.dumps(FIXTURE).replace('"bpm": 60', '"bpm": ' + "1" * 641)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "invalid.json"
+            db = root / "should-not-exist.sqlite3"
+            path.write_text(raw, encoding="utf-8")
+            process = subprocess.run(
+                [sys.executable, "-X", "int_max_str_digits=640", "-m", "mojum.aquarium",
+                 "--graph", str(path), "--db", str(db), "--ticks", "1"],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(process.returncode, 2, process.stderr)
+            self.assertIn("Malformed graph JSON", process.stderr)
+            self.assertNotIn("Traceback", process.stderr)
+            self.assertFalse(db.exists())
 
     def test_ascii_escaped_surrogate_cli_does_not_create_private_journal(self):
         # JSON can spell a lone surrogate with ASCII escapes, but the decoded
