@@ -225,6 +225,28 @@ class PortableHostTests(unittest.TestCase):
                     self.assertEqual(q.store.count(), initial_events)
                     self.assertEqual(q.checkpoint()["journal_head"], initial_head)
 
+    def test_controller_mode_replays_and_cross_mode_reopen_fails_closed(self):
+        first = self.invoke("--brain-mode", "developmental_controller")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        result = json.loads(first.stdout)
+        self.assertEqual(result["brain_mode"], "developmental_controller")
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.tick, 4)
+            items = aquarium.store.dataset(include_nonpublic=True, limit=10)["projection"]["items"]
+            self.assertEqual(items[-1]["event"]["payload"]["brain"]["status"],
+                             "SYNTHETIC_DEVELOPMENTAL_CONTROLLER")
+            head = aquarium.checkpoint()["journal_head"]
+            count = aquarium.store.count()
+        wrong = self.invoke()
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertEqual(wrong.stdout, "")
+        with self.open_aquarium(brain_mode="developmental_controller") as aquarium:
+            self.assertEqual(aquarium.store.count(), count)
+            self.assertEqual(aquarium.checkpoint()["journal_head"], head)
+        second = self.invoke("--brain-mode", "developmental_controller")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(json.loads(second.stdout)["start_tick"], 4)
+
     @unittest.skipUnless(os.name == "posix" and hasattr(signal, "SIGTERM"),
                          "POSIX process signal required")
     def test_sigterm_stops_between_commits_and_reopens_exactly(self):
