@@ -77,13 +77,13 @@ class V2Test(unittest.TestCase):
         premature = m.snapshot()
         del premature["table"]["1:1:1"]
         premature["evicted_cues"] = 1
-        premature["evicted_observations"] = 1
+        premature["evicted_observations"] = 2
         with self.assertRaisesRegex(CuriosityError, "eviction history"):
             ContactAssociationsV2.from_snapshot(premature)
         erased = m.snapshot()
         erased["table"] = {}
         erased["evicted_cues"] = 2
-        erased["evicted_observations"] = 2
+        erased["evicted_observations"] = 3
         with self.assertRaises(CuriosityError):
             ContactAssociationsV2.from_snapshot(erased)
 
