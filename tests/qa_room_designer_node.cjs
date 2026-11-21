@@ -11,7 +11,7 @@ const cp = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const { dimension, startCoordinate, validate, buildDraft, floatToken, pointerToWorld,
-        snap, withinRect } = require("../tools/room_designer.js");
+        snap, snapWithin, withinRect } = require("../tools/room_designer.js");
 
 function sample() {
   return {
@@ -84,6 +84,10 @@ test("pointer math respects aspect-ratio letterbox and bottom-left coordinates",
   assert.deepEqual(pointerToWorld(150, 300, narrow, 4.5, 4), [2.25, 2]);
   assert.equal(snap(1.14, .25), 1.25);
   assert.equal(snap(1.14, 0), 1.14);
+  assert.equal(snapWithin(4.9, 4.9, 0.25), 4.9);
+  assert.equal(snapWithin(4.9, 4.9, 0), 4.9);
+  assert.equal(snapWithin(-0.2, 4.9, 0.25), 0);
+  assert.equal(snapWithin(5.1, 4.9, 0.25), 4.9);
   assert.throws(() => pointerToWorld(0, 0, {width:0,height:0}, 4.5, 4));
 });
 
@@ -226,6 +230,35 @@ test("actual offline UI can draw, move start, erase and export valid JSON", () =
     nodes["room-width"].dispatch("input");
     assert.equal(nodes.status.dataset.status, "ok");
     assert.equal(JSON.parse(nodes["room-json"].value).obstacles.length, 1);
+
+    // Non-grid-aligned room (4.9 m): touching the right/top wall must not
+    // round a valid coordinate up to 5.0 m.
+    nodes["room-width"].value = "4.9";
+    nodes["room-height"].value = "4.9";
+    nodes["room-width"].dispatch("input");
+    nodes["room-height"].dispatch("input");
+    tools[1].dispatch("click");
+    svg.dispatch("pointerdown", {
+      pointerType:"touch", clientX:425, clientY:0, pointerId:4
+    });
+    assert.deepEqual(JSON.parse(nodes["room-json"].value).start, [4.9, 4.9]);
+    svg.dispatch("keydown", {key:"ArrowRight", preventDefault() {}});
+    svg.dispatch("keydown", {key:"ArrowUp", preventDefault() {}});
+    assert.deepEqual(JSON.parse(nodes["room-json"].value).start, [4.9, 4.9]);
+    assert.equal(nodes.status.dataset.status, "ok");
+
+    // Draw to the exact right boundary, retaining valid JSON geometry.
+    tools[0].dispatch("click");
+    svg.dispatch("pointerdown", {
+      pointerType:"touch", clientX:350, clientY:350, pointerId:5,
+      preventDefault() {}
+    });
+    svg.dispatch("pointermove", {clientX:425, clientY:300, pointerId:5});
+    svg.dispatch("pointerup", {clientX:425, clientY:300, pointerId:5});
+    const final = JSON.parse(nodes["room-json"].value);
+    assert.equal(final.obstacles.length, 2);
+    assert.equal(final.obstacles[1][0] + final.obstacles[1][2], 4.9);
+    assert.equal(nodes.status.dataset.status, "ok");
   } finally {
     if (savedWindow === undefined) delete global.window;
     else global.window = savedWindow;
