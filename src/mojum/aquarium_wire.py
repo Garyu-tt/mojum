@@ -68,6 +68,8 @@ def _stored_policy(manifest):
     if policy_id == "local_cell_v4" and sensory_mode == "toy_probe":
         raise NoosphereError("local_cell_v4 journals require sensory_mode none or toy_probe_v2")
     if sensory_mode == "toy_probe_v2":
+        if policy_id not in ("motor_play_v1", "local_cell_v4"):
+            raise NoosphereError(f"toy_probe_v2 is not allowed by stored policy {policy_id}")
         if {
             "sensory_mode": sensory_mode,
             "sensory_schema": manifest.get("sensory_schema"),

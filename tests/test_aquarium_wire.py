@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V2B_MODE, V3_ESCAPE_MODE, V3_MODE
 from mojum.aquarium_wire import inspect_journal
 from mojum.noosphere import LocalNoosphere, NoosphereError
 
@@ -121,6 +121,29 @@ class AquariumWireTests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "ambiguous or unknown"):
             inspect_journal(foreign, external_expected_head=head)
         self.assertEqual(foreign.read_bytes(), before)
+
+    def test_inspector_refuses_unwritten_sensory_v2_combinations(self):
+        sensory_path = self.db.with_name("sensory-v2.sqlite3")
+        with Aquarium(sensory_path, SEED, GRAPH, motor_mode="developmental_fixture",
+                      sensory_mode="toy_probe_v2") as aquarium:
+            sensory_fields = {
+                key: value for key, value in aquarium.manifest.items()
+                if key.startswith("sensory_") or key in {"contact_bridge_schema", "occlusion_schema"}
+            }
+        for motor_mode in ("scripted", V2B_MODE, V3_MODE, V3_ESCAPE_MODE):
+            with self.subTest(motor_mode=motor_mode):
+                source = self.db.with_name(f"{motor_mode}.sqlite3")
+                with Aquarium(source, SEED, GRAPH, motor_mode=motor_mode) as aquarium:
+                    event = aquarium.store.dataset(include_nonpublic=True)["projection"]["items"][0]["event"]
+                event["payload"].update(sensory_fields)
+                mixed = self.db.with_name(f"{motor_mode}-mixed.sqlite3")
+                with LocalNoosphere(mixed, event["agent_id"]) as store:
+                    head = store.append(event, expected_head=store.head())
+                    self.assertEqual(store.verify_chain()["head"], head)
+                before = mixed.read_bytes()
+                with self.assertRaisesRegex(NoosphereError, "toy_probe_v2 is not allowed"):
+                    inspect_journal(mixed, external_expected_head=head)
+                self.assertEqual(mixed.read_bytes(), before)
 
     def test_inspector_refuses_unpinned_contact_with_valid_hash_chain(self):
         # The independent inspector must not certify sensory observations
