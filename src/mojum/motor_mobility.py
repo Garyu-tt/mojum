@@ -20,13 +20,16 @@ import math
 from pathlib import Path
 
 from .aquarium import MANIFEST_SCHEMA, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA
-from .developmental import SCHEMA as MOTOR_SCHEMA
+from .developmental import MOVES, REST, SCHEMA as MOTOR_SCHEMA
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
 
 SCHEMA = "mojum.aquarium.mobility-audit/1"
 GATE_SCHEMA = "mojum.aquarium.mobility-gates/1"
-MOVE_KINDS = frozenset(("east", "north", "west", "south"))
-REST_KIND = "rest"
+MOVE_KINDS = frozenset(name for name, _, _ in MOVES)
+REST_KIND = REST[0]
+_ACTION_VECTORS = {
+    name: (float(dx), float(dy)) for name, dx, dy in (*MOVES, REST)
+}
 
 # Versioned, deliberately conservative thresholds. They flag *silent collapse*,
 # never a policy's right to rest, and are not a quality score.
@@ -70,6 +73,12 @@ def _position(value):
     return float(value[0]), float(value[1])
 
 
+def _scalar(value, field):
+    if not _finite(value):
+        raise MobilityAuditError(f"{field} must be a finite numeric scalar")
+    return float(value)
+
+
 def _action_fields(frame, policy_schema):
     if type(frame) is not dict or not _REQUIRED_FRAME_FIELDS <= frame.keys() \
             or not frame.keys() <= _REQUIRED_FRAME_FIELDS | _OPTIONAL_FRAME_FIELDS:
@@ -85,20 +94,40 @@ def _action_fields(frame, policy_schema):
     intent, outcome = controller.get("intent"), controller.get("outcome")
     if type(intent) is not dict or type(outcome) is not dict:
         raise MobilityAuditError("frame is missing measured motor intent/outcome")
+    if intent.get("schema") != policy_schema:
+        raise MobilityAuditError("motor intent schema disagrees with the bootstrap")
     kind = intent.get("kind")
-    if type(kind) is not str or kind not in MOVE_KINDS | {REST_KIND}:
+    if type(kind) is not str or kind not in _ACTION_VECTORS:
         raise MobilityAuditError("unknown committed motor action")
+    expected_dx, expected_dy = _ACTION_VECTORS[kind]
+    intent_vector = (
+        _scalar(intent.get("dx"), "motor intent dx"),
+        _scalar(intent.get("dy"), "motor intent dy"),
+    )
+    if intent_vector != (expected_dx, expected_dy):
+        raise MobilityAuditError("motor intent vector is not canonical for its action")
+    request = frame["movement_request"]
+    if type(request) is not dict or set(request) != {"dx", "dy"}:
+        raise MobilityAuditError("frame is missing the canonical movement request")
+    request_vector = (
+        _scalar(request.get("dx"), "movement request dx"),
+        _scalar(request.get("dy"), "movement request dy"),
+    )
+    if request_vector != intent_vector:
+        raise MobilityAuditError("movement request disagrees with motor intent")
     blocked = outcome.get("observed_blocked")
     if type(blocked) is not bool:
         raise MobilityAuditError("committed motor outcome is not boolean")
     if kind == REST_KIND and blocked:
         raise MobilityAuditError("rest cannot be blocked in the point-room fixture")
     world = frame.get("world")
-    if type(world) is not dict or type(world.get("blocked")) is not bool:
+    if (type(world) is not dict or type(world.get("tick")) is not int
+            or world["tick"] != frame["tick"] + 1
+            or type(world.get("blocked")) is not bool):
         raise MobilityAuditError("frame is missing a measured world outcome")
     if world["blocked"] != blocked:
         raise MobilityAuditError("motor and world outcomes disagree")
-    return kind, blocked, _position(world.get("position"))
+    return kind, blocked, _position(world.get("position")), intent_vector
 
 
 def _manifest_policy(manifest):
@@ -108,10 +137,15 @@ def _manifest_policy(manifest):
             or type(manifest.get("motor_policy_schema")) is not str
             or manifest["motor_policy_schema"] != MOTOR_SCHEMA):
         raise MobilityAuditError("journal has no measured developmental motor policy")
+    room = manifest.get("room")
+    if type(room) is not dict:
+        raise MobilityAuditError("bootstrap is missing the measured room start")
+    start = _position(room.get("start"))
     return {
         "motor_mode": manifest["motor_mode"],
         "motor_policy_schema": manifest["motor_policy_schema"],
         "temporal_schema": manifest.get("temporal_schema"),
+        "room_start": start,
     }
 
 
@@ -127,22 +161,21 @@ def summarize(manifest, frames):
     longest_rest_streak = streak = 0
     positions = set()
     path_length = 0.0
-    previous = None
+    previous = policy["room_start"]
     for expected_tick, frame in enumerate(frames):
         if type(frame) is not dict or type(frame.get("tick")) is not int:
             raise MobilityAuditError("invalid frame tick")
         if frame["tick"] != expected_tick:
             raise MobilityAuditError("frame tick discontinuity")
-        kind, blocked, position = _action_fields(frame, policy["motor_policy_schema"])
+        kind, blocked, position, (dx, dy) = _action_fields(
+            frame, policy["motor_policy_schema"])
         # These are *measured* outcomes, not policy intentions: a rest or
         # blocked motor attempt must not move the point-room body, and a
         # reported successful move must actually change its position.
-        if previous is not None:
-            moved = position != previous
-            if (kind == REST_KIND or blocked) and moved:
-                raise MobilityAuditError("rest or blocked action changed measured position")
-            if kind != REST_KIND and not blocked and not moved:
-                raise MobilityAuditError("successful move did not change measured position")
+        expected_position = previous if blocked else (previous[0] + dx, previous[1] + dy)
+        if position != expected_position:
+            raise MobilityAuditError(
+                "committed measured position disagrees with the measured action")
         if kind == REST_KIND:
             rest_actions += 1
             streak += 1
@@ -155,8 +188,7 @@ def summarize(manifest, frames):
             else:
                 successful_moves += 1
         positions.add(position)
-        if previous is not None:
-            path_length += math.hypot(position[0] - previous[0], position[1] - previous[1])
+        path_length += math.hypot(position[0] - previous[0], position[1] - previous[1])
         previous = position
 
     frames_count = len(frames)

@@ -53,9 +53,10 @@ PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
 ```
 
 The report includes frame/action/blocked/successful counts, idle fraction,
-longest rest streak, distinct visited positions, coverage span, path length
-and a versioned gate result (`rest_collapse`, `revisit_concentration`). It
-also accepts `--expected-head` for an independently recorded chain head.
+longest rest streak, distinct visited positions, coverage span, and path
+length measured from the bootstrap `room.start`, plus a versioned gate result
+(`rest_collapse`, `revisit_concentration`). It also accepts `--expected-head`
+for an independently recorded chain head.
 
 Thresholds are conservative heuristics, not a navigation score: a rest streak
 of at least `max(10, frames // 10)` combined with an idle fraction of at least

@@ -109,8 +109,8 @@ journal with the matching runtime for deterministic replay.
 A blocked-move count alone cannot show whether a developmental policy actually
 explored the room. The read-only audit verifies the journal chain and reports
 attempts, successful moves, idle fraction, longest rest streak, distinct
-positions, coverage span and path length, plus versioned rest-collapse and
-revisit-concentration gates:
+positions, coverage span and path length from the bootstrap start, plus
+versioned rest-collapse and revisit-concentration gates:
 
 ```bash
 PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3

@@ -1,6 +1,7 @@
 """Independent QA for the read-only mobility audit over committed motor frames."""
 
 from contextlib import closing
+import copy
 from importlib.resources import files
 import json
 from pathlib import Path
@@ -9,12 +10,14 @@ import tempfile
 import unittest
 
 from mojum.aquarium import Aquarium, AquariumError
+from mojum.developmental import MOVES, REST
 from mojum.motor_mobility import MobilityAuditError, audit_journal, summarize
 from mojum.noosphere import NoosphereError
 
 DATA = files("mojum").joinpath("data")
 SEED = json.loads(DATA.joinpath("genesis_seed.json").read_text(encoding="utf-8"))
 GRAPH = json.loads(DATA.joinpath("first_loop.json").read_text(encoding="utf-8"))
+ACTION_VECTORS = {name: (dx, dy) for name, dx, dy in (*MOVES, REST)}
 
 
 def frame(tick, kind, blocked, position, *, world_blocked=None):
@@ -23,13 +26,18 @@ def frame(tick, kind, blocked, position, *, world_blocked=None):
         "schema": "mojum.aquarium.frame/1", "tick": tick, "time_ns": tick * 10,
         "genome_revision": 0, "phenotype": {}, "graph_execution_sha256": "0" * 64,
         "interoception": {}, "brain": {}, "learning_observer": None,
-        "world": {"blocked": blocked if world_blocked is None else world_blocked,
+        "world": {"tick": tick + 1,
+                  "blocked": blocked if world_blocked is None else world_blocked,
                   "position": list(position)},
-        "movement_request": {"dx": 0.0, "dy": 0.0},
+        "movement_request": {"dx": ACTION_VECTORS[kind][0],
+                             "dy": ACTION_VECTORS[kind][1]},
         "physical_model": "NONE_FIXTURE_ONLY",
         "developmental_controller": {
             "schema": "mojum.developmental.motor-play/1",
-            "intent": {"kind": kind}, "outcome": {"observed_blocked": blocked},
+            "intent": {"schema": "mojum.developmental.motor-play/1",
+                        "kind": kind, "dx": ACTION_VECTORS[kind][0],
+                        "dy": ACTION_VECTORS[kind][1]},
+            "outcome": {"observed_blocked": blocked},
             "action_source": "internal_committed_prior_outcomes_only",
             "real_actuation": False,
         },
@@ -41,6 +49,7 @@ def manifest(schema="mojum.developmental.motor-play/1"):
         "schema": "mojum.aquarium.bootstrap/1", "agent_id": SEED["genome_id"],
         "motor_mode": "developmental_fixture", "motor_policy_schema": schema,
         "temporal_schema": "mojum.temporal.motor-play-range/1",
+        "room": {"start": [0.0, 0.0]},
     }
 
 
@@ -61,14 +70,14 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(report["successful_moves"], 28)
         self.assertEqual(report["distinct_positions"], 28)
         self.assertEqual(report["longest_rest_streak"], 0)
-        self.assertEqual(report["path_length_m"], 27 * 0.125)
+        self.assertEqual(report["path_length_m"], 28 * 0.125)
         self.assertEqual(report["coverage_span_m"], [27 * 0.125, 0.0])
         self.assertEqual(report["gates"], {"rest_collapse": False,
                                            "revisit_concentration": False})
         self.assertEqual(report["verdict"], "MOBILITY_OBSERVED")
 
     def test_permanent_rest_is_flagged_even_with_zero_collisions(self):
-        frames = [frame(tick, "rest", False, (1.0, 2.0)) for tick in range(40)]
+        frames = [frame(tick, "rest", False, (0.0, 0.0)) for tick in range(40)]
         report = summarize(manifest(), frames)
         self.assertEqual(report["blocked_attempts"], 0)
         self.assertEqual(report["successful_moves"], 0)
@@ -78,8 +87,9 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "REST_COLLAPSE_SUSPECTED")
 
     def test_single_rest_before_the_streak_limit_is_not_collapse(self):
-        frames = [frame(tick, "east", False, (tick * 0.125, 0.0)) for tick in range(20)]
-        frames.append(frame(20, "rest", False, (19 * 0.125, 0.0)))
+        frames = [frame(tick, "east", False, ((tick + 1) * 0.125, 0.0))
+                  for tick in range(20)]
+        frames.append(frame(20, "rest", False, (20 * 0.125, 0.0)))
         report = summarize(manifest(), frames)
         self.assertEqual(report["idle_fraction"], 1 / 21)
         self.assertFalse(report["gates"]["rest_collapse"])
@@ -88,7 +98,7 @@ class SummarizeTests(unittest.TestCase):
     def test_back_and_forth_oscillation_is_reported_as_revisit_concentration(self):
         frames = []
         for tick in range(40):
-            position = (0.0, 0.0) if tick % 2 == 0 else (0.125, 0.0)
+            position = (0.125, 0.0) if tick % 2 == 0 else (0.0, 0.0)
             frames.append(frame(tick, "east" if tick % 2 == 0 else "west",
                                 False, position))
         report = summarize(manifest(), frames)
@@ -99,11 +109,11 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "REVISIT_CONCENTRATION_SUSPECTED")
 
     def test_measured_motion_must_agree_with_reported_outcome(self):
-        start = frame(0, "rest", False, (1.0, 1.0))
+        start = frame(0, "rest", False, (0.0, 0.0))
         inconsistent = (
-            frame(1, "rest", False, (1.125, 1.0)),
-            frame(1, "east", True, (1.125, 1.0)),
-            frame(1, "east", False, (1.0, 1.0)),
+            frame(1, "rest", False, (0.125, 0.0)),
+            frame(1, "east", True, (0.125, 0.0)),
+            frame(1, "east", False, (0.0, 0.0)),
         )
         for bad in inconsistent:
             with self.subTest(kind=bad["developmental_controller"]["intent"]["kind"],
@@ -112,8 +122,8 @@ class SummarizeTests(unittest.TestCase):
                 with self.assertRaisesRegex(MobilityAuditError, "measured position"):
                     summarize(manifest(), [start, bad])
 
-        consistent = [start, frame(1, "east", True, (1.0, 1.0)),
-                      frame(2, "east", False, (1.125, 1.0))]
+        consistent = [start, frame(1, "east", True, (0.0, 0.0)),
+                      frame(2, "east", False, (0.125, 0.0))]
         report = summarize(manifest(), consistent)
         self.assertEqual(report["blocked_attempts"], 1)
         self.assertEqual(report["successful_moves"], 1)
@@ -123,9 +133,9 @@ class SummarizeTests(unittest.TestCase):
         # A zero-collision history is not proof of movement, and repeated
         # blocked attempts must not make a stationary policy look mobile.
         for actions in (
-            [frame(tick, "east", True, (1.0, 2.0)) for tick in range(30)],
-            [frame(tick, "rest", False, (1.0, 2.0)) for tick in range(4)],
-            [frame(0, "east", False, (1.0, 2.0))],
+            [frame(tick, "east", True, (0.0, 0.0)) for tick in range(30)],
+            [frame(tick, "rest", False, (0.0, 0.0)) for tick in range(4)],
+            [frame(0, "east", True, (0.0, 0.0))],
         ):
             with self.subTest(frames=len(actions), kind=actions[0]["developmental_controller"]["intent"]["kind"]):
                 report = summarize(manifest(), actions)
@@ -149,7 +159,7 @@ class SummarizeTests(unittest.TestCase):
                 summarize(bad, [])
 
     def test_malformed_or_inconsistent_frames_fail_closed(self):
-        good = frame(0, "east", False, (0.0, 0.0))
+        good = frame(0, "east", False, (0.125, 0.0))
         mutations = [
             {**good, "tick": 1},                       # discontinuity
             {**good, "tick": True},                    # bool tick
@@ -176,6 +186,39 @@ class SummarizeTests(unittest.TestCase):
         with self.assertRaises(MobilityAuditError):
             summarize(manifest(), [frame(0, "rest", True, (0.0, 0.0))])
 
+    def test_canonical_action_vector_start_and_world_tick_are_required(self):
+        good = frame(0, "east", False, (0.125, 0.0))
+        mutations = []
+
+        bad_request = copy.deepcopy(good)
+        bad_request["movement_request"]["dx"] = 0.0
+        mutations.append(bad_request)
+
+        bad_intent = copy.deepcopy(good)
+        bad_intent["developmental_controller"]["intent"]["dx"] = -0.125
+        mutations.append(bad_intent)
+
+        bad_direction = copy.deepcopy(good)
+        bad_direction["world"]["position"] = [-0.125, 0.0]
+        mutations.append(bad_direction)
+
+        bad_teleport = copy.deepcopy(good)
+        bad_teleport["world"]["position"] = [5000.0, 0.0]
+        mutations.append(bad_teleport)
+
+        bad_first_position = copy.deepcopy(good)
+        bad_first_position["world"]["position"] = [0.0, 0.0]
+        mutations.append(bad_first_position)
+
+        bad_world_tick = copy.deepcopy(good)
+        bad_world_tick["world"]["tick"] = 0
+        mutations.append(bad_world_tick)
+
+        for bad in mutations:
+            with self.subTest(bad=bad):
+                with self.assertRaises(MobilityAuditError):
+                    summarize(manifest(), [bad])
+
 
 class JournalAuditTests(unittest.TestCase):
     def setUp(self):
@@ -196,6 +239,7 @@ class JournalAuditTests(unittest.TestCase):
             "motor_mode": report["motor_mode"],
             "motor_policy_schema": report["motor_policy_schema"],
             "temporal_schema": report["temporal_schema"],
+            "room": {"start": [1.0, 2.0]},
         }
         expected = summarize(stored_manifest, payloads)
         for key in ("frames", "rest_actions", "move_actions", "blocked_attempts",
