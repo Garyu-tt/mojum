@@ -44,6 +44,11 @@ from .graph import validate as validate_graph
 from .noosphere import (
     EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event,
 )
+from .segmented_noosphere import (
+    MAX_JOURNAL_EVENTS as SEGMENTED_JOURNAL_LIMIT,
+    MAX_SEGMENT_SIZE, MIN_SEGMENT_SIZE, SegmentedNoosphere,
+    STORE_SCHEMA as SEGMENTED_STORE_SCHEMA,
+)
 from .sensory_bridge import ToyContactBridge, SCHEMA as TOY_CONTACT_SCHEMA, OCCLUSION_SCHEMA
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_associations_v2 import ContactAssociationsV2, SCHEMA as MODEL_V2_SCHEMA
@@ -150,6 +155,7 @@ class Aquarium:
         external_expected_head=None, neural_mode="shadow", motor_mode="scripted", pulse_sum="auto",
         sensory_mode="none", sensory_scene=None, temporal_mode="none", read_only=False,
         brain_mode="placeholder",
+        journal_backend="legacy", journal_segment_size=4096,
     ):
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise AquariumError("invalid virtual dt_ns")
@@ -171,6 +177,16 @@ class Aquarium:
         self._archive_v2a = motor_mode == V2A_ARCHIVE_MODE
         self._epoch_v4 = motor_mode == V4_MODE
         self._read_only = self._archive_v2a or read_only
+        if type(journal_backend) is not str or journal_backend not in ("legacy", "segmented"):
+            raise AquariumError("journal_backend must be legacy or segmented")
+        if (type(journal_segment_size) is not int
+                or not MIN_SEGMENT_SIZE <= journal_segment_size <= MAX_SEGMENT_SIZE):
+            raise AquariumError(
+                f"journal_segment_size must be integer in {MIN_SEGMENT_SIZE}..{MAX_SEGMENT_SIZE}")
+        self.journal_backend = journal_backend
+        segmented = journal_backend == "segmented"
+        if segmented and not self._epoch_v4:
+            raise AquariumError(f"segmented journal requires {V4_MODE} motor mode")
         self._local_cell = motor_mode in (
             V2A_ARCHIVE_MODE, V2B_MODE, V3_MODE, V3_ESCAPE_MODE, V4_MODE,
         )
@@ -293,6 +309,12 @@ class Aquarium:
                 "temporal_schema": RANGE_SCHEMA,
                 "motor_guidance_schema": GUIDANCE_SCHEMA,
             })
+        if segmented:
+            self.manifest.update({
+                "journal_backend": "segmented",
+                "journal_schema": SEGMENTED_STORE_SCHEMA,
+                "journal_segment_size": journal_segment_size,
+            })
         # An independently supplied anchor is only meaningful for history that
         # already exists. Validate it before any writable SQLite open so a
         # mistyped anchor cannot create a fresh PRIVATE journal as a side
@@ -305,7 +327,18 @@ class Aquarium:
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
         self._committed_count = 0
-        first = _read_first_event(db_path, agent_id)
+        if segmented:
+            path = Path(db_path)
+            first = None
+            if path.exists() or path.is_symlink():
+                with SegmentedNoosphere(path, agent_id, segment_size=journal_segment_size,
+                                        read_only=True) as probe:
+                    first = probe.first_event()
+                    if (first is not None and external_expected_head is not None
+                            and probe.head() != external_expected_head):
+                        raise NoosphereError("segmented journal does not match expected head")
+        else:
+            first = _read_first_event(db_path, agent_id)
         if first is not None:
             self._check_bootstrap(first)
         elif external_expected_head is not None:
@@ -313,7 +346,11 @@ class Aquarium:
                 "expected head requires an existing journal; refusing to create a new one")
         elif self._read_only or legacy_v2b:
             raise AquariumError("this motor selector requires an existing journal")
-        self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only)
+        if segmented:
+            self.store = SegmentedNoosphere(
+                db_path, agent_id, segment_size=journal_segment_size, read_only=self._read_only)
+        else:
+            self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only)
         try:
             if self.store.count() == 0:
                 if self._read_only or legacy_v2b:
@@ -405,6 +442,8 @@ class Aquarium:
     @property
     def journal_event_budget(self):
         """Event ceiling for this journal and its pinned motor wire."""
+        if self.journal_backend == "segmented":
+            return SEGMENTED_JOURNAL_LIMIT
         if self._epoch_v4:
             return MAX_REPLAY_EVENTS
         if self.motor is not None:
@@ -720,10 +759,13 @@ class Aquarium:
             raise AquariumError("aquarium seed, room, graph, clock or mode mismatch")
 
     def _replay(self, external_expected_head, *, detect_sum):
-        verified = self.store.verify_chain(
-            external_expected_head=external_expected_head,
-            strict_wire=(self._local_cell or self.brain_mode == "developmental_controller"),
-        )
+        if self.journal_backend == "segmented":
+            verified = self.store.verify_chain(external_expected_head=external_expected_head)
+        else:
+            verified = self.store.verify_chain(
+                external_expected_head=external_expected_head,
+                strict_wire=(self._local_cell or self.brain_mode == "developmental_controller"),
+            )
         count = verified["count"]
         budget = self.journal_event_budget
         if count > budget:
@@ -924,6 +966,10 @@ def main():
                         default="placeholder", help="opt-in synthetic controller, not a neural brain")
     parser.add_argument("--motor-mode", choices=MOTOR_MODES,
                         default="scripted")
+    parser.add_argument("--journal-backend", choices=("legacy", "segmented"),
+                        default="legacy", help="segmented requires local_cell_v4")
+    parser.add_argument("--journal-segment-size", type=int, default=4096,
+                        help="events per logical segment in a segmented journal")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"), default="none",
                         help="opt-in synthetic contact learning with developmental motor play")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none",
@@ -987,6 +1033,8 @@ def main():
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
             brain_mode=args.brain_mode,
             external_expected_head=args.expected_head,
+            journal_backend=args.journal_backend,
+            journal_segment_size=args.journal_segment_size,
         )
     except (AquariumError, NoosphereError) as exc:
         # A wrong independent anchor or a foreign journal is a command error,

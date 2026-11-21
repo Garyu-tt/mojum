@@ -23,6 +23,7 @@ from .aquarium import MAX_REPLAY_EVENTS as AQUARIUM_REPLAY_EVENTS
 from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
+from .noosphere import NoosphereError
 
 
 SCHEMA = "mojum.portable-host.run/2"
@@ -117,7 +118,10 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
         configured_budget = getattr(
             aquarium, "journal_event_budget", AQUARIUM_REPLAY_EVENTS
         )
-        event_budget = min(AQUARIUM_REPLAY_EVENTS, configured_budget)
+        if getattr(aquarium, "journal_backend", "legacy") == "segmented":
+            event_budget = configured_budget
+        else:
+            event_budget = min(AQUARIUM_REPLAY_EVENTS, configured_budget)
     else:
         events_needed = ticks
         event_budget = MAX_REPLAY_EVENTS
@@ -183,6 +187,10 @@ def main(argv=None):
     parser.add_argument("--motor-mode", choices=("developmental_fixture", V4_MODE),
                         default="developmental_fixture",
                         help="opt-in synthetic motor policy")
+    parser.add_argument("--journal-backend", choices=("legacy", "segmented"),
+                        default="legacy", help="segmented requires local_cell_v4")
+    parser.add_argument("--journal-segment-size", type=int, default=4096,
+                        help="events per logical segment in a segmented journal")
     parser.add_argument("--sensory-mode", choices=("toy_probe", "toy_probe_v2", "none"),
                         default="toy_probe",
                         help="synthetic sensory policy; v4 accepts none or toy_probe_v2")
@@ -225,6 +233,8 @@ def main(argv=None):
                 sensory_mode=args.sensory_mode,
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
+                journal_backend=args.journal_backend,
+                journal_segment_size=args.journal_segment_size,
             ) as aquarium:
                 begin_tick = aquarium.tick
                 committed = run_paced(
@@ -257,7 +267,7 @@ def main(argv=None):
                         "motor_mode": aquarium.motor_mode,
                         "sensory_mode": aquarium.sensory_mode,
                     })
-        except (AquariumError, PortableHostError) as exc:
+        except (AquariumError, NoosphereError, PortableHostError) as exc:
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
     # measurements or learner state.

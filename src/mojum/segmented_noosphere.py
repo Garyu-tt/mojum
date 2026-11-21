@@ -51,56 +51,36 @@ class SegmentedNoosphere:
     segment, so no half-created segment is ever visible.
     """
 
-    def __init__(self, db_path, agent_id, *, segment_size=4096):
+    def __init__(self, db_path, agent_id, *, segment_size=4096, read_only=False):
         self.agent_id = _text(agent_id, "agent_id")
         if (type(segment_size) is not int
                 or not MIN_SEGMENT_SIZE <= segment_size <= MAX_SEGMENT_SIZE):
             raise NoosphereError("segment_size must be integer in 64..8192")
         self.segment_size = segment_size
+        if type(read_only) is not bool:
+            raise NoosphereError("read_only must be boolean")
+        self.read_only = read_only
         path = Path(db_path)
-        if (path.is_symlink() or path.is_dir() or not path.name
+        preexisting = path.exists()
+        if (path.is_symlink() or (preexisting and not path.is_file()) or not path.name
                 or str(db_path) == ":memory:" or not path.parent.is_dir()):
             raise NoosphereError("segmented database needs an ordinary local file")
-        preexisting = path.exists()
-        if preexisting:
+        if read_only and not preexisting:
+            raise NoosphereError("read-only segmented journal must already exist")
+        file_uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode="
+        if preexisting and not read_only:
             # An old LocalNoosphere database must fail *before* we open it
             # writable or change its SQLite journal-mode header. Do not
             # silently prepare migrations or rewrite PRIVATE histories.
-            uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=ro"
             try:
-                # sqlite3.Connection.__exit__ commits/rolls back a
-                # transaction, but does NOT close the connection. Keep the
-                # readonly owner/schema preflight strictly short-lived on
-                # both successful and exception paths (Python 3.13 warns).
-                with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as probe:
-                    actual = dict(probe.execute("SELECT k,v FROM metadata"))
-                    core_tables = {
-                        name for (name,) in probe.execute(
-                            "SELECT name FROM sqlite_master WHERE type = 'table' "
-                            "AND name IN ('segments', 'segmented_events')"
-                        )
-                    }
-            except (sqlite3.Error, ValueError, TypeError) as exc:
+                with closing(sqlite3.connect(file_uri + "ro", uri=True, timeout=5.0)) as probe:
+                    probe.execute("PRAGMA trusted_schema=OFF")
+                    probe.execute("PRAGMA query_only=ON")
+                    self._check_existing(probe, path)
+            except sqlite3.Error as exc:
                 raise NoosphereError(
                     "existing journal has no readable segmented manifest"
                 ) from exc
-            if actual != {
-                "schema": STORE_SCHEMA, "owner": self.agent_id,
-                "segment_size": str(segment_size),
-            }:
-                raise NoosphereError(
-                    "wrong owner/schema/segment size; old journal unchanged"
-                )
-            # Do not recreate missing historical tables on a corrupt store:
-            # CREATE TABLE IF NOT EXISTS is appropriate only for a *new* DB.
-            if core_tables != {"segments", "segmented_events"}:
-                raise NoosphereError(
-                    "existing segmented journal is missing core tables"
-                )
-            if os.name == "posix" and path.stat().st_mode & 0o077:
-                raise NoosphereError(
-                    "existing segmented PRIVATE database must be owner-only"
-                )
         # Create PRIVATE files with owner-only mode *before* SQLite opens
         # them. sqlite3.connect normally creates mode 0666 & umask; applying
         # chmod after WAL setup permits a temporary read-exposure window.
@@ -120,24 +100,51 @@ class SegmentedNoosphere:
         # SQLite open. Never silently resurrect a historical PRIVATE journal
         # or create a replacement with the process default file permissions.
         # Windows has no POSIX O_EXCL/0600 precreate in this implementation.
-        mode = "rw" if preexisting or os.name == "posix" else "rwc"
-        db_uri = "file:" + quote(str(path.absolute()), safe="/:") + "?mode=" + mode
+        if read_only:
+            mode = "ro"
+        else:
+            mode = "rw" if preexisting or os.name == "posix" else "rwc"
         self._db = sqlite3.connect(
-            db_uri, uri=True, timeout=5.0, isolation_level=None
+            file_uri + mode, uri=True, timeout=5.0, isolation_level=None
         )
-        self._db.row_factory = sqlite3.Row
         try:
+            self._db.row_factory = sqlite3.Row
             self._db.execute("PRAGMA busy_timeout=5000")
             self._db.execute("PRAGMA trusted_schema=OFF")
-            self._db.execute("PRAGMA synchronous=FULL")
-            self._db.execute("PRAGMA journal_mode=WAL")
-            self._db.execute("PRAGMA foreign_keys=ON")
-            # Never change permissions on an existing legacy path while
-            # diagnosing an incompatible schema. No automatic migration.
-            self._setup()
+            if read_only:
+                self._db.execute("PRAGMA query_only=ON")
+                self._check_existing(self._db, path)
+            else:
+                self._db.execute("PRAGMA synchronous=FULL")
+                self._db.execute("PRAGMA journal_mode=WAL")
+                self._db.execute("PRAGMA foreign_keys=ON")
+                self._setup()
         except BaseException:
             self._db.close()
             raise
+
+    def _check_existing(self, db, path):
+        try:
+            metadata = dict(db.execute("SELECT k,v FROM metadata"))
+            core_tables = {
+                row[0] for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name IN ('segments', 'segmented_events')"
+                )
+            }
+        except (sqlite3.Error, ValueError, TypeError) as exc:
+            raise NoosphereError(
+                "existing journal has no readable segmented manifest"
+            ) from exc
+        if metadata != {
+            "schema": STORE_SCHEMA, "owner": self.agent_id,
+            "segment_size": str(self.segment_size),
+        }:
+            raise NoosphereError("wrong owner/schema/segment size; old journal unchanged")
+        if core_tables != {"segments", "segmented_events"}:
+            raise NoosphereError("existing segmented journal is missing core tables")
+        if os.name == "posix" and path.stat().st_mode & 0o077:
+            raise NoosphereError("existing segmented PRIVATE database must be owner-only")
 
     def _setup(self):
         self._db.execute("BEGIN IMMEDIATE")
@@ -232,6 +239,8 @@ class SegmentedNoosphere:
         Multiple writers are serialized by BEGIN IMMEDIATE, and the expected
         *global* head CAS rejects stale writers even when they race rollover.
         """
+        if self.read_only:
+            raise NoosphereError("segmented journal is read-only")
         if (type(events) not in (list, tuple)
                 or not 1 <= len(events) <= MAX_BATCH):
             raise NoosphereError("append_many requires 1..256 events")
@@ -389,6 +398,23 @@ class SegmentedNoosphere:
             }
         if self.count() != proven["count"] or self.head() != proven["head"]:
             raise NoosphereError("journal advanced during receipt generation")
+
+    def first_event(self):
+        """Return the bootstrap candidate, or None for an empty journal."""
+        try:
+            row = self._db.execute(
+                "SELECT seq,agent_id,wire_json FROM segmented_events ORDER BY seq LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            event = json.loads(row["wire_json"])
+        except (sqlite3.Error, TypeError, ValueError, RecursionError) as exc:
+            raise NoosphereError("invalid segmented bootstrap event") from exc
+        if (type(row["seq"]) is not int or row["seq"] != 1
+                or row["agent_id"] != self.agent_id
+                or type(event) is not dict or event.get("agent_id") != self.agent_id):
+            raise NoosphereError("invalid segmented bootstrap event")
+        return event
 
     def event_at(self, seq):
         _integer(seq, "seq", 1)

@@ -129,10 +129,18 @@ For the versioned sensory profile, use `--sensory-mode toy_probe_v2` with the
 same `--temporal-mode none` selector. Its bootstrap pins the v4 and sensory v2
 contracts, and the wire inspector reports `local_cell_v4+toy_probe_v2`.
 
-The v4 path is still bounded by the 100,000-event local journal budget and the
-current checksum-only replay contract. It is not a neural brain, an
+The default v4 journal has a 100,000-event limit and uses checksum-only
+replay. It is not a neural brain, an
 authenticated segment archive, a physical device runtime, or proof of
 conscious experience. See [the epoch contract](docs/LOCAL_CELL_V4_EPOCH_R01.md).
+
+To use logical segments in a **new** SQLite file, add `--journal-backend
+segmented --journal-segment-size 4096` to either v4 command. Repeat the same
+backend, segment size and policy selectors on restart. For anchored replay,
+pass a separately recorded head with `--expected-head`. The segmented source
+allows 262,144 events, while v4 still has a 99,990-tick limit. The segments
+reside in one SQLite file. Trace export, archive inspection and cold-copy
+tools continue to require the legacy backend.
 
 ### Bounded foreground host
 
