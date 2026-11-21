@@ -116,6 +116,7 @@ class CellExplorerV5:
                 or not 0 <= state["forced_probes"] <= state["updates"]):
             raise CellV5Error("invalid v5 retention envelope")
         observed_live = 0
+        observations_by_last_tick = []
         retained_rests = 0
         repeated_blocks = 0
         for key, actions in state["records"].items():
@@ -154,6 +155,7 @@ class CellExplorerV5:
             if cell_observations > last_seen + 1:
                 raise CellV5Error("more v5 cell observations than elapsed ticks")
             observed_live += cell_observations
+            observations_by_last_tick.append((last_seen, cell_observations))
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV5Error("v5 lost or double-counted learned observations")
         if state["evictions"] == 0 and state["forgotten_observations"] != 0:
@@ -180,10 +182,8 @@ class CellExplorerV5:
         # claiming more observations than the elapsed history permits.
         # Under LRU, forgotten records predate every still-retained stamp.
         prefix_observations = state["forgotten_observations"]
-        for last_seen, key in sorted(
-                (tick, key) for key, tick in state["last_seen_at"].items()):
-            prefix_observations += sum(
-                counts[0] for counts in state["records"][key].values())
+        for last_seen, observation_count in sorted(observations_by_last_tick):
+            prefix_observations += observation_count
             if prefix_observations > last_seen + 1:
                 raise CellV5Error(
                     "combined v5 cell observations exceed elapsed ticks")
