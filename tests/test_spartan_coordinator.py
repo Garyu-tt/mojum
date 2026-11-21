@@ -47,6 +47,20 @@ class SpartanTests(unittest.TestCase):
         self.assertEqual(enqueue(self.db, items, 101)["added"], 1)
         self.assertEqual(enqueue(self.db, items, 102)["added"], 0)
 
+    def test_boolean_priority_does_not_alias_integer_task_identity(self):
+        # SQLite binds True and 1 to the same integer. They must not pass
+        # enqueue validation as interchangeable immutable task definitions.
+        for value in (True, False):
+            with self.subTest(priority=value):
+                with self.assertRaisesRegex(ValueError, "priority"):
+                    enqueue(self.db, [{"id": "bad", "scope": "room",
+                                       "priority": value}], 101)
+                self.assertIsNone(self.db.execute(
+                    "SELECT 1 FROM tasks WHERE id='bad'"
+                ).fetchone())
+        self.assertEqual(enqueue(self.db, [{"id": "ok", "scope": "room",
+                                            "priority": 1}], 102)["added"], 1)
+
     def test_scope_exclusive_and_parallel_different_scopes(self):
         enqueue(self.db, [{"id": "a", "scope": "room"},
                           {"id": "b", "scope": "room"},
