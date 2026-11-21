@@ -113,9 +113,9 @@ class Explorer:
             raise DevelopmentError("stale or unexpected proprioception tick")
         for suggestions in (avoid, prefer):
             if (type(suggestions) is not tuple
-                    or len(suggestions) != len(set(suggestions))
                     or any(type(a) is not str or a not in ACTIONS
-                           for a in suggestions)):
+                           for a in suggestions)
+                    or len(suggestions) != len(set(suggestions))):
                 raise DevelopmentError("invalid learned motor affordances")
         if "rest" in avoid:
             raise DevelopmentError("cannot veto synthetic safe rest")
