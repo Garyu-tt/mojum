@@ -358,7 +358,9 @@
         const canMove=active && ok && walkState.tick<W.MAX_PREVIEW_STEPS;
         $("walk-toggle").setAttribute("aria-pressed",String(active));
         $("walk-toggle").textContent=active?"■ Завершить тест":"▶ Тест прогулки";
-        $("walk-toggle").disabled=!ok;
+        // Even when the draft is temporarily invalid, the active preview
+        // can always be stopped without waiting for edits to become valid.
+        $("walk-toggle").disabled=!ok && !active;
         $("walk-reset").disabled=!canMove && !(active && ok);
         for(const key of ["up","down","left","right"]) $("walk-"+key).disabled=!canMove;
         const group=$("walk-trail");
