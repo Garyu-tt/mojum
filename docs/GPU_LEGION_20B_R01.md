@@ -28,6 +28,10 @@ With seven fully free P106-100 cards, six can hypothetically be divided into
 two nonoverlapping three-GPU groups, with one GPU left unassigned. That is
 **two independent 20B model processes**, not 300 independent 20B models.
 The coordinator may queue 300 virtual workers across those endpoints.
+As observed through JediControl on VM200, ALT is still active and consuming
+VRAM; two full-size replicas cannot currently be inferred from the actual
+free-memory readings. The synthetic two-replica scenario applies only after
+resources have been safely released and remeasured.
 This is a capacity estimate, **not proof** of an executable model on Pascal.
 Older NVIDIA Pascal (compute capability 6.1) requires a compatible CUDA
 build, typically CUDA 12 and a llama.cpp build targeting \`sm_61\`.
@@ -71,7 +75,14 @@ python3 tools/gpu_legion_plan.py --model /models/gpt-oss-20b-mxfp4.gguf \
 \`\`\`
 
 The planner probes only local \`nvidia-smi\` and emits a machine-readable plan.
-It **never executes** the emitted commands or contacts an LLM endpoint. If
+It **never executes** the emitted commands or contacts an LLM endpoint.
+The default new endpoint is **127.0.0.1:18180** (next: 18181), deliberately
+avoiding the existing ALT factory service on port 18080. The output field
+\`hardware_verified\` is **always false**: even live \`nvidia-smi\` is an
+observation, not authenticated device attestation or proof of model loading.
+Only a real direct probe sets \`observed_local_inventory=true\` in CLI output;
+an offline \`--inventory\` file cannot do so even if its JSON says
+\`source: nvidia-smi\`. No generated plan authorizes starting a service. If
 \`nvidia-smi\` is absent, invalid, or the required number of replicas cannot
 be placed within the budget, it exits 2. If a host has fewer than two viable
 replicas, omit \`--require-replicas 2\` to see its actual proposal.
@@ -90,6 +101,12 @@ Each proposed replica includes:
 - nonoverlapping GPU indices, unique loopback inference port, and usable VRAM
 - \`CUDA_VISIBLE_DEVICES\` mapping and an argument-vector for \`llama-server\`
 - bounded \`--ctx-size 2048\`, \`--parallel 1\` and layer splitting across GPUs
+
+The model source is revision-pinned above. Hugging Face's current default
+branch may expose a different case-sensitive filename and byte count than
+that immutable revision. Do not substitute a newer main-branch download while
+reusing the pinned hash; verify the resolved revision, filename, size and
+SHA-256 as one unit.
 
 The plan uses the **current index order** reported by nvidia-smi. Index order
 can change across reboots or GPU resets. An actual launcher must re-probe and
