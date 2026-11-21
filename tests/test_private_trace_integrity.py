@@ -201,6 +201,9 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("SHA-256", values["brokenProof"]["status"])
         self.assertFalse(values["missingProof"]["enabled"])
         self.assertIn("SHA-256", values["missingProof"]["status"])
+        for name in ("missingStatus", "missingRange"):
+            self.assertFalse(values[name]["enabled"], name)
+            self.assertIn("SHA-256", values[name]["status"], name)
         for name in ("blankLine", "whitespaceLine", "trailingBlank"):
             self.assertFalse(values[name]["enabled"], name)
             self.assertIn("Пустая JSONL-строка", values[name]["status"], name)
