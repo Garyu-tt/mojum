@@ -3,9 +3,15 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+# The 3.13 leak audit discovers tests with tests/ as sys.path[0].
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from tools import gpu_legion_plan as gpu
 
