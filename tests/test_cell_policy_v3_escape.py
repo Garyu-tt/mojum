@@ -204,6 +204,70 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
 
+    def test_snapshot_rejects_impossible_streak_counters(self):
+        def snap(**changes):
+            s = CellExplorerV3Escape().snapshot()
+            s.update(changes)
+            return s
+
+        cases = [
+            ("streak longer than history (no rest observed)", snap(
+                last_tick=0, updates=1,
+                records={"0:0": {"x+": [1, 0]}},
+                last_seen_at={"0:0": 0}, consecutive_rests=3,
+            ), "streak longer than observed history"),
+            ("rest streak longer than updates", snap(
+                last_tick=0, updates=1,
+                records={"0:0": {"rest": [1, 0]}},
+                last_seen_at={"0:0": 0}, consecutive_rests=3,
+            ), "streak longer than observed history"),
+            ("blocked-probe streak without blocked outcomes", snap(
+                last_tick=0, updates=1,
+                records={"0:0": {"x+": [1, 0]}},
+                last_seen_at={"0:0": 0}, consecutive_blocked_probes=4,
+            ), "streak longer than observed history"),
+            ("rest and blocked-probe streaks coexist", snap(
+                last_tick=4, updates=5,
+                records={"0:0": {"x+": [3, 3], "rest": [2, 0]}},
+                last_seen_at={"0:0": 4},
+                consecutive_rests=1, consecutive_blocked_probes=1,
+            ), "streaks coexist"),
+            ("rest streak without rest in last cell", snap(
+                last_tick=1, updates=2,
+                records={"0:0": {"x+": [1, 0]}, "1:0": {"y+": [1, 0]}},
+                last_seen_at={"0:0": 0, "1:0": 1}, consecutive_rests=2,
+            ), "rest streak without rest in last cell"),
+            ("blocked-probe streak without blocked move in last cell", snap(
+                last_tick=2, updates=3,
+                records={"0:0": {"x+": [1, 1]}, "1:0": {"y+": [2, 0]}},
+                last_seen_at={"0:0": 0, "1:0": 2}, consecutive_blocked_probes=1,
+            ), "blocked-probe streak without blocked move"),
+        ]
+        for name, bad, message in cases:
+            with self.subTest(name):
+                with self.assertRaisesRegex(CellV3EscapeError, message):
+                    CellExplorerV3Escape.from_snapshot(bad)
+
+    def test_every_intermediate_real_snapshot_restores(self):
+        room, start = sealed_cell()
+        state = initial_state(room, start[0], start[1])
+        policy = CellExplorerV3Escape()
+        for tick in range(60):
+            sense = Proprioception(
+                tick, state.revision, state.x, state.y, tick % 2 == 0,
+            )
+            intent = policy.decide(sense)
+            state, result = advance(
+                room, state, tick=tick + 1, dx=intent["dx"], dy=intent["dy"],
+                expected_revision=state.revision,
+            )
+            policy.observe(sense, intent, result["blocked"])
+            snapshot = policy.snapshot()
+            self.assertEqual(
+                CellExplorerV3Escape.from_snapshot(snapshot).snapshot(),
+                snapshot,
+            )
+
     def test_forged_or_stale_intent_is_rejected(self):
         policy = CellExplorerV3Escape()
         sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)

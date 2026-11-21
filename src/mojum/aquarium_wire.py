@@ -14,9 +14,15 @@ from .aquarium import (
     MAX_REPLAY_EVENTS,
     SCHEMA as FRAME_SCHEMA,
 )
+from .cell_policy_v3_escape import (
+    MAX_CONSECUTIVE_RESTS as V3E_MAX_CONSECUTIVE_RESTS,
+    REPROBE_BLOCKED_BEFORE_REST as V3E_REPROBE_BLOCKED_BEFORE_REST,
+    SCHEMA as V3_ESCAPE_SCHEMA,
+)
 from .cell_policy_v4 import SCHEMA as V4_SCHEMA
 from .developmental import SCHEMA as MOTOR_PLAY
 from .epoch_sense_v2 import EPOCH_TICKS, SCHEMA as EPOCH_SENSE_SCHEMA
+from .local_cell_sense import ACTIONS as CELL_ACTIONS, MAX_EPISODE_TICKS
 from .noosphere import NoosphereError, STORE_SCHEMA, _open_readonly, _text, _verify_chain
 from .policy_identity import (
     MOTOR_SELECTOR_KEYS, POLICIES, SCHEMA as IDENTITY_SCHEMA,
@@ -96,6 +102,63 @@ def _object_field(event, name):
     return value
 
 
+def _check_escape_frame(frame, motor):
+    """Reject an escape frame the runtime could never have committed.
+
+    A valid hash chain proves integrity, not that the frame obeys the
+    pinned ``Local Cell/3-escape`` contract.  These are the counters the
+    policy must keep bounded; accepting an impossible frame here would
+    certify a journal the runtime could never have written.
+    """
+    intent = _object_field(motor, "intent")
+    learning = _object_field(motor, "learning")
+    tick = frame["tick"]  # Verified as exact int by inspect_event.
+    action = learning.get("action")
+    measured = learning.get("measured_blocked")
+    observed = learning.get("observed_outcomes")
+    blocked = learning.get("blocked_outcomes")
+    probe = learning.get("escape_probe")
+    rests = learning.get("consecutive_rests")
+    probes = learning.get("consecutive_blocked_probes")
+    updates = learning.get("total_updates")
+    evictions = learning.get("total_evictions")
+    forgotten = learning.get("total_forgotten_observations")
+    if (type(action) is not str or action not in CELL_ACTIONS
+            or intent.get("action") != action
+            or type(intent.get("tick")) is not int or intent["tick"] != tick
+            or type(measured) is not bool
+            or (action == "rest" and measured)
+            or type(observed) is not int
+            or not 1 <= observed <= MAX_EPISODE_TICKS
+            or type(blocked) is not int or not 0 <= blocked <= observed
+            # Rest is never a collision measurement in this profile.
+            or (action == "rest" and blocked)
+            # A re-probe can only be flagged when the action already has
+            # measured blocked evidence.
+            or type(probe) is not bool
+            or (probe and (action == "rest" or blocked < 1))
+            or type(rests) is not int
+            or not 0 <= rests <= V3E_MAX_CONSECUTIVE_RESTS
+            or type(probes) is not int
+            or not 0 <= probes <= V3E_REPROBE_BLOCKED_BEFORE_REST
+            or type(updates) is not int or updates != tick + 1
+            or type(forgotten) is not int
+            or not 0 <= forgotten <= updates
+            or type(evictions) is not int
+            or not 0 <= evictions <= forgotten):
+        raise NoosphereError("frame disagrees with its pinned escape schema")
+    evicted = learning.get("evicted_cell")
+    dropped = learning.get("evicted_observations")
+    if type(dropped) is not int:
+        raise NoosphereError("frame disagrees with its pinned escape schema")
+    if evicted is None:
+        if dropped != 0:
+            raise NoosphereError(
+                "frame disagrees with its pinned escape schema")
+    elif type(evicted) is not str or not evicted or dropped < 1:
+        raise NoosphereError("frame disagrees with its pinned escape schema")
+
+
 def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
     if frame.get("schema") != FRAME_SCHEMA:
         raise NoosphereError("unknown Aquarium frame schema")
@@ -134,6 +197,8 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
                         or wrong_clock(intent, {"tick": tick, **expected_epoch})
                         or wrong_clock(learning, expected_epoch)):
                     raise NoosphereError("frame disagrees with its pinned epoch schema")
+            elif state_schema == V3_ESCAPE_SCHEMA:
+                _check_escape_frame(frame, motor)
     if temporal_schema is not None:
         if _object_field(frame, "range_guidance").get("schema") != _GUIDANCE:
             raise NoosphereError("frame disagrees with its pinned temporal schema")
