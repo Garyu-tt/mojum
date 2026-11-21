@@ -39,8 +39,10 @@ an old attempt after its lease expires, even if the same numbered worker slot
 reclaims the task. This fencing token prevents stale processes from changing a
 new lease; it is **not authentication** and must never replace worker identity
 verification. A worker that exhausted all three attempts must finish `blocked`,
-not requeue. Re-enqueueing an existing task ID is idempotent only if its scope,
-priority and payload match exactly; conflicting batches roll back atomically.
+not requeue. On the next claim, the coordinator also quarantines exhausted
+`queued` rows left by an older ledger instead of granting a fourth lease.
+Re-enqueueing an existing task ID is idempotent only if its scope, priority and
+payload match exactly; conflicting batches roll back atomically.
 
 `tasks.json` is an array such as:
 ```json

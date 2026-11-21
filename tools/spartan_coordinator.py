@@ -106,6 +106,14 @@ def expire(db: sqlite3.Connection, now: int) -> None:
         "updated_at=? WHERE state='running' AND lease_until<=? AND attempts>=?",
         (now, now, MAX_ATTEMPTS),
     )
+    # Reconcile ledgers written by older coordinator versions as well as any
+    # externally imported state.  An exhausted queued row must never receive
+    # a fourth lease merely because it was not left in ``running`` state.
+    db.execute(
+        "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
+        "updated_at=? WHERE state='queued' AND attempts>=?",
+        (now, MAX_ATTEMPTS),
+    )
     db.execute(
         "UPDATE tasks SET state='queued', worker_id=NULL, lease_until=NULL, "
         "updated_at=? WHERE state='running' AND lease_until<=?",
@@ -129,12 +137,13 @@ def claim(db: sqlite3.Connection, worker_id: int, now: int, ttl: int = 900) -> d
             row = db.execute("""
                 SELECT t.* FROM tasks AS t
                 WHERE t.state='queued'
+                  AND t.attempts < ?
                   AND NOT EXISTS (
                     SELECT 1 FROM tasks AS active
                     WHERE active.scope=t.scope AND active.state='running'
                   )
                 ORDER BY t.priority DESC, t.updated_at ASC, t.id ASC LIMIT 1
-            """).fetchone()
+            """, (MAX_ATTEMPTS,)).fetchone()
             if row:
                 db.execute(
                     "UPDATE tasks SET state='running', worker_id=?, lease_until=?, "

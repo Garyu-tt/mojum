@@ -14,7 +14,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.spartan_coordinator import (
-    claim, connect, create_schema, enqueue, finish, heartbeat, init, status,
+    MAX_ATTEMPTS, claim, connect, create_schema, enqueue, finish, heartbeat,
+    init, status,
 )
 
 
@@ -157,6 +158,27 @@ class SpartanTests(unittest.TestCase):
         self.assertTrue(finish(self.db, 3, "a", "blocked",
                                132, attempt=3))
         self.assertIsNone(claim(self.db, 4, 133))
+        self.assertEqual(status(self.db)["states"]["blocked"], 1)
+
+    def test_preexisting_exhausted_queue_is_quarantined(self):
+        enqueue(self.db, [
+            {"id": "exhausted", "scope": "room", "priority": 100},
+            {"id": "eligible", "scope": "memory"},
+        ], 101)
+        self.db.execute(
+            "UPDATE tasks SET attempts=? WHERE id='exhausted'",
+            (MAX_ATTEMPTS,),
+        )
+
+        task = claim(self.db, 1, 110)
+
+        self.assertEqual(task["id"], "eligible")
+        exhausted = self.db.execute(
+            "SELECT state, attempts FROM tasks WHERE id='exhausted'"
+        ).fetchone()
+        self.assertEqual(dict(exhausted), {
+            "state": "blocked", "attempts": MAX_ATTEMPTS,
+        })
         self.assertEqual(status(self.db)["states"]["blocked"], 1)
 
     def test_duplicate_ids_rejected(self):
