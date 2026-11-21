@@ -22,7 +22,7 @@ class CanonicalGenomeTests(unittest.TestCase):
 
     def test_reject_invalid_json_and_utf8(self):
         for value in (float("nan"), float("inf"), object(),
-                      {"name": "\\ud800"}):
+                      {"name": chr(0xD800)}):
             with self.subTest(type=type(value).__name__), self.assertRaises(GenesisError):
                 sha256({"value": value})
 
