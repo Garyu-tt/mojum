@@ -95,7 +95,7 @@ test("drag clamps to room and preserves decimal scalar class without modifying p
   const clamped = C.dragObstacle(before, 0, 100, 100);
   assert.equal(C.validate(clamped).obstacles[0].x, 4.375);
   assert.equal(C.validate(clamped).obstacles[0].y, 2);
-  assert.throws(() => C.dragObstacle(before, 0, 1.25, 2.5), /пересекает препятствие/);
+  assert.throws(() => C.dragObstacle(before, 0, 1.25, 1.5), /пересекает препятствие/);
   const startMoved = C.dragStart(before, 4.9, 4.9);
   assert.deepEqual(C.validate(startMoved).start, {x:4.5,y:4});
   assert.throws(() => C.dragStart(before, 2.05, 1.5), /пересекает препятствие/);
