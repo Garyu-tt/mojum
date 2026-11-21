@@ -1,6 +1,8 @@
 """Separately versioned, bounded-retention contact associations (issue #133).
 
-``mojum.sensory-curiosity.association/2`` never converts or reinterprets
+``mojum.sensory-curiosity.association/2-windowed`` is a separate experimental
+wire identity from canonical ``mojum.sensory-curiosity.association/2``.
+It never converts or reinterprets
 ``/1`` snapshots: ``/1`` snapshots are rejected here and ``/2`` snapshots are
 rejected by ``ContactAssociations.from_snapshot``.
 
@@ -19,7 +21,7 @@ from .sensory_play import (
     CuriosityError, ContactAssociations, MAX_CUES, _finite,
 )
 
-MODEL_SCHEMA_V2 = "mojum.sensory-curiosity.association/2"
+MODEL_SCHEMA_V2 = "mojum.sensory-curiosity.association/2-windowed"
 WINDOW = 64
 MAX_UPDATES_V2 = 10**9
 
