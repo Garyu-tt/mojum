@@ -34,9 +34,23 @@ canonical writer or live failover.
   the source archive against the signed statement, before creating
   any recovery journal or copying PRIVATE event payload.
 - Reconstruct **only** the exact signed source history in a new
-  scratch SQLite, check global SHA-chain and absolute event count,
-  checkpoint SQLite WAL, atomically publish a new destination with
-  no overwrite, then verify the newly published SQLite independently.
+  owner-private scratch SQLite and verify global SHA-chain and absolute
+  event count. BEFORE the final file is visible, commit a separate
+  `mojum.noosphere.recovered-quarantine/1` custody row pinned to the
+  actor, exact event count, source head and independently pinned
+  receipt hash. Commit SQLite INSERT-rejection triggers for
+  `segmented_events` and `segments`, checkpoint WAL and only then
+  atomically publish the new SQLite path. The newly published DB
+  is independently verified again.
+- A default `SegmentedNoosphere.append` or `Aquarium.step` against
+  this restored copy **must fail without committing any new event**:
+  `QUARANTINED_READ_ONLY` marks the copy as a historical record,
+  not a writer. No silent promotion.
+- These SQLite triggers are a local **accidental-write guard**,
+  not tamperproof security against the database owner or OS admin,
+  who could DROP them. A separately reviewed owner approval plus
+  writer fencing/authority protocol is still required for safe
+  promotion after real source failure.
 - Never remove, repair, truncate, rename, silently merge or promote
   a pre-existing canonical Noosphere source database.
 
@@ -87,7 +101,10 @@ Tests use only disposable owner-private synthetic fixtures:
   corrupted/missing archived member, 0755 restore destination,
   existing SQLite path, target/credentials in archived tree,
   and repeated attempt to overwrite the restored source all fail
-  closed.
+  closed. Tests also confirm a recovered SQLite and Aquarium
+  **reject further writes**, keep the original checkpoint, and an
+  interruption before final publication does not expose an
+  unfenced database.
 
 CI matrix CPython 3.11–3.13 plus parent HMAC and owner-verified
 cross-filesystem transfer regression suites. No actual user data,
