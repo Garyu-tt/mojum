@@ -165,6 +165,23 @@ class BassyAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(BodyContractError, "genome mismatch"):
             select_bassy_asset(self.body, other)
 
+    def test_aquarium_body_preview_does_not_modify_journal(self):
+        from mojum.aquarium import Aquarium
+
+        graph = json.loads((ROOT / "examples" / "first_loop.json").read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            with Aquarium(Path(tmp) / "preview.sqlite3", SEED, graph,
+                          neural_mode="disabled") as aquarium:
+                before = aquarium.checkpoint()
+                p = aquarium.body_preview(CHROMOSOME, age_years=6)
+                self.assertEqual(before, aquarium.checkpoint())
+                self.assertEqual(p["genome_id"], aquarium.agent_id)
+                self.assertEqual(p["dimensions"]["height_mm"], 1150)
+                aquarium.step(dx=0, dy=0)
+                followup = aquarium.body_preview(CHROMOSOME, age_years=16)
+                self.assertEqual(followup["at_tick"], aquarium.tick)
+                self.assertEqual(followup["genome_id"], p["genome_id"])
+
     def test_glb_header_and_checksum_are_checked(self):
         digest = hashlib.sha256(GLB_HEADER).hexdigest()
         m = manifest(digest)
