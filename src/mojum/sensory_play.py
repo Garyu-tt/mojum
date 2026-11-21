@@ -81,6 +81,12 @@ class ToyScene:
         ids = [t.id for t in toys]
         if len(ids) != len(set(ids)):
             raise CuriosityError("duplicate spectator toy IDs")
+        # Identical public geometry/reflectance with differing hidden softness
+        # cannot be selected independently of input order. Fail closed instead
+        # of allowing ordering or spectator labels to act as a hidden oracle.
+        visible_signatures = [(t.x, t.y, t.radius_m, t.rgb) for t in toys]
+        if len(visible_signatures) != len(set(visible_signatures)):
+            raise CuriosityError("ambiguous observationally identical toys")
         for t in toys:
             if not (t.radius_m < t.x < width - t.radius_m
                     and t.radius_m < t.y < height - t.radius_m):
