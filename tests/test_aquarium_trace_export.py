@@ -175,6 +175,46 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
             export_private_trace(other, self.out, SEED, GRAPH, allow_private_export=True)
         self.assertFalse(self.out.exists())
 
+    def test_frame_limit_validation_boundary_is_inclusive_at_maximum(self):
+        fits = {"neural_mode": "disabled"}
+        with self.aquarium(**fits) as a:
+            a.step()
+        report = self.exported(start_tick=0, frame_limit=5000, **fits)
+        self.assertEqual(report["frames"], 1)
+        self.assertFalse(report["has_more"])
+        for bad in (0, -1, 5001):
+            with self.subTest(frame_limit=bad):
+                dest = self.root / f"invalid-{bad}.jsonl"
+                with self.assertRaisesRegex(
+                        ValueError, r"frame_limit must be an integer in 1\.\.5000"):
+                    export_private_trace(
+                        self.db, dest, SEED, GRAPH, allow_private_export=True,
+                        start_tick=0, frame_limit=bad, **fits,
+                    )
+                self.assertFalse(dest.exists())
+
+    def test_exact_maximum_frame_history_and_first_overflow(self):
+        fits = {"neural_mode": "disabled", "motor_mode": "scripted"}
+        with self.aquarium(**fits) as a:
+            for _ in range(5001):
+                a.step()
+        # Exactly MAX_FRAMES selected frames are a valid bounded slice.
+        report = self.exported(start_tick=0, frame_limit=5000, **fits)
+        self.assertEqual(report["frames"], 5000)
+        self.assertTrue(report["has_more"])
+        self.assertEqual(report["next_tick"], 5000)
+        lines = self.out.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 5001)
+        self.assertEqual(json.loads(lines[-1])["trace_integrity"]["frame_count"], 5000)
+        # Requesting the whole 5001-frame history fails closed, never truncates.
+        full = self.root / "full-history.jsonl"
+        with self.assertRaisesRegex(ValueError, "at most 5000 frames"):
+            export_private_trace(
+                self.db, full, SEED, GRAPH, allow_private_export=True, **fits,
+            )
+        self.assertFalse(full.exists())
+        self.assertEqual(list(self.root.glob(".mojum-private-trace-*")), [])
+
     def test_trace_size_limit_fail_closed_and_no_partial_file(self):
         with self.aquarium() as a:
             a.step()
