@@ -16,6 +16,7 @@ import argparse
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ from pathlib import Path
 REPORT_SCHEMA = "mojum.room-spec-report/1"
 MAX_INPUT_BYTES = 256 * 1024
 MAX_OBSTACLES = 4096
+# Keep exact wire spelling, but bound Decimal parsing and arithmetic on hostile inputs.
+MAX_NUMBER_TOKEN_CHARS = 128
 # Pairwise overlap analysis is bounded so a huge but legal document cannot
 # turn validation into quadratic work on a CPU-first fixture.
 MAX_OVERLAP_ANALYSIS_OBSTACLES = 256
@@ -87,6 +90,9 @@ def _as_number(value, label, errors):
     if _NUMBER.fullmatch(value) is None:
         errors.append("%s has an invalid JSON number token" % (label,))
         return None
+    if len(value) > MAX_NUMBER_TOKEN_CHARS:
+        errors.append("%s exceeds the number-token length limit" % (label,))
+        return None
     try:
         number = Decimal(value)
     except InvalidOperation:
@@ -94,6 +100,17 @@ def _as_number(value, label, errors):
         return None
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
+        return None
+    # Point-room runtime coordinates are Python numeric scalars. Reject JSON
+    # values whose magnitude would become infinity or a nonzero underflow on
+    # conversion, rather than validating an unusable room or overflowing when
+    # computing areas. The original token is still used in the report.
+    try:
+        as_float = float(number)
+    except (OverflowError, ValueError):
+        as_float = math.inf
+    if not math.isfinite(as_float) or (number != 0 and as_float == 0):
+        errors.append("%s is not representable as a finite room coordinate" % (label,))
         return None
     return number
 
@@ -224,7 +241,7 @@ def validate_room_document(document):
         "height": str(document["height"]),
         "obstacle_count": len(obstacles),
         "obstacles": [[str(v) for v in rect] for rect in document["obstacles"]],
-        "start": [str(v) for v in start],
+        "start": [str(v) for v in document["start"]],
         "obstacles_total_area": str(sum(areas, Decimal(0))),
         "estimated_free_area": str(width * height - sum(areas, Decimal(0))),
         "number_tokens_preserved": True,
