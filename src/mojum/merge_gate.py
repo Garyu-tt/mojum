@@ -63,7 +63,7 @@ FAILING_CONCLUSIONS = frozenset(
     }
 )
 
-_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_SHA_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"
@@ -246,17 +246,28 @@ def evaluate(
     expected_base: str = "main",
     required: Sequence[str] = (),
     waivers: Mapping[str, str] | None = None,
+    required_counts: Mapping[str, int] | None = None,
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
 
     if expected_head_sha is not None and not _SHA_RE.match(expected_head_sha):
-        raise ValueError("expected_head_sha must be 7-64 hexadecimal characters")
+        raise ValueError("expected_head_sha must be 40 or 64 hexadecimal characters")
 
     waivers = dict(waivers or {})
+    required_counts = dict(required_counts or {})
+    for pattern, count in required_counts.items():
+        if (not isinstance(pattern, str) or not pattern.strip()
+                or type(count) is not int or not 1 <= count <= 10000):
+            raise ValueError("required_counts must map nonempty patterns to positive counts")
     rejects: list[GateReason] = []
     defers: list[GateReason] = []
     patterns = tuple(required)
     matched_labels: list[str] = []
+    for extra in set(required_counts) - set(patterns):
+        rejects.append(GateReason(
+            "UNKNOWN_INVENTORY_PATTERN",
+            f"count given for non-required pattern {extra!r}",
+        ))
 
     if not expected_head_sha:
         rejects.append(
@@ -326,6 +337,20 @@ def evaluate(
             )
             continue
 
+        # A currently visible workflow/job wildcard is not a complete job
+        # inventory: missing matrix siblings are absent from the rollup.
+        # Require the caller to pin the expected number of DISTINCT jobs.
+        # Exact job labels may be required individually without a count.
+        is_open_set = (
+            any(char in pattern for char in "*?[]")
+            or any(check.workflow == pattern for check in matches)
+        )
+        if is_open_set and pattern not in required_counts:
+            rejects.append(GateReason(
+                "REQUIRED_INVENTORY_MISSING",
+                f"required pattern {pattern!r} needs --require-count PATTERN=N "
+                "or explicit exact job labels",
+            ))
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -333,6 +358,18 @@ def evaluate(
                     GateReason(
                         "STALE_CHECK",
                         f"{check.label} ran for head {check.head_sha}, not {facts.head_sha}",
+                    )
+                )
+                continue
+
+            # A reported failure must never be hidden by an inconsistent
+            # PENDING/UNKNOWN status in a partially refreshed check snapshot.
+            # Fail closed on negative terminal conclusions first.
+            if check.conclusion in FAILING_CONCLUSIONS:
+                rejects.append(
+                    GateReason(
+                        "CHECK_FAILED",
+                        f"{check.label} concluded {check.conclusion}",
                     )
                 )
                 continue
@@ -365,20 +402,21 @@ def evaluate(
                     )
                 )
                 continue
-            if check.conclusion in FAILING_CONCLUSIONS:
-                rejects.append(
-                    GateReason(
-                        "CHECK_FAILED",
-                        f"{check.label} concluded {check.conclusion}",
-                    )
-                )
-                continue
             rejects.append(
                 GateReason(
                     "CHECK_UNKNOWN_CONCLUSION",
                     f"{check.label} has an unrecognized conclusion {check.conclusion!r}",
                 )
             )
+
+        if pattern in required_counts:
+            distinct_labels = {check.label for check in matches}
+            if len(distinct_labels) != required_counts[pattern] or len(matches) != len(distinct_labels):
+                defers.append(GateReason(
+                    "REQUIRED_INVENTORY_MISMATCH",
+                    f"{pattern!r} has {len(distinct_labels)} distinct jobs from "
+                    f"{len(matches)} entries; expected {required_counts[pattern]}",
+                ))
 
     reasons = tuple(rejects + defers)
     if rejects:
@@ -452,6 +490,22 @@ def _parse_waivers(values: Iterable[str]) -> dict[str, str]:
     return waivers
 
 
+def _parse_required_counts(values: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        pattern, separator, raw_count = value.rpartition("=")
+        if not separator or not pattern.strip() or not raw_count.isdecimal():
+            raise ValueError(f"--require-count expects PATTERN=N, got {value!r}")
+        count = int(raw_count)
+        if not 1 <= count <= 10000:
+            raise ValueError("--require-count must be in the range 1..10000")
+        pattern = pattern.strip()
+        if pattern in counts:
+            raise ValueError(f"duplicate --require-count for {pattern!r}")
+        counts[pattern] = count
+    return counts
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="mojum-merge-gate",
@@ -480,6 +534,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--require-count",
+        action="append",
+        default=[],
+        metavar="PATTERN=N",
+        help="pin exact number of distinct checks for wildcard/workflow requirements",
+    )
+    parser.add_argument(
         "--waive",
         action="append",
         default=[],
@@ -505,6 +566,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         waivers = _parse_waivers(args.waive)
+        required_counts = _parse_required_counts(args.require_count)
         if args.pr is not None:
             snapshot = fetch_snapshot(args.pr, gh=args.gh)
         else:
@@ -516,6 +578,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_base=args.expected_base,
             required=args.require,
             waivers=waivers,
+            required_counts=required_counts,
         )
     except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError) as error:
         _emit(
@@ -544,6 +607,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "required": list(result.required),
             "matched": list(result.matched),
             "waivers": waivers,
+            "required_counts": required_counts,
             "reasons": [reason.as_dict() for reason in result.reasons],
             "merge_performed": False,
         }
