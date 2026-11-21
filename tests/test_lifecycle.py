@@ -44,6 +44,28 @@ class LifecycleTests(unittest.TestCase):
         for n in PROFILE["regions"]:
             self.assertEqual(older.region(n), base.region(n))
 
+    def test_no_birth_region_reaches_structural_maturity(self):
+        """A zero birth rate must not reserve capacity for impossible newborns."""
+        profile = copy.deepcopy(PROFILE)
+        cfg = profile["regions"]["cortex"]
+        cfg["birth_per_evidence"] = 0
+        cfg["newborn_cap"] = 4
+        cfg["mature_per_evidence"] = 2
+        state = Lifecycle(profile)
+        state.experience("cortex", development_units=3,
+                         expected_revision=state.revision)
+        self.assertFalse(state.region("cortex")["structurally_mature"])
+        state.experience("cortex", development_units=1,
+                         expected_revision=state.revision)
+        observed = state.region("cortex")
+        self.assertEqual(observed["newborn_created"], 0)
+        self.assertEqual(observed["mature_neurons"], 28)
+        self.assertEqual(observed["immature_neurons"], 0)
+        self.assertTrue(observed["structurally_mature"])
+        state.advance(10**12, expected_revision=state.revision)
+        self.assertEqual(state.region("cortex"), observed)
+        self.assertEqual(Lifecycle.from_snapshot(state.snapshot()).region("cortex"), observed)
+
     def test_learning_continues_after_structural_maturity(self):
         s = self.make()
         s.experience("cortex", development_units=6, expected_revision=s.revision)
