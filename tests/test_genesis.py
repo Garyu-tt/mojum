@@ -193,7 +193,7 @@ class GenesisContractTests(unittest.TestCase):
             canonical({"nested": ["valid", "\ud800"]})
         with self.assertRaisesRegex(GenesisError, "canonical UTF-8 JSON"):
             sha256({"\udfff": "invalid key"})
-        valid = {"name": "Данте", "emoji": "🐈"}
+        valid = {"name": "Данте", "emoji": "🐈", "lesson": "音楽"}
         expected = json.dumps(valid, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         self.assertEqual(canonical(valid), expected)
         self.assertEqual(sha256(valid), hashlib.sha256(expected.encode("utf-8")).hexdigest())
