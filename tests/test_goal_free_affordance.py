@@ -201,6 +201,11 @@ class GoalFreeAffordanceTests(unittest.TestCase):
         fake = copy.deepcopy(good)
         fake["table"]["0|999:0:0|1"] = {"x+": {"samples": 1, "blocked": 0}}
         corruptions.append(fake)
+        # Regex-admitted "-" with a numeric distance must fail closed,
+        # not escape as a raw ValueError from int("-").
+        malformed = copy.deepcopy(good)
+        malformed["table"] = {"0|-|1": {"x+": {"samples": 1, "blocked": 0}}}
+        corruptions.append(malformed)
         for snapshot in corruptions:
             with self.subTest(snapshot=snapshot), self.assertRaises(AffordanceError):
                 AffordanceMemory.from_snapshot(snapshot)
