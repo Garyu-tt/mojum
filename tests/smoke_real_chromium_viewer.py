@@ -299,6 +299,14 @@ def main():
             )
             data = trace.read_text(encoding="utf-8")
             source_by_policy[policy] = data
+            footer = json.loads(data.splitlines()[-1])
+            assert footer["policy_schema"] == (
+                "mojum.developmental.explorer/1" if policy == "coarse_v1"
+                else "mojum.developmental.explorer.local-cell/2"
+            ), "export must bind explicit policy wire identity"
+            assert "developmental_state" not in footer, (
+                "private learned state must not leak in JSONL metadata"
+            )
             injected = instrumented_html(original, data)
             for width, height, mode in ((1280, 800, "desktop"), (390, 844, "mobile")):
                 report = (inspect_actual_mobile_chromedriver(
@@ -377,6 +385,87 @@ def main():
         )
         assert result["rejected"] is True
         assert result["controls_disabled"] is True
+        assert result["displayed_policy"] == "—"
+
+        # Negative control 1: a footer may be rewritten without affecting
+        # the SHA-256 of the exact unchanged frame bytes. Reject mismatch.
+        clean = source_by_policy["local_cell_v2"].splitlines()
+        bogus = json.loads(clean[-1])
+        bogus["policy_schema"] = "mojum.developmental.local-cell/2"
+        altered_footer_only = "\n".join(
+            clean[:-1] + [json.dumps(bogus, sort_keys=True,
+                                    ensure_ascii=False, separators=(",", ":"))]
+        ) + "\n"
+        result = inspect_actual_browser(
+            chrome, instrumented_html(
+                original, altered_footer_only,
+                expected_rejection="Политика checkpoint не совпадает с кадрами"
+            ), width=1280, height=800
+        )
+        assert result["rejected"] and result["controls_disabled"]
+        assert result["displayed_policy"] == "—"
+
+        # Negative control 2: an alternative peer wire schema with the
+        # same public name local_cell_v2 is NOT the known v2A format.
+        # Recompute SHA of *all* changed frame lines to ensure rejection
+        # is based on ABI identity, not a stale file checksum.
+        altered_frames = [json.loads(line) for line in clean[:-1]]
+        for frame in altered_frames:
+            frame["developmental"]["schema"] = "mojum.developmental.local-cell/2"
+            frame["developmental"]["learning"]["schema"] = (
+                "mojum.developmental.local-cell/2"
+            )
+        tampered_wire = "".join(
+            json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":"), allow_nan=False) + "\n"
+            for frame in altered_frames
+        ).encode("utf-8")
+        rewritten_footer = json.loads(clean[-1])
+        rewritten_footer["policy_schema"] = "mojum.developmental.local-cell/2"
+        rewritten_footer["trace_integrity"]["byte_length"] = len(tampered_wire)
+        rewritten_footer["trace_integrity"]["sha256"] = (
+            hashlib.sha256(tampered_wire).hexdigest()
+        )
+        tampered_file = tampered_wire.decode("utf-8") + json.dumps(
+            rewritten_footer, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False
+        ) + "\n"
+        result = inspect_actual_browser(
+            chrome, instrumented_html(
+                original, tampered_file,
+                expected_rejection="Неподдерживаемая версия моторной политики"
+            ), width=1280, height=800
+        )
+        assert result["rejected"] and result["controls_disabled"]
+        assert result["displayed_policy"] == "—"
+
+        # Negative control 3: missing learning.schema must not be
+        # displayed as a valid v2 motor model, even with a recomputed hash.
+        for frame in altered_frames:
+            frame["developmental"]["schema"] = (
+                "mojum.developmental.explorer.local-cell/2"
+            )
+            frame["developmental"]["learning"].pop("schema", None)
+        no_learning = "".join(
+            json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":"), allow_nan=False) + "\n"
+            for frame in altered_frames
+        ).encode("utf-8")
+        footer = json.loads(clean[-1])
+        footer["trace_integrity"]["byte_length"] = len(no_learning)
+        footer["trace_integrity"]["sha256"] = (
+            hashlib.sha256(no_learning).hexdigest()
+        )
+        result = inspect_actual_browser(
+            chrome, instrumented_html(
+                original, no_learning.decode("utf-8") + json.dumps(
+                    footer, sort_keys=True, ensure_ascii=False,
+                    separators=(",", ":"), allow_nan=False
+                ) + "\n",
+                expected_rejection="Схема обучения не совпадает с моторной политикой"
+            ), width=1280, height=800
+        )
+        assert result["rejected"] and result["controls_disabled"]
         assert result["displayed_policy"] == "—"
     assert len(reports) == 4, "both persisted policy versions need both browsers"
     print(json.dumps({

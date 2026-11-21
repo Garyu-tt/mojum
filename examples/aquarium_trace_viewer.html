@@ -134,7 +134,10 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     if (!dev || typeof dev !== "object" || Array.isArray(dev) ||
         typeof dev.schema !== "string" || dev.schema.length > 100 ||
         !dev.schema) throw new Error("Некорректная версия моторной политики");
-    if (dev.learning && dev.learning.schema !== dev.schema)
+    if (dev.schema !== V1 && dev.schema !== V2)
+      throw new Error("Неподдерживаемая версия моторной политики");
+    if (!dev.learning || typeof dev.learning !== "object" ||
+        Array.isArray(dev.learning) || dev.learning.schema !== dev.schema)
       throw new Error("Схема обучения не совпадает с моторной политикой");
     return dev.schema;
   }
@@ -143,7 +146,7 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     if (schema === "scripted") return "Внешний сценарий";
     if (schema === V1) return "coarse_v1 · зоны 0,5 м";
     if (schema === V2) return "local_cell_v2 · ячейки 4 см";
-    return "Неизвестная схема (не подтверждена)";
+    throw new Error("Неподдерживаемая версия моторной политики");
   }
   function status(msg, error) {
     $("status").textContent = msg;
@@ -213,6 +216,12 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
     }
     if (!accepted.length) throw new Error("Нет ни одного кадра Aquarium");
     if (!footer) throw new Error("Отсутствует завершающий checkpoint; файл неполный");
+    // Older exporter footers have no policy_schema, so retain compatible
+    // frame-only inference; new footers pin the precise policy wire ABI.
+    // SHA-256 is not a signature, so this is semantic consistency only.
+    if (footer.policy_schema !== undefined &&
+        footer.policy_schema !== recordingPolicy)
+      throw new Error("Политика checkpoint не совпадает с кадрами");
     const first = accepted[0].tick, next = accepted[accepted.length-1].tick + 1;
     const range = footer.trace_range;
     if (range !== undefined) {
