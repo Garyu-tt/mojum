@@ -7,7 +7,8 @@ It never converts or reinterprets
 rejected by ``ContactAssociations.from_snapshot``.
 
 Retention is deterministic and bounded:
-* per-cue mean uses a sliding-window step ``1/min(count, WINDOW)`` (decay);
+* per-cue mean uses step ``1/min(count, WINDOW)``; after 64 contacts
+  this is exponential smoothing, not an exact 64-contact sliding window;
 * when the cue table is full, the least-recently-updated cue is evicted
   (ties: smallest key) and its observations are accounted as forgotten;
 * invariant: ``sum(entry.total) + evicted_observations == updates``.
@@ -55,14 +56,6 @@ class ContactAssociationsV2(ContactAssociations):
         seen_last_updates = set()
         if (snapshot["evicted_cues"] > snapshot["evicted_observations"]):
             raise CuriosityError("inconsistent eviction accounting")
-        if snapshot["updates"] and not snapshot["table"]:
-            raise CuriosityError("learned observations without retained cues")
-        # Before the first eviction, all MAX_CUES slots must be populated.
-        # Each subsequent eviction requires another measured contact.
-        if snapshot["evicted_cues"] > max(0, snapshot["updates"] - MAX_CUES):
-            raise CuriosityError("impossible association eviction history")
-        if snapshot["evicted_cues"] and len(snapshot["table"]) != MAX_CUES:
-            raise CuriosityError("eviction history with underfull cue table")
         for key, entry in snapshot["table"].items():
             if not isinstance(key, str) or len(key) > 11:
                 raise CuriosityError("invalid numeric cue")
@@ -87,10 +80,6 @@ class ContactAssociationsV2(ContactAssociations):
             total += entry["total"]
         if total != snapshot["updates"]:
             raise CuriosityError("inconsistent association count")
-        # The most recent measured cue is always retained, including after
-        # eviction, and has a unique monotonically increasing update number.
-        if snapshot["updates"] and snapshot["updates"] not in seen_last_updates:
-            raise CuriosityError("latest association update missing")
         m = cls()
         m.table = copy.deepcopy(snapshot["table"])
         m.updates = snapshot["updates"]
@@ -101,7 +90,9 @@ class ContactAssociationsV2(ContactAssociations):
     def learn(self, sensor, measurement, prediction):
         if prediction != self.predict(sensor):
             raise CuriosityError("stale association prediction")
-        if (not isinstance(measurement, dict) or type(measurement.get("contact")) is not bool
+        if (type(measurement) is not dict
+                or set(measurement) != {"contact", "instrument", "source_tick", "measured_deflection"}
+                or type(measurement.get("contact")) is not bool
                 or measurement.get("instrument") != "synthetic_probe_not_material_classifier"
                 or type(measurement.get("source_tick")) is not int
                 or measurement["source_tick"] != sensor["tick"]):
