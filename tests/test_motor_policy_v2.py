@@ -58,7 +58,7 @@ class VersionedMotorPolicyTests(unittest.TestCase):
     def test_v2_bootstrap_pins_distinct_policy_and_replays_exactly(self):
         with self.aquarium(motor_policy=MODE) as first, \
                 self.aquarium(self.other, motor_policy=MODE) as twin:
-            self.assertEqual(first.manifest["developmental_schema"], LEGACY_SCHEMA)
+            self.assertEqual(first.manifest["developmental_schema"], V2_SCHEMA)
             self.assertEqual(first.manifest["motor_policy"], MODE)
             self.assertEqual(first.manifest["motor_policy_schema"], V2_SCHEMA)
             for _ in range(35):
