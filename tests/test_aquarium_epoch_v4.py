@@ -109,6 +109,25 @@ class EpochJournalV4Tests(unittest.TestCase):
             self.assertEqual(aquarium.checkpoint(), before)
             self.assertEqual(aquarium.store.count(), 1)
 
+    def test_wire_rejects_foreign_topic_with_valid_hash_chain(self):
+        """Inspector must enforce the same event-topic set as v4 replay."""
+        with self.open() as aquarium:
+            foreign = aquarium._record(
+                "development.advance", "development-000-001",
+                {
+                    "schema": "mojum.agent.development-event/1",
+                    "from_months": 0, "to_months": 1,
+                    "reason": "synthetic foreign-topic acceptance regression",
+                },
+                aquarium.tick * aquarium.dt_ns, aquarium.genome.revision,
+            )
+            aquarium.store.append(foreign, expected_head=aquarium.store.head())
+            self.assertEqual(aquarium.store.verify_chain()["count"], 2)
+        with self.assertRaisesRegex(NoosphereError, "unsupported local-cell v4 journal topic"):
+            inspect_journal(self.db)
+        with self.assertRaisesRegex(AquariumError, "contain only frames"):
+            self.open()
+
     def test_wire_rejects_premature_epoch_marker_with_valid_hash_chain(self):
         """Read-only inspection must enforce the boundary, not just SHA-256."""
         with self.open() as aquarium:
