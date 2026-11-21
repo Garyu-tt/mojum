@@ -96,6 +96,61 @@
     ].join("\n");
   }
 
+  function fromDraftJSON(raw) {
+    // Only import canonical drafts previously produced by this editor.
+    // JSON.parse alone discards duplicate keys and turns 4.0 into 4; a
+    // byte-normalized canonical check detects ambiguity rather than
+    // accidentally altering the organism's future world revision.
+    if (typeof raw !== "string" || new TextEncoder().encode(raw).length > 1_048_576) {
+      throw new Error("Файл JSON слишком большой или повреждён");
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw, (key, value, context) => {
+        if (typeof value !== "number") return value;
+        if (!context || typeof context.source !== "string") {
+          throw new Error("Этот браузер не умеет сохранять точные числовые токены при импорте");
+        }
+        return { __mojum_numeric_token: context.source };
+      });
+    } catch (error) {
+      throw new Error("Не удалось прочитать JSON: " + error.message);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+        || Object.keys(parsed).sort().join(",") !== "height,obstacles,schema,start,width"
+        || parsed.schema !== SCHEMA
+        || !Array.isArray(parsed.start) || parsed.start.length !== 2
+        || !Array.isArray(parsed.obstacles)) {
+      throw new Error("Поддерживается только собственный формат проекта комнаты");
+    }
+    const unpack = item => {
+      if (!item || typeof item !== "object" || Array.isArray(item)
+          || Object.keys(item).join(",") !== "__mojum_numeric_token") {
+        throw new Error("Некорректное число в файле комнаты");
+      }
+      return item.__mojum_numeric_token;
+    };
+    const recovered = {
+      width: unpack(parsed.width),
+      height: unpack(parsed.height),
+      start: { x: unpack(parsed.start[0]), y: unpack(parsed.start[1]) },
+      obstacles: parsed.obstacles.map(rect => {
+        if (!Array.isArray(rect) || rect.length !== 4) {
+          throw new Error("Препятствие должно содержать четыре числа");
+        }
+        return {
+          x: unpack(rect[0]), y: unpack(rect[1]),
+          w: unpack(rect[2]), h: unpack(rect[3]),
+        };
+      }),
+    };
+    validate(recovered);
+    if (raw.trim() !== draftJSON(recovered).trim()) {
+      throw new Error("Изменённый или неоднозначный JSON: импортируйте файл, экспортированный редактором");
+    }
+    return recovered;
+  }
+
   function fmt(number, previous = "") {
     if (!Number.isFinite(number) || number < 0 || number > 1000) {
       throw new Error("Координата вне области редактора");
@@ -132,7 +187,7 @@
 
   const api = Object.freeze({
     SCHEMA, MAX_EDITOR_OBSTACLES, DEFAULT, clone, token,
-    validate, draftJSON, fmt, dragObstacle, dragStart,
+    validate, draftJSON, fromDraftJSON, fmt, dragObstacle, dragStart,
   });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MojumRoomDesignerCore = api;
