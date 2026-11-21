@@ -18,7 +18,7 @@ def _finite_scalar(value):
         return False
     try:
         return math.isfinite(value)
-    except (OverflowError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return False
 
 
@@ -92,23 +92,26 @@ def _revision(room, tick, x, y):
     return hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
 
 def initial_state(room: Room, x: float, y: float) -> RoomState:
-    if not _valid(room, x, y):
+    if not isinstance(room, Room) or not _valid(room, x, y):
         raise ValueError("invalid initial position")
     return RoomState(0, x, y, _revision(room, 0, x, y))
 
 def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
             expected_revision: str) -> tuple[RoomState, dict]:
     """One logical tick; exact segment-vs-AABB test prevents tunneling."""
+    if (not isinstance(room, Room) or not isinstance(state, RoomState)
+            or type(state.tick) is not int or state.tick < 0
+            or not _valid(room, state.x, state.y)):
+        raise ValueError("invalid starting state")
+    if (type(tick) is not int or tick != state.tick + 1
+            or not _finite_scalar(dx) or not _finite_scalar(dy)):
+        raise ValueError("invalid tick or displacement")
     if state.revision != expected_revision or state.revision != _revision(room, state.tick, state.x, state.y):
         raise ValueError("stale or corrupted revision")
-    if type(tick) is not int or tick != state.tick + 1 or not all(_finite_scalar(v) for v in (dx, dy)):
-        raise ValueError("invalid tick or displacement")
     # Sampling in 1 cm increments can miss any thinner obstacle. Test the
     # whole movement segment against closed rectangle boundaries instead.
     if not displacement_within_budget(dx, dy):
         raise ValueError("displacement exceeds fixture budget")
-    if not _valid(room, state.x, state.y):
-        raise ValueError("invalid starting state")
     tx, ty = state.x + dx, state.y + dy
     blocked = (not _valid(room, tx, ty) or
                any(_segment_hits_rect(state.x, state.y, tx, ty, rect)
