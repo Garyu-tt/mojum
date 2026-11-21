@@ -143,6 +143,22 @@ report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
 formats even though the original CLIs used the same mode name. Keep each
 journal with the matching runtime for deterministic replay.
 
+## Audit measured motor mobility
+
+A blocked-move count alone cannot show whether a developmental policy actually
+explored the room. The read-only audit verifies the journal chain and reports
+attempts, successful moves, idle fraction, longest rest streak, distinct
+positions, coverage span and path length, plus versioned rest-collapse and
+revisit-concentration gates:
+
+```bash
+PYTHONPATH=src python -m mojum.motor_mobility --db ./motor_play_PRIVATE.sqlite3
+```
+
+`--expected-head` checks an independently recorded chain head. The command
+never writes to the journal and rejects scripted or noncanonical journals.
+[Audit contract](docs/DEVELOPMENTAL_R013.md)
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
