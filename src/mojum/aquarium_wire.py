@@ -137,6 +137,10 @@ def _check_policy_frame(frame, contract, temporal_schema, sensory_mode=None):
             raise NoosphereError("frame disagrees with its pinned temporal schema")
     elif "range_guidance" in frame:
         raise NoosphereError("unexpected temporal guidance frame")
+    if sensory_mode is None and "toy_contact" in frame:
+        # A valid event hash proves integrity, not permission to introduce
+        # sensory observations absent from the pinned bootstrap selector.
+        raise NoosphereError("unexpected sensory frame without a pinned sensory policy")
     if sensory_mode == "toy_probe_v2":
         contact = _object_field(frame, "toy_contact")
         if contact.get("schema") != SENSORY_BRIDGE_V2:
