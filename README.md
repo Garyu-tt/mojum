@@ -33,6 +33,20 @@ PYTHONPATH=src python -m mojum.aquarium --db ./dante-goal-free.sqlite3 --ticks 3
 
 The organism proposes its own tiny point-room motions; you must not supply `--dx/--dy` overrides in this mode. To view committed **PRIVATE** synthetic frames locally, append `--watch` (JSONL on stdout). Do not upload the traces, journals or raw checkpoint metadata to public issue trackers.
 
+To create a **brand-new** synthetic room with nondefault dimensions and exact int/float geometry using only the CLI (experimental opt-in, never reuse an existing SQLite file):
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./custom-room.sqlite3 --exploration-mode goal_free --developmental-policy local_cell_v2 --room-numeric-contract typed_v1 --new-room-contract examples/room_exact_mixed.json --ticks 12
+```
+
+The command prints a `journal_head` to record independently. To reopen the original room in SQLite-enforced read-only mode, without a Python `Room` definition or additional steps:
+
+```sh
+PYTHONPATH=src python -m mojum.aquarium --db ./custom-room.sqlite3 --exploration-mode goal_free --developmental-policy local_cell_v2 --room-numeric-contract typed_v1 --resume-typed-room --expected-journal-head YOUR_INDEPENDENT_64_HEX_HEAD
+```
+
+A positive `--ticks N` on resume explicitly requests further simulated frames and changes the head. New-room creation reserves a fresh name exclusively and refuses existing data; old `bootstrap/1` histories are never inferred or rewritten. See [typed custom-room CLI quickstart](docs/R015_TYPED_ROOM_CLI_QUICKSTART.md). This is a **CPU point-room fixture**, not MuJoCo or a real neural brain.
+
 Windows PowerShell from the checkout:
 
 ```powershell
