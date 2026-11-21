@@ -176,6 +176,25 @@ class ShapeErrorTests(unittest.TestCase):
                 raw = encode({**CANONICAL, key: value})
                 self.assertIn(expected, errors_of(raw))
 
+    def test_huge_exponents_are_invalid_instead_of_crashing_area_math(self):
+        raw = (b'{"width":1e999999,"height":1e999999,'
+               b'"obstacles":[],"start":[1,1]}')
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIsNone(report.summary)
+        self.assertIn("width is outside the finite runtime numeric range", report.errors)
+        self.assertIn("height is outside the finite runtime numeric range", report.errors)
+
+    def test_out_of_range_coordinates_and_underflow_are_rejected(self):
+        for fragment in (b'1e309', b'1e-999999'):
+            with self.subTest(fragment=fragment):
+                raw = (b'{"width":4,"height":4,"obstacles":[],'
+                       b'"start":[' + fragment + b',2]}')
+                report = validate_room_bytes(raw)
+                self.assertFalse(report.valid)
+                self.assertIn("start[0] is outside the finite runtime numeric range",
+                              report.errors)
+
     def test_zero_and_negative_dimensions_are_rejected(self):
         for value in (0, -1, -0.5):
             with self.subTest(value=value):
