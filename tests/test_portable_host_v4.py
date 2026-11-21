@@ -85,7 +85,8 @@ class V4PortableHostAcceptanceTests(unittest.TestCase):
     def test_v4_default_shadow_neural_mode_is_valid(self):
         # The v4 host constrains sensory/temporal/brain modes, not the
         # independently versioned optional neural shadow computation.
-        run = self.invoke("--motor-mode", V4_MODE, "--sensory-mode", "none")
+        run = self.invoke("--motor-mode", V4_MODE, "--sensory-mode", "none",
+                          "--temporal-mode", "none")
         self.assertEqual(run.returncode, 0, run.stderr)
         status = json.loads(run.stdout)
         self.assertEqual(status["schema"], SCHEMA_V4)
