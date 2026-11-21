@@ -199,8 +199,8 @@ class Aquarium:
         # Local RAM is authoritative only through its last fully adopted commit.
         # A read of the shared SQLite head alone is not an organism checkpoint.
         self._committed_head = None
-        self._committed_event_count = self.store.count()
         try:
+            self._committed_event_count = self.store.count()
             if self._read_only_archive and self._committed_event_count == 0:
                 raise AquariumError("archived v2A journal requires a bootstrap")
             if self._committed_event_count == 0:
