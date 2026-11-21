@@ -109,7 +109,14 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
         )
     events_needed = (aquarium.required_events_for_steps(ticks)
                      if is_v4 else ticks)
-    limit = getattr(aquarium, "journal_limit", MAX_REPLAY_EVENTS)
+    # Legacy budget remains the pre-existing MAX_REPLAY_EVENTS gate, even
+    # when the Aquarium instance was opened before a stricter limit was
+    # applied. Segmented opt-in instead uses its own explicit source cap.
+    source_limit = (aquarium._effective_journal_limit()
+                    if callable(getattr(aquarium, "_effective_journal_limit", None))
+                    else getattr(aquarium, "journal_limit", MAX_REPLAY_EVENTS))
+    limit = (source_limit if getattr(aquarium, "journal_backend", "legacy") == "segmented"
+             else min(source_limit, MAX_REPLAY_EVENTS))
     if aquarium.store.count() + events_needed > limit:
         raise PortableHostError(
             "requested ticks exceed bounded %d-event selected source budget; "
