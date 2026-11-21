@@ -389,6 +389,9 @@ class TranscriptSummaryTests(unittest.TestCase):
 
     def test_summary_rejects_malformed_rows(self):
         for bad in (
+            17,  # A non-iterable must raise CellV5Error, not TypeError.
+            [17],  # A non-sequence row must not reach len(row).
+            [None],
             [("x+", {"measured_blocked": False})],
             [({"action": "up"}, {"measured_blocked": False})],
             [({"action": "x+"}, {"measured_blocked": 1})],
