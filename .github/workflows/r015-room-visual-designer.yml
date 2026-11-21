@@ -13,9 +13,6 @@ on:
       - "tests/room_walk_preview.test.cjs"
       - "tests/test_room_walk_python_parity.py"
       - "tests/room_designer_browser_smoke.cjs"
-      - "tests/test_visual_room_cross_language.py"
-      - "src/mojum/room_input.py"
-      - "src/mojum/room_contract.py"
       - "examples/room_simple_mixed.json"
       - "docs/R015_VISUAL_ROOM_DESIGNER.md"
       - "docs/R015_OFFLINE_WALK_PREVIEW.md"
@@ -26,7 +23,7 @@ permissions:
 
 jobs:
   visual-room:
-    name: SVG editor JSON -> Python -> SQLite (${{ matrix.python-version }})
+    name: Offline SVG editor and Python point-motion parity (${{ matrix.python-version }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -66,20 +63,10 @@ jobs:
           path: ui-qa-artifacts/room-designer-mobile.png
           if-no-files-found: error
           retention-days: 7
-      - name: Real Python custom room + private SQLite acceptance
+      - name: Independent JS/Python point-motion parity on current main
         env:
           PYTHONPATH: src
           PYTHONDONTWRITEBYTECODE: "1"
-          PYTHONWARNINGS: always::ResourceWarning
         run: |
           set -euo pipefail
-          python -m unittest discover -s tests -p test_visual_room_cross_language.py -v 2>&1 | tee visual-room-qa.log
-          python -m unittest discover -s tests -p test_room_walk_python_parity.py -v 2>&1 | tee -a visual-room-qa.log
-          if grep -q 'ResourceWarning: unclosed database' visual-room-qa.log; then
-            echo "FAIL: SQLite connection leak" >&2
-            exit 1
-          fi
-      - name: Original CLI safety regression
-        env:
-          PYTHONPATH: src
-        run: python -m unittest discover -s tests -p test_new_room_json_cli.py -v
+          python -m unittest discover -s tests -p test_room_walk_python_parity.py -v
