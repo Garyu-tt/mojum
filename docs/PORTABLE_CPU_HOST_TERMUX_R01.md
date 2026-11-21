@@ -86,12 +86,14 @@ copy PRIVATE memory to shared device storage or a public web page.
 - Invalid tick/interval arguments are rejected before the database is
   opened or the organism is created. Valid bounds are 1..1000 ticks
   and 20..3600000 ms.
-- A fixed historical replay ceiling of **10,000 total journal events**
-  still exists in the canonical R0.13 Aquarium. Host refuses an
-  invocation which would exceed it before writing any requested
-  frame. Truly indefinite operation needs a separately validated
-  streaming replay and compaction design; merely restarting this
-  bounded host cannot bypass this limitation.
+- This stacked streaming-replay revision raises the hard journal ceiling
+  to **100,000 total events** (including the bootstrap and acquisitions),
+  without loading the entire history into RAM. Host refuses an invocation
+  which would exceed it before writing any requested frame. Each restart
+  still fully verifies and recomputes the entire history, so CPU time
+  grows linearly with the number of events. Truly indefinite operation
+  needs safe authenticated checkpoints and snapshot acceleration;
+  merely restarting this bounded host cannot bypass the new limit.
 - An Android 12+ OS may suspend/kill a Termux foreground/background
   process, and arbitrary power-saving / Doze states affect scheduling.
   On resumption there are **no catch-up bursts** of imaginary past

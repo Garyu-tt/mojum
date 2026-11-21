@@ -120,7 +120,7 @@ class PortableCPUTests(unittest.TestCase):
         with self.open_aquarium() as aquarium:
             before = aquarium.checkpoint()
             with patch("mojum.portable_host.MAX_REPLAY_EVENTS", 3):
-                with self.assertRaisesRegex(PortableHostError, "10000-event"):
+                with self.assertRaisesRegex(PortableHostError, "3-event"):
                     run_paced(aquarium, ticks=3, interval_ms=20,
                               stop_event=threading.Event())
             self.assertEqual(aquarium.checkpoint(), before)

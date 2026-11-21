@@ -272,3 +272,32 @@ class LocalNoosphere:
             "items": items,
         }
         return {"projection": copy.deepcopy(projection), "sha256": _sha(projection)}
+
+    def iter_events(self, *, include_nonpublic=False, batch_size=128):
+        """Iterate journal rows in bounded memory, PRIVATE only by opt-in.
+
+        This is a read-only projection, not a substitute for verify_chain().
+        Caller must check a fully verified journal head and row count before
+        interpreting private events as a trusted replay. Yielded rows mirror
+        dataset()['projection']['items'] without materializing all history.
+        """
+        if type(include_nonpublic) is not bool:
+            raise NoosphereError("include_nonpublic must be boolean")
+        _integer(batch_size, "batch_size", 1, 1024)
+        sql = ("SELECT seq,wire_json,event_hash FROM events WHERE agent_id = ?"
+               + ("" if include_nonpublic else " AND visibility = 'PUBLIC'")
+               + " ORDER BY seq")
+        cursor = self._db.execute(sql, (self.agent_id,))
+        try:
+            while True:
+                batch = cursor.fetchmany(batch_size)
+                if not batch:
+                    break
+                for row in batch:
+                    yield {
+                        "seq": row["seq"],
+                        "event": json.loads(row["wire_json"]),
+                        "event_hash": row["event_hash"],
+                    }
+        finally:
+            cursor.close()
