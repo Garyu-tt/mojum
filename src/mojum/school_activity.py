@@ -165,7 +165,7 @@ def run_activity(catalog, activity_id, script, *, sim_tick=0, learner_ref="fixtu
     happens here. A revision replaces the previous artifact, not an asserted skill.
     """
     validate_catalog(catalog)
-    if activity_id not in ACTIVITIES or not any(s["starter_activity"]["id"] == activity_id for s in catalog["sections"]):
+    if type(activity_id) is not str or activity_id not in ACTIVITIES or not any(s["starter_activity"]["id"] == activity_id for s in catalog["sections"]):
         raise SchoolError("unknown/unimplemented activity")
     if type(sim_tick) is not int or not 0 <= sim_tick <= MAX_SIM_TICK:
         raise SchoolError("invalid virtual tick")
@@ -205,12 +205,98 @@ def run_activity(catalog, activity_id, script, *, sim_tick=0, learner_ref="fixtu
                          "note": "Scripted attempts only; no evidence of learning or transfer."}}
 
 
+def _check_private_fixture_run(run):
+    """Fail closed before deriving public metrics from an untrusted PRIVATE dict.
+
+    Structural and local SHA checks are NOT an authenticity or authorization
+    mechanism. A future Noosphere adapter must verify writer and consent itself.
+    """
+    if (type(run) is not dict or set(run) != {"schema", "activity_id", "learner_ref", "visibility", "sim_tick", "events", "artifacts", "feedback"}
+            or run.get("schema") != RUN_SCHEMA or run.get("visibility") != "PRIVATE"):
+        raise SchoolError("invalid private run envelope")
+    aid, ref, tick = run.get("activity_id"), run.get("learner_ref"), run.get("sim_tick")
+    if type(aid) is not str or aid not in ACTIVITIES:
+        raise SchoolError("invalid private run activity")
+    if type(ref) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", ref):
+        raise SchoolError("invalid private run learner reference")
+    if type(tick) is not int or not 0 <= tick <= MAX_SIM_TICK:
+        raise SchoolError("invalid private run tick")
+    artifacts, events = run.get("artifacts"), run.get("events")
+    if type(artifacts) is not list or len(artifacts) != 2 or type(events) is not list or len(events) != len(PHASES):
+        raise SchoolError("invalid private run collection")
+    kind = ACTIVITIES[aid]
+    expected_schema = ART_SCHEMA if kind == "art" else RHYTHM_SCHEMA
+    expected_media = "image/svg+xml" if kind == "art" else "application/json"
+    for index, phase in enumerate(("make", "revise")):
+        item = artifacts[index]
+        if (type(item) is not dict or set(item) != {"schema", "phase", "media_type", "visibility",
+                                                  "sim_tick", "sha256", "content", "provenance"}):
+            raise SchoolError("invalid private artifact fields")
+        if any((
+            item.get("schema") != expected_schema,
+            item.get("phase") != phase,
+            item.get("media_type") != expected_media,
+            item.get("visibility") != "PRIVATE",
+            item.get("sim_tick") != tick + PHASES.index(phase),
+            item.get("provenance") != "scripted-stdlib-fixture",
+        )):
+            raise SchoolError("malformed private artifact metadata")
+        content = item.get("content")
+        if type(content) is not str:
+            raise SchoolError("invalid private artifact content")
+        try:
+            payload = content.encode("utf-8")
+        except UnicodeError as exc:
+            raise SchoolError("invalid artifact UTF-8") from exc
+        if len(payload) > MAX_ARTIFACT_BYTES or item.get("sha256") != hashlib.sha256(payload).hexdigest():
+            raise SchoolError("invalid private artifact hash or size")
+    for offset, phase in enumerate(PHASES):
+        event = events[offset]
+        if (type(event) is not dict or set(event) != {"schema", "visibility", "learner_ref",
+                                                     "section_id", "activity_id", "phase",
+                                                     "sim_tick", "observation", "artifact_sha256",
+                                                     "provenance"}):
+            raise SchoolError("invalid private event fields")
+        expected_hash = (artifacts[0]["sha256"] if phase == "make" else
+                         artifacts[1]["sha256"] if phase == "revise" else None)
+        if type(event) is not dict or any((
+            event.get("schema") != EVENT_SCHEMA,
+            event.get("visibility") != "PRIVATE",
+            event.get("learner_ref") != ref,
+            event.get("activity_id") != aid,
+            event.get("section_id") != aid.split(".")[0],
+            event.get("phase") != phase,
+            event.get("sim_tick") != tick + offset,
+            event.get("artifact_sha256") != expected_hash,
+            event.get("provenance") != "scripted-stdlib-fixture",
+        )):
+            raise SchoolError("invalid private event chain")
+        observation = event["observation"]
+        if phase in ("make", "revise"):
+            if observation != "artifact submitted":
+                raise SchoolError("invalid artifact event observation")
+        elif not _nonempty(observation):
+            raise SchoolError("invalid private event observation")
+        try:
+            observation.encode("utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise SchoolError("invalid observation UTF-8") from exc
+    feedback = run["feedback"]
+    if (type(feedback) is not dict or set(feedback) != {"schema", "visibility",
+                "revision_changed", "reviewed_phases", "note"}
+            or feedback["schema"] != "mojum.school-feedback/1"
+            or feedback["visibility"] != "PRIVATE"
+            or type(feedback["revision_changed"]) is not bool
+            or feedback["revision_changed"] != (artifacts[0]["sha256"] != artifacts[1]["sha256"])
+            or feedback["reviewed_phases"] != list(PHASES)
+            or feedback["note"] != "Scripted attempts only; no evidence of learning or transfer."):
+        raise SchoolError("invalid private feedback envelope")
+
+
 def compare_trials(baseline, repeat):
     """Contrast distinct trials without grading or pretending to measure transfer."""
-    if not all(isinstance(r, dict) and r.get("schema") == RUN_SCHEMA and
-               r.get("visibility") == "PRIVATE" and len(r.get("artifacts", [])) == 2
-               for r in (baseline, repeat)):
-        raise SchoolError("invalid comparison trial")
+    _check_private_fixture_run(baseline)
+    _check_private_fixture_run(repeat)
     if baseline["activity_id"] != repeat["activity_id"] or baseline["learner_ref"] != repeat["learner_ref"]:
         raise SchoolError("trials must target the same activity and learner")
     if type(baseline["sim_tick"]) is not int or type(repeat["sim_tick"]) is not int or repeat["sim_tick"] <= baseline["sim_tick"] + 4:
@@ -224,8 +310,7 @@ def compare_trials(baseline, repeat):
 
 def redacted_summary(run):
     """Only safe aggregate counts; do not export learner IDs, content or hashes."""
-    if not isinstance(run, dict) or run.get("schema") != RUN_SCHEMA or run.get("visibility") != "PRIVATE":
-        raise SchoolError("invalid private run")
+    _check_private_fixture_run(run)
     return {"schema": "mojum.school-public-summary/1", "visibility": "PUBLIC_REDACTED",
             "activity_id": run["activity_id"], "phase_count": len(run["events"]),
             "artifact_count": len(run["artifacts"]), "learning_claimed": False}
