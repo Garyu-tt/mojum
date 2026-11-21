@@ -71,6 +71,16 @@ class BearingOutcomeMemory:
             model = RangeOutcomeMemory.from_snapshot(data)
             if model.updates < 1:
                 raise TemporalOutcomeError("empty learned relative-bearing model")
+            # The bearing key came from the PRE-action sensor, so invisibility
+            # and a numeric near-field bucket are mutually exclusive. Without
+            # this cross-field check a forged snapshot could claim experience
+            # about a visible toy within a model labelled "no toy detected",
+            # or vice versa, despite never being producible by observe().
+            for context in model.histograms:
+                before_bucket = context.split("|", 1)[0]
+                if (bearing == "none") != (before_bucket == "none"):
+                    raise TemporalOutcomeError(
+                        "relative-bearing memory contradicts sensor visibility")
             result.models[bearing] = model
             total += model.updates
         if total != state["updates"]:
