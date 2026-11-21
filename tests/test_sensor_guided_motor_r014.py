@@ -156,6 +156,44 @@ class SensorGuidedMotorTests(unittest.TestCase):
             self.assertEqual(restored.temporal_model.updates, 49)
             self.assertEqual(restored.store.count(), 50)
 
+    def test_committed_history_can_change_later_action_without_external_input(self):
+        # This is the critical end-to-end claim: no model injection or
+        # privileged movement API. Compare the chosen motor action with
+        # the old Explorer policy at the *same previous* RAM/sensory cue.
+        # The action must differ only when earlier committed numeric evidence
+        # offers a new, unblocked range transition.
+        divergence = None
+        for i, toy_x in enumerate((1.22, 1.26, 1.18)):
+            test_db = self.db.with_name(f"autonomous-{i}.sqlite3")
+            toy = ToyScene(toys=(
+                Toy("spectator.runtime", toy_x, 2.0, .1, (130, 80, 190), .4),
+            ))
+            with self.baby(test_db, room=Room(4, 4),
+                           sensory_scene=toy) as child:
+                for _ in range(160):
+                    old_state = child.world
+                    old_policy = Explorer.from_snapshot(child.explorer.snapshot())
+                    record = child.step()
+                    raw = record["interoception"]["heartbeat"]["pulse"]
+                    signal = Proprioception(
+                        record["tick"], old_state.revision, old_state.x,
+                        old_state.y, raw,
+                    )
+                    baseline = old_policy.decide(signal)["action"]
+                    chosen = record["developmental"]["intent"]["action"]
+                    if chosen != baseline:
+                        evidence = record["motor_guidance"]
+                        self.assertGreater(record["tick"], 0)
+                        self.assertTrue(evidence["avoid"] or evidence["prefer"])
+                        self.assertNotEqual(chosen, "teleport")
+                        divergence = (record["tick"], baseline, chosen)
+                        break
+            if divergence is not None:
+                break
+        self.assertIsNotNone(
+            divergence, "autonomous committed history did not change any motor action",
+        )
+
     def test_forged_preaction_guidance_rejected_before_adoption(self):
         with self.baby() as child:
             payload, _, _ = child._calculate(None, None)
