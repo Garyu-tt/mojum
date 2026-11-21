@@ -229,5 +229,62 @@ class ExportCrashAndPublicationQA(unittest.TestCase):
         self.assertEqual(self.db.read_bytes(), newer_original)
 
 
+    def test_corrupt_boundary_only_in_staged_backup_never_exports(self):
+        # Create two real logical segments (segment size 64) with the
+        # canonical emitter, then alter ONLY a disposable read-only source
+        # backup. The original must remain independently replayable.
+        with Aquarium(
+            self.db, SEED, GRAPH, neural_mode="disabled",
+            exploration_mode="goal_free", developmental_policy="local_cell_v4",
+            sensory_mode="none", journal_backend="segmented",
+            journal_segment_size=64, external_expected_head=self.head,
+        ) as producer:
+            for _ in range(60):
+                producer.step()
+            trusted_head = producer.checkpoint()["journal_head"]
+            self.assertEqual(producer.store.count(), 66)
+            self.assertEqual(producer.store.verify_chain(
+                external_expected_head=trusted_head
+            )["count"], 66)
+        source_before = self.db.read_bytes()
+        from mojum import aquarium_trace_export as exporter
+        from contextlib import closing
+        original_backup = exporter._stage_sqlite
+
+        def corrupt_copy(source, stage):
+            original_backup(source, stage)
+            with closing(sqlite3.connect(str(stage))) as connection:
+                with connection:
+                    connection.execute("DROP TRIGGER no_boundary_update")
+                    connection.execute(
+                        "UPDATE segments SET prior_segment_head=? "
+                        "WHERE segment_index=1", ("f" * 64,),
+                    )
+                    self.assertEqual(connection.total_changes, 1)
+
+        target = self.home / "forged-boundary.jsonl"
+        with patch("mojum.aquarium_trace_export._stage_sqlite",
+                   side_effect=corrupt_copy):
+            with self.assertRaises(ValueError):
+                export_private_trace(
+                    self.db, target, SEED, GRAPH, allow_private_export=True,
+                    expected_journal_head=trusted_head,
+                    exploration_mode="goal_free",
+                    developmental_policy="local_cell_v4",
+                    journal_backend="segmented", journal_segment_size=64,
+                    sensory_mode="none", neural_mode="disabled",
+                )
+        self.assertFalse(target.exists(), "forged segment must not publish")
+        self.assertEqual(self.db.read_bytes(), source_before)
+        with Aquarium(
+            self.db, SEED, GRAPH, neural_mode="disabled",
+            exploration_mode="goal_free", developmental_policy="local_cell_v4",
+            sensory_mode="none", journal_backend="segmented",
+            journal_segment_size=64, external_expected_head=trusted_head,
+        ) as still_valid:
+            self.assertEqual(still_valid.store.count(), 66)
+            self.assertEqual(still_valid.checkpoint()["journal_head"], trusted_head)
+
+
 if __name__ == "__main__":
     unittest.main()
