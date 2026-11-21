@@ -67,10 +67,10 @@ class ReactiveControllerStandaloneTests(unittest.TestCase):
         self.assertAlmostEqual(state.y, 2.0)
 
     def test_invalid_goals_fail_closed(self):
-        for goal in (None, (), (True, 2), ("1", 2), (float("nan"), 2),
+        for i, goal in enumerate((None, (), (True, 2), ("1", 2), (float("nan"), 2),
                      (float("inf"), 2), (-1, 0), (5, 5), (2, 2),
-                     (10 ** 5000, 1)):
-            with self.subTest(goal=str(goal)[:32]), self.assertRaises(ControllerError):
+                     (10 ** 5000, 1))):
+            with self.subTest(case=i), self.assertRaises(ControllerError):
                 checked_goal(self.room, goal)
         self.assertEqual(self.state, initial_state(self.room, 1.0, 2.0))
 
