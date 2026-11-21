@@ -29,6 +29,7 @@ from .noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from .sim import Simulation, digest
 from .world_room import Room, RoomState, _revision, _valid, advance, initial_state
 from .room_contract import encode_room_exact
+from .typed_room_resume import load_verified_typed_room
 from .verified_snapshot import (
     STATE_SCHEMA, SnapshotError, load_snapshot, save_snapshot,
     runtime_source_sha256,
@@ -628,7 +629,8 @@ def main():
     parser.add_argument("--db", type=Path, required=True, help="explicit local SQLite file; not cloud")
     parser.add_argument("--genome", type=Path, default=root / "examples/genesis_seed.json")
     parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
-    parser.add_argument("--ticks", type=int, default=120)
+    parser.add_argument("--ticks", type=int, default=None,
+                        help="new: default 120; typed restore: default 0 (no append)")
     # None means the option was absent; a supplied nominal value is still an
     # external motor request and must not be silently accepted in goal_free.
     parser.add_argument("--dx", type=float, default=None)
@@ -644,9 +646,22 @@ def main():
     parser.add_argument("--room-numeric-contract",
                         choices=("legacy", "typed_v1"), default="legacy",
                         help="opt-in exact int/float geometry manifest for NEW journals")
+    parser.add_argument("--resume-typed-room", action="store_true",
+                        help="load room and start from an existing pinned-head typed SQLite")
+    parser.add_argument("--expected-journal-head",
+                        help="independent 64-hex source head required with --resume-typed-room")
     parser.add_argument("--watch", action="store_true",
                         help="emit PRIVATE synthetic frames as local JSONL")
     args = parser.parse_args()
+    if args.ticks is None:
+        args.ticks = 0 if args.resume_typed_room else 120
+    if args.resume_typed_room:
+        if args.room_numeric_contract != "typed_v1":
+            parser.error("--resume-typed-room requires --room-numeric-contract typed_v1")
+        if args.expected_journal_head is None:
+            parser.error("--resume-typed-room requires --expected-journal-head")
+    elif args.expected_journal_head is not None:
+        parser.error("--expected-journal-head is only valid with --resume-typed-room")
     if not 0 <= args.ticks <= 1000:
         parser.error("--ticks must be within 0..1000")
     if args.developmental_policy == ARCHIVE_MODE and args.ticks != 0:
@@ -669,6 +684,18 @@ def main():
             _movement(0.0 if args.dy is None else args.dy)
         except AquariumError as exc:
             parser.error(str(exc))
+    # An archived source is verified READ-ONLY with a separately supplied
+    # head *before* opening the writable Aquarium. The Aquarium then checks
+    # the same head again so a concurrent source append cannot be adopted.
+    geometry = {}
+    if args.resume_typed_room:
+        room, start, _ = load_verified_typed_room(
+            args.db, agent_id="dante-fixture-001",
+            expected_journal_head=args.expected_journal_head)
+        geometry = {
+            "room": room, "start": start,
+            "external_expected_head": args.expected_journal_head,
+        }
     with Aquarium(
         args.db, json.loads(args.genome.read_text(encoding="utf-8")),
         json.loads(args.graph.read_text(encoding="utf-8")),
@@ -676,6 +703,7 @@ def main():
         sensory_mode=args.sensory_mode,
         developmental_policy=args.developmental_policy,
         room_numeric_contract=args.room_numeric_contract,
+        **geometry,
     ) as aquarium:
         for _ in range(args.ticks):
             if args.exploration_mode == "goal_free":
