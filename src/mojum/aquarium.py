@@ -367,6 +367,7 @@ class Aquarium:
             brain = self.brain.decide(
                 next_motor,
                 tick=self.tick,
+                expected_at_ns=self.tick * self.dt_ns,
                 interoception=sensory,
                 proprioception={
                     "tick": self.world.tick,
@@ -645,7 +646,8 @@ class Aquarium:
                 # Compare JSON types for the opt-in wire. Python structural
                 # equality treats bools and numbers as interchangeable.
                 matches = (canonical(event) == canonical(expected)
-                           if self._local_cell or next_contact is not None else event == expected)
+                           if self._local_cell or next_contact is not None
+                           or self.brain_mode == "developmental_controller" else event == expected)
                 if not matches:
                     raise _FrameMismatch("non-deterministic or mismatched committed frame")
                 self.world = next_world
