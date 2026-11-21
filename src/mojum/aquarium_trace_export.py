@@ -50,6 +50,28 @@ def _destination(path):
             or dest.parent.is_symlink()
             or os.path.lexists(dest)):
         raise ValueError("output must be a new filename in an existing trusted directory")
+    if os.name == "posix":
+        # PRIVATE JSONL is 0600, but a shared parent leaks filenames and
+        # enables other accounts to race source/target directory entries.
+        # Match the independent read-only orphan inspector's owner-only
+        # directory requirement. Never silently chmod an operator's folder.
+        parent = dest.parent
+        info = parent.stat(follow_symlinks=False)
+        if (not stat.S_ISDIR(info.st_mode) or
+                info.st_uid != os.geteuid() or
+                stat.S_IMODE(info.st_mode) & 0o077 or
+                (stat.S_IMODE(info.st_mode) & 0o700) != 0o700):
+            raise PermissionError(
+                "PRIVATE trace output directory must be owner-owned, "
+                "owner-readable/writable/searchable, and inaccessible to group/other"
+            )
+        # Check the entire provided parent path, not just the last
+        # component. This is a fail-closed PREFLIGHT check, not a promise
+        # that an adversary cannot rename it after validation.
+        if parent.resolve(strict=True) != parent.absolute():
+            raise PermissionError(
+                "PRIVATE trace output directory has a symlink or alias ancestor"
+            )
     return dest
 
 
