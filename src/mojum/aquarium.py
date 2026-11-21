@@ -413,7 +413,13 @@ class Aquarium:
             if boundary // EPOCH_TICKS > self.epoch_index:
                 markers += 1
             boundary += EPOCH_TICKS
-        return ticks + markers
+        required = ticks + markers
+        if self._committed_count + required > self.journal_event_budget:
+            raise AquariumError(
+                "v4 run exceeds the bounded journal event budget; "
+                "export verified history and start a new journal"
+            )
+        return required
 
     def _epoch_event(self, epoch_index):
         absolute_tick = epoch_index * EPOCH_TICKS
@@ -967,7 +973,11 @@ def main():
     with aquarium:
         # Reject the whole CLI batch before any frame is committed. The
         # per-step gate remains authoritative for direct API callers.
-        if aquarium.stored_events + args.ticks > aquarium.journal_event_budget:
+        try:
+            required_events = aquarium.required_events_for_steps(args.ticks)
+        except AquariumError as exc:
+            parser.error(str(exc))
+        if aquarium.stored_events + required_events > aquarium.journal_event_budget:
             parser.error("requested ticks exceed remaining journal event budget")
         for _ in range(args.ticks):
             aquarium.step(dx=dx, dy=dy)

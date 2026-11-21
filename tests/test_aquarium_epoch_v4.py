@@ -176,6 +176,29 @@ class AquariumEpochV4Tests(unittest.TestCase):
                 aquarium.required_events_for_steps(MAX_ABSOLUTE_TICKS + 1)
             self.assertEqual(aquarium.store.count(), 1)
 
+    def test_epoch_budget_preflight_preserves_boundary_and_pending_marker_budget(self):
+        with self.open() as aquarium:
+            # Model the state immediately before the first post-boundary
+            # frame without spending another 9,999-frame test run here.
+            aquarium.tick = EPOCH_TICKS
+            aquarium.epoch_index = 0
+            self.assertEqual(aquarium.required_events_for_steps(1), 2)
+            before = aquarium.checkpoint()
+
+            # One free event slot cannot admit both the durable marker and its
+            # first frame. The preflight must reject before appending either.
+            aquarium._committed_count = aquarium.journal_event_budget - 1
+            with self.assertRaisesRegex(AquariumError, "event budget"):
+                aquarium.step()
+            self.assertEqual(aquarium.store.count(), 1)
+            self.assertEqual(aquarium.checkpoint(), before)
+
+            # Once the marker is durable, the pending first frame needs only
+            # one event and must not be charged for a duplicate marker.
+            aquarium.epoch_index = 1
+            aquarium._committed_count = aquarium.journal_event_budget - 1
+            self.assertEqual(aquarium.required_events_for_steps(1), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
