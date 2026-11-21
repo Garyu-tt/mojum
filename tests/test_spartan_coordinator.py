@@ -1,9 +1,17 @@
 """Atomic dispatcher tests: no LLM required."""
 import concurrent.futures
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# The Python 3.13 SQLite leak audit is executed as ``python tests/...``.  In
+# that mode Python puts ``tests/`` rather than the repository root on
+# ``sys.path``, so repository-local command modules need the root explicitly.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from tools.spartan_coordinator import (
     claim, connect, create_schema, enqueue, finish, heartbeat, init, status,
