@@ -2,13 +2,17 @@
 
 import argparse
 import json
+from importlib.resources import files
 from pathlib import Path
 from .sim import Simulation
 
 
 def main():
     parser = argparse.ArgumentParser(description="Mojum R0.1 CPU-only graph fixture")
-    parser.add_argument("graph", type=Path)
+    parser.add_argument(
+        "graph", nargs="?", type=Path, default=files("mojum").joinpath("data", "first_loop.json"),
+        help="graph JSON path (defaults to the packaged first-loop fixture)",
+    )
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--dt-ms", type=int, default=10)
     args = parser.parse_args()

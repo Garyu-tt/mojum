@@ -59,6 +59,77 @@ class AquariumNeuralTests(unittest.TestCase):
         with self.aquarium() as a:
             self.assertEqual(a.checkpoint(), final)
 
+    def test_replay_and_continue_both_historical_float_sums(self):
+        # Journal heads produced by unmodified main (367ede6), CPython 3.11 and 3.12.
+        cases = [
+            ("ordered", "compensated", "ff26df18799bb15f74aa066161af6da2862f2388ccc60218406d0b6f136780d4",
+             "86ea9617e457190f977effd6fe7a5279ae727a164e3304b9e8a782017d18a039"),
+            ("compensated", "ordered", "4329ee42918383e7f0c149a4acf2120eecdbb7753f02419e1ff900a1dbfb4936",
+             "579de8af7ac6d372805cdd32770dee9add5b5c0e6dce5aa7c35720f5e47f5607"),
+        ]
+        for original, other, head120, head150 in cases:
+            with self.subTest(original=original):
+                db = self.db.with_name(original + ".db")
+                with Aquarium(db, SEED, GRAPH, pulse_sum=original) as writer:
+                    for _ in range(120):
+                        writer.step()
+                    before = writer.checkpoint()
+                    self.assertEqual(before["journal_head"], head120)
+                with self.assertRaises(AquariumError):
+                    Aquarium(db, SEED, GRAPH, pulse_sum=other)
+                with patch("mojum.aquarium.NATIVE_PULSE_SUM", other):
+                    with Aquarium(db, SEED, GRAPH, external_expected_head=head120) as reader:
+                        self.assertEqual(reader.checkpoint(), before)
+                        for _ in range(30):
+                            reader.step()
+                        self.assertEqual(reader.checkpoint()["journal_head"], head150)
+
+    def test_alternative_replay_restores_motor_history_and_genome_acquisitions(self):
+        with self.aquarium(pulse_sum="ordered", motor_mode="developmental_fixture") as writer:
+            writer.step()
+            writer.acquire({
+                "schema": ACQUISITION_SCHEMA, "event_id": "tempo", "genome_id": SEED["genome_id"],
+                "gene": "heartbeat_bpm", "delta": 15, "valid_from_tick": 1,
+                "observed_at_ns": 0, "recorded_at_ns": writer.dt_ns,
+                "source": "synthetic-unit-test", "evidence": "tempo change",
+            })
+            for _ in range(25):
+                writer.step()
+            before = writer.checkpoint()
+        with self.assertRaises(AquariumError):
+            self.aquarium(pulse_sum="compensated", motor_mode="developmental_fixture")
+        with patch("mojum.aquarium.NATIVE_PULSE_SUM", "compensated"):
+            with self.aquarium(motor_mode="developmental_fixture") as reader:
+                self.assertEqual(reader.checkpoint(), before)
+
+    def test_explicit_source_sum_continues_an_ambiguous_prefix(self):
+        with self.aquarium(pulse_sum="ordered") as writer:
+            for _ in range(3):
+                writer.step()
+            before = writer.checkpoint()
+        with self.aquarium(pulse_sum="compensated") as other:
+            self.assertEqual(other.checkpoint(), before)
+        with patch("mojum.aquarium.NATIVE_PULSE_SUM", "compensated"):
+            with self.aquarium(pulse_sum="ordered") as reader:
+                reader.step()
+                self.assertEqual(reader.store.head(), "36e0fbce098d8e9b71ae59570fb02c340141487cc3fddcdf1b86da678de94ce7")
+
+    def test_frame_by_frame_switch_between_sums_is_rejected(self):
+        with self.aquarium(pulse_sum="ordered") as a, Aquarium(
+            self.db.with_name("other.db"), SEED, GRAPH, pulse_sum="compensated"
+        ) as b:
+            for _ in range(4):
+                a.step()
+                b.step()
+            b.step()
+            fifth = b.store.dataset(include_nonpublic=True)["projection"]["items"][-1]["event"]
+            a.store.append(fifth, expected_head=a.store.head())
+            mixed_head = a.store.head()
+        for native in ("ordered", "compensated"):
+            with self.subTest(native=native), patch("mojum.aquarium.NATIVE_PULSE_SUM", native):
+                with self.assertRaises(AquariumError):
+                    self.aquarium(external_expected_head=mixed_head)
+
     def test_two_independent_runs_have_identical_weights_and_head(self):
         b = Path(self.temp.name) / "another.db"
         with self.aquarium() as a, Aquarium(b, SEED, GRAPH) as d:

@@ -35,6 +35,18 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 
 The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or MuJoCo. The SQLite checkpoint is a **checksum-only**, non-authenticated local record, not a portable security credential or complete atomic multi-component snapshot. Journal replay is currently capped at 10,000 events; do not run unattended past this budget.
 
+## Run from an installed wheel
+
+With CPython 3.11+ and a locally built Mojum wheel, install into a virtual environment and run from any working directory:
+
+```sh
+python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 120
+mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
+```
+
+Starting from a new journal, the second run reaches tick 150 with 151 stored events. The wheel includes the example genome and graph. See [offline install instructions](docs/LOCAL_INSTALL_R01.md). The installed synthetic motor-play mode is optional; the default scripted mode remains unchanged.
+
 ## Architecture and development
 
 - **GENESIS:** inherited and acquired genes, deterministic phenotype changes.
