@@ -1,0 +1,133 @@
+name: Mojum guarded auto-ship
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview eligible PR; no merge'
+        required: false
+        type: boolean
+        default: true
+permissions: {}
+concurrency:
+  group: mojum-main-guarded-autoship
+  cancel-in-progress: false
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+    steps:
+      - name: Verify and merge one already-approved PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = "main";
+            const required = [];
+            for (const job of ["aquarium-stdlib", "motor-gate-stdlib", "mesh-stdlib"]) {
+              for (const py of ["3.11", "3.12", "3.13"]) required.push(job + " (" + py + ")");
+            }
+            const dryRun = context.eventName === "workflow_dispatch" && core.getInput("dry_run") !== "false";
+            const result = { scanned: 0, pendingApproval: 0, waitingCI: 0, stale: 0, merged: null };
+            const { data: open } = await github.rest.pulls.list({
+              owner, repo, base: target, state: "open", sort: "updated", direction: "desc", per_page: 100,
+            });
+            const eligible = open.filter(p =>
+              !p.draft && p.base.ref === target && p.head.repo &&
+              p.head.repo.full_name === owner + "/" + repo
+            );
+            // Rotate the capped set so an old PR is not permanently starved by new activity.
+            const offset = eligible.length ? Math.floor(Date.now() / 300000) % eligible.length : 0;
+            const candidates = eligible.slice(offset).concat(eligible.slice(0, offset)).slice(0, 18);
+            for (const summary of candidates) {
+              const number = summary.number;
+              ++result.scanned;
+              try {
+                const { data: p } = await github.rest.pulls.get({owner, repo, pull_number: number});
+                if (p.state !== "open" || p.draft || p.base.ref !== target || p.mergeable !== true ||
+                    p.mergeable_state !== "clean" || !p.head.repo ||
+                    p.head.repo.full_name !== owner + "/" + repo) continue;
+                const head = p.head.sha;
+                const { data: ref } = await github.rest.git.getRef({owner, repo, ref: "heads/" + target});
+                const base = ref.object.sha;
+                if (p.base.sha !== base) { ++result.stale; continue; }
+                const reviews = await github.paginate(github.rest.pulls.listReviews,
+                  {owner, repo, pull_number: number, per_page: 100});
+                const latestByReviewer = new Map();
+                for (const rev of reviews) {
+                  if (rev.user && rev.user.login) latestByReviewer.set(rev.user.login, rev);
+                }
+                const independent = [...latestByReviewer.values()].some(rev =>
+                  rev.state === "APPROVED" && rev.user.login !== p.user.login &&
+                  rev.user.login !== (p.head.user && p.head.user.login));
+                if (!independent) { ++result.pendingApproval; continue; }
+                const { data: compared } = await github.rest.repos.compareCommits({
+                  owner, repo, base, head,
+                });
+                if (compared.behind_by !== 0 || compared.status === "diverged" ||
+                    compared.status === "behind") { ++result.stale; continue; }
+                const checks = await github.paginate(github.rest.checks.listForRef,
+                  {owner, repo, ref: head, per_page: 100});
+                if (!checks.length || checks.length > 100) { ++result.waitingCI; continue; }
+                const names = new Map();
+                for (const check of checks) {
+                  if (check.head_sha !== head) continue;
+                  const previous = names.get(check.name);
+                  if (!previous || (check.id || 0) > (previous.id || 0)) names.set(check.name, check);
+                }
+                if (required.some(name => !names.has(name) ||
+                    names.get(name).status !== "completed" ||
+                    names.get(name).conclusion !== "success")) {
+                  ++result.waitingCI;
+                  continue;
+                }
+                // Fail closed on a present failing, skipped, or pending check; never override a red job.
+                if ([...names.values()].some(check => check.status !== "completed" ||
+                    check.conclusion !== "success")) {
+                  ++result.waitingCI;
+                  continue;
+                }
+                const threads = await github.graphql(
+                  "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{isResolved}}}}}",
+                  {owner, repo, number}
+                );
+                const container = threads.repository && threads.repository.pullRequest &&
+                  threads.repository.pullRequest.reviewThreads;
+                if (!container || container.pageInfo.hasNextPage ||
+                    container.nodes.some(thread => !thread.isResolved)) continue;
+                // Re-read after checks and reviews; Github itself enforces branch rules and last-push review.
+                const {data: current} = await github.rest.pulls.get({owner, repo, pull_number: number});
+                const {data: currentBase} = await github.rest.git.getRef(
+                  {owner, repo, ref: "heads/" + target});
+                if (current.head.sha !== head || current.base.sha !== base ||
+                    currentBase.object.sha !== base || current.draft ||
+                    current.mergeable !== true || current.mergeable_state !== "clean") {
+                  ++result.stale;
+                  continue;
+                }
+                if (dryRun) {
+                  core.info("DRY RUN ready: #" + number + " head=" + head + " base=" + base);
+                  result.merged = "DRY-RUN #" + number;
+                  break;
+                }
+                const {data: merged} = await github.rest.pulls.merge({
+                  owner, repo, pull_number: number, sha: head, merge_method: "squash",
+                });
+                if (merged.merged && merged.sha) {
+                  core.info("MERGED #" + number + " " + merged.sha);
+                  result.merged = {number, sha: merged.sha};
+                  break; // One merge per run; every next PR must be checked on the new main.
+                }
+              } catch (e) {
+                // Auth, API, CI, ruleset and transient failures are a hold, never an override.
+                core.warning("PR #" + number + " held: " + String(e.status || e.message).slice(0,160));
+                continue;
+              }
+            }
+            core.info(JSON.stringify(result));
