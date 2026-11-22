@@ -111,6 +111,51 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(sum(a for a, _ in ids), 1)
         self.assertEqual(len({rid for _, rid in ids}), 1)
 
+    def test_concurrent_distinct_intakes_have_one_atomic_capacity_slot(self):
+        """Two different revisions must not each reserve the one Cezar run."""
+        barrier = threading.Barrier(2)
+        results, errors = [], []
+        lock = threading.Lock()
+
+        def worker(number):
+            try:
+                db = m.connect(self.db_path)
+                try:
+                    barrier.wait(timeout=8)
+                    fresh, row = m.claim(
+                        db, self.ident(number=number), single_flight=True)
+                    with lock:
+                        results.append((fresh, row["status"]))
+                finally:
+                    db.close()
+            except Exception as exc:
+                with lock:
+                    errors.append(str(exc))
+
+        workers = [threading.Thread(target=worker, args=(n,)) for n in (612, 613)]
+        for t in workers:
+            t.start()
+        for t in workers:
+            t.join(timeout=15)
+        self.assertFalse(any(t.is_alive() for t in workers))
+        self.assertEqual(errors, [])
+        self.assertCountEqual(results, [(True, "claimed"), (False, "busy")])
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission WHERE status IN ('claimed','submitted')"
+        ).fetchone()[0], 1)
+
+    def test_dispatch_busy_does_not_post_second_distinct_run(self):
+        m.claim(self.db, self.ident(number=612))
+        prompt = self.private_prompt()
+        with patch.object(m.urllib.request, "build_opener",
+                          side_effect=AssertionError("unexpected second POST")):
+            result = m.dispatch(self.db, self.ident(number=613), prompt)
+        self.assertFalse(result["admitted"])
+        self.assertEqual(result["reason"], "capacity-busy")
+        self.assertEqual(result["status"], "busy")
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission").fetchone()[0], 1)
+
     def test_private_state_permissions_and_symlink_refusal(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
         pub = Path(self.tmp.name) / "public"
@@ -242,7 +287,6 @@ class AdmissionTests(unittest.TestCase):
         with patch.object(m.urllib.request, "build_opener", side_effect=inspect_opener):
             with self.assertRaisesRegex(RuntimeError, "handler installed"):
                 m.dispatch(self.db, self.ident(), self.private_prompt())
-        # Once a POST might have started, a claim is deliberately not retried.
         self.assertEqual(self.db.execute("SELECT status FROM admission").fetchone()[0], "claimed")
 
     def test_uncertain_dispatch_keeps_claim_without_retry(self):

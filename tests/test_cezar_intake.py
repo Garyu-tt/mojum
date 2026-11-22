@@ -202,6 +202,28 @@ class IntakeTests(unittest.TestCase):
         with self.assertRaises(m.admission.AdmissionError):
             m.discover(opener=self.fake(issues))
 
+    def test_systemd_unit_does_not_expose_host_or_secrets(self):
+        root = MODULE.parent.parent / "ops" / "cezar" / "systemd"
+        service = (root / "cezar-mojum-admission-r01.service").read_text()
+        self.assertIn("User=mirbi", service)
+        self.assertIn("ProtectSystem=strict", service)
+        self.assertIn("ProtectHome=true", service)
+        self.assertIn("NoNewPrivileges=true", service)
+        self.assertIn("ReadWritePaths=/var/lib/cezar/home/admission /var/lib/cezar/home/admission-prompts", service)
+        self.assertIn("InaccessiblePaths=/srv/mirbi", service)
+        self.assertIn("cezar_intake.py", service)
+        self.assertIn("--execute", service)
+        self.assertNotIn("GITHUB_TOKEN", service)
+        self.assertNotIn("GH_TOKEN", service)
+        self.assertNotIn("0.0.0.0", service)
+
+    def test_intake_timer_bounded_cadence(self):
+        root = MODULE.parent.parent / "ops" / "cezar" / "systemd"
+        timer = (root / "cezar-mojum-admission-r01.timer").read_text()
+        self.assertIn("OnUnitInactiveSec=15min", timer)
+        self.assertIn("Unit=cezar-mojum-admission-r01.service", timer)
+        self.assertIn("Persistent=true", timer)
+
     def test_pending_claimed_after_dispatch_uncertainty_is_durable(self):
         r=m.discover(opener=self.fake([self.issue()]))[0]
         m.admission.claim(self.db,r["identity"])
