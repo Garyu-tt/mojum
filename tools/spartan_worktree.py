@@ -29,8 +29,6 @@ def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
         raise IsolationError("symlink in worktree root path refused")
     repo = Path(repo).resolve(strict=True)
     root = Path(root).resolve(strict=True)
-    if root == repo or root in repo.parents or repo in root.parents:
-        raise IsolationError("worktree root must be separate from repository")
     if not root.is_dir():
         raise IsolationError("invalid worktree root")
     dest = root / task
@@ -48,10 +46,14 @@ def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
             check=True, capture_output=True, text=True, timeout=20, env=env)
 
     try:
-        git("rev-parse", "--is-inside-work-tree")
+        top = Path(git("rev-parse", "--show-toplevel").stdout.strip()).resolve(strict=True)
+        if root == top or root in top.parents or top in root.parents:
+            raise IsolationError("worktree root must be separate from repository")
         git("cat-file", "-e", f"{base_sha}^{{commit}}")
         git("worktree", "add", "--no-checkout", "-b", branch, str(dest), base_sha)
         git("-C", str(dest), "checkout", "--force", branch)
+    except IsolationError:
+        raise
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise IsolationError("git worktree preparation failed; inspect partial worktree") from exc
     return dest
