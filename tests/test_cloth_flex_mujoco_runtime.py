@@ -38,6 +38,8 @@ class ActualMuJoCoClothTests(unittest.TestCase):
         model = self.mujoco.MjModel.from_xml_string(self.spike.make_mjcf())
         self.assertEqual(model.nflex, 1)
         self.assertEqual(model.nmocap, 1)
+        self.assertEqual(model.neq, 1)
+        self.assertGreater(model.njnt, 0)
         self.assertEqual(model.nflexvert, self.spike.GRID[0] * self.spike.GRID[1])
         self.assertAlmostEqual(model.opt.timestep, self.spike.DT)
 
