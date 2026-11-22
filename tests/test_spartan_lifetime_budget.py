@@ -79,6 +79,24 @@ class BudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(budget.BudgetError, "changed"):
             budget.settle(self.db, "ticket", 1, 11, 2)
 
+    def test_conflicting_settlement_freezes_new_dispatch_across_reconnect(self):
+        budget.reserve(self.db, "receipt", 1, 20, 40)
+        budget.settle(self.db, "receipt", 1, 10, 20)
+        self.assertFalse(budget.status(self.db)["frozen"])
+        with self.assertRaisesRegex(budget.BudgetError, "changed; ledger frozen"):
+            budget.settle(self.db, "receipt", 1, 11, 20)
+        self.assertTrue(budget.status(self.db)["frozen"])
+        with closing(budget.connect(self.path)) as reopened:
+            with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+                budget.reserve(reopened, "another", 2, 1, 1)
+            with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+                budget.reserve(reopened, "receipt", 1, 20, 40)
+            self.assertEqual(budget.status(reopened)["reported_tokens"], 10)
+            self.assertEqual(budget.status(reopened)["requests"], 1)
+        # Replaying the original receipt is idempotent but never unfreezes.
+        self.assertFalse(budget.settle(self.db, "receipt", 1, 10, 20)["new_settlement"])
+        self.assertTrue(budget.status(self.db)["frozen"])
+
     def test_provider_overrun_persistently_freezes_future_dispatch(self):
         budget.reserve(self.db, "overrun", 1, 10, 20)
         with self.assertRaisesRegex(budget.BudgetError, "ledger frozen"):
