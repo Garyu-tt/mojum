@@ -591,7 +591,7 @@ class FleetTests(unittest.TestCase):
         self._assert_claim_failure_instance_isolated(
             OSError("SECRET coordinator path or filesystem detail"))
 
-    def _assert_claim_failure_isolated(self, error_type):
+    def _assert_claim_failure_type_isolated(self, error_type):
         # An untrusted SQLite/OS exception cannot abort other worker futures
         # or leak a private coordinator diagnostic into the batch report.
         self.add_task("failure-isolated-one", scope="component.one")
@@ -625,10 +625,10 @@ class FleetTests(unittest.TestCase):
             self.assertEqual(states["queued"], 1)
 
     def test_claim_database_error_isolated_from_peer_results(self):
-        self._assert_claim_failure_isolated(sqlite3.DatabaseError)
+        self._assert_claim_failure_type_isolated(sqlite3.DatabaseError)
 
     def test_claim_oserror_isolated_from_peer_results(self):
-        self._assert_claim_failure_isolated(OSError)
+        self._assert_claim_failure_type_isolated(OSError)
 
     def test_unexpected_worker_crash_retains_successful_proposals(self):
         self.add_task("recover-first", scope="component.first")
