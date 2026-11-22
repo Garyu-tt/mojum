@@ -176,10 +176,10 @@ class FanoutContract(unittest.TestCase):
                 None,None,302,"no",{},"https://example.org")
 
     def test_overdeep_loopback_json_response_fails_closed(self):
-        # A 3 KiB JSON array can exceed CPython's nesting limit despite
+        # A 40 KiB JSON array can exceed CPython's nesting limit despite
         # satisfying the network byte cap. Health/slots must fail as a
         # controlled FanoutError rather than aborting main() with traceback.
-        nested = b"[" * 1500 + b"0" + b"]" * 1500
+        nested = b"[" * 20000 + b"0" + b"]" * 20000
 
         class Response:
             status = 200
@@ -192,8 +192,7 @@ class FanoutContract(unittest.TestCase):
                 return False
 
             def read(self, limit):
-                self_limit = limit
-                assert self_limit >= len(nested)
+                assert limit >= len(nested)
                 return nested
 
         opener = Mock()
