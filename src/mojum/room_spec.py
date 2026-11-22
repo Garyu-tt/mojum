@@ -145,16 +145,23 @@ def _overlap(first, second):
 
 
 def _runtime_geometry_errors(document, start):
-    """Re-check an exact-valid draft with the runtime's native JSON types.
+    """Match native integer legacy rooms and float-only versioned drafts.
 
-    Room preserves JSON integers as Python ints, while decimal/exponent
-    numbers become floats. Converting every obstacle coordinate to float would
-    round large integers (for example 2**53+1) onto a nearby valid start, even
-    though the actual point-room correctly keeps them separate. Aquarium's
-    initial start position remains float-valued, as in the existing preflight.
+    A legacy unversioned Room preserves JSON integer geometry, while the
+    versioned room-draft loader converts all coordinates to float. Do not
+    falsely accept a versioned draft that will fail at bootstrap, or falsely
+    reject a valid unversioned native-integer room.
     """
+    # The versioned draft loader constructs an all-float Room. Legacy
+    # unversioned inputs can be loaded directly by world_room.Room, which
+    # preserves native JSON integer geometry. Validate each against its actual
+    # downstream numeric contract rather than conflating these two paths.
+    versioned_draft = document.get("schema") == DRAFT_SCHEMA
+
     def runtime_number(token):
-        return float(token) if any(ch in token for ch in ".eE") else int(token)
+        if versioned_draft or any(ch in token for ch in ".eE"):
+            return float(token)
+        return int(token)
 
     errors = []
     width, height = runtime_number(document["width"]), runtime_number(document["height"])
