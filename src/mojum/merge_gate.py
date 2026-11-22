@@ -562,6 +562,9 @@ def _run_gh_json(command: Sequence[str], *, label: str) -> dict[str, object]:
         completed = subprocess.run(
             command, capture_output=True, text=True, check=False, timeout=60
         )
+    except UnicodeError as error:
+        # subprocess text decoding can fail before JSON validation runs.
+        raise FetchError(f"{label} returned undecodable UTF-8") from error
     except (OSError, subprocess.SubprocessError) as error:
         raise FetchError(f"cannot run {' '.join(command)}: {error}") from error
     if completed.returncode != 0:
@@ -659,6 +662,8 @@ def _decode_snapshot_bytes(data: bytes) -> object:
     try:
         return json.loads(data.decode("utf-8"),
                           object_pairs_hook=_unique_snapshot_object)
+    except UnicodeDecodeError as exc:
+        raise SnapshotError("snapshot JSON is not valid UTF-8") from exc
     except RecursionError as exc:
         raise SnapshotError("snapshot JSON exceeds parser nesting limit") from exc
 
