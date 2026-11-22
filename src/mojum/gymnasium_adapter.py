@@ -65,6 +65,14 @@ def make_gymnasium_point_room(room, *, start, max_steps=256, max_step_m=0.25):
                 raise ValueError("Gymnasium action must be two finite numeric values")
             # Do not let numpy scalar dtypes bypass the stdlib core validator.
             actual = (float(arr[0]), float(arr[1]))
+            # Reject the original numeric values before any float32 cast.
+            # Otherwise, a float64 just outside Box.high can round down
+            # to its float32 endpoint and bypass the advertised action space.
+            if not all(float(lo) <= value <= float(hi)
+                       for value, lo, hi in zip(
+                           actual, self.action_space.low, self.action_space.high
+                       )):
+                raise ValueError("action is outside the advertised Gymnasium Box")
             if not self.action_space.contains(
                 np.asarray(actual, dtype=np.float32)
             ):
