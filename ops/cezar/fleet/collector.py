@@ -341,7 +341,8 @@ def _github_closed_history(now):
             }
             save(cache, CLOSED_CACHE)
             fresh = True
-        except (OSError, ValueError, TypeError, TimeoutError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError, TimeoutError,
+                json.JSONDecodeError, RecursionError):
             if cache is None:
                 raise FleetError("GitHub history unavailable without cache")
     recent = cache["recent"]
@@ -376,7 +377,8 @@ def collect(now=None, *, include_history=False):
     for name,run in sections:
         try:
             observations[name]=run()
-        except (OSError,ValueError,TypeError,TimeoutError,json.JSONDecodeError) as exc:
+        except (OSError,ValueError,TypeError,TimeoutError,json.JSONDecodeError,
+                RecursionError) as exc:
             observations[name]={"available":False,"reason":type(exc).__name__}
     observations["external_running_confirmed"]=None
     observations["external_running_explanation"]="No live heartbeat from ChatGPT/external executors; not equal to zero."
