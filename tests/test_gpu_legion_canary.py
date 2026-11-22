@@ -23,6 +23,8 @@ class Handler(BaseHTTPRequestHandler):
         self.server.calls += 1
         length = int(self.headers.get("Content-Length", "0"))
         self.server.request_body = self.rfile.read(min(length, 8192))
+        if self.server.arrival_barrier is not None:
+            self.server.arrival_barrier.wait(timeout=4)
         if self.server.redirect:
             self.send_response(302)
             self.send_header("Location", "https://example.invalid/do-not-follow")
@@ -55,6 +57,7 @@ class LoopbackFixture(unittest.TestCase):
         self.server.request_body = b""
         self.server.redirect = False
         self.server.delay = 0
+        self.server.arrival_barrier = None
         self.server.status_code = 200
         self.server.content_type = "application/json"
         self.server.reply = json.dumps({
@@ -157,8 +160,11 @@ class CanaryTests(LoopbackFixture):
 
     def test_overlapping_failed_http_calls_are_not_invisible(self):
         self.server.status_code = 503
-        self.server.delay = 0.2
+        # Force both server requests to overlap rather than depending on a
+        # sleep that can be serialized under heavily loaded CI runners.
+        self.server.arrival_barrier = threading.Barrier(2, timeout=4)
         report = canary.run_canary([self.url], samples=2, parallel=2, timeout=5)
+        self.assertFalse(self.server.arrival_barrier.broken)
         self.assertEqual(report["successful_responses"], 0)
         self.assertEqual(report["failed_responses"], 2)
         self.assertEqual(report["peak_overlapping_http_calls"], 2)
