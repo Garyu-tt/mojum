@@ -157,11 +157,19 @@ are made that historical task completions count as Mojum QA acceptance,
 and no old worktree was automatically reactivated.
 
 This history index proves archive duplicates and makes replay
-visible; it is **not yet a live cross-agent admission lock**. Before
-activating GitHub events or many workers, add a durable idempotency
-registry keyed by repository + Issue/PR identity + intended revision
-and require independent QA for any produced patch. Cezar's native
-GitHub events remain paused until that quality and admission gate exists.
+visible; it is **not a live cross-agent admission lock**. Cezar 0.20.0
+already has an append-only native automation receipt ledger and reserves
+each `(automationId, eventId)` only once, including across restarts of
+this single instance. Auditing the server's private
+`.ai/cezar/automation-receipts.ndjson` showed **four receipt versions
+for two unique event keys**, with exactly **one Cezar run ID per key**.
+This prevents replay of the same native event by the same rule, but
+**does not** prevent two different automations or manual task requests
+from submitting semantically identical work. Cross-rule admissions
+should additionally normalize GitHub repo + Issue/PR identity + intended
+revision before unattended dispatch, and independently verify every
+produced patch. Both native GitHub event automations remain paused
+until the model quality and admission gates are established.
 
 ## Required release invariants
 
