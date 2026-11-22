@@ -118,11 +118,13 @@ def call_once(endpoint: str, model: str, timeout: float, *, opener=None) -> dict
     }
 
 
-def peak_overlap(events):
-    """Count overlapping HTTP response intervals, not GPU compute intervals."""
+def peak_overlap(events, *, successful_only=False):
+    """Count overlapping measured call intervals, never GPU compute intervals."""
     points = []
     for item in events:
-        if item.get("success") and type(item.get("start_ns")) is int and type(item.get("end_ns")) is int:
+        if successful_only and not item.get("success"):
+            continue
+        if type(item.get("start_ns")) is int and type(item.get("end_ns")) is int:
             if item["end_ns"] < item["start_ns"]:
                 raise CanaryError("invalid request interval")
             points.extend(((item["start_ns"], 1), (item["end_ns"], -1)))
@@ -152,12 +154,16 @@ def run_canary(endpoints, *, model="gpt-oss-20b", samples=1, parallel=1,
         raise CanaryError("timeout outside 1..60 seconds")
 
     def perform(endpoint):
+        # Capture unsuccessful requests too. Omitting failed requests would
+        # undercount real HTTP overlap exactly when a server is overloaded.
+        begin = time.monotonic_ns()
         try:
             return caller(endpoint, model, timeout)
         except Exception as exc:
             return {"success": False, "endpoint": endpoint,
                     "error": type(exc).__name__ + ": " + str(exc)[:170],
-                    "content_logged": False}
+                    "content_logged": False,
+                    "start_ns": begin, "end_ns": time.monotonic_ns()}
 
     jobs = [endpoint for _ in range(samples) for endpoint in endpoints]
     with ThreadPoolExecutor(max_workers=parallel) as pool:
@@ -167,7 +173,8 @@ def run_canary(endpoints, *, model="gpt-oss-20b", samples=1, parallel=1,
         "schema": "mojum.gpu-legion-canary.v1",
         "attempts": len(jobs), "successful_responses": len(successes),
         "failed_responses": len(jobs) - len(successes),
-        "peak_overlapping_http_calls": peak_overlap(successes),
+        "peak_overlapping_http_calls": peak_overlap(results),
+        "peak_overlapping_successful_http_calls": peak_overlap(successes, successful_only=True),
         "total_completion_tokens_reported": sum(r.get("completion_tokens_reported") or 0 for r in successes),
         "results": results,
         "gpu_compute_concurrency_verified": False,
