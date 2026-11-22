@@ -1,15 +1,18 @@
 {
   "schema": "mojum.school-catalog/1",
-  "revision": "0.2.1-proposal",
+  "revision": "0.3.0-proposal",
   "status": "CATALOG_ONLY_NOT_EXECUTABLE",
-  "note": "Proposed architecture, sculpture, logistics, urban planning and engineering lessons, including a voluntary Factorio-based logistics case. Catalog-only descriptions, not executable training or evidence of learned skills.",
+  "note": "Optional game-based learning with Factorio-like logistics and cross-subject labs. Catalog only; no game integration, autonomous teaching or proven learning.",
   "principles": [
     "opt_in_exploration",
     "no_forced_grades_or_punishment",
     "age_and_capability_adaptive",
     "cpu_first_simulation",
     "provenance_and_privacy",
-    "cross_discipline_transfer_must_be_measured"
+    "cross_discipline_transfer_must_be_measured",
+    "play_without_compulsory_assessment",
+    "no_mandatory_proprietary_games_or_online_services",
+    "no_coercive_retention_or_reward_pressure"
   ],
   "learning_loop": [
     "observe",
@@ -33,7 +36,8 @@
       ],
       "cross_subject_ids": [
         "visual_arts",
-        "dance"
+        "dance",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "music.starter",
@@ -87,7 +91,8 @@
         "architecture",
         "craft_making",
         "urban_planning",
-        "structural_engineering"
+        "structural_engineering",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "sculpture.starter",
@@ -289,7 +294,8 @@
         "architecture",
         "creative_writing",
         "logistics",
-        "structural_engineering"
+        "structural_engineering",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "design.starter",
@@ -399,7 +405,8 @@
         "craft_making",
         "logistics",
         "urban_planning",
-        "structural_engineering"
+        "structural_engineering",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "architecture.starter",
@@ -480,7 +487,8 @@
         "architecture",
         "urban_planning",
         "craft_making",
-        "structural_engineering"
+        "structural_engineering",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "logistics.starter",
@@ -582,7 +590,8 @@
       "cross_subject_ids": [
         "architecture",
         "logistics",
-        "design"
+        "design",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "urban_planning.starter",
@@ -647,7 +656,8 @@
         "architecture",
         "sculpture",
         "craft_making",
-        "logistics"
+        "logistics",
+        "game_based_learning"
       ],
       "starter_activity": {
         "id": "structural_engineering.starter",
@@ -691,6 +701,164 @@
             "architecture",
             "logistics"
           ]
+        }
+      ]
+    },
+    {
+      "id": "game_based_learning",
+      "title": "Игровое обучение и игровые лаборатории",
+      "skills": [
+        "исследование правил",
+        "решение задач",
+        "стратегия и планирование",
+        "командное взаимодействие",
+        "перенос знаний за пределы игры",
+        "творческая игра"
+      ],
+      "artifact_types": [
+        "игровой проект",
+        "план прохождения",
+        "журнал эксперимента",
+        "сравнение решений",
+        "построенная модель"
+      ],
+      "cross_subject_ids": [
+        "logistics",
+        "architecture",
+        "structural_engineering",
+        "urban_planning",
+        "design",
+        "music"
+      ],
+      "starter_activity": {
+        "id": "game_based_learning.starter",
+        "prompt": "Выбрать подходящую игру или оригинальную виртуальную игровую лабораторию, сформулировать гипотезу, поиграть и сравнить результаты нескольких подходов.",
+        "observation": "Зафиксировать добровольный выбор, действия, результат и то, что пока нельзя считать доказательством переноса навыка."
+      },
+      "implementation_status": "PLANNED",
+      "lessons": [
+        {
+          "id": "game_based_learning.puzzle_01",
+          "title": "Головоломки и эксперимент",
+          "level": "foundation",
+          "goal": "Учиться разбираться в правилах и проверять гипотезы",
+          "activity": "В короткой оригинальной головоломке попробовать два разных решения и обсудить различия",
+          "evidence": "Состояния задачи, последовательность действий и наблюдаемый результат",
+          "transfer_to": [
+            "design",
+            "structural_engineering"
+          ]
+        },
+        {
+          "id": "game_based_learning.build_02",
+          "title": "Строительство и свободное творчество",
+          "level": "foundation",
+          "goal": "Использовать игру для творческого конструирования без навязанных оценок",
+          "activity": "В оригинальной песочнице или в Minecraft по добровольному выбору построить и улучшить мастерскую",
+          "evidence": "План, варианты конструкции и самостоятельное описание решения",
+          "transfer_to": [
+            "architecture",
+            "sculpture",
+            "design"
+          ]
+        },
+        {
+          "id": "game_based_learning.factory_03",
+          "title": "Фабрика как система (пример Factorio)",
+          "level": "intermediate",
+          "goal": "Связывать производство, хранение, транспорт и ограничения мощности",
+          "activity": "В Factorio или оригинальном офлайн-симуляторе производственной цепочки исследовать конвейеры, запасы и узкие места, затем перестроить линию",
+          "evidence": "Схема фабрики, поток изделий за виртуальную минуту, загрузка узлов и изменения после оптимизации",
+          "transfer_to": [
+            "logistics",
+            "craft_making",
+            "structural_engineering"
+          ]
+        },
+        {
+          "id": "game_based_learning.physics_04",
+          "title": "Физика и инженерные эксперименты",
+          "level": "intermediate",
+          "goal": "Отличать предсказания от результатов симуляции и замечать ограничения модели",
+          "activity": "Сравнить две виртуальные конструкции или траектории; использовать самостоятельную CPU-симуляцию либо подходящую инженерную игру",
+          "evidence": "Гипотеза, измеренные величины, расхождения и границы точности",
+          "transfer_to": [
+            "structural_engineering",
+            "architecture"
+          ]
+        },
+        {
+          "id": "game_based_learning.city_05",
+          "title": "Город, транспорт и ресурсные сети",
+          "level": "advanced",
+          "goal": "Рассматривать несколько взаимозависимых систем как целое",
+          "activity": "В городской стратегии или оригинальной модели спланировать район, соединить службы и перепроектировать маршрут при сбое",
+          "evidence": "Карта, время в пути, обслуженные здания и сравнение сценариев",
+          "transfer_to": [
+            "urban_planning",
+            "logistics",
+            "architecture"
+          ]
+        },
+        {
+          "id": "game_based_learning.transfer_06",
+          "title": "Перенос навыка за пределы игры",
+          "level": "advanced",
+          "goal": "Проверять, помогает ли игровой опыт решать новую задачу",
+          "activity": "После игры выполнить независимое задание на новую фабрику или планировку; сравнить с предварительной попыткой и контрольным вариантом",
+          "evidence": "Базовая попытка, независимая задача, контроль, критерии сравнения и ограничения вывода",
+          "transfer_to": [
+            "logistics",
+            "design",
+            "architecture"
+          ]
+        }
+      ],
+      "reference_games": [
+        {
+          "title": "Factorio",
+          "subject_ids": [
+            "logistics",
+            "structural_engineering"
+          ],
+          "learning_focus": "конвейеры, производственные цепочки, узкие места, автоматизация",
+          "access": "OPTIONAL_LICENSED_GAME_OR_ORIGINAL_SIM"
+        },
+        {
+          "title": "Minecraft",
+          "subject_ids": [
+            "architecture",
+            "design",
+            "craft_making"
+          ],
+          "learning_focus": "пространство, творчество, строительство, простая логика",
+          "access": "OPTIONAL_LICENSED_GAME_OR_ORIGINAL_SIM"
+        },
+        {
+          "title": "Kerbal Space Program",
+          "subject_ids": [
+            "structural_engineering"
+          ],
+          "learning_focus": "эксперименты с траекториями и проектирование с учётом упрощённой физики",
+          "access": "OPTIONAL_LICENSED_GAME_OR_ORIGINAL_SIM"
+        },
+        {
+          "title": "Cities: Skylines",
+          "subject_ids": [
+            "urban_planning",
+            "logistics"
+          ],
+          "learning_focus": "городская инфраструктура и транспортные связи",
+          "access": "OPTIONAL_LICENSED_GAME_OR_ORIGINAL_SIM"
+        },
+        {
+          "title": "Portal",
+          "subject_ids": [
+            "design",
+            "structural_engineering"
+          ],
+          "learning_focus": "пространственное мышление и головоломки",
+          "access": "OPTIONAL_LICENSED_GAME_OR_ORIGINAL_SIM"
         }
       ]
     }
