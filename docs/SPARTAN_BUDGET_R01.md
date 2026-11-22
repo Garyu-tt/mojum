@@ -12,13 +12,31 @@ crashes after reservation, the reservation remains debited, even if no usage
 receipt was obtained. An ambiguous timeout must not trigger a second dispatch
 under the same ID. A retry with a fresh ID requires additional budget.
 
-Example, from repository root:
+Example, from repository root (use an **absolute** path and private 0700 directory):
 
-    python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 init --tokens 100000 --micro-usd 1000000
-    python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 reserve --id task123-attempt1-model1 --worker 3 --tokens 4096 --micro-usd 25000
-    python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 settle --id task123-attempt1-model1 --worker 3 --actual-tokens 2940 --actual-micro-usd 11325
-    python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 status
-    python3 -m unittest discover -s tests -p 'test_spartan_lifetime_budget.py' -v
+```sh
+LEDGER_DIR="$HOME/.local/state/mojum/spartan-budget"
+mkdir -p "$LEDGER_DIR"
+chmod 700 "$LEDGER_DIR"
+LEDGER="$LEDGER_DIR/budget.sqlite3"
+python3 tools/spartan_budget.py --db "$LEDGER" init --tokens 100000 --micro-usd 1000000
+python3 tools/spartan_budget.py --db "$LEDGER" reserve --id task123-attempt1-model1 --worker 3 --tokens 4096 --micro-usd 25000
+python3 tools/spartan_budget.py --db "$LEDGER" settle --id task123-attempt1-model1 --worker 3 --actual-tokens 2940 --actual-micro-usd 11325
+python3 tools/spartan_budget.py --db "$LEDGER" status
+python3 -m unittest discover -s tests -p 'test_spartan_lifetime_budget.py' -v
+python3 -m unittest discover -s tests -p 'test_spartan_budget_private_storage.py' -v
+```
+
+POSIX storage is enforced *before* SQLite opens: the leaf directory must be
+owned by the service UID and inaccessible to all other users, and non-sticky
+writable or symlinked ancestor paths are refused. New database files use
+`O_CREAT|O_EXCL|O_NOFOLLOW` with mode 0600, independently of process umask.
+Existing DB, WAL, SHM and rollback-journal files must be regular, owner-owned,
+single-link and mode 0600; unsafe files are rejected without chmod or deletion.
+Relative paths, SQLite memory/URI paths and unsupported platforms fail closed.
+This protects against other-UID filesystem substitution, not a hostile root
+or a second worker already using the same UID. Secure SQLite is still not
+a provider-side spend guarantee.
 
 All operations run with SQLite WAL and BEGIN IMMEDIATE transactional locking.
 The cap is immutable once initialized, even if the ledger is reopened.
