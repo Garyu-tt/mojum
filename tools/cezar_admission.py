@@ -36,6 +36,13 @@ class AdmissionError(ValueError):
     pass
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse Cezar redirects before any follow-up request leaves loopback."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AdmissionError("Cezar dispatch redirect forbidden")
+
+
 def _reject_constant(_):
     raise AdmissionError("nonfinite JSON")
 
@@ -252,7 +259,7 @@ def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
     req = urllib.request.Request(url, json.dumps(body).encode("utf-8"),
                                  method="POST", headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(
                 req, timeout=timeout) as response:
             if response.status != 201 or response.geturl() != url:
                 raise AdmissionError("unexpected Cezar dispatch response")
