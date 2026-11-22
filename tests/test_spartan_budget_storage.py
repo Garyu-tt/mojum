@@ -7,6 +7,8 @@ import stat
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from mojum.spartan_budget import BudgetCaps, BudgetDenied, BudgetLedger
 
@@ -78,6 +80,31 @@ class BudgetPrivateStorageTests(unittest.TestCase):
         private.mkdir(mode=0o700)
         with self.assertRaisesRegex(BudgetDenied, "replaceable ancestor"):
             BudgetLedger(private / "ledger.sqlite3", self.caps)
+
+    def test_foreign_owned_ancestor_denied_even_if_sticky(self):
+        # A directory's owner can chmod it later. Sticky does not prevent
+        # that owner from replacing somebody else's entries inside it.
+        foreign = self.root / "foreign"
+        foreign.mkdir(mode=0o700)
+        private = foreign / "private"
+        private.mkdir(mode=0o700)
+        ledger = private / "ledger.sqlite3"
+        actual_lstat = Path.lstat
+
+        def foreign_owner(path):
+            info = actual_lstat(path)
+            if path == foreign:
+                return SimpleNamespace(st_mode=info.st_mode,
+                                       st_uid=os.getuid() + 1000)
+            return info
+
+        for mode in (0o755, 0o1777):
+            foreign.chmod(mode)
+            with patch.object(Path, "lstat", autospec=True,
+                              side_effect=foreign_owner):
+                with self.assertRaisesRegex(BudgetDenied, "untrusted ancestor"):
+                    BudgetLedger(ledger, self.caps)
+            self.assertFalse(ledger.exists())
 
     def test_concurrent_connections_preserve_private_files(self):
         path = self.root / "concurrent.sqlite3"
