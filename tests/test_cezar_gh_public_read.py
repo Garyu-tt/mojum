@@ -181,6 +181,30 @@ class CezarGhPublicReadTests(unittest.TestCase):
             with self.subTest(args=args), self.assertRaises(adapter.Refused):
                 adapter.parse(args)
 
+    def test_api_redirect_rejected_before_following_untrusted_location(self):
+        # A post-request response.geturl() check is too late: urllib normally
+        # follows 302 responses before returning a response to our caller.
+        with self.assertRaisesRegex(adapter.Refused, "redirect forbidden"):
+            adapter.NoRedirect().redirect_request(
+                None, None, 302, "Found",
+                {"Location": "https://example.invalid/redirect"},
+                "https://example.invalid/redirect",
+            )
+
+        def inspect_opener(*handlers):
+            self.assertTrue(any(isinstance(h, adapter.NoRedirect)
+                                for h in handlers),
+                            "API read must install the redirect-denying handler")
+            raise RuntimeError("handler confirmed before outgoing request")
+
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(adapter, "CACHE_DIR", Path(tmp)), patch.object(
+                    adapter.urllib.request, "build_opener",
+                    side_effect=inspect_opener):
+                with self.assertRaisesRegex(RuntimeError, "handler confirmed"):
+                    adapter.read(url, ttl=0)
+
     def test_public_cache_never_authenticates_and_reuses_response(self):
         class FakeResponse:
             status = 200
