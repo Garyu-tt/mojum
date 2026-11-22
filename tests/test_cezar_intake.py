@@ -240,12 +240,13 @@ class IntakeTests(unittest.TestCase):
     def test_systemd_unit_does_not_expose_host_or_secrets(self):
         root = MODULE.parent.parent / "ops" / "cezar" / "systemd"
         service = (root / "cezar-mojum-admission-r01.service").read_text()
-        self.assertIn("User=mirbi", service)
+        self.assertIn("User=cezar_gate", service)
+        self.assertIn("Group=cezar_gate", service)
         self.assertIn("ProtectSystem=strict", service)
         self.assertIn("ProtectHome=true", service)
         self.assertIn("NoNewPrivileges=true", service)
-        self.assertIn("ReadWritePaths=/var/lib/cezar/home/admission /var/lib/cezar/home/admission-prompts", service)
-        self.assertIn("InaccessiblePaths=/srv/mirbi", service)
+        self.assertIn("ReadWritePaths=/var/lib/cezar-gate/private", service)
+        self.assertIn("InaccessiblePaths=/var/lib/cezar /srv/mirbi", service)
         self.assertIn("cezar_intake.py", service)
         self.assertIn("--execute", service)
         self.assertNotIn("GITHUB_TOKEN", service)
