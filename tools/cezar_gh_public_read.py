@@ -185,7 +185,8 @@ def read(url, ttl):
             with os.fdopen(entry_fd, "rb") as entry:
                 info = os.fstat(entry.fileno())
                 if (not stat.S_ISREG(info.st_mode) or
-                        info.st_uid != os.geteuid() or info.st_mode & 0o077):
+                        info.st_uid != os.geteuid() or info.st_mode & 0o077 or
+                        info.st_nlink != 1):
                     raise Refused("cache entry not owner-private and regular")
                 age = time.time() - info.st_mtime
                 if 0 <= age < ttl:

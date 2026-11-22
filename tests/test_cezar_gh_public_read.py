@@ -261,6 +261,29 @@ class CezarGhPublicReadTests(unittest.TestCase):
             self.assertTrue(cached.is_symlink())
             self.assertEqual(foreign.read_text(encoding="utf-8"), foreign_content)
 
+    def test_cache_rejects_hardlinked_external_file(self):
+        # A regular mode-0600 file may be a hard link to unrelated content.
+        # Owner/mode and O_NOFOLLOW checks alone do not detect that alias.
+        if not hasattr(os, "link"):
+            self.skipTest("hard links unsupported on this platform")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            external = Path(tmp) / "unrelated.json"
+            injected = '{"items":[{"forged":true}]}'
+            external.write_text(json.dumps({"body": injected, "link": ""}),
+                                encoding="utf-8")
+            external.chmod(0o600)
+            os.link(external, cache_dir / filename)
+            with patch.object(adapter, "CACHE_DIR", cache_dir):
+                with self.assertRaisesRegex(adapter.Refused,
+                                            "cache entry not owner-private"):
+                    adapter.read(url, ttl=300)
+            self.assertEqual(json.loads(external.read_text(encoding="utf-8"))["body"],
+                             injected)
+
     def test_cache_rejects_symlink_in_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
