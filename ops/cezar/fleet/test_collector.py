@@ -241,6 +241,43 @@ class GitHubLifecycleTests(unittest.TestCase):
                          ["merged", "closed-unmerged"])
         self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
 
+    def test_corrupt_private_cache_recovers_via_public_get(self):
+        # A secure regular file may contain torn JSON after a crash.
+        self.cache.write_text('{"schema":', encoding="utf-8")
+        self.cache.chmod(0o600)
+        rows = f._closed_from_response(self._closed())
+        with patch.object(f, "_fetch_closed_rest", return_value=rows) as fetch:
+            result = f._github_closed_history(self.now)
+        fetch.assert_called_once_with()
+        self.assertTrue(result["snapshot_fresh"])
+        self.assertEqual(result["merged_in_visible_sample"], 1)
+        self.assertEqual(json.loads(self.cache.read_text())["recent"], rows)
+
+    def test_corrupt_private_cache_without_network_is_unavailable(self):
+        self.cache.write_text("{", encoding="utf-8")
+        self.cache.chmod(0o600)
+        with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
+            with self.assertRaisesRegex(f.FleetError, "unavailable"):
+                f._github_closed_history(self.now)
+
+    def test_inconsistent_merge_outcome_is_rejected_and_refetched(self):
+        good = f._closed_from_response(self._closed())
+        for item in ({**good[0], "merged_at": None},
+                     {**good[1], "merged_at": "2026-11-22T21:09:00Z"}):
+            with self.subTest(item=item):
+                invalid = {"schema": "cezar.github-closed-cache/1",
+                           "observed_at": self.now.isoformat(),
+                           "recent": [item]}
+                self.cache.write_text(json.dumps(invalid), encoding="utf-8")
+                self.cache.chmod(0o600)
+                with self.assertRaises(f.CorruptClosedCache):
+                    f._load_closed_cache()
+                with patch.object(f, "_fetch_closed_rest", return_value=good) as fetch:
+                    result = f._github_closed_history(self.now)
+                fetch.assert_called_once_with()
+                self.assertEqual(result["merged_in_visible_sample"], 1)
+                self.assertEqual(result["closed_unmerged_in_visible_sample"], 1)
+
     def test_stale_cache_is_labelled_stale_on_public_api_failure(self):
         with patch.object(f, "_fetch_closed_rest",
                           return_value=f._closed_from_response(self._closed())):
@@ -266,6 +303,8 @@ class GitHubLifecycleTests(unittest.TestCase):
         # simulate json.loads rejecting an over-deep local cache payload.
         with (patch.object(f, "_load_closed_cache",
                            side_effect=RecursionError("deep private JSON")),
+              patch.object(f, "_fetch_closed_rest",
+                           side_effect=TimeoutError("offline")),
               patch.object(f, "_cezar", return_value={"active": 1}),
               patch.object(f, "_schedule_list", return_value={"enabled": 5}),
               patch.object(f, "_models", return_value={"inference_busy_known": 0}),
@@ -276,7 +315,7 @@ class GitHubLifecycleTests(unittest.TestCase):
         self.assertEqual(snap["github"]["open_prs"], 12)
         self.assertEqual(snap["models"]["inference_busy_known"], 0)
         self.assertEqual(snap["github_history"],
-                         {"available": False, "reason": "RecursionError"})
+                         {"available": False, "reason": "FleetError"})
 
     def test_absent_cache_and_network_failure_is_unavailable(self):
         with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
