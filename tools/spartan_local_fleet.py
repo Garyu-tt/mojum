@@ -198,10 +198,16 @@ def call_model(backend, prompt, role, max_tokens, clone=0, request=None):
     text = message.get("content")
     if not isinstance(text, str) or not text.strip() or len(text) > 240000:
         raise FleetError("model returned empty/oversized text")
+    usage = data.get("usage")
+    if usage is None:
+        # Local OpenAI-compatible endpoints may omit usage or return null.
+        usage = {}
+    elif not isinstance(usage, dict):
+        raise FleetError("invalid model usage metadata")
     return {"device": backend.device, "model": backend.model,
             "port": backend.port, "clone": clone,
             "latency_s": round(time.monotonic() - start, 3),
-            "reported_completion_tokens": data.get("usage", {}).get("completion_tokens"),
+            "reported_completion_tokens": usage.get("completion_tokens"),
             "proposal": text}
 
 
@@ -323,37 +329,40 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
             alternatives.sort(key=lambda b: (b.model == backend.model, -b.ctx, b.port))
             targets.append(alternatives[0])
         def invoke(clone, target):
-            def measured():
-                if meter is not None:
-                    meter.begin()
-                try:
-                    return call_model(target, prompt, role, max_tokens,
-                                      clone=clone, request=request)
-                finally:
-                    if meter is not None:
-                        meter.end()
-
-            if locks is None:
-                return measured()
-            # Primary and cloned calls share per-physical-backend admission.
-            lock = locks[target.port]
-            if not lock.acquire(timeout=MODEL_SLOT_WAIT_SECONDS):
-                raise TransientFleetError("model slot remained busy")
+            if meter is not None:
+                meter.begin()
             try:
-                return measured()
+                return call_model(target, prompt, role, max_tokens,
+                                  clone=clone, request=request)
             finally:
-                lock.release()
+                if meter is not None:
+                    meter.end()
 
-        if len(targets) == 1:
-            results = [invoke(0, targets[0])]
-        else:
-            # These are genuinely simultaneous independent model calls when
-            # the two distinct physical backends have spare slots, rather
-            # than two sequential copies of the same proposal.
-            with ThreadPoolExecutor(max_workers=2) as clones_pool:
-                futures = [clones_pool.submit(invoke, i, target)
-                           for i, target in enumerate(targets)]
-                results = [future.result() for future in futures]
+        # Reserve BOTH model slots before launching a dual-clone pair.
+        # Taking per-call locks separately can split opposite-primary tasks
+        # across two single-slot models and prevent the paired RPCs overlapping.
+        acquired = []
+        try:
+            if locks is not None:
+                deadline = time.monotonic() + MODEL_SLOT_WAIT_SECONDS
+                for port in sorted({target.port for target in targets}):
+                    lock = locks[port]
+                    if not lock.acquire(
+                            timeout=max(0.0, deadline - time.monotonic())):
+                        raise TransientFleetError("model slot remained busy")
+                    acquired.append(lock)
+            if len(targets) == 1:
+                results = [invoke(0, targets[0])]
+            else:
+                # Both backend reservations are held only until both
+                # parallel calls complete, including exceptional exits.
+                with ThreadPoolExecutor(max_workers=2) as clones_pool:
+                    futures = [clones_pool.submit(invoke, i, target)
+                               for i, target in enumerate(targets)]
+                    results = [future.result() for future in futures]
+        finally:
+            for lock in reversed(acquired):
+                lock.release()
         artifact = {"schema": "mojum.spartan.local-proposal.v1",
                     "task_id": task["id"], "scope": task["scope"],
                     "worker": worker_id, "attempt": attempt,
