@@ -163,6 +163,37 @@ class FanoutContract(unittest.TestCase):
             with self.assertRaisesRegex(f.FanoutError, "cannot read tasks file"):
                 f.load_tasks_file(link)
 
+    def test_malformed_backend_json_cannot_overreport_free_slots(self):
+        # The last duplicate is_processing value would otherwise turn a busy
+        # slot into a free one; deep JSON can also exhaust parser recursion.
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *unused):
+                return False
+
+            def read(self, n):
+                return self.payload[:n]
+
+        cases = (
+            (b'[{"id":0,"n_ctx":2048,"is_processing":true,'
+             b'"is_processing":false}]', "duplicate backend JSON field"),
+            (b"[" * 20000 + b"0" + b"]" * 20000,
+             "invalid JSON response"),
+        )
+        for payload, message in cases:
+            with self.subTest(message=message):
+                fake = Mock(open=Mock(return_value=Response(payload)))
+                with self.assertRaisesRegex(f.FanoutError, message):
+                    f._request_json(18180, "/slots", opener=fake)
+
     def test_loopback_allowlist_and_post_paths(self):
         for port,path in ((22,"/health"),(18080,"/health"),
                           (18180,"http://example.invalid"),
