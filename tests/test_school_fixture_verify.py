@@ -104,6 +104,23 @@ class SchoolColdVerifyTests(unittest.TestCase):
 
     @unittest.skipUnless(
         os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "POSIX directory nofollow support required",
+    )
+    def test_initial_fixture_directory_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            alias = Path(temp) / "school-alias"
+            alias.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(SchoolContractError, "real directory"):
+                verify_scripted_fixture(alias, self.catalog)
+            # A rejected alias must not alter the actual private fixture.
+            self.assertEqual(
+                verify_scripted_fixture(target, self.catalog)["status"],
+                "MATCHES_SCRIPTED_REPLAY",
+            )
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
         "POSIX directory descriptors required",
     )
     def test_renamed_directory_does_not_redirect_a_pinned_verification(self):
