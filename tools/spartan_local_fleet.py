@@ -274,6 +274,44 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
                 "error": type(exc).__name__}
 
 
+def rotate_worker_ids(db_path, max_agents, count):
+    """Persist round-robin logical identities independent of physical slots.
+
+    The fleet-wide flock in run() serializes batches; the SQLite transaction
+    also keeps the cursor safe if a non-fleet reader accesses this database.
+    """
+    db = coordinator.connect(str(db_path))
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS fleet_rotation (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    next_agent INTEGER NOT NULL
+                        CHECK(next_agent BETWEEN 1 AND 300)
+                )
+            """)
+            row = db.execute(
+                "SELECT next_agent FROM fleet_rotation WHERE id=1"
+            ).fetchone()
+            stored = row["next_agent"] if row else 1
+            start = (stored - 1) % max_agents
+            agents = [((start + i) % max_agents) + 1 for i in range(count)]
+            following = ((start + count) % max_agents) + 1
+            db.execute(
+                "INSERT INTO fleet_rotation(id, next_agent) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET next_agent=excluded.next_agent",
+                (following,),
+            )
+            db.execute("COMMIT")
+            return agents
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+    finally:
+        db.close()
+
+
 def run(db_path, folder, *, max_agents, max_jobs, backends=None):
     if not 1 <= max_agents <= 300 or not 1 <= max_jobs <= MAX_PARALLEL:
         raise FleetError("invalid fleet bounds")
@@ -303,7 +341,7 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
         if not slots:
             raise FleetError("no observed live free inference slots")
         admitted = min(max_jobs, len(slots), max_agents)
-        agents = list(range(1, admitted + 1))
+        agents = rotate_worker_ids(db_path, max_agents, admitted)
         locks = {b.port: BoundedSemaphore(b.free) for b in discovered if b.free}
         results = []
         with ThreadPoolExecutor(max_workers=admitted) as pool:

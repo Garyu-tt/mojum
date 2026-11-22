@@ -162,6 +162,21 @@ class FleetTests(unittest.TestCase):
                                 request=fake_server)
         self.assertEqual(accepted["state"], "proposal_for_independent_review")
 
+    def test_durable_worker_identity_rotation_across_batches(self):
+        # Six physical slots must not pin all future tasks to agents 1..6.
+        for i in range(4):
+            self.add_task(f"round-{i}", scope=f"component.round.{i}")
+        with patch.object(fleet, "discover", return_value=self.backends), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            first = fleet.run(self.db, self.out, max_agents=300, max_jobs=2)
+            second = fleet.run(self.db, self.out, max_agents=300, max_jobs=2)
+        self.assertEqual({r["worker"] for r in first["results"]}, {1, 2})
+        self.assertEqual({r["worker"] for r in second["results"]}, {3, 4})
+        self.assertEqual(first["admitted_concurrent_model_calls"], 2)
+        self.assertEqual(second["admitted_concurrent_model_calls"], 2)
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["review"], 4)
+
     def test_no_duplicate_artifact_overwrite(self):
         x = fleet.save_private(self.out, "task-one", 1, {"a": 1})
         with self.assertRaises(FileExistsError):
