@@ -49,6 +49,7 @@ export function createVrmPoseProjector(vrm, bindings) {
   }
 
   let lastTick = -1;
+  let lastSimulationTimeNs = -1;
   function apply(packet) {
     if (packet === null || typeof packet !== 'object' ||
         Array.isArray(packet) ||
@@ -58,7 +59,7 @@ export function createVrmPoseProjector(vrm, bindings) {
         !Number.isSafeInteger(packet.tick) || packet.tick < 0 ||
         packet.tick <= lastTick ||
         !Number.isSafeInteger(packet.simulation_time_ns) ||
-        packet.simulation_time_ns < 0 ||
+        packet.simulation_time_ns <= lastSimulationTimeNs ||
         typeof packet.revision !== 'string' || !SHA256.test(packet.revision) ||
         !Array.isArray(packet.joints) || packet.joints.length !== entries.length) {
       throw new TypeError('invalid, stale or incomplete VRM pose snapshot');
@@ -85,6 +86,7 @@ export function createVrmPoseProjector(vrm, bindings) {
       throw error;
     }
     lastTick = packet.tick;
+    lastSimulationTimeNs = packet.simulation_time_ns;
     return {schema: SCHEMA, tick: lastTick, applied_joints: entries.length,
             visual_only: true};
   }
@@ -95,6 +97,7 @@ export function createVrmPoseProjector(vrm, bindings) {
     // Reset the visualization to the captured pose, not an invented T-pose.
     entries.forEach(e => { e.node.rotation[e.axis] = e.initialRotation; });
     lastTick = -1;
+    lastSimulationTimeNs = -1;
   }
 
   return Object.freeze({apply, resetReplay});
