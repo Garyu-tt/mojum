@@ -6,11 +6,13 @@ The separate trace-integrity QA verifies producer SHA-256 and strict import.
 Node runs only as an optional test harness, never as a viewer dependency.
 """
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,8 +166,24 @@ async function loadSynthetic() {
 
 
 class OfflineViewerPlaybackTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node unavailable; CI should run this test")
+    def test_missing_node_fails_ci_instead_of_skipping(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "true"}):
+                with self.assertRaisesRegex(AssertionError, "Node is required in CI"):
+                    self.test_actual_viewer_playback_navigation_and_cancellation()
+
+    def test_missing_node_can_skip_only_locally(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "", "GITHUB_ACTIONS": ""}):
+                with self.assertRaises(unittest.SkipTest):
+                    self.test_actual_viewer_playback_navigation_and_cancellation()
+
     def test_actual_viewer_playback_navigation_and_cancellation(self):
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+                self.fail("Node is required in CI for actual viewer playback acceptance")
+            self.skipTest("Node unavailable for optional local viewer test")
         # Four sequential public-format synthetic frames; no SQLite or private
         # user content. The trace is clearly legacy and requires explicit opt-in.
         frames = [
@@ -188,7 +206,7 @@ class OfflineViewerPlaybackTests(unittest.TestCase):
             file = Path(tmp) / "ephemeral.synthetic.jsonl"
             file.write_text(wire, encoding="utf-8")
             done = subprocess.run(
-                [shutil.which("node"), "-e", NODE_HARNESS, str(VIEWER), str(file)],
+                [node, "-e", NODE_HARNESS, str(VIEWER), str(file)],
                 cwd=ROOT, encoding="utf-8", capture_output=True,
                 timeout=20, check=False,
             )
