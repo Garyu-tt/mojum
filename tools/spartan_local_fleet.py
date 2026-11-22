@@ -146,7 +146,9 @@ def choose(backends, role):
     return candidates[0]
 
 
-def call_model(backend, prompt, role, max_tokens, clone=0, request=_http):
+def call_model(backend, prompt, role, max_tokens, clone=0, request=None):
+    if request is None:
+        request = _http
     if len(prompt) > min(MAX_PROMPT, backend.ctx * 3):
         raise FleetError("task prompt too long for current model context")
     system = ("You are one of 300 independent Mojum development agents. "
@@ -197,7 +199,7 @@ def save_private(folder: Path, task_id: str, attempt: int, artifact):
 
 
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
-           request=_http):
+           request=None):
     db = coordinator.connect(str(db_path))
     try:
         coordinator.create_schema(db)
