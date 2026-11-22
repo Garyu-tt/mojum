@@ -1,4 +1,5 @@
 import os
+import stat
 import sys
 import subprocess
 import tempfile
@@ -307,6 +308,78 @@ sys.exit(1)
                          and os.open in os.supports_dir_fd
                          and os.mkdir in os.supports_dir_fd,
                          "POSIX pinned output directory writes required")
+    def test_patch_artifact_fsyncs_file_then_directory(self):
+        out = self.root / "private-sync" / "patches"
+        out.mkdir(parents=True, mode=0o700)
+        original = os.fsync
+        calls = []
+
+        def record(fd):
+            mode = os.fstat(fd).st_mode
+            calls.append("file" if stat.S_ISREG(mode) else
+                         "directory" if stat.S_ISDIR(mode) else "other")
+            return original(fd)
+
+        with patch.object(legion.os, "fsync", side_effect=record):
+            legion._write_private_patch(out, "candidate.patch", "durable diff\\n")
+        self.assertEqual(calls, ["file", "directory"])
+        self.assertEqual((out / "candidate.patch").read_text(), "durable diff\\n")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_directory_creation_fsyncs_each_parent(self):
+        out = self.root / "fresh-ancestor-sync" / "patches"
+        original = os.fsync
+        calls = []
+
+        def record(fd):
+            mode = os.fstat(fd).st_mode
+            calls.append("file" if stat.S_ISREG(mode) else
+                         "directory" if stat.S_ISDIR(mode) else "other")
+            return original(fd)
+
+        with patch.object(legion.os, "fsync", side_effect=record):
+            legion._write_private_patch(out, "candidate.patch", "durable diff\\n")
+        self.assertEqual(calls, ["directory", "directory", "file", "directory"])
+        self.assertEqual((out / "candidate.patch").read_text(), "durable diff\\n")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_file_sync_failure_unlinks_partial(self):
+        out = self.root / "private-file-sync" / "patches"
+        out.mkdir(parents=True, mode=0o700)
+        with patch.object(legion.os, "fsync", side_effect=OSError("sync failure")):
+            with self.assertRaisesRegex(ValueError, "persist"):
+                legion._write_private_patch(out, "candidate.patch", "incomplete")
+        self.assertFalse((out / "candidate.patch").exists())
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_directory_sync_failure_unlinks_partial(self):
+        out = self.root / "private-dir-sync" / "patches"
+        out.mkdir(parents=True, mode=0o700)
+        original = os.fsync
+
+        def fail_directory(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError("directory sync failure")
+            return original(fd)
+
+        with patch.object(legion.os, "fsync", side_effect=fail_directory):
+            with self.assertRaisesRegex(ValueError, "persist"):
+                legion._write_private_patch(out, "candidate.patch", "incomplete")
+        self.assertFalse((out / "candidate.patch").exists())
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
     def test_patch_artifact_rejects_shared_output_directory(self):
         shared = self.root / "untrusted"
         shared.mkdir()
@@ -334,6 +407,80 @@ sys.exit(1)
             legion._write_private_patch(link / "patches", "candidate.patch", "secret")
         self.assertFalse((trusted / "patches").exists())
 
+
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd,
+                         "POSIX private output directory required")
+    def test_relative_patch_output_records_absolute_reviewer_reference(self):
+        from unittest.mock import Mock
+        task = {"id": "relative-output", "attempts": 1, "payload": "{}"}
+        connection = Mock()
+        diff = "diff --git a/src/test.py b/src/test.py\n"
+        previous = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with (
+                patch.object(legion.queue, "connect", return_value=connection),
+                patch.object(legion.queue, "claim", return_value=task),
+                patch.object(legion.queue, "finish", return_value=True) as finish,
+                patch.object(legion.subprocess, "run",
+                             return_value=Mock(returncode=0, stdout=b"")),
+                patch.object(legion.subprocess, "check_output", return_value="a" * 40),
+                patch.object(legion, "task_context",
+                             return_value=("prompt", ["src/test.py"])),
+                patch.object(legion, "generate", return_value=diff),
+                patch.object(legion, "verify", return_value=diff),
+            ):
+                result = legion.run_one(
+                    "unused.sqlite3", 1, self.root, Path("relative-private") / "patches",
+                    "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5,
+                )
+        finally:
+            os.chdir(previous)
+        self.assertEqual(result["state"], "review")
+        persisted = Path(result["patch"])
+        self.assertTrue(persisted.is_absolute())
+        self.assertTrue(persisted.is_file())
+        self.assertEqual(persisted.parent, self.root / "relative-private" / "patches")
+        self.assertEqual(finish.call_args.args[5], str(persisted))
+        connection.close.assert_called_once()
+
+    def test_relative_patch_output_rejects_traversal_before_claim(self):
+        with self.assertRaisesRegex(ValueError, "traversal"):
+            legion.run_one("unused.sqlite3", 1, self.root, Path("../unsafe"),
+                           "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5)
+
+    def test_expired_review_lease_discards_unreferenced_patch(self):
+        # A stale attempt must not leak disk space through orphan proposals.
+        from unittest.mock import Mock
+        out = self.root / "expired-review" / "patches"
+        task = {"id": "expired-task", "attempts": 1, "payload": "{}"}
+        conn = Mock()
+        diff = "diff --git a/src/test.py b/src/test.py\n"
+        with (
+            patch.object(legion.queue, "connect", return_value=conn),
+            patch.object(legion.queue, "claim", return_value=task),
+            patch.object(legion.queue, "finish",
+                         side_effect=lambda *args, **kwargs: args[3] == "blocked") as finish,
+            patch.object(legion.subprocess, "run",
+                         return_value=Mock(returncode=0, stdout=b"")),
+            patch.object(legion.subprocess, "check_output", return_value="a" * 40),
+            patch.object(legion, "task_context",
+                         return_value=("prompt", ["src/test.py"])),
+            patch.object(legion, "generate", return_value=diff),
+            patch.object(legion, "verify", return_value=diff),
+        ):
+            result = legion.run_one(
+                str(self.root / "not-written.sqlite3"), 1, self.root, out,
+                "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5,
+            )
+        self.assertEqual(result["state"], "blocked")
+        self.assertIn("lease expired", result["reason"])
+        self.assertEqual(list(out.glob("*.patch")), [])
+        self.assertEqual([call.args[3] for call in finish.call_args_list],
+                         ["review", "blocked"])
+        conn.close.assert_called_once()
 
     def _run_cli_with_fake_workers(self, fake_worker):
         import io
