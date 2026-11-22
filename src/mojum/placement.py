@@ -96,7 +96,8 @@ def plan(jobs, nodes, *, local_node_id, trusted_remote_ids=frozenset()):
     _check_id(local_node_id)
     if (type(jobs) not in (tuple, list) or len(jobs) > MAX_JOBS
             or type(nodes) not in (tuple, list) or not 1 <= len(nodes) <= MAX_NODES
-            or type(trusted_remote_ids) is not frozenset):
+            or type(trusted_remote_ids) is not frozenset
+            or len(trusted_remote_ids) >= MAX_NODES):
         raise PlacementError("invalid planner input")
     if (any(type(j) is not StatelessJob for j in jobs)
             or any(type(n) is not NodeBudget for n in nodes)
