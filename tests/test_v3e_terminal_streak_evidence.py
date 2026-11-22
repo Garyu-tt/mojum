@@ -48,6 +48,42 @@ class TerminalStreakEvidenceTests(unittest.TestCase):
                                     "blocked-probe streak lacks measured outcomes"):
             CellExplorerV3Escape.from_snapshot(state)
 
+    def test_recent_movement_cell_invalidates_rest_streak(self):
+        # Tick 1 was necessarily a movement, hence ticks 1..2 cannot be
+        # consecutive rests even though two older aggregate rests exist.
+        state = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "last_tick": 2, "updates": 3,
+            "records": {
+                "0:0": {"rest": [2, 0]},
+                "1:0": {"x+": [1, 0]},
+            },
+            "last_seen_at": {"0:0": 2, "1:0": 1},
+            "evictions": 0, "forgotten_observations": 0,
+            "consecutive_rests": 2, "consecutive_blocked_probes": 0,
+        }
+        with self.assertRaisesRegex(CellV3EscapeError,
+                                    "recent cell lacks measured rest"):
+            CellExplorerV3Escape.from_snapshot(state)
+
+    def test_recent_unblocked_cell_invalidates_probe_streak(self):
+        # Tick 1 was necessarily unblocked; two blocked outcomes in an
+        # older cell cannot justify a two-tick terminal blocked streak.
+        state = {
+            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "last_tick": 2, "updates": 3,
+            "records": {
+                "0:0": {"x+": [2, 2]},
+                "1:0": {"y+": [1, 0]},
+            },
+            "last_seen_at": {"0:0": 2, "1:0": 1},
+            "evictions": 0, "forgotten_observations": 0,
+            "consecutive_rests": 0, "consecutive_blocked_probes": 2,
+        }
+        with self.assertRaisesRegex(CellV3EscapeError,
+                                    "recent cell lacks measured blocked move"):
+            CellExplorerV3Escape.from_snapshot(state)
+
     def test_valid_cross_cell_blocked_probe_streak_roundtrips(self):
         policy = CellExplorerV3Escape()
         for tick in range(2):
