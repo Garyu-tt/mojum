@@ -568,7 +568,9 @@ def _run_gh_json(command: Sequence[str], *, label: str) -> dict[str, object]:
         detail = (completed.stderr or completed.stdout or "").strip()
         raise FetchError(f"{label} exited {completed.returncode}: {detail}")
     try:
-        payload = json.loads(completed.stdout)
+        # Live gh responses must not bypass the duplicate-key validation
+        # applied to offline snapshots and nested CI check entries.
+        payload = _decode_snapshot_bytes(completed.stdout.encode("utf-8"))
     except json.JSONDecodeError as error:
         raise FetchError(f"{label} returned invalid JSON: {error}") from error
     if not isinstance(payload, dict):
