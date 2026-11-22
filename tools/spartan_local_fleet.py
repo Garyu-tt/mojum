@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sqlite3
 import time
 from threading import BoundedSemaphore
 from urllib.error import HTTPError, URLError
@@ -396,12 +397,22 @@ def main():
     p.add_argument("--status", action="store_true")
     args = p.parse_args()
     if args.status:
-        db = coordinator.connect(args.db)
+        # A status probe must never create or migrate a coordinator database.
+        # Use SQLite URI read-only mode instead of coordinator.connect(), which
+        # creates missing files and sets writable WAL journal pragmas.
+        db_path = Path(args.db)
+        if not db_path.is_file() or db_path.is_symlink():
+            raise FleetError("coordinator database missing or unsafe")
         try:
-            coordinator.create_schema(db)
-            status = coordinator.status(db)
-        finally:
-            db.close()
+            db = sqlite3.connect(db_path.absolute().as_uri() + "?mode=ro",
+                                 uri=True, timeout=30, isolation_level=None)
+            db.row_factory = sqlite3.Row
+            try:
+                status = coordinator.status(db)
+            finally:
+                db.close()
+        except sqlite3.DatabaseError as exc:
+            raise FleetError("cannot read coordinator status") from exc
         models = discover()
         print(json.dumps({"coordinator": status,
                           "physical_models": [b.__dict__ for b in models],

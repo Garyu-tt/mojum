@@ -50,6 +50,31 @@ class FleetTests(unittest.TestCase):
             sc.enqueue(db, [{"id": task_id, "scope": scope,
                              "priority": 10, "payload": payload}], 101)
 
+    def test_status_never_creates_missing_sqlite_and_reads_existing(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        missing = self.root / "missing.sqlite3"
+        argv = ["fleet", "--db", str(missing), "--output-dir", str(self.out),
+                "--status"]
+        with patch.object(sys, "argv", argv), \
+             patch.object(fleet, "discover", return_value=self.backends):
+            with self.assertRaisesRegex(fleet.FleetError, "database missing"):
+                fleet.main()
+        self.assertFalse(missing.exists())
+        self.assertFalse(Path(str(missing) + "-wal").exists())
+        self.assertFalse(Path(str(missing) + "-shm").exists())
+
+        argv[2] = str(self.db)
+        capture = StringIO()
+        with patch.object(sys, "argv", argv), \
+             patch.object(fleet, "discover", return_value=self.backends), \
+             redirect_stdout(capture):
+            fleet.main()
+        payload = json.loads(capture.getvalue())
+        self.assertEqual(payload["coordinator"]["slots"], 300)
+        self.assertEqual(payload["live_free_model_slots"], 6)
+
     def test_live_slots_and_cpu_gpu_inventory(self):
         self.assertEqual(len(self.backends), 3)
         self.assertEqual(sum(x.free for x in self.backends), 6)
