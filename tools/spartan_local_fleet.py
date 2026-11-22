@@ -198,10 +198,16 @@ def call_model(backend, prompt, role, max_tokens, clone=0, request=None):
     text = message.get("content")
     if not isinstance(text, str) or not text.strip() or len(text) > 240000:
         raise FleetError("model returned empty/oversized text")
+    usage = data.get("usage")
+    if usage is None:
+        # Local OpenAI-compatible endpoints may omit usage or return null.
+        usage = {}
+    elif not isinstance(usage, dict):
+        raise FleetError("invalid model usage metadata")
     return {"device": backend.device, "model": backend.model,
             "port": backend.port, "clone": clone,
             "latency_s": round(time.monotonic() - start, 3),
-            "reported_completion_tokens": data.get("usage", {}).get("completion_tokens"),
+            "reported_completion_tokens": usage.get("completion_tokens"),
             "proposal": text}
 
 
