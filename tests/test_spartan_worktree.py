@@ -57,6 +57,31 @@ class WorktreeTests(unittest.TestCase):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, self.root, "task-1", self.sha)
 
+    def test_rejects_existing_branch_without_touching_it(self):
+        # A worker must not adopt another worker's existing branch, even
+        # when the requested destination is still empty.
+        subprocess.check_call(
+            ["git", "-C", str(self.repo), "branch", "spartan/task-occupied", self.sha])
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, self.root, "task-occupied", self.sha)
+        self.assertFalse((self.root / "task-occupied").exists())
+        branch_sha = subprocess.check_output(
+            ["git", "-C", str(self.repo), "rev-parse",
+             "refs/heads/spartan/task-occupied"], text=True).strip()
+        self.assertEqual(branch_sha, self.sha)
+
+    def test_rejects_symlink_destination_without_touching_target(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        alias = self.root / "task-linked"
+        try:
+            alias.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable")
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, self.root, "task-linked", self.sha)
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_rejects_invalid_identifiers(self):
         for task in ("../escape", "UPPER", "a/b", "-bad", "x" * 49):
             with self.subTest(task=task), self.assertRaises(mod.IsolationError):
