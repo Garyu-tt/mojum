@@ -1,0 +1,37 @@
+name: Mojum MuJoCo 3.17 servo cloth compatibility QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cloth_flex_spike.py'
+      - 'tests/test_cloth_flex_mujoco317_runtime.py'
+      - '.github/workflows/cloth-flex-mujoco317-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  flex-mujoco317:
+    name: cloth-mujoco317 (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    env:
+      MOJUM_MUJOCO_317_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned 3.17 engine seen failing on source PR 588
+        run: python -m pip install --disable-pip-version-check 'mujoco==3.17.0'
+      - name: Compile, step and benchmark real flex on MuJoCo 3.17
+        run: python -m unittest discover -s tests -p 'test_cloth_flex_mujoco317_runtime.py' -v
