@@ -1,5 +1,7 @@
 """Hermetic security and no-replay tests for the Cezar Telegram replacement."""
 import importlib.util
+import os
+import stat
 import tempfile
 from pathlib import Path
 import unittest
@@ -173,6 +175,44 @@ class CezarTelegramTests(unittest.TestCase):
         self.state_path.chmod(0o644)
         with self.assertRaises(bot.BotFailure):
             bot._state()
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"),
+                         "pinned POSIX private file reads required")
+    def test_private_state_symlink_is_rejected_before_read(self):
+        outside = self.base / "outside.json"
+        outside.write_text('{"schema":1}', encoding="utf-8")
+        outside.chmod(0o600)
+        self.state_path.symlink_to(outside)
+        with self.assertRaises(bot.BotFailure):
+            bot._state()
+
+    def test_private_state_rejects_oversized_regular_file(self):
+        self.state_path.write_bytes(b"x" * (bot.STATE_MAX_BYTES + 1))
+        self.state_path.chmod(0o600)
+        with self.assertRaises(bot.BotFailure):
+            bot._state()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory durability")
+    def test_state_save_fsyncs_file_then_directory(self):
+        original = os.fsync
+        synced = []
+
+        def record(fd):
+            mode = os.fstat(fd).st_mode
+            synced.append("file" if stat.S_ISREG(mode) else
+                          "directory" if stat.S_ISDIR(mode) else "other")
+            return original(fd)
+
+        with patch.object(bot.os, "fsync", side_effect=record):
+            bot.save(self.state)
+        self.assertEqual(synced, ["file", "directory"])
+        self.assertEqual(bot._state()["schema"], 1)
+
+    def test_http_redirects_are_denied(self):
+        with self.assertRaises(bot.BotFailure):
+            bot.NoRedirect().redirect_request(
+                None, None, 302, "redirect", {}, "https://untrusted.example/"
+            )
 
     def test_unicode_title_control_characters_are_neutralized(self):
         self.assertEqual(bot.stable_text("foo\nbar\x00z"),"foo bar z")
