@@ -47,6 +47,42 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertFalse(verdict["merge_performed"])
             self.assertNotIn(str(path), output.getvalue())
 
+    def test_duplicate_json_keys_cannot_mask_pr_or_check_state(self):
+        # Last-wins JSON decoding can silently replace draft=True or a
+        # failed check with an apparently safe value. Refuse the ambiguity.
+        cases = (
+            b'{"isDraft":true,"isDraft":false}',
+            b'{"statusCheckRollup":[{"status":"FAILURE","status":"COMPLETED"}]}',
+            b'{"statusCheckRollup":[{"name":"one","name":"two"}]}',
+        )
+        for payload in cases:
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "snapshot.json"
+                path.write_bytes(payload)
+                with self.assertRaisesRegex(SnapshotError, "duplicate JSON key"):
+                    _load_snapshot(str(path))
+                with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(payload))):
+                    with self.assertRaisesRegex(SnapshotError, "duplicate JSON key"):
+                        _load_snapshot("-")
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = main([
+                        "--input", str(path),
+                        "--expected-head-sha", "a" * 40,
+                        "--expected-base-sha", "b" * 40,
+                    ])
+                self.assertEqual(code, 1)
+                verdict = json.loads(output.getvalue())
+                self.assertEqual(verdict["code"], "INVALID_INPUT")
+                self.assertFalse(verdict["merge_performed"])
+
+    def test_distinct_nested_snapshot_fields_are_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "snapshot.json"
+            obj = {"statusCheckRollup": [{"name": "Aquarium", "status": "COMPLETED"}]}
+            path.write_text(json.dumps(obj), encoding="utf-8")
+            self.assertEqual(_load_snapshot(str(path)), obj)
+
     def test_missing_secure_open_flags_fail_closed_before_read(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "pr.json"
