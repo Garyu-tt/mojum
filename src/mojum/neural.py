@@ -115,11 +115,20 @@ class PulsePredictor:
                  or not all(_finite(v) and 0 <= v <= 1 for v in pending)
                  or pending[0] != 1.0)):
             raise NeuralError("invalid pending features")
+        # Each squared error is in [0, 1]: both the binary label and the
+        # clamped prediction are in [0, 1]. More loss than updates cannot
+        # have been produced by observe(), even if the snapshot was rehashed.
         if (type(updates) is not int or updates < 0
-                or not _finite(state["loss_sum"]) or state["loss_sum"] < 0):
+                or not _finite(state["loss_sum"])
+                or not 0 <= state["loss_sum"] <= updates):
             raise NeuralError("invalid online-learning counters")
+        # Each successful observation has a strictly increasing nonnegative
+        # integer timestamp. With N observations, at least N-1 nanoseconds
+        # must have elapsed; the first observation is not a training update.
         if ((last is None and (pending is not None or updates != 0))
-                or (last is not None and (type(last) is not int or last < 0 or pending is None))):
+                or (last is not None and
+                    (type(last) is not int or last < 0
+                     or pending is None or updates > last))):
             raise NeuralError("invalid previous sensory time")
         inst._weights = list(weights)
         inst._pending = copy.deepcopy(pending)

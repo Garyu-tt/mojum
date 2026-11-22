@@ -175,6 +175,46 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
             export_private_trace(other, self.out, SEED, GRAPH, allow_private_export=True)
         self.assertFalse(self.out.exists())
 
+    def test_frame_limit_validation_boundary_is_inclusive_at_maximum(self):
+        fits = {"neural_mode": "disabled"}
+        with self.aquarium(**fits) as a:
+            a.step()
+        report = self.exported(start_tick=0, frame_limit=5000, **fits)
+        self.assertEqual(report["frames"], 1)
+        self.assertFalse(report["has_more"])
+        for bad in (0, -1, 5001):
+            with self.subTest(frame_limit=bad):
+                dest = self.root / f"invalid-{bad}.jsonl"
+                with self.assertRaisesRegex(
+                        ValueError, r"frame_limit must be an integer in 1\.\.5000"):
+                    export_private_trace(
+                        self.db, dest, SEED, GRAPH, allow_private_export=True,
+                        start_tick=0, frame_limit=bad, **fits,
+                    )
+                self.assertFalse(dest.exists())
+
+    def test_exact_maximum_frame_history_and_first_overflow(self):
+        fits = {"neural_mode": "disabled", "motor_mode": "scripted"}
+        with self.aquarium(**fits) as a:
+            for _ in range(5001):
+                a.step()
+        # Exactly MAX_FRAMES selected frames are a valid bounded slice.
+        report = self.exported(start_tick=0, frame_limit=5000, **fits)
+        self.assertEqual(report["frames"], 5000)
+        self.assertTrue(report["has_more"])
+        self.assertEqual(report["next_tick"], 5000)
+        lines = self.out.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 5001)
+        self.assertEqual(json.loads(lines[-1])["trace_integrity"]["frame_count"], 5000)
+        # Requesting the whole 5001-frame history fails closed, never truncates.
+        full = self.root / "full-history.jsonl"
+        with self.assertRaisesRegex(ValueError, "at most 5000 frames"):
+            export_private_trace(
+                self.db, full, SEED, GRAPH, allow_private_export=True, **fits,
+            )
+        self.assertFalse(full.exists())
+        self.assertEqual(list(self.root.glob(".mojum-private-trace-*")), [])
+
     def test_trace_size_limit_fail_closed_and_no_partial_file(self):
         with self.aquarium() as a:
             a.step()
@@ -270,6 +310,43 @@ class PrivateAquariumTraceExportTests(unittest.TestCase):
         self.assertEqual(frames[0]["developmental_controller"]["intent"]["kind"], "north")
         self.assertEqual(footer["journal_head"], head)
         self.assertNotIn("temporal_range_state", footer)
+
+    def test_cli_exports_committed_developmental_controller_frames(self):
+        with self.aquarium(motor_mode="developmental_fixture",
+                           sensory_mode="toy_probe",
+                           brain_mode="developmental_controller") as aquarium:
+            recorded = [aquarium.step() for _ in range(4)]
+            head = aquarium.store.head()
+        before = self.db.read_bytes()
+        command = [
+            sys.executable, "-m", "mojum.aquarium_trace_export",
+            "--db", str(self.db), "--output", str(self.out),
+            "--motor-mode", "developmental_fixture", "--sensory-mode", "toy_probe",
+            "--expected-head", head, "--allow-private-export",
+        ]
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        refused = subprocess.run(command, cwd=self.root, env=env, encoding="utf-8",
+                                 capture_output=True, timeout=30)
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("mode mismatch", refused.stderr)
+        self.assertFalse(self.out.exists())
+        self.assertEqual(self.db.read_bytes(), before)
+
+        accepted = subprocess.run(
+            [*command, "--brain-mode", "developmental_controller"],
+            cwd=self.root, env=env, encoding="utf-8", capture_output=True, timeout=30,
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        report = json.loads(accepted.stdout)
+        self.assertEqual(report["frames"], len(recorded))
+        self.assertEqual(report["journal_head"], head)
+        self.assertNotIn("brain", report)
+        self.assertEqual(self.db.read_bytes(), before)
+        frames, footer = self.frames_and_summary()
+        self.assertEqual(frames, recorded)
+        self.assertEqual(frames[0]["brain"]["schema"], "mojum.neural.developmental-controller/1")
+        self.assertEqual(footer["journal_head"], head)
+        self.assertNotIn("brain", footer)
 
 
 if __name__ == "__main__":

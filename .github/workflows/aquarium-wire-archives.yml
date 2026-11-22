@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/mojum/aquarium.py'
       - 'src/mojum/aquarium_wire.py'
+      - 'src/mojum/policy_identity.py'
       - 'src/mojum/noosphere.py'
       - 'src/mojum/developmental.py'
       - 'tests/test_aquarium_wire.py'
@@ -13,6 +14,14 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  # Deduplicate first attempts for a PR while keeping retries and other events independent.
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.run_attempt == '1'
+      && format('pr-{0}', github.event.pull_request.number)
+      || format('run-{0}-attempt-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == '1' }}
 
 jobs:
   archive-policy-identification:

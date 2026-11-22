@@ -8,11 +8,49 @@ The checked-in Python stdlib fixture runs **offline on one CPU**. It has a versi
 
 Release acceptance and the remaining work on the integrated sensorimotor loop are tracked on GitHub. [Acceptance #51](https://github.com/Garyu-tt/mojum/issues/51) · [Sensorimotor integration #55](https://github.com/Garyu-tt/mojum/issues/55)
 
+## Exact-head CI merge gate (acceptance tooling)
+
+`mojum.merge_gate` turns a PR snapshot into a `ready` / `defer` / `reject`
+verdict for one exact commit and never performs a merge. Pass the snapshot from
+`gh pr view --json ...` with the SHA you intend to merge:
+
+```sh
+PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
+  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+```
+
+Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
+See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
+the recommended `gh pr merge --match-head-commit` sequence. The gate is a
+client-side guard; repository rulesets remain authoritative.
+
 ## Offline room designer (experimental)
 
 Open [the local SVG editor](tools/room_designer.html) with its three adjacent JavaScript files to draw a synthetic 2D point-room, move the start marker and rectangles, preserve exact decimal tokens, save/reopen JSON and preview up to 512 collision-only steps. Undo/Redo and a bounded 64-snapshot history work without a server. For a **single portable HTML file**, use `python tools/package_room_designer.py --out room-designer-offline.html`. See [editor limitations](docs/R015_VISUAL_ROOM_DESIGNER.md).
 
-**Input-only, offline authoring at this stage:** the typed-room JSON CLI required to create a custom Aquarium SQLite journal has not been merged into `main`; this editor does not claim runtime integration, MuJoCo or real physical contact.
+### Opt-in Aquarium room draft (experimental)
+
+Export a room from the offline SVG editor as a versioned
+`mojum.world.point-room-draft/1` JSON file, then boot a **new** PRIVATE
+Aquarium journal with it:
+
+```sh
+PYTHONPATH=src python -m mojum.room_spec ./my-room.json --format json
+PYTHONPATH=src python -m mojum.aquarium --db ./custom_room_PRIVATE.sqlite3 \
+  --room-file ./my-room.json --ticks 120 --neural-mode disabled
+```
+
+Supply the **same** `--room-file` when reopening that journal. The CLI
+validates strict JSON, duplicate keys, a 256 KiB size cap, geometry and a
+point-room-safe start **before** creating SQLite; existing journals reject
+changes to the pinned runtime room. The exact authored numeric tokens are
+checked on input, but the stored Aquarium manifest pins converted Python
+float geometry, **not a hash of the original draft bytes**. This remains a
+synthetic 2D point-room, not MuJoCo or physical contact. The legacy
+fixed-room `local_cell_*` modes intentionally refuse custom rooms. The
+portable foreground host has not yet gained `--room-file` support.
+
+The editor itself is input-only and does not edit a running organism.
 
 ## Run the current aquarium
 
@@ -253,6 +291,13 @@ v2B SQLite schema remains compatible with the original #115 runtime.
 For original #112 history, use `--motor-mode local_cell_v2_a_archive
 --ticks 0` and the original genome, graph, and neural mode. Both profiles
 use the exact built-in point-room and frame-only journals without toy sensing.
+
+`aquarium_wire` identifies the older `coarse_v1` goal-free journals from
+#112 and #115 as `legacy_coarse_v1`. Replay a copy using the original
+runtime with `--exploration-mode goal_free --ticks 0` and the original
+genome, graph, and neural mode. Current Aquarium refuses those journals
+under either v2 profile and preserves the source file.
+[Pinned historical runtimes](.github/workflows/aquarium-wire-archives.yml)
 
 To transfer a verified v2A history into a separate new v2B file, use
 `python -m mojum.migration_v2a_v2b` with the original genome and graph,

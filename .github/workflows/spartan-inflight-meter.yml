@@ -1,0 +1,33 @@
+name: Spartan instrumented RPC meter (offline)
+on:
+  pull_request:
+    paths:
+      - 'tools/spartan_inflight_meter.py'
+      - 'tests/test_spartan_inflight_meter.py'
+      - 'docs/SPARTAN_INFLIGHT_METER_R01.md'
+      - '.github/workflows/spartan-inflight-meter.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/spartan_inflight_meter.py'
+      - 'tests/test_spartan_inflight_meter.py'
+      - '.github/workflows/spartan-inflight-meter.yml'
+permissions:
+  contents: read
+jobs:
+  offline-stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run SQLite meter regressions without model credentials
+        run: python -m unittest discover -s tests -p test_spartan_inflight_meter.py -v

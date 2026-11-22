@@ -15,9 +15,10 @@ mojum-aquarium = "mojum.aquarium:main"
 mojum-aquarium-wire = "mojum.aquarium_wire:main"
 mojum-motor-mobility = "mojum.motor_mobility:main"
 mojum-fixture = "mojum.__main__:main"
-mojum-host = "mojum.portable_host:main"
+mojum-host = "mojum.portable_host:cli"
 mojum-room-check = "mojum.room_spec:main"
 mojum-motor-play-v2 = "mojum.motor_play_v2_eval:main"
+mojum-merge-gate = "mojum.merge_gate:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

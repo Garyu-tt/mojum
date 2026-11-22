@@ -7,7 +7,10 @@ proof of human learning, or protection against a malicious same-UID writer.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import errno
 import json
+import os
 from itertools import islice
 from pathlib import Path
 import stat
@@ -26,14 +29,91 @@ VERIFY_SCHEMA = "mojum.school-fixture-verification/1"
 MAX_MANIFEST_BYTES = 65_536
 
 
-def _read_regular_bounded(path: Path, limit: int) -> bytes:
-    """Read at most limit bytes; reject symlinks and nonregular entries."""
+@contextmanager
+def _fixture_directory(target: Path):
+    """Pin one real POSIX directory across enumeration and all file reads.
+
+    On non-POSIX systems retain the existing best-effort path checks; those
+    platforms do not receive a claim of race-resistant cold verification.
+    """
+    if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"):
+        try:
+            fd = os.open(
+                target, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+        except OSError as error:
+            raise SchoolContractError("fixture must be a real directory") from error
+        try:
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise SchoolContractError("fixture must be a real directory")
+            yield fd
+        finally:
+            os.close(fd)
+    else:
+        try:
+            if target.is_symlink() or not target.is_dir():
+                raise SchoolContractError("fixture must be a real directory")
+        except OSError as error:
+            raise SchoolContractError("cannot inspect school fixture directory") from error
+        yield None
+
+
+def _read_regular_bounded(path: Path, limit: int, *, directory_fd: int | None = None) -> bytes:
+    """Open a bounded regular file, relative to a pinned directory on POSIX."""
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
-            raise SchoolContractError("school fixture contains a nonregular file")
-        with path.open("rb") as source:
-            payload = source.read(limit + 1)
+        if directory_fd is not None:
+            # O_NOFOLLOW prevents swapping the entry to a symlink after a
+            # directory listing. O_NONBLOCK prevents a substituted FIFO from
+            # stalling the verifier before fstat can reject it.
+            if not hasattr(os, "O_NONBLOCK"):
+                raise SchoolContractError(
+                    "nonblocking file opens required for pinned fixture verification"
+                )
+            flags = (os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                     | getattr(os, "O_CLOEXEC", 0))
+            # The directory fd pins ancestry, but a concurrent writer may
+            # still replace a regular entry with another regular inode.
+            # Fail closed even when the replacement carries identical bytes.
+            before = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode):
+                raise SchoolContractError("school fixture contains a nonregular file")
+            with os.fdopen(os.open(path.name, flags, dir_fd=directory_fd), "rb") as source:
+                opened = os.fstat(source.fileno())
+                if not stat.S_ISREG(opened.st_mode):
+                    raise SchoolContractError("school fixture contains a nonregular file")
+                if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise SchoolContractError("school fixture file changed while opening")
+                payload = source.read(limit + 1)
+        else:
+            # On platforms without a pinnable directory descriptor, bind the
+            # checked pathname to the inode that is actually read. This is a
+            # narrower fallback than POSIX dir_fd isolation, but rejects a
+            # swapped regular file, symlink or FIFO before reading its bytes.
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode):
+                raise SchoolContractError("school fixture contains a nonregular file")
+            flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+            descriptor = os.open(path, flags)
+            try:
+                opened = os.fstat(descriptor)
+                if (not stat.S_ISREG(opened.st_mode)
+                        or (opened.st_dev, opened.st_ino)
+                           != (before.st_dev, before.st_ino)):
+                    raise SchoolContractError(
+                        "school fixture file changed while opening")
+                with os.fdopen(descriptor, "rb") as source:
+                    descriptor = -1  # Ownership transferred to the file object.
+                    payload = source.read(limit + 1)
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
     except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise SchoolContractError("school fixture contains a nonregular file") from error
         raise SchoolContractError("cannot read school fixture file") from error
     if len(payload) > limit:
         raise SchoolContractError("school fixture file exceeds byte budget")
@@ -51,15 +131,27 @@ def verify_scripted_fixture(
     """
     _validated_catalog_bytes(catalog)
     target = Path(output_dir)
+    # Keep the directory descriptor open for the *entire* comparison, not just
+    # the listing. A concurrent rename must not redirect later artifact reads.
+    with _fixture_directory(target) as directory_fd:
+        return _verify_pinned_fixture(target, catalog, directory_fd)
+
+
+def _verify_pinned_fixture(
+    target: Path, catalog: dict[str, Any], directory_fd: int | None,
+) -> dict[str, Any]:
     try:
-        if target.is_symlink() or not target.is_dir():
-            raise SchoolContractError("fixture must be a real directory")
-        paths = list(islice(target.iterdir(), 4))  # Only three files are permitted.
+        if directory_fd is None:
+            names = [path.name for path in islice(target.iterdir(), 4)]
+        else:
+            with os.scandir(directory_fd) as entries:
+                names = [entry.name for entry in islice(entries, 4)]
     except OSError as error:
         raise SchoolContractError("cannot list school fixture directory") from error
 
-    manifest_path = target / "events.json"
-    manifest_wire = _read_regular_bounded(manifest_path, MAX_MANIFEST_BYTES)
+    manifest_wire = _read_regular_bounded(
+        target / "events.json", MAX_MANIFEST_BYTES, directory_fd=directory_fd,
+    )
     try:
         manifest = json.loads(manifest_wire.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, RecursionError) as error:
@@ -73,19 +165,19 @@ def verify_scripted_fixture(
     mode = manifest.get("mode")
     start_tick = events[0].get("sim_tick")
 
-    # Invalid tick, section or mode fail through the same public contract as
-    # fixture creation. In particular bool is never a valid virtual tick.
     expected = run_scripted_activity(catalog, section_id, start_tick=start_tick, mode=mode)
     expected_manifest = {k: v for k, v in expected.items() if k != "artifacts"}
     if manifest_wire != _canonical_json(expected_manifest):
         raise SchoolContractError("school fixture manifest differs from deterministic replay")
 
     expected_names = {"events.json", *expected["artifacts"].keys()}
-    if len(paths) != len(expected_names) or {p.name for p in paths} != expected_names:
+    if len(names) != len(expected_names) or set(names) != expected_names:
         raise SchoolContractError("school fixture directory has missing or extra files")
     total_bytes = len(manifest_wire)
     for name, original in expected["artifacts"].items():
-        actual = _read_regular_bounded(target / name, MAX_ARTIFACT_BYTES)
+        actual = _read_regular_bounded(
+            target / name, MAX_ARTIFACT_BYTES, directory_fd=directory_fd,
+        )
         if actual != original:
             raise SchoolContractError("school fixture artifact differs from deterministic replay")
         total_bytes += len(actual)
