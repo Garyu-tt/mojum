@@ -59,7 +59,8 @@ def _check_private_sqlite_path(path: str) -> None:
         if not stat.S_ISDIR(info.st_mode):
             raise BudgetDenied("budget ledger directory chain contains a symlink")
         if depth == 0:
-            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+            # A private ledger directory must not disclose its entries to other UIDs.
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o077)
         else:
             unsafe = (info.st_uid not in (0, os.geteuid())
                       or (bool(info.st_mode & 0o022)
@@ -77,6 +78,7 @@ def _check_private_sqlite_path(path: str) -> None:
             continue
         if (not stat.S_ISREG(info.st_mode)
                 or info.st_uid != os.geteuid()
+                or info.st_nlink != 1
                 or info.st_mode & 0o077):
             raise BudgetDenied(
                 "budget ledger files must be regular owner-only files (0600)"
@@ -144,6 +146,12 @@ class BudgetLedger:
                 raise
 
     def _connect(self) -> sqlite3.Connection:
+        # The paid-provider ledger may not fail open on platforms where the
+        # pathname/ownership guard or nofollow opening cannot be enforced.
+        if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+            raise BudgetDenied("private POSIX ledger storage is required")
+        if not Path(self.path).is_absolute():
+            raise BudgetDenied("budget ledger path must be absolute")
         if os.name == "posix":
             _check_private_sqlite_path(self.path)
             flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
