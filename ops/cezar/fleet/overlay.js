@@ -7,11 +7,11 @@
   const style = document.createElement("style");
   style.textContent = `
     #${id} { position: fixed; z-index: 2147480000; bottom: 16px; right: 16px;
-      color: #eef3fa; font: 13px/1.45 system-ui,-apple-system,sans-serif; max-width: min(440px,calc(100vw - 24px)); }
+      color: #eef3fa; font: 13px/1.45 system-ui,-apple-system,sans-serif; max-width: min(560px,calc(100vw - 24px)); }
     #${id} button { border:1px solid #465877; background:#182234; color:#ecf3fb; border-radius:11px;
       cursor:pointer; padding:11px 15px; font: inherit; font-weight:650; box-shadow:0 2px 14px #0007; }
     #${id} button:focus-visible {outline:2px solid #75baff;outline-offset:2px;}
-    #${id} .fleet-panel {width:min(420px,calc(100vw - 28px));max-height:min(75vh,650px);overflow:auto;
+    #${id} .fleet-panel {width:min(540px,calc(100vw - 28px));max-height:min(78vh,760px);overflow:auto;
       border:1px solid #43536c;background:#111b2b;border-radius:13px;padding:14px;
       box-shadow:0 12px 36px #000b;margin-bottom:7px;}
     #${id} .fleet-row {display:flex;gap:10px;justify-content:space-between;margin:6px 0;align-items:center;}
@@ -33,12 +33,12 @@
   host.setAttribute("aria-label", "Состояние флота Cezar");
   const panel = document.createElement("div");
   panel.className = "fleet-panel";
-  panel.hidden = true;
+  panel.hidden = false;
   panel.setAttribute("role", "region");
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.textContent = "Mojum · синхронизация: загрузка";
-  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-expanded", "true");
   toggle.setAttribute("aria-controls", "cezar-fleet-r01-body");
   panel.id = "cezar-fleet-r01-body";
   host.append(panel, toggle);
@@ -66,6 +66,14 @@
       timeZone:"Europe/Kyiv",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"
     }).format(t);
   }
+  function elapsed(iso) {
+    const t=Date.parse(iso||"");
+    if(!Number.isFinite(t)) return "время неизвестно";
+    const m=Math.max(0,Math.floor((Date.now()-t)/60000));
+    return m<1?"только что":m<60?m+" мин назад":
+      m<1440?Math.floor(m/60)+" ч "+(m%60)+" мин назад":
+      Math.floor(m/1440)+" дн назад";
+  }
   function render(d) {
     panel.replaceChildren();
     if (!d || d.schema !== "cezar.fleet.visibility.v1") {
@@ -87,11 +95,21 @@
     row("Модели заняты",typeof m.capacity_slots_known==="number"
       ?m.inference_busy_known+" / "+m.capacity_slots_known+(m.capacity_complete?"":" (частично)"):"неизвестно");
     row("Открытые PR GitHub",typeof g.open_prs==="number"?g.open_prs:"неизвестно");
+    const recent=Array.isArray(g.latest_open_prs)?g.latest_open_prs:[];
+    const newest=recent.filter(x=>x&&x.created_at&&Number.isFinite(Date.parse(x.created_at)))
+      .sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+    if(newest){
+      row("Последний созданный PR","#"+newest.number+" · "+elapsed(newest.created_at));
+      if((Date.now()-Date.parse(newest.created_at))>35*60000)
+        panel.appendChild(el("p","Новых PR не видно "+elapsed(newest.created_at)+
+          ". Публикации могли остановиться, но это не доказывает остановку внешних агентов.","fleet-warn fleet-small"));
+    }else row("Последний созданный PR","нет данных","fleet-warn");
+
     row("Открытые Issues GitHub",typeof g.open_issues==="number"?g.open_issues:"неизвестно");
     row("Merged в последних закрытых PR",typeof h.merged_in_visible_sample==="number"?h.merged_in_visible_sample:"неизвестно",h.snapshot_fresh===false?"fleet-warn":"");
     row("Внешние прямо сейчас","неизвестно","fleet-warn");
     panel.appendChild(el("p",
-      "Для подсчёта выполняющихся внешних агентов нужен heartbeat от их исполнителей. Расписания и PR не являются таким подтверждением.",
+      "Внешние ChatGPT-агенты отдельно от Cezar. Для них видны последние запуски и GitHub-артефакты; живой heartbeat пока не поступает.",
       "fleet-muted fleet-sub"));
     // GitHub is the repository's task/artifact source of truth. These are
     // links to real records, never synthetic Cezar runs or confirmed workers.
@@ -129,6 +147,68 @@
       panel.appendChild(el("p","История слияний GitHub недоступна; это не ноль выполненных задач.",
         "fleet-warn fleet-sub"));
     }
+    const qa=d.qa_fleet||{};
+    if(qa.available===true && Array.isArray(qa.workers)){
+      panel.appendChild(el("div","CPU QA: 17 локальных слотов","fleet-title fleet-sub"));
+      const active=(qa.snapshot_fresh===true && Number.isSafeInteger(qa.active_requests))?
+        String(qa.active_requests):"неизвестно (устарело)";
+      row("Модельные запросы выполняются",active,qa.snapshot_fresh===true?"fleet-good":"fleet-warn");
+      row("Задания в текущем цикле",typeof qa.assigned==="number"?qa.assigned:"?");
+      row("Завершены / ошибки",String(qa.completed_tasks??"?")+" / "+String(qa.failed_tasks??"?"));
+      panel.appendChild(el("p","Это действительные запросы к локальным моделям, но не одобренные pull request. GitHub-слияния не выполняются.","fleet-muted"));
+      for(const v of qa.workers){
+        if(!v || !Number.isSafeInteger(v.slot) || v.slot<0 || v.slot>=17)continue;
+        if(v.pr==null && v.state==="queued")continue;
+        const entry=document.createElement("div");entry.className="fleet-agent";
+        const state={queued:"в очереди",fetching_patch:"получает diff",inflight:"ожидает ответ модели",
+          completed:"ответ получен",failed:"ошибка"}[v.state]||"неизвестно";
+        entry.appendChild(el("div","QA слот "+(v.slot+1)+" · модель "+v.port+" · "+state));
+        if(Number.isSafeInteger(v.pr)&&v.pr>0){
+          const link=document.createElement("a");
+          link.href="https://github.com/Garyu-tt/mojum/pull/"+v.pr;
+          link.rel="noopener noreferrer";link.target="_blank";
+          link.textContent="PR #"+v.pr;
+          entry.appendChild(link);
+        }
+        if(v.summary)entry.appendChild(el("div",String(v.summary).slice(0,350),"fleet-muted fleet-small"));
+        panel.appendChild(entry);
+      }
+      panel.appendChild(el("p","Последнее измерение: "+clock(qa.generated_at)+
+        (qa.snapshot_fresh===true?"":" · устарело"),"fleet-muted fleet-small"));
+    }else{
+      panel.appendChild(el("p","Локальная QA-фабрика: нет проверенных данных.","fleet-warn fleet-sub"));
+    }
+    const receipts=d.reports||{};
+    if(receipts.available===true && Array.isArray(receipts.agents)){
+      row("Последние отчёты исполнителей",receipts.agents.length);
+      panel.appendChild(el("div","Что сообщали агенты · не live heartbeat","fleet-title fleet-sub"));
+      if(!receipts.agents.length)
+        panel.appendChild(el("p","Пока нет отчётов исполнителей.","fleet-muted"));
+      for(const rep of receipts.agents.slice(0,10)){
+        if(!rep||typeof rep.agent!=="string") continue;
+        const name={peer1:"Разработчик 1",peer2:"Разработчик 2",
+          peer3:"Разработчик 3",peer4:"Разработчик 4",qa:"Независимая QA"}[rep.agent]||"Агент";
+        const phase={observed:"подтверждён прошлый результат",started:"сообщил о старте",
+          progress:"сообщил о прогрессе",completed:"сообщил о завершении",
+          blocked:"сообщил о блокере",failed:"сообщил об ошибке"}[rep.phase]||"неизвестно";
+        const wrap=document.createElement("div");wrap.className="fleet-agent";
+        wrap.appendChild(el("div",name+" · "+phase+" · "+elapsed(rep.reported_at)));
+        wrap.appendChild(el("div",String(rep.note||"").slice(0,240),"fleet-muted"));
+        if(Number.isSafeInteger(rep.pr)&&rep.pr>0){
+          const link=document.createElement("a");
+          link.href="https://github.com/Garyu-tt/mojum/pull/"+rep.pr;
+          link.rel="noopener noreferrer";link.target="_blank";
+          link.textContent="GitHub PR #"+rep.pr;
+          wrap.appendChild(link);
+        }
+        wrap.appendChild(el("div",rep.source==="owner-observation"?
+          "Источник: проверка ChatGPT-автоматизации":"Источник: самоотчёт исполнителя",
+          "fleet-muted fleet-small"));
+        panel.appendChild(wrap);
+      }
+    } else {
+      panel.appendChild(el("p","Отчёты исполнителей недоступны.","fleet-warn fleet-sub"));
+    }
     const agents=Array.isArray(s.agents)?s.agents:[];
     if(agents.length) {
       panel.appendChild(el("div","Зарегистрированные агенты","fleet-title fleet-sub"));
@@ -136,8 +216,8 @@
         const item=document.createElement("div");
         item.className="fleet-agent";
         item.appendChild(el("div",a.name||"неизвестный агент"));
-        const lastLabel={completed:"завершён",in_progress:"выполнялся",failed:"ошибка",no_update:"нет результата"}[a.last_status]||"статус неизвестен";
-        item.appendChild(el("div","Последний запуск: "+clock(a.last_run)+" ("+lastLabel+") · Следующий: "+clock(a.next_run),
+        const lastLabel={completed:"завершён",in_progress:"был запущен, живой статус неизвестен",failed:"ошибка",no_update:"нет результата"}[a.last_status]||"статус неизвестен";
+        item.appendChild(el("div","Последний запуск: "+clock(a.last_run)+" · "+elapsed(a.last_run)+" ("+lastLabel+") · Следующий: "+clock(a.next_run),
           "fleet-muted fleet-small"));
         panel.appendChild(item);
       }
