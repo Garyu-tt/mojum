@@ -229,6 +229,26 @@ def save_private(folder: Path, task_id: str, attempt: int, artifact):
     finally:
         os.close(dir_fd)
 
+class ModelCallMeter:
+    """Count real overlapping model invocations, including clones."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self.invocations = 0
+        self.inflight = 0
+        self.peak = 0
+
+    def begin(self):
+        with self._lock:
+            self.invocations += 1
+            self.inflight += 1
+            self.peak = max(self.peak, self.inflight)
+
+    def end(self):
+        with self._lock:
+            self.inflight -= 1
+
+
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
            request=None, meter=None):
     db = coordinator.connect(str(db_path))
