@@ -18,7 +18,7 @@ Example, from repository root:
     python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 reserve --id task123-attempt1-model1 --worker 3 --tokens 4096 --micro-usd 25000
     python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 settle --id task123-attempt1-model1 --worker 3 --actual-tokens 2940 --actual-micro-usd 11325
     python3 tools/spartan_budget.py --db ./spartan-budget_PRIVATE.sqlite3 status
-    python3 -m unittest discover -s tests -p 'test_spartan_budget.py' -v
+    python3 -m unittest discover -s tests -p 'test_spartan_lifetime_budget.py' -v
 
 All operations run with SQLite WAL and BEGIN IMMEDIATE transactional locking.
 The cap is immutable once initialized, even if the ledger is reopened.
