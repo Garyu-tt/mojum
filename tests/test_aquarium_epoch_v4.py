@@ -19,7 +19,9 @@ from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError, V3_MODE, V4_MODE
 from mojum.aquarium_wire import inspect_journal
-from mojum.cell_policy_v4 import CellExplorerV4, CellV4Error, SCHEMA as V4_SCHEMA
+from mojum.cell_policy_v4 import (
+    CellExplorerV4, CellV4Error, MAX_CELLS, SCHEMA as V4_SCHEMA,
+)
 from mojum.epoch_sense_v2 import (
     EPOCH_TICKS,
     EpochProprioception,
@@ -27,7 +29,7 @@ from mojum.epoch_sense_v2 import (
     MAX_ABSOLUTE_TICKS,
     SCHEMA as EPOCH_SCHEMA,
 )
-from mojum.local_cell_sense import Proprioception
+from mojum.local_cell_sense import Proprioception, STEP_METERS
 from mojum.noosphere import NoosphereError
 
 
@@ -141,6 +143,50 @@ class EpochSenseV4Tests(unittest.TestCase):
         for name, snapshot in forged.items():
             with self.subTest(name=name), self.assertRaises(CellV4Error):
                 CellExplorerV4.from_snapshot(snapshot)
+
+    def test_evicted_history_cannot_retain_a_partial_table(self):
+        # Eviction only runs when a new cell arrives at a full table, and the
+        # table never shrinks afterwards. A forged snapshot can keep every
+        # counter consistent, drop most retained cells, and still claim an
+        # eviction; that history is unreachable through ``observe``.
+        model = CellExplorerV4()
+        for index in range(MAX_CELLS + 1):
+            x = STEP_METERS * (index % 100)
+            y = STEP_METERS * (index // 100)
+            cue = EpochProprioception(
+                index, index // EPOCH_TICKS, index % EPOCH_TICKS,
+                "a" * 64, x, y, False,
+            )
+            model.observe(cue, model.decide(cue), False)
+        self.assertEqual(model.evictions, 1)
+        self.assertEqual(len(model.records), MAX_CELLS)
+        good = model.snapshot()
+        self.assertEqual(CellExplorerV4.from_snapshot(good).snapshot(), good)
+
+        forged = deepcopy(good)
+        keep = {
+            key for key, _ in sorted(
+                forged["last_seen_at"].items(), key=lambda item: item[1]
+            )[-5:]
+        }
+        dropped = 0
+        for key in set(forged["records"]) - keep:
+            dropped += sum(
+                counts[0] for counts in forged["records"].pop(key).values()
+            )
+            del forged["last_seen_at"][key]
+        forged["forgotten_observations"] += dropped
+        # Counters still sum to ``updates``, stamps stay unique with the
+        # newest at the current tick, and one eviction is permitted at this
+        # update count. Only the full-retained-table rule can reject it.
+        self.assertEqual(
+            sum(counts[0] for row in forged["records"].values()
+                for counts in row.values())
+            + forged["forgotten_observations"],
+            forged["updates"],
+        )
+        with self.assertRaisesRegex(CellV4Error, "eviction"):
+            CellExplorerV4.from_snapshot(forged)
 
     def test_blocked_rest_is_rejected_before_policy_mutation(self):
         model = CellExplorerV4()
