@@ -4,7 +4,9 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.spartan_inflight_meter import (
     begin, connect, create_schema, finish, heartbeat, snapshot, track_call,
 )
