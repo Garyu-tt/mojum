@@ -2,6 +2,8 @@
 import contextlib
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -138,6 +140,54 @@ class SpartanInflightAuditTests(unittest.TestCase):
         self.path.write_bytes(b' ' * 4097 + b'\n')
         with self.assertRaises(AuditError):
             audit(self.path)
+
+    def test_oversize_line_is_bounded_before_allocating_entire_line(self):
+        import gc
+        import tracemalloc
+
+        # Write the hostile line before tracing the validator's allocations.
+        with self.path.open("wb") as sink:
+            chunk = b"x" * 4096
+            for _ in range(2048):
+                sink.write(chunk)
+            sink.write(b"\\n")
+        gc.collect()
+        was_tracing = tracemalloc.is_tracing()
+        if not was_tracing:
+            tracemalloc.start()
+        try:
+            baseline, _ = tracemalloc.get_traced_memory()
+            tracemalloc.reset_peak()
+            with self.assertRaisesRegex(AuditError, "event exceeds 4096 bytes"):
+                audit(self.path)
+            _, peak = tracemalloc.get_traced_memory()
+            self.assertLess(peak - baseline, 2 * 1024 * 1024)
+        finally:
+            if not was_tracing:
+                tracemalloc.stop()
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX FIFO support required")
+    def test_fifo_input_rejected_without_hanging_cli(self):
+        path = self.path.with_suffix(".fifo")
+        os.mkfifo(path)
+        runner = Path(__file__).resolve().parents[1] / "tools" / "spartan_inflight_audit.py"
+        run = subprocess.run(
+            [sys.executable, str(runner), "--input", str(path)],
+            text=True, capture_output=True, check=False, timeout=5,
+        )
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("regular file", run.stderr)
+
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0),
+                         "platform lacks O_NOFOLLOW")
+    def test_symlinked_collector_source_is_refused(self):
+        self.write([start(1, "a"), end(2, "a")])
+        linked = self.path.with_suffix(".symlink")
+        linked.symlink_to(self.path)
+        with self.assertRaises(OSError):
+            audit(linked)
 
     def test_cli_target_exit_status_and_invalid_logs(self):
         self.write([start(1, 'a'), end(2, 'a')])
