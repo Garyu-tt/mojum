@@ -118,11 +118,19 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
                     raise AssertionError("catalog read exceeded byte cap")
                 return super().read(size)
 
+            def close(self):
+                # Path.open() is used as a context manager and closes the
+                # stream. Capture the bounded read count *before* closing.
+                if not self.closed:
+                    self.bytes_consumed_at_close = self.tell()
+                super().close()
+
         source = BoundedSource(b"x" * (256 * 1024 + 2))
         with mock.patch.object(Path, "open", return_value=source):
             with self.assertRaisesRegex(ValueError, "oversized integration registry"):
                 load_catalog(Path("synthetic-untrusted-catalog.json"))
-        self.assertEqual(source.tell(), 256 * 1024 + 1)
+        self.assertTrue(source.closed)
+        self.assertEqual(source.bytes_consumed_at_close, 256 * 1024 + 1)
 
 
 if __name__ == "__main__":
