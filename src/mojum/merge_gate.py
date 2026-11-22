@@ -784,7 +784,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             required=args.require,
             waivers=waivers,
         )
-    except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError) as error:
+    except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError, RecursionError) as error:
         _emit(
             {
                 "schema": SCHEMA,
