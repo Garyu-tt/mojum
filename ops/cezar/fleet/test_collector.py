@@ -6,6 +6,9 @@ import json
 import os
 import subprocess
 import sys
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -292,6 +295,37 @@ class GitHubLifecycleTests(unittest.TestCase):
             capture_output=True, text=True, timeout=3,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_fifo_history_cache_never_blocks_observer(self):
+        # A FIFO must not hang before fstat() can reject the non-regular file.
+        # Use a child process so an accidental blocking open is always killed.
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO creation is unavailable on this platform")
+        os.mkfifo(self.cache, 0o600)
+        script = """
+import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location("fleet_fifo_test", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+mod.CLOSED_CACHE = pathlib.Path(sys.argv[2])
+mod._cezar = lambda: {"active": 1}
+mod._schedule_list = lambda now: {"enabled": 5}
+mod._models = lambda: {"capacity_slots_known": 0}
+mod._github = lambda now: {"open_prs": 1}
+mod._fetch_closed_rest = lambda: (_ for _ in ()).throw(AssertionError("network must not be used"))
+print(json.dumps(mod.collect(include_history=True)))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SRC), str(self.cache)],
+            check=True, capture_output=True, text=True, timeout=3,
+        )
+        snap = json.loads(result.stdout)
+        self.assertEqual(snap["cezar"]["active"], 1)
+        self.assertEqual(snap["schedules"]["enabled"], 5)
+        self.assertEqual(snap["models"]["capacity_slots_known"], 0)
+        self.assertEqual(snap["github"]["open_prs"], 1)
+        self.assertEqual(snap["github_history"],
+                         {"available": False, "reason": "FleetError"})
 
     def test_symlink_or_untrusted_history_cache_is_not_read(self):
         secret = self.parent / "secret.json"
