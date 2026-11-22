@@ -68,6 +68,12 @@ def parse(args):
             raise Refused("missing issue or PR qualifier")
         if len(q) > 400:
             raise Refused("query too large")
+        # The leading repo: qualifier alone is not a scope boundary: an
+        # additional repo: or a Boolean OR can broaden GitHub search.
+        # This shim is only authorized to read the single pinned repository.
+        remainder = q[len("repo:" + REPO + " "):]
+        if re.search(r"(?i)(?:repo|org|user):|\b(?:OR|NOT)\b|[()]", remainder):
+            raise Refused("query may broaden repository scope")
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
         if sort not in ("updated", "created") or order != "asc":
