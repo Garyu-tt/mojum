@@ -62,7 +62,8 @@ def _private_sqlite_path(path: str) -> Path:
 
     exists = check_existing(target)
     sidecars = [Path(str(target) + suffix) for suffix in ("-wal", "-shm")]
-    has_sidecar = any(check_existing(sidecar) for sidecar in sidecars)
+    sidecar_presence = [check_existing(sidecar) for sidecar in sidecars]
+    has_sidecar = any(sidecar_presence)
     if not exists and has_sidecar:
         raise PermissionError("orphaned telemetry journal sidecar")
     if not exists:
