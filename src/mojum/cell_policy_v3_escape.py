@@ -89,15 +89,37 @@ def _check_streak_counters(state):
         name != "rest" and counts[1] > 0 for name, counts in actions.items()
     ):
         raise CellV3EscapeError("blocked-probe streak without blocked move")
-    if probes:
-        live_blocked = sum(
-            counts[1] for acts in state["records"].values()
-            for counts in acts.values()
+    # A terminal streak spans at most four consecutive ticks. All cells
+    # observed during those ticks must still be in the 512-cell LRU table;
+    # older evicted observations cannot substantiate a recent streak.
+    if rests:
+        measured_rests = sum(
+            acts.get("rest", (0, 0))[0] for acts in state["records"].values()
         )
-        if probes > live_blocked + state["forgotten_observations"]:
-            raise CellV3EscapeError(
-                "blocked-probe streak exceeds measured blocked outcomes"
-            )
+        if rests > measured_rests:
+            raise CellV3EscapeError("rest streak lacks measured outcomes")
+    if probes:
+        measured_blocks = sum(
+            counts[1] for acts in state["records"].values()
+            for action, counts in acts.items() if action != "rest"
+        )
+        if probes > measured_blocks:
+            raise CellV3EscapeError("blocked-probe streak lacks measured outcomes")
+    # A retained cell last seen during the terminal streak must have at
+    # least one measured outcome of the claimed kind. Global counts alone
+    # cannot prove a streak: older rests/blocks may belong to unrelated ticks.
+    first_streak_tick = state["last_tick"] - (rests or probes) + 1
+    for cell, seen_at in state["last_seen_at"].items():
+        if seen_at < first_streak_tick:
+            continue
+        recorded = state["records"][cell]
+        if rests and "rest" not in recorded:
+            raise CellV3EscapeError("recent cell lacks measured rest")
+        if probes and not any(
+            action != "rest" and counts[1] > 0
+            for action, counts in recorded.items()
+        ):
+            raise CellV3EscapeError("recent cell lacks measured blocked move")
 
 
 class CellExplorerV3Escape:
