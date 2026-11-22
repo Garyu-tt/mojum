@@ -71,6 +71,11 @@ def parse(args):
             raise Refused("search must remain in the pinned repository")
         if "is:issue" not in q and "is:pr" not in q:
             raise Refused("missing issue or PR qualifier")
+        # For read-only PR-opened triage, ignore historical events whose
+        # pull requests are now closed, including closed-unmerged experiments.
+        # Do not change future explicit closed/merged event queries.
+        if "is:pr" in q and "created:>=" in q and "is:open" not in q:
+            q += " is:open"
         if len(q) > 400:
             raise Refused("query too large")
         # GitHub search supports boolean OR and multiple repo: qualifiers.
