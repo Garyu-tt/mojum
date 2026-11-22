@@ -77,10 +77,31 @@ def _read_regular_bounded(path: Path, limit: int, *, directory_fd: int | None = 
                     raise SchoolContractError("school fixture contains a nonregular file")
                 payload = source.read(limit + 1)
         else:
-            if not stat.S_ISREG(path.lstat().st_mode):
+            # On platforms without a pinnable directory descriptor, bind the
+            # checked pathname to the inode that is actually read. This is a
+            # narrower fallback than POSIX dir_fd isolation, but rejects a
+            # swapped regular file, symlink or FIFO before reading its bytes.
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode):
                 raise SchoolContractError("school fixture contains a nonregular file")
-            with path.open("rb") as source:
-                payload = source.read(limit + 1)
+            flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+            descriptor = os.open(path, flags)
+            try:
+                opened = os.fstat(descriptor)
+                if (not stat.S_ISREG(opened.st_mode)
+                        or (opened.st_dev, opened.st_ino)
+                           != (before.st_dev, before.st_ino)):
+                    raise SchoolContractError(
+                        "school fixture file changed while opening")
+                with os.fdopen(descriptor, "rb") as source:
+                    descriptor = -1  # Ownership transferred to the file object.
+                    payload = source.read(limit + 1)
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
     except OSError as error:
         if error.errno == errno.ELOOP:
             raise SchoolContractError("school fixture contains a nonregular file") from error
