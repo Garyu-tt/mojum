@@ -69,7 +69,7 @@ def connect(path: str) -> sqlite3.Connection:
     # sqlite3.connect creates a new DB using the process umask (often 0644).
     # Creating the DB as 0600 first also makes SQLite's WAL and SHM 0600.
     # Do not change a process-wide umask: parallel workers share it.
-    if os.name == "posix" and path != ":memory:":
+    if os.name == "posix" and os.fspath(path) != ":memory:":
         filename = os.fspath(path)
         if isinstance(filename, bytes) or filename.startswith("file:"):
             raise ValueError("Spartan SQLite requires a filesystem path")
