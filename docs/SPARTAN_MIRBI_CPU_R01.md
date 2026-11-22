@@ -42,19 +42,21 @@ issue scopes across hosts; do not run the same issue twice.
 ~~~sh
 install -d -m 700 "$HOME/.local/state/mojum-spartan" \
   "$HOME/.local/state/mojum-spartan/proposals"
+# Resolve the HOME symlink: the coordinator forbids symlinked SQLite parents.
+STATE="$(realpath -e "$HOME/.local/state/mojum-spartan")"
 python3 tools/spartan_coordinator.py \
-  --db "$HOME/.local/state/mojum-spartan/tasks.sqlite3" init --slots 300
-# Enqueue reviewed, real Mojum tasks (no secrets) from a private JSON file:
+  --db "$STATE/tasks.sqlite3" init --slots 300
+# Enqueue reviewed, real Mojum tasks (no secrets) from a 0600 JSON file:
 python3 tools/spartan_coordinator.py \
-  --db "$HOME/.local/state/mojum-spartan/tasks.sqlite3" enqueue --json ./tasks.json
+  --db "$STATE/tasks.sqlite3" enqueue --json ./tasks.json
 python3 -m tools.spartan_local_fleet \
-  --db "$HOME/.local/state/mojum-spartan/tasks.sqlite3" \
-  --output-dir "$HOME/.local/state/mojum-spartan/proposals" \
+  --db "$STATE/tasks.sqlite3" \
+  --output-dir "$STATE/proposals" \
   --backend-profile mirbi-linux --status
 
 python3 -m tools.spartan_local_fleet \
-  --db "$HOME/.local/state/mojum-spartan/tasks.sqlite3" \
-  --output-dir "$HOME/.local/state/mojum-spartan/proposals" \
+  --db "$STATE/tasks.sqlite3" \
+  --output-dir "$STATE/proposals" \
   --backend-profile mirbi-linux --agents 300 --max-jobs 6 \
   --max-cpu-inflight 2
 ~~~
