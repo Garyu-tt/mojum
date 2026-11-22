@@ -36,6 +36,15 @@ BACKENDS = (
     (18180, "GPT20B", "gpu-0-3", "general"),
     (18181, "GPT20B", "gpu-4-6", "general"),
 )
+# Explicit owner-operated, loopback-only CPU hosts. Never probe these ports
+# unless the operator selects the mirbi-linux profile.
+MIRBI_BACKENDS = (
+    (48081, "QwenCoder3B", "cpu-existing", "coder"),
+    (48082, "Qwen3_1p7B", "cpu-general", "general"),
+    (48083, "QwenCoder3B", "cpu-coder-a", "coder"),
+    (48084, "QwenCoder3B", "cpu-coder-b", "coder"),
+)
+BACKEND_PROFILES = {"vm200": BACKENDS, "mirbi-linux": MIRBI_BACKENDS}
 
 
 class FleetError(ValueError):
@@ -52,7 +61,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def _http(port: int, path: str, body=None, timeout=5):
-    if type(port) is not int or port not in {x[0] for x in BACKENDS}:
+    if type(port) is not int or port not in {b[0] for group in BACKEND_PROFILES.values() for b in group}:
         raise FleetError("unapproved loopback port")
     if path not in ("/health", "/slots", "/v1/chat/completions"):
         raise FleetError("unapproved API path")
@@ -82,8 +91,8 @@ def _http(port: int, path: str, body=None, timeout=5):
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
         raise TransientFleetError("model API unavailable: " + type(exc).__name__) from exc
     except RecursionError as exc:
-        # A valid JSON response within MAX_RESPONSE may still be too deeply nested.
-        # Treat one malformed backend as unavailable, not a fatal fleet exception.
+        # A valid JSON response under MAX_RESPONSE can exceed decoder depth.
+        # Isolate the offending backend rather than failing all discovery.
         raise FleetError("model response JSON nesting exceeds limit") from exc
 
 
@@ -98,9 +107,11 @@ class Backend:
     ctx: int
 
 
-def discover(request=_http):
+def discover(request=_http, *, profile="vm200"):
+    if profile not in BACKEND_PROFILES:
+        raise FleetError("unknown explicit local backend profile")
     available = []
-    for port, model, device, purpose in BACKENDS:
+    for port, model, device, purpose in BACKEND_PROFILES[profile]:
         try:
             health = request(port, "/health")
             slots = request(port, "/slots")
@@ -399,7 +410,7 @@ def rotate_worker_ids(db_path, max_agents, count):
 
 
 def run(db_path, folder, *, max_agents, max_jobs, backends=None,
-        max_cpu_inflight=1):
+        max_cpu_inflight=1, backend_profile="vm200"):
     if not 1 <= max_agents <= 300 or not 1 <= max_jobs <= MAX_PARALLEL:
         raise FleetError("invalid fleet bounds")
     if type(max_cpu_inflight) is not int or not 1 <= max_cpu_inflight <= 4:
@@ -440,7 +451,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
             before = coordinator.status(db)
         finally:
             db.close()
-        discovered = discover() if backends is None else backends
+        discovered = (discover(profile=backend_profile)
+                      if backends is None else backends)
         # Live /slots is the hard physical ceiling. CPU Qwen's 4 reported
         # slots are NOT evidence that 4 simultaneous code generations finish:
         # VM200's first four-way 7B attempt timed out. Admit one call per CPU
@@ -484,6 +496,7 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                                     "reason": "unexpected_worker_failure"})
         return {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
                 "addressable_agents": max_agents,
+                "backend_profile": backend_profile,
                 "observed_physical_models": len(discovered),
                 "live_free_model_slots": sum(b.free for b in discovered),
                 "per_backend_admission": admitted_by_port,
@@ -521,6 +534,9 @@ def main():
     p.add_argument("--max-cpu-inflight", type=int, default=1,
                    help="per-CPU-model calls, default 1 until throughput validated")
     p.add_argument("--status", action="store_true")
+    p.add_argument("--backend-profile", choices=tuple(BACKEND_PROFILES),
+                   default="vm200",
+                   help="explicit loopback-only physical host profile")
     args = p.parse_args()
     if args.status:
         # A status probe must never create or migrate a coordinator database.
@@ -547,7 +563,7 @@ def main():
                 db.close()
         except sqlite3.DatabaseError as exc:
             raise FleetError("cannot read coordinator status") from exc
-        models = discover()
+        models = discover(profile=args.backend_profile)
         print(json.dumps({"coordinator": status,
                           "physical_models": [b.__dict__ for b in models],
                           "live_free_model_slots": sum(b.free for b in models),
@@ -556,7 +572,8 @@ def main():
         return
     report = run(args.db, args.output_dir,
                  max_agents=args.agents, max_jobs=args.max_jobs,
-                 max_cpu_inflight=args.max_cpu_inflight)
+                 max_cpu_inflight=args.max_cpu_inflight,
+                 backend_profile=args.backend_profile)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     incomplete = ("claim_unavailable", "worker_failures", "blocked",
                   "retry_queued", "lease_expired")

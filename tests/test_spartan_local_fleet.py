@@ -709,7 +709,6 @@ class FleetTests(unittest.TestCase):
             fleet.main()
         self.assertEqual(json.loads(output.getvalue()), report)
 
-
 class ModelJsonDepthTests(unittest.TestCase):
     def test_oversized_nesting_isolated_without_live_network(self):
         # 40 KiB is far below MAX_RESPONSE but far past the JSON decoder limit.
@@ -746,6 +745,7 @@ class ModelJsonDepthTests(unittest.TestCase):
             # discovery or hide independently healthy GPU backends.
             backends = fleet.discover(request=source)
         self.assertEqual({b.port for b in backends}, {18180, 18181})
+
 
 if __name__ == "__main__":
     unittest.main()
