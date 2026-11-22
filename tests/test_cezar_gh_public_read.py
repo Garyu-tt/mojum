@@ -65,6 +65,24 @@ class CezarGhPublicReadTests(unittest.TestCase):
         from urllib.parse import parse_qs, urlsplit
         self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
 
+    def test_created_pr_query_preserves_explicit_closed_and_open_filters(self):
+        from urllib.parse import parse_qs, urlsplit
+        # Created-date triage may default to open PRs only when the caller
+        # did not explicitly ask for a historical closed subset.
+        for suffix in ("is:closed", "state:closed", "is:open", "state:open",
+                       "closed:>=2026-11-21"):
+            query = ("repo:Garyu-tt/mojum is:pr created:>=2026-11-20 "
+                     + suffix)
+            with self.subTest(suffix=suffix):
+                mode, request, include = adapter.parse([
+                    "api", "--method", "GET", "/search/issues",
+                    "-f", "q=" + query,
+                ])
+                self.assertEqual(mode, "api")
+                self.assertFalse(include)
+                self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"],
+                                 [query])
+
     def test_read_only_label_timeline_with_headers(self):
         mode, request, include = adapter.parse([
             "api", "--include", "--method", "GET",
