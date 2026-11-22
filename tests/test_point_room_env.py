@@ -56,7 +56,7 @@ class PointRoomEnvTests(unittest.TestCase):
         env = self.make_env()
         first, _ = env.reset()
         for bad in ((float("nan"), 0), (float("inf"), 0),
-                    (True, 0), ("1", 0), (0.3, 0), (0.2, 0.2), [0], "x"):
+                    (True, 0), ("1", 0), (10**1000, 0), (0.3, 0), (0.2, 0.2), [0], "x"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     env.step(bad)
