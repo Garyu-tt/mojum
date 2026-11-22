@@ -266,6 +266,12 @@ def _discard_unreviewed_patch(out, name):
 
 
 def run_one(db_path, worker, root, out, url, model, timeout):
+    # Pin the lexical absolute pathname before writing the durable SQLite
+    # proposal reference; a reviewer may run from a different working dir.
+    out = Path(out)
+    if ".." in out.parts:
+        raise ValueError("output directory traversal forbidden")
+    out = Path(os.path.abspath(out))
     db = queue.connect(db_path)
     try:
         task = queue.claim(db, worker, int(time.time()), max(600, timeout * 3))
