@@ -68,6 +68,19 @@ class WorktreeTests(unittest.TestCase):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, self.repo, "task", self.sha)
 
+    def test_rejects_symlinked_root_ancestor(self):
+        actual_parent = self.base / "actual-parent"
+        actual_parent.mkdir()
+        (actual_parent / "worktrees").mkdir()
+        alias = self.base / "alias-parent"
+        try:
+            alias.symlink_to(actual_parent, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable")
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, alias / "worktrees", "task", self.sha)
+        self.assertFalse((actual_parent / "worktrees" / "task").exists())
+
     def test_rejects_unknown_commit(self):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, self.root, "task", "f" * 40)
