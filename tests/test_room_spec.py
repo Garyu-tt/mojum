@@ -478,5 +478,35 @@ class NumericWireRegressionTests(unittest.TestCase):
         self.assertEqual(report.summary["start"], ["1e-2", "2.0"])
 
 
+
+class NativeIntegerRoomParityTests(unittest.TestCase):
+    def test_large_exact_integer_bounds_are_not_rounded_before_runtime(self):
+        # All JSON tokens here are integers. CPython's float(x)+float(w)
+        # exceeds float(width), but the real Room uses exact int arithmetic.
+        from mojum.world_room import Room, initial_state
+        x, w = 9007199254741039, 279
+        width = x + w
+        self.assertGreater(float(x) + float(w), float(width))
+        raw = json.dumps({
+            "width": width,
+            "height": 1,
+            "obstacles": [[x, 0, w, 1]],
+            "start": [0, 0],
+        }).encode("ascii")
+        room = Room(width, 1, ((x, 0, w, 1),))
+        initial_state(room, 0.0, 0.0)
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.summary["width"], str(width))
+
+    def test_float_geometry_still_rejects_rounding_past_wall(self):
+        # Decimals are still native floats: 0.1 + 0.2 > 0.3.
+        raw = (b'{"width":0.3,"height":1,'
+               b'"obstacles":[[0.1,0.1,0.2,0.2]],"start":[0,0]}')
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float conversion", report.errors[0])
+
+
 if __name__ == "__main__":
     unittest.main()
