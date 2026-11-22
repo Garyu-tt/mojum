@@ -59,6 +59,30 @@ class CezarGhPublicReadTests(unittest.TestCase):
             with self.subTest(args=args), self.assertRaises(adapter.Refused):
                 adapter.parse(args)
 
+    def test_search_scope_cannot_be_widened_with_qualifiers_or_boolean_logic(self):
+        for suffix in (
+            "is:pr OR repo:someone/else",
+            "is:pr repo:someone/else",
+            "is:pr -repo:Garyu-tt/mojum",
+            "is:issue OR is:pr",
+            "(is:issue OR is:pr)",
+            "is:pr org:another",
+            "is:issue user:another",
+        ):
+            with self.subTest(query=suffix), self.assertRaises(adapter.Refused):
+                adapter.parse([
+                    "api", "--method", "GET", "/search/issues",
+                    "-f", "q=repo:Garyu-tt/mojum " + suffix,
+                ])
+        # Ordinary bounded, single-repository time filtering remains valid.
+        mode, request, include = adapter.parse([
+            "api", "--method", "GET", "/search/issues",
+            "-f", "q=repo:Garyu-tt/mojum is:pr created:>=2026-11-20",
+        ])
+        self.assertEqual(mode, "api")
+        self.assertIn("created%3A%3E%3D2026-11-20", request[0])
+        self.assertFalse(include)
+
     def test_limits_and_unapproved_headers_fail_closed(self):
         invalid = [
             ["api", "--method", "GET", "/search/issues", "-f",
