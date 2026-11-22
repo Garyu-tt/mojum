@@ -75,6 +75,20 @@ class ResourceFixture(unittest.TestCase):
         with self.assertRaisesRegex(CapacityError, "unavailable"):
             self.detect()
 
+    def test_incomplete_existing_membership_scope_fails_closed(self):
+        # A visible member with missing metrics must never be replaced by
+        # the unbounded mount root in the capacity calculation.
+        for missing in ("cpu.max", "memory.max", "memory.current"):
+            with self.subTest(missing=missing):
+                original = (self.scope / missing).read_text()
+                (self.scope / missing).unlink()
+                try:
+                    with self.assertRaisesRegex(
+                            CapacityError, "resource files unavailable"):
+                        self.detect()
+                finally:
+                    (self.scope / missing).write_text(original)
+
     def test_cgroup_namespace_mount_fallback(self):
         self.member.write_text("0::/path/not-visible-in-container\n")
         s = self.detect()
