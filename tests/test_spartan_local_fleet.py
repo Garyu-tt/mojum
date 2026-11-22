@@ -75,6 +75,19 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / ":memory:").exists())
 
+    def test_pathlike_memory_database_remains_in_memory(self):
+        # Path(':memory:') must not be pre-created as a disk file.
+        previous_cwd = os.getcwd()
+        try:
+            os.chdir(self.root)
+            with closing(sc.connect(Path(":memory:"))) as db:
+                sc.create_schema(db)
+                sc.init(db, 1, 0)
+                self.assertEqual(db.execute("PRAGMA database_list").fetchone()[2], "")
+            self.assertFalse((self.root / ":memory:").exists())
+        finally:
+            os.chdir(previous_cwd)
+
     def test_memory_sqlite_does_not_create_a_literal_database_file(self):
         # sqlite3 treats :memory: specially; the security preflight must not
         # accidentally turn it into a real file before SQLite opens it.
