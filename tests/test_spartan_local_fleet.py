@@ -117,6 +117,25 @@ class FleetTests(unittest.TestCase):
                               others=(self.backends[0],), request=fake_server)
         self.assertEqual(result["state"], "blocked")
 
+    def test_busy_physical_slot_is_retryable_without_unbounded_wait(self):
+        from threading import BoundedSemaphore
+
+        self.add_task("occupied-model")
+        lock = BoundedSemaphore(1)
+        lock.acquire()
+        try:
+            # A busy backend must not strand a time-limited coordinator lease.
+            with patch.object(fleet, "MODEL_SLOT_WAIT_SECONDS", 0):
+                result = fleet.single(self.db, 1, self.backends[0], self.out,
+                                      locks={self.backends[0].port: lock},
+                                      request=fake_server)
+        finally:
+            lock.release()
+        self.assertEqual(result["state"], "retry_queued")
+        self.assertFalse(list(self.out.iterdir()))
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["queued"], 1)
+
     def test_bad_task_never_requests_untrusted_model(self):
         with closing(sc.connect(str(self.db))) as db:
             sc.enqueue(db, [{"id": "bad", "scope": "a",
