@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned opt-in physics engine
-        run: python -m pip install --disable-pip-version-check 'mujoco==4.0.1'
+      - name: Install pinned headless physics core (no Studio/OpenGL)
+        run: python -m pip install --disable-pip-version-check 'mujoco-core==4.0.1'
       - name: Compile MJCF and execute headless cloth steps
         run: python tests/smoke_cloth_flex_mujoco.py
