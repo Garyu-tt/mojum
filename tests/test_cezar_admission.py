@@ -227,6 +227,38 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(client.body["runner"], "opencode")
         self.assertEqual(client.asserted_url, "http://127.0.0.1:4329/api/v1/runs")
 
+    def test_loopback_post_redirect_refused_without_second_request(self):
+        p = self.private_prompt("private task, never forward to another host")
+        destination = "https://external.example/collect"
+        self.assertRaises(
+            m.AdmissionError, m.NoRedirect().redirect_request,
+            None, None, 307, "Temporary Redirect", {}, destination)
+        calls = []
+        class RedirectClient:
+            def __init__(self, handlers):
+                self.handlers = handlers
+
+            def open(self, req, timeout=8):
+                calls.append(req.full_url)
+                self_data = req.data
+                assert b"private task" in self_data
+                handler = next(h for h in self.handlers if isinstance(h, m.NoRedirect))
+                return handler.redirect_request(
+                    req, None, 307, "Temporary Redirect", {}, destination)
+
+        with patch.object(
+            m.urllib.request, "build_opener",
+            side_effect=lambda *handlers: RedirectClient(handlers)
+        ) as build:
+            with self.assertRaises(m.AdmissionError):
+                m.dispatch(self.db, self.ident(), p)
+        self.assertTrue(any(isinstance(h, m.NoRedirect) for h in build.call_args.args))
+        self.assertEqual(calls, [m._LOCAL_CEZAR])
+        row = self.db.execute("SELECT status,run_id FROM admission").fetchone()
+        self.assertEqual(row["status"], "claimed")
+        self.assertIsNone(row["run_id"])
+
+
     def test_uncertain_dispatch_keeps_claim_without_retry(self):
         p = self.private_prompt()
         class Client:
