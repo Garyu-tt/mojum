@@ -81,6 +81,20 @@ class ClothFlexSpikeTests(unittest.TestCase):
                     ):
                         _vertex_penetrations(Vertices())
 
+    def test_extreme_finite_vertices_are_controlled_failures(self):
+        # Even finite vertices can overflow squared-distance arithmetic.
+        for bad in (1e155, 1e308, 10 ** 1000):
+            for axis in range(3):
+                with self.subTest(bad=str(bad)[:24], axis=axis):
+                    coords = [0.0, 0.0, 0.0]
+                    coords[axis] = bad
+                    class Vertices:
+                        flexvert_xpos = [coords]
+                    with self.assertRaisesRegex(
+                        RuntimeError, "nonfinite flex vertex coordinate"
+                    ):
+                        _vertex_penetrations(Vertices())
+
     def test_print_xml_offline_no_dependency(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
