@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -97,6 +98,51 @@ class FanoutContract(unittest.TestCase):
                 f.validate_tasks([bad])
         with self.assertRaises(f.FanoutError):
             f.validate_tasks(tasks(301))
+
+    def test_tasks_input_is_bounded_before_json_parsing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tasks.json"
+            sample = tasks(1)
+            path.write_text(json.dumps(sample), encoding="utf-8")
+            self.assertEqual(f.load_tasks_file(path), sample)
+
+            path.write_bytes(b" " * (f.MAX_TASK_FILE_BYTES + 1))
+            with self.assertRaisesRegex(f.FanoutError, "byte limit"):
+                f.load_tasks_file(path)
+            path.write_text('[{"id":"x","agent_id":1,"prompt":NaN}]',
+                            encoding="utf-8")
+            with self.assertRaisesRegex(f.FanoutError, "nonfinite"):
+                f.load_tasks_file(path)
+            path.write_bytes(b"\\xff")
+            with self.assertRaisesRegex(f.FanoutError, "invalid tasks JSON"):
+                f.load_tasks_file(path)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX FIFO support required")
+    def test_fifo_tasks_path_is_rejected_without_blocking(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tasks.fifo"
+            os.mkfifo(path)
+            command = [sys.executable, "-c",
+                       "from tools.gpu_legion_fanout import load_tasks_file; "
+                       "import sys; load_tasks_file(sys.argv[1])", str(path)]
+            run = subprocess.run(command,
+                                 cwd=Path(__file__).resolve().parents[1],
+                                 text=True, capture_output=True, check=False,
+                                 timeout=5)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn("tasks input must be a regular file", run.stderr)
+
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0),
+                         "platform has no O_NOFOLLOW")
+    def test_symlink_tasks_path_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tasks.json"
+            path.write_text(json.dumps(tasks(1)), encoding="utf-8")
+            link = Path(folder) / "link.json"
+            link.symlink_to(path)
+            with self.assertRaisesRegex(f.FanoutError, "cannot read tasks file"):
+                f.load_tasks_file(link)
 
     def test_loopback_allowlist_and_post_paths(self):
         for port,path in ((22,"/health"),(18080,"/health"),

@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
@@ -32,6 +33,7 @@ MAX_REQUESTS = 600
 MAX_RUNNING = 16
 MAX_CONTENT_BYTES = 65536
 MAX_PROMPT_CHARS = 8192
+MAX_TASK_FILE_BYTES = 16 * 1024 * 1024
 
 
 class FanoutError(ValueError):
@@ -122,6 +124,40 @@ def discover_backend(port, *, request=_request_json):
         seen.add(sid)
     free = sum(not slot["is_processing"] for slot in slots)
     return Backend(port, len(slots), free, min(contexts))
+
+
+def load_tasks_file(path):
+    """Read a bounded regular JSON file, never a blocking FIFO or device.
+
+    This check precedes json.loads, which otherwise loads unbounded attacker-
+    supplied bytes into memory. Verify the opened inode instead of relying
+    on a racy pathname stat. Do not follow final symlinks where supported.
+    """
+    fd = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        fd = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise FanoutError("tasks input must be a regular file")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            raw = handle.read(MAX_TASK_FILE_BYTES + 1)
+    except OSError as exc:
+        raise FanoutError("cannot read tasks file: " + type(exc).__name__) from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(raw) > MAX_TASK_FILE_BYTES:
+        raise FanoutError("tasks file byte limit exceeded")
+    try:
+        return json.loads(raw.decode("utf-8"),
+                          parse_constant=lambda value: (_ for _ in ()).throw(
+                              FanoutError("nonfinite task JSON")))
+    except FanoutError:
+        raise
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise FanoutError("invalid tasks JSON") from exc
 
 
 def validate_tasks(data):
@@ -270,8 +306,7 @@ def main(argv=None):
              "backend_details":[b.__dict__ for b in backends],
              "no_models_started":True,"no_inference_performed":True},sort_keys=True))
         return 0
-    with args.tasks.open("r",encoding="utf-8") as f:
-        tasks=json.load(f)
+    tasks=load_tasks_file(args.tasks)
     work=plan(validate_tasks(tasks),backends,limit=args.max_jobs)
     if not args.execute:
         print(json.dumps({"planned_requests":len(work),
