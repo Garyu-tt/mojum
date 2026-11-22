@@ -20,8 +20,9 @@ class IsolationError(RuntimeError):
 def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
     if not TASK.fullmatch(task) or not SHA.fullmatch(base_sha):
         raise IsolationError("invalid task or base SHA")
-    if Path(root).is_symlink():
-        raise IsolationError("symlink worktree root refused")
+    raw_root = Path(root).absolute()
+    if any(part.is_symlink() for part in (raw_root, *raw_root.parents)):
+        raise IsolationError("symlink in worktree root path refused")
     repo = Path(repo).resolve(strict=True)
     root = Path(root).resolve(strict=True)
     if root == repo or root in repo.parents or repo in root.parents:
