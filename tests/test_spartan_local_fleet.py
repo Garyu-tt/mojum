@@ -137,6 +137,22 @@ class FleetTests(unittest.TestCase):
             sc.connect(str(writable / "tasks.sqlite3"))
         self.assertFalse((writable / "tasks.sqlite3").exists())
 
+    @unittest.skipUnless(hasattr(os, "geteuid"), "POSIX owner check")
+    def test_coordinator_refuses_directory_owned_by_another_account(self):
+        # A directory with mode 0755 may still be replaceable by its OWNER.
+        # Checking only group/world writable bits is not sufficient.
+        from types import SimpleNamespace
+
+        parent = SimpleNamespace(
+            st_mode=os.stat(self.root).st_mode,
+            st_uid=os.geteuid() + 1,
+        )
+        proposed = self.root / "untrusted.sqlite3"
+        with patch.object(sc.os, "lstat", return_value=parent):
+            with self.assertRaisesRegex(ValueError, "owner-controlled"):
+                sc.connect(str(proposed))
+        self.assertFalse(proposed.exists())
+
     def test_status_never_creates_missing_sqlite_and_reads_existing(self):
         from contextlib import redirect_stdout
         from io import StringIO
