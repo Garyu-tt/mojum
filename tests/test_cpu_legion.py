@@ -416,7 +416,7 @@ sys.exit(1)
         from unittest.mock import Mock
         task = {"id": "relative-output", "attempts": 1, "payload": "{}"}
         connection = Mock()
-        diff = "diff --git a/src/test.py b/src/test.py\\n"
+        diff = "diff --git a/src/test.py b/src/test.py\n"
         previous = Path.cwd()
         try:
             os.chdir(self.root)
