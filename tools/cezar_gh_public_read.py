@@ -131,14 +131,24 @@ def bounded_int(value, minval, maxval):
 
 def _open_cache_dir():
     """Pin every path component, then only operate relative to this descriptor."""
-    CACHE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not CACHE_DIR.is_absolute():
         raise Refused("cache directory must be absolute")
-    flags = os.O_RDONLY | os.O_DIRECTORY
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     fd = os.open(CACHE_DIR.anchor, flags)
     try:
+        # Create missing parents relative to pinned descriptors. Path.mkdir()
+        # would follow attacker-swapped ancestors before we could validate them.
         for part in CACHE_DIR.parts[1:]:
-            new_fd = os.open(part, flags | os.O_NOFOLLOW, dir_fd=fd)
+            if part in (".", ".."):
+                raise Refused("unsafe cache directory component")
+            try:
+                new_fd = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                new_fd = os.open(part, flags, dir_fd=fd)
             os.close(fd)
             fd = new_fd
         info = os.fstat(fd)
@@ -162,8 +172,10 @@ def read(url, ttl):
         token = hashlib.sha256(url.encode()).hexdigest()
         filename = token + ".json"
         try:
-            entry_fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW,
-                               dir_fd=cache_fd)
+            # O_NONBLOCK is mandatory: checking fstat *after* opening a
+            # replaced FIFO would otherwise hang before the type check.
+            entry_fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW |
+                               os.O_NONBLOCK, dir_fd=cache_fd)
         except FileNotFoundError:
             entry_fd = None
         except OSError as exc:
