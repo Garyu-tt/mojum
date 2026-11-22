@@ -15,7 +15,9 @@ DIST = Path("/var/lib/cezar/runtime/node_modules/@open-mercato/cezar/web/dist")
 BACKUP = Path("/var/lib/cezar/home/fleet/index-original-r01.html")
 SCRIPT = Path(__file__).with_name("overlay.js")
 JS_NAME = "cezar-fleet-r01.js"
-MARKER = '<script defer src="/assets/cezar-fleet-r01.js"></script>'
+LEGACY_MARKER = '<script defer src="/assets/cezar-fleet-r01.js"></script>'
+# Immutable static assets use a one-year cache; bump this query on each update.
+MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r02"></script>'
 MAX_INDEX = 300_000
 MAX_SCRIPT = 120_000
 
@@ -76,9 +78,11 @@ def install(dist=DIST,script=SCRIPT,backup=BACKUP):
     data=index.read_text("utf-8")
     if data.count("</body>")!=1:
         raise DeployRefused("unrecognized cockpit HTML shell")
-    installed=MARKER in data
-    if data.count(MARKER)>1:
+    current=data.count(MARKER)
+    legacy=data.count(LEGACY_MARKER)
+    if current+legacy>1:
         raise DeployRefused("duplicate fleet script marker")
+    installed=bool(current or legacy)
     if backup.exists() or backup.is_symlink():
         regular_file(backup)
         if not installed:
@@ -88,12 +92,17 @@ def install(dist=DIST,script=SCRIPT,backup=BACKUP):
     else:
         raise DeployRefused("injected UI without a known-good backup")
     _replace(target,js)
-    if not installed:
+    if legacy:
+        # The old script URL is browser-immutable for 31536000 seconds.
+        # Migrate exactly one known marker without changing the original backup.
+        _replace(index,data.replace(LEGACY_MARKER,MARKER).encode("utf-8"))
+    elif not installed:
         updated=data.replace("</body>",
                              f'    <!-- owner-private, read-only Cezar fleet -->\n'
                              f'    {MARKER}\n  </body>')
         _replace(index,updated.encode("utf-8"))
     return {"installed":True,"was_present":installed,
+            "cache_version_changed":bool(legacy),
             "read_only":True,"backup_preserved":True}
 
 
