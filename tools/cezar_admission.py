@@ -9,6 +9,7 @@ No tokens, command execution, PR writing, approvals or merge privileges.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -76,30 +77,34 @@ def connect(path: Path):
             or stat.S_IMODE(st.st_mode) & 0o077 or st.st_nlink != 1):
         raise AdmissionError("unsafe admission database inode")
     db = sqlite3.connect(str(path), timeout=20, isolation_level=None)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout=20000")
-    db.execute("PRAGMA journal_mode=DELETE")
-    db.execute("PRAGMA synchronous=FULL")
-    db.execute("PRAGMA foreign_keys=ON")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS admission (
-            id TEXT PRIMARY KEY,
-            key TEXT NOT NULL UNIQUE,
-            repo TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            number INTEGER NOT NULL,
-            revision TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            scope_sha256 TEXT NOT NULL,
-            status TEXT NOT NULL CHECK(status IN ('claimed','submitted','finished','blocked')),
-            run_id TEXT UNIQUE,
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-            UNIQUE(repo, kind, number, revision, phase)
-        );
-        CREATE INDEX IF NOT EXISTS admission_status ON admission(status);
-    """)
-    return db
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=20000")
+        db.execute("PRAGMA journal_mode=DELETE")
+        db.execute("PRAGMA synchronous=FULL")
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS admission (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL UNIQUE,
+                repo TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                number INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                scope_sha256 TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('claimed','submitted','finished','blocked')),
+                run_id TEXT UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                UNIQUE(repo, kind, number, revision, phase)
+            );
+            CREATE INDEX IF NOT EXISTS admission_status ON admission(status);
+        """)
+        return db
+    except BaseException:
+        db.close()
+        raise
 
 
 def identity(repo: str, kind: str, number: int, revision: str,
@@ -275,7 +280,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     prior_umask = os.umask(0o077)
     try:
-        with connect(args.db) as db:
+        with closing(connect(args.db)) as db:
             if args.command == "stats":
                 rows = db.execute("SELECT status,COUNT(*) AS count FROM admission GROUP BY status")
                 result = {"schema": SCHEMA, "statuses": {r["status"]: r["count"] for r in rows}}
