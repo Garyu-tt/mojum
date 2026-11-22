@@ -1,0 +1,99 @@
+"""Fail-closed local file input for exact-head QA preflight (issue #415)."""
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+from mojum.merge_gate import MAX_INPUT_BYTES, SnapshotError, _load_snapshot, main
+
+
+class SnapshotFileInputTests(unittest.TestCase):
+    def test_regular_json_is_read_and_path_read_text_is_not_used(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "pr.json"
+            path.write_text('{"headRefOid":"abc"}', encoding="utf-8")
+            # No unchecked Path.read_text() after a separately sampled stat().
+            with mock.patch.object(Path, "read_text", side_effect=AssertionError("unbounded path read")):
+                self.assertEqual(_load_snapshot(str(path)), {"headRefOid": "abc"})
+
+    def test_large_file_is_rejected_before_json_parsing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "oversized.json"
+            with path.open("wb") as output:
+                output.write(b" " * (MAX_INPUT_BYTES + 1))
+            with self.assertRaisesRegex(SnapshotError, "snapshot exceeds"):
+                _load_snapshot(str(path))
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0),
+                         "POSIX final-symlink rejection required")
+    def test_preexisting_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "pr.json"
+            path.write_text('{"safe":true}', encoding="utf-8")
+            alias = root / "alias.json"
+            alias.symlink_to(path)
+            with self.assertRaisesRegex(SnapshotError, "source unavailable"):
+                _load_snapshot(str(alias))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX nonblocking FIFO support required")
+    def test_fifo_is_rejected_without_blocking(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fifo = Path(temp) / "pr.fifo"
+            os.mkfifo(fifo)
+            root = Path(__file__).resolve().parents[1]
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(root / "src")
+            run = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys; from mojum.merge_gate import _load_snapshot; _load_snapshot(sys.argv[1])",
+                 str(fifo)],
+                cwd=root, env=env, text=True, capture_output=True,
+                check=False, timeout=5,
+            )
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn("snapshot source must be a regular file", run.stderr)
+
+    def test_error_does_not_expose_sensitive_input_filename(self):
+        with tempfile.TemporaryDirectory() as temp:
+            secret = "PRIVATE-access-token-NOT-FOR-LOGS.json"
+            path = str(Path(temp) / secret)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(["--input", path, "--expected-head-sha", "a" * 40,
+                             "--expected-base-sha", "b" * 40])
+            self.assertEqual(code, 1)
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["code"], "INVALID_INPUT")
+            self.assertNotIn(secret, stdout.getvalue())
+            self.assertEqual(result["error"], "snapshot source unavailable")
+
+    def test_open_descriptor_is_closed_on_invalid_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "broken.json"
+            path.write_bytes(b"{bad}")
+            real_open = os.open
+            fds = []
+
+            def capture_open(*args, **kwargs):
+                fd = real_open(*args, **kwargs)
+                fds.append(fd)
+                return fd
+
+            with mock.patch("mojum.merge_gate.os.open", side_effect=capture_open):
+                with self.assertRaises(json.JSONDecodeError):
+                    _load_snapshot(str(path))
+            self.assertEqual(len(fds), 1)
+            with self.assertRaises(OSError):
+                os.fstat(fds[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
