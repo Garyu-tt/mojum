@@ -248,5 +248,59 @@ class FanoutContract(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(output.stat().st_mode),0o600)
 
 
+    def test_one_failed_call_does_not_erase_completed_peers(self):
+        backends=[f.Backend(18180,1,1,2048),
+                  f.Backend(18181,1,1,2048)]
+        work=f.plan(f.validate_tasks(tasks(2)),backends)
+
+        def mixed(job):
+            if job.task_id=="task-1":
+                raise RuntimeError("SECRET RAW PROVIDER FAILURE")
+            return {"task_id":job.task_id, "agent_id":job.agent_id,
+                    "clone":job.clone, "port":job.target_port,
+                    "completion_tokens":4, "text":"valuable proposal"}
+
+        result=f.execute(work,backends,caller=mixed)
+        self.assertEqual(len(result),2)
+        self.assertEqual(result[0]["text"],"valuable proposal")
+        self.assertEqual(result[1]["failed"],True)
+        self.assertEqual(result[1]["error_type"],"RuntimeError")
+        self.assertNotIn("SECRET",json.dumps(result))
+        self.assertNotIn("text",result[1])
+
+    def test_cli_partial_batch_saves_private_report_with_failure_exit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            tasks_path=directory/"tasks.json"
+            tasks_path.write_text(json.dumps(tasks(2)),encoding="utf-8")
+            output=directory/"partial.json"
+            actual_execute=f.execute
+
+            def mixed(job):
+                if job.task_id=="task-1":
+                    raise RuntimeError("SECRET RAW PROVIDER FAILURE")
+                return {"task_id":job.task_id, "agent_id":job.agent_id,
+                        "clone":job.clone, "port":job.target_port,
+                        "completion_tokens":2, "text":"keep useful work"}
+
+            with patch.object(f,"discover_backend",
+                              side_effect=lambda port:f.Backend(port,1,1,2048)), \
+                 patch.object(f,"execute",
+                              side_effect=lambda work,backends:
+                                  actual_execute(work,backends,caller=mixed)):
+                self.assertEqual(f.main(["--tasks",str(tasks_path),
+                                         "--execute","--output",str(output)]),2)
+
+            report=json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(report["inference_requests_completed"],1)
+            self.assertEqual(report["inference_requests_failed"],1)
+            self.assertTrue(report["partial_batch"])
+            self.assertEqual(report["results"][0]["text"],"keep useful work")
+            self.assertTrue(report["results"][1]["failed"])
+            self.assertNotIn("SECRET",json.dumps(report))
+            if os.name=="posix":
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode),0o600)
+
+
 if __name__=="__main__":
     unittest.main()
