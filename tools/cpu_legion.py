@@ -174,6 +174,60 @@ def verify(root, diff, paths):
         raise ValueError("patch fails git apply --check: " + check.stderr[:200])
     return diff.rstrip() + "\n"
 
+def _write_private_patch(out, name, diff):
+    """Create a 0600 artifact below a pinned, owner-controlled directory chain.
+
+    Reject symlink ancestors and non-sticky shared ancestors. Relative paths
+    are anchored to the current directory; same-UID races are out of scope.
+    """
+    if (os.name != "posix" or not getattr(os, "O_NOFOLLOW", 0)
+            or not getattr(os, "O_DIRECTORY", 0)
+            or os.open not in os.supports_dir_fd
+            or os.mkdir not in os.supports_dir_fd):
+        raise ValueError("secure patch artifact writes require POSIX dirfd/nofollow")
+    out = Path(out)
+    if ".." in out.parts:
+        raise ValueError("output directory traversal forbidden")
+    components = out.absolute().parts[1:]
+    if not components:
+        raise ValueError("output directory must be private")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    current_fd = -1
+    file_fd = -1
+    try:
+        current_fd = os.open("/", flags)
+        for part in components:
+            parent = os.fstat(current_fd)
+            if (parent.st_uid not in (0, os.geteuid())
+                    or ((parent.st_mode & 0o022)
+                        and not (parent.st_mode & stat.S_ISVTX))):
+                raise ValueError("unsafe output directory ancestor")
+            try:
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        target = os.fstat(current_fd)
+        if target.st_uid != os.geteuid() or target.st_mode & 0o077:
+            raise ValueError("output directory must be owner-controlled and private")
+        file_fd = os.open(
+            name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+            | getattr(os, "O_CLOEXEC", 0), 0o600, dir_fd=current_fd,
+        )
+        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+            file_fd = -1
+            handle.write(diff)
+    except OSError as exc:
+        raise ValueError("cannot securely write patch artifact") from exc
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if current_fd >= 0:
+            os.close(current_fd)
+
+
 def run_one(db_path, worker, root, out, url, model, timeout):
     db = queue.connect(db_path)
     try:
@@ -191,10 +245,7 @@ def run_one(db_path, worker, root, out, url, model, timeout):
             diff = verify(root, generate(url, model, prompt, timeout), paths)
             digest = hashlib.sha256(diff.encode()).hexdigest()
             name = hashlib.sha256(task["id"].encode()).hexdigest()[:16] + "-" + digest[:16] + ".patch"
-            out.mkdir(parents=True, mode=0o700, exist_ok=True)
-            fd = os.open(out / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(diff)
+            _write_private_patch(out, name, diff)
             if not queue.finish(db, worker, task["id"], "review", int(time.time()),
                                 str(out / name), attempt=task["attempts"]):
                 raise ValueError("lease expired before review")

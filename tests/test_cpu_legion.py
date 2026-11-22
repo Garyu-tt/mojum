@@ -225,6 +225,7 @@ class CpuLegionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "inode changed"):
                 legion._read_context_file(self.root, "src/test.py")
 
+
     @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0),
                          "requires POSIX nofollow")
     def test_context_rejects_ancestor_symlink_swapped_after_preflight(self):
@@ -286,6 +287,52 @@ sys.exit(1)
         with patch("tools.cpu_legion.safe_file", side_effect=grow):
             with self.assertRaises(ValueError):
                 legion._read_context_file(self.root, "src/test.py")
+
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_private_directory_and_exclusive_mode(self):
+        out = self.root / "private" / "patches"
+        legion._write_private_patch(out, "candidate.patch", "diff fixture\\n")
+        artifact = out / "candidate.patch"
+        self.assertEqual(artifact.read_text(), "diff fixture\\n")
+        self.assertEqual(artifact.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(out.stat().st_mode & 0o777, 0o700)
+        with self.assertRaises(ValueError):
+            legion._write_private_patch(out, "candidate.patch", "overwritten\\n")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_rejects_shared_output_directory(self):
+        shared = self.root / "untrusted"
+        shared.mkdir()
+        shared.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(ValueError, "private"):
+                legion._write_private_patch(shared, "candidate.patch", "secret")
+            self.assertFalse((shared / "candidate.patch").exists())
+            with self.assertRaisesRegex(ValueError, "ancestor"):
+                legion._write_private_patch(shared / "subdir", "candidate.patch", "secret")
+            self.assertFalse((shared / "subdir").exists())
+        finally:
+            shared.chmod(0o700)
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_rejects_symlinked_ancestor(self):
+        trusted = self.root / "trusted"
+        trusted.mkdir()
+        link = self.root / "link"
+        link.symlink_to(trusted, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            legion._write_private_patch(link / "patches", "candidate.patch", "secret")
+        self.assertFalse((trusted / "patches").exists())
 
 
 if __name__ == "__main__":

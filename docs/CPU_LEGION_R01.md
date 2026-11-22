@@ -23,7 +23,14 @@ and file growth after a path preflight fail closed; platforms without POSIX
 `dir_fd` and `O_NOFOLLOW` support cannot generate a model request. The worker
 then requests a small unified diff,
 checks file scope and `git apply --check`, and writes a private 0600 patch
-artifact. A **separate isolated runner** must verify that the submitted patch
+artifact. Patch artifacts are created through pinned POSIX directory descriptors:
+the output directory must be owned by the service UID and have no group/world
+permissions; symlinked ancestors and non-sticky writable parent directories
+are rejected. Private subdirectories may be created under trusted or sticky
+parents (such as /tmp), but unsafe pre-existing destinations fail closed.
+The artifact file itself is exclusive-create mode 0600. This is not a full
+same-UID sandbox or protection against all kernel/filesystem races.
+A **separate isolated runner** must verify that the submitted patch
 matches its recorded digest, execute the relevant tests without model
 credentials, and create a draft PR. Independent QA/SHIP alone decides whether
 the exact tested HEAD and BASE are safe to integrate.
