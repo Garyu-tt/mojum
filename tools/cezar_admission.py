@@ -285,6 +285,34 @@ def mark_blocked(db, admission_id: str, run_id: str) -> dict:
         raise
 
 
+def mark_finished(db, admission_id: str, run_id: str) -> dict:
+    """Operator-confirmed terminal transition; no automatic status inference."""
+    try:
+        admission_id = str(uuid.UUID(admission_id))
+        run_id = str(uuid.UUID(run_id))
+    except (ValueError, AttributeError) as exc:
+        raise AdmissionError("invalid UUID") from exc
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = db.execute("SELECT * FROM admission WHERE id=?", (admission_id,)).fetchone()
+        if row is None or row["run_id"] != run_id:
+            raise AdmissionError("admission/run identity mismatch")
+        if row["status"] == "finished":
+            db.execute("COMMIT")
+            return dict(row)
+        if row["status"] != "submitted":
+            raise AdmissionError("only a submitted run may be finished")
+        db.execute("UPDATE admission SET status='finished',"
+                   " updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                   (admission_id,))
+        row = db.execute("SELECT * FROM admission WHERE id=?", (admission_id,)).fetchone()
+        db.execute("COMMIT")
+        return dict(row)
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
+
+
 def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
              single_flight=True) -> dict:
     if url != _LOCAL_CEZAR:
@@ -337,9 +365,10 @@ def main(argv=None):
         p.add_argument("--scope", required=True)
         if kind == "dispatch":
             p.add_argument("--prompt-file", type=Path, required=True)
-    block_parser = sub.add_parser("block")
-    block_parser.add_argument("--admission-id", required=True)
-    block_parser.add_argument("--run-id", required=True)
+    for action in ("block", "finish"):
+        final_parser = sub.add_parser(action)
+        final_parser.add_argument("--admission-id", required=True)
+        final_parser.add_argument("--run-id", required=True)
     sub.add_parser("stats")
     args = parser.parse_args(argv)
     prior_umask = os.umask(0o077)
@@ -348,8 +377,9 @@ def main(argv=None):
             if args.command == "stats":
                 rows = db.execute("SELECT status,COUNT(*) AS count FROM admission GROUP BY status")
                 result = {"schema": SCHEMA, "statuses": {r["status"]: r["count"] for r in rows}}
-            elif args.command == "block":
-                row = mark_blocked(db, args.admission_id, args.run_id)
+            elif args.command in ("block", "finish"):
+                finalizer = mark_blocked if args.command == "block" else mark_finished
+                row = finalizer(db, args.admission_id, args.run_id)
                 result = {"admission_id": row["id"], "status": row["status"],
                           "run_id": row["run_id"]}
             else:

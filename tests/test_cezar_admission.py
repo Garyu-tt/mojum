@@ -156,6 +156,29 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT count(*) FROM admission").fetchone()[0], 1)
 
+    def test_manual_finish_releases_slot_without_replaying_revision(self):
+        ident = self.ident()
+        fresh, row = m.claim(self.db, ident)
+        self.assertTrue(fresh)
+        run_id = str(uuid.uuid4())
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, row["id"], run_id)
+        m.mark_submitted(self.db, row["id"], run_id)
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, row["id"], str(uuid.uuid4()))
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            code = m.main(["--db", str(self.db_path), "finish",
+                           "--admission-id", row["id"], "--run-id", run_id])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "finished")
+        self.assertEqual(m.mark_finished(self.db, row["id"], run_id)["status"], "finished")
+        duplicate, old = m.claim(self.db, ident)
+        self.assertFalse(duplicate)
+        self.assertEqual(old["status"], "finished")
+        new, _ = m.claim(self.db, self.ident(number=613), single_flight=True)
+        self.assertTrue(new)
+
     def test_private_state_permissions_and_symlink_refusal(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
         pub = Path(self.tmp.name) / "public"
