@@ -139,6 +139,8 @@ async function controlSmoke(source){
    clear(id){active=null;cleared++;}
  };
  const get=openDOM(timers), input=get("file");
+ // The minimal fake DOM does not parse HTML select defaults; set 1x explicitly.
+ get("speed").value="1";
  input.files=[{name:"verified.jsonl",size:Buffer.byteLength(source),
    arrayBuffer:async()=>Uint8Array.from(Buffer.from(source)).buffer}];
  await input.listeners.change.call(input);
