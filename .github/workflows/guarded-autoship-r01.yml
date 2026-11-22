@@ -33,7 +33,7 @@ jobs:
             for (const job of ["aquarium-stdlib", "motor-gate-stdlib", "mesh-stdlib"]) {
               for (const py of ["3.11", "3.12", "3.13"]) required.push(job + " (" + py + ")");
             }
-            const dryRun = context.eventName === "workflow_dispatch" && core.getInput("dry_run") !== "false";
+            const dryRun = context.eventName === "workflow_dispatch" && String((context.payload.inputs || {}).dry_run || "true") !== "false";
             const result = { scanned: 0, pendingApproval: 0, waitingCI: 0, stale: 0, merged: null };
             const { data: open } = await github.rest.pulls.list({
               owner, repo, base: target, state: "open", sort: "updated", direction: "desc", per_page: 100,
