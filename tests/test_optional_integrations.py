@@ -66,6 +66,20 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
         data["entries"][0]["packages"][1]["name"] = data["entries"][0]["packages"][0]["name"]
         self.check_rejected(json.dumps(data).encode())
 
+    def test_issue_map_rejects_unknown_or_missing_issue(self):
+        data = load_catalog()
+        data["entries"][0]["issue"] = 123456
+        self.check_rejected(json.dumps(data).encode())
+        data = load_catalog()
+        data["entries"].pop()
+        self.check_rejected(json.dumps(data).encode())
+
+    def test_accepted_status_requires_approved_license(self):
+        data = load_catalog()
+        data["entries"][0]["status"] = "accepted"
+        data["entries"][0]["license_review"] = "required"
+        self.check_rejected(json.dumps(data).encode())
+
     def test_duplicate_json_keys_fail_closed(self):
         self.check_rejected(b'{"schema":1,"schema":2}')
 
