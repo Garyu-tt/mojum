@@ -91,6 +91,9 @@ class PrivateLedgerTests(unittest.TestCase):
     def test_reject_shared_leaf_and_replaceable_ancestors(self):
         shared = self.root / "public"
         shared.mkdir(mode=0o755)
+        # mkdir mode is masked by the runner's umask (often 077).
+        # Force the intended leaky fixture before checking fail-closed denial.
+        shared.chmod(0o755)
         with self.assertRaisesRegex(budget.BudgetError, "not owner-private"):
             budget.connect(shared / "budget.sqlite3")
         self.assertFalse((shared / "budget.sqlite3").exists())
@@ -130,6 +133,9 @@ class PrivateLedgerTests(unittest.TestCase):
     def test_cli_denies_unsafe_database_without_traceback(self):
         shared = self.root / "public"
         shared.mkdir(mode=0o755)
+        # mkdir mode is masked by the runner's umask (often 077).
+        # Force the intended leaky fixture before checking fail-closed denial.
+        shared.chmod(0o755)
         filename = shared / "leaky.sqlite3"
         result = subprocess.run([
             sys.executable, str(ROOT / "tools" / "spartan_budget.py"),
