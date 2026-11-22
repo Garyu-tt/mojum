@@ -47,6 +47,7 @@ class GatewayTests(unittest.TestCase):
             "/api/v1/github/checks?prs=612,99999999",
             "/api/v1/github/checks?prs=612&issues=1",
             "https://evil.example/api/v1/health",
+            "//[invalid",  # malformed IPv6 authority
             "//evil.example/api/v1/health",
             "/api/v1/health#fragment",
         )
