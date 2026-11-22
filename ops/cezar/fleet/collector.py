@@ -61,14 +61,28 @@ def _parse_time(value):
 
 
 def _schedule_list(now):
-    statinfo=os.lstat(SCHEDULES)
-    if (not stat.S_ISREG(statinfo.st_mode) or statinfo.st_uid!=os.geteuid()
-            or statinfo.st_nlink!=1 or statinfo.st_mode & 0o077):
-        raise FleetError("schedule snapshot must be private owner-only regular file")
-    raw=SCHEDULES.read_bytes()
-    if len(raw)>32768:raise FleetError("schedule snapshot size")
+    # Pin the inspected file: lstat() followed by read_bytes() could
+    # follow a replaced symlink and would allocate an unbounded payload.
+    try:
+        fd=os.open(SCHEDULES,os.O_RDONLY|os.O_NOFOLLOW|getattr(os,"O_CLOEXEC",0))
+    except OSError as exc:
+        raise FleetError("schedule snapshot cannot be opened safely") from exc
+    try:
+        statinfo=os.fstat(fd)
+        if (not stat.S_ISREG(statinfo.st_mode) or statinfo.st_uid!=os.geteuid()
+                or statinfo.st_nlink!=1 or statinfo.st_mode & 0o077):
+            raise FleetError("schedule snapshot must be private owner-only regular file")
+        if statinfo.st_size>32768:
+            raise FleetError("schedule snapshot size")
+        with os.fdopen(fd,"rb") as stream:
+            fd=-1
+            raw=stream.read(32769)
+    finally:
+        if fd>=0:os.close(fd)
+    if len(raw)>32768:
+        raise FleetError("schedule snapshot size")
     source=json.loads(raw)
-    if source.get("schema")!="cezar.external-automations.v1":
+    if type(source) is not dict or source.get("schema")!="cezar.external-automations.v1":
         raise FleetError("unknown schedule snapshot")
     timestamp=_parse_time(source.get("observed_at"))
     records=source.get("agents")
