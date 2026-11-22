@@ -148,7 +148,8 @@ class BudgetLedger:
     def _connect(self) -> sqlite3.Connection:
         # The paid-provider ledger may not fail open on platforms where the
         # pathname/ownership guard or nofollow opening cannot be enforced.
-        if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        if (os.name != "posix" or not getattr(os, "O_NOFOLLOW", 0)
+                or not getattr(os, "O_DIRECTORY", 0)):
             raise BudgetDenied("private POSIX ledger storage is required")
         if not Path(self.path).is_absolute():
             raise BudgetDenied("budget ledger path must be absolute")
@@ -162,8 +163,24 @@ class BudgetLedger:
             except FileExistsError:
                 pass
             else:
-                os.close(fd)
+                try:
+                    # SQLite's WAL transaction durability does not guarantee
+                    # that the new database inode was durably published.
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
             _check_private_sqlite_path(self.path)
+            # Sync the owner-private parent before permitting any reservation.
+            # Reopen also retries a directory sync after an uncertain failure.
+            parent_fd = os.open(
+                str(Path(self.path).parent),
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         try:
             db.execute("PRAGMA busy_timeout=5000")
