@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -142,6 +143,43 @@ class GpuLegionPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(gpu.InventoryError, "exceeds"):
                 gpu.load_inventory(file)
 
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NONBLOCK"),
+                         "POSIX nonblocking descriptor required")
+    def test_fifo_snapshot_is_rejected_without_waiting_for_writer(self):
+        with tempfile.TemporaryDirectory() as folder:
+            fifo = Path(folder) / "blocked.json"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(gpu.InventoryError, "regular file"):
+                gpu.load_inventory(fifo)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"),
+                         "POSIX nofollow descriptor required")
+    def test_symlink_snapshot_is_rejected_before_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            real = Path(folder) / "private.json"
+            real.write_text('{"source":"synthetic","gpus":[]}')
+            alias = Path(folder) / "alias.json"
+            alias.symlink_to(real)
+            with self.assertRaises(OSError):
+                gpu.load_inventory(alias)
+
+    def test_sparse_huge_file_rejected_before_materializing_contents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "sparse.json"
+            with snapshot.open("wb") as output:
+                output.truncate(1024**3)
+            with self.assertRaisesRegex(gpu.InventoryError, "exceeds 64 KiB"):
+                gpu.load_inventory(snapshot)
+
+    def test_exact_maximum_inventory_size_remains_accepted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "exact.json"
+            payload = b'{"source":"synthetic","gpus":[]}'
+            snapshot.write_bytes(payload + b" " * (gpu.MAX_INPUT_BYTES - len(payload)))
+            data, devices = gpu.load_inventory(snapshot)
+            self.assertEqual(data["source"], "synthetic")
+            self.assertEqual(devices, [])
 
     def test_imported_json_cannot_claim_hardware_verification(self):
         data, _ = p106_inventory(3)
