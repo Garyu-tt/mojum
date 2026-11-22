@@ -558,6 +558,39 @@ class FleetTests(unittest.TestCase):
 
 
 
+    def _assert_claim_failure_isolated(self, failure):
+        self.add_task("failed-claim", scope="component.claim")
+        self.add_task("healthy-claim", scope="component.healthy")
+        original_claim = sc.claim
+
+        def claim_or_fail(db, worker_id, *args, **kwargs):
+            if worker_id == 1:
+                raise failure
+            return original_claim(db, worker_id, *args, **kwargs)
+
+        with patch.object(fleet.coordinator, "claim", side_effect=claim_or_fail), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2,
+                               backends=self.backends)
+        by_worker = {item["worker"]: item for item in report["results"]}
+        self.assertEqual(report["claim_unavailable"], 1)
+        self.assertEqual(report["worker_failures"], 0)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(by_worker[1]["state"], "claim_unavailable")
+        self.assertEqual(by_worker[1]["reason"], "coordinator_claim_failed")
+        self.assertEqual(by_worker[2]["state"], "proposal_for_independent_review")
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+        self.assertNotIn("SECRET", json.dumps(report))
+
+    def test_sqlite_database_claim_failure_isolated(self):
+        # A DatabaseError that is not OperationalError must not kill the batch.
+        self._assert_claim_failure_isolated(
+            sqlite3.DatabaseError("SECRET SQLite schema or database content"))
+
+    def test_os_error_claim_failure_isolated(self):
+        self._assert_claim_failure_isolated(
+            OSError("SECRET coordinator path or filesystem detail"))
+
     def test_unexpected_worker_crash_retains_successful_proposals(self):
         self.add_task("recover-first", scope="component.first")
         self.add_task("recover-second", scope="component.second")
