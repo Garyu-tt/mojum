@@ -348,9 +348,25 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
         raise FleetError("private artifact folder required")
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    lock = db_path.with_suffix(db_path.suffix + ".fleet.lock")
-    fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+    # Validate the database/parent *before* opening the adjacent lock. A
+    # group-writable directory could otherwise plant a symlink lock target.
     try:
+        coordinator._check_private_sqlite_path(str(db_path))
+    except (OSError, ValueError) as exc:
+        raise FleetError("unsafe private coordinator directory/database") from exc
+    lock = db_path.with_suffix(db_path.suffix + ".fleet.lock")
+    flags = (os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_CLOEXEC", 0))
+    try:
+        fd = os.open(lock, flags, 0o600)
+    except OSError as exc:
+        raise FleetError("unsafe or inaccessible private fleet lock") from exc
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            raise FleetError("fleet lock must be an owner-only regular file")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
