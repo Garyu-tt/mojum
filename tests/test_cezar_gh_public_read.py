@@ -220,40 +220,6 @@ class CezarGhPublicReadTests(unittest.TestCase):
                                      client.assert_header.items()))
 
     def test_cached_response_cannot_be_swapped_to_unrelated_file(self):
-        # Old pathname preflight: is_file() followed by is_symlink()
-        # followed by read_text(). A replacement during the check leaked a
-        # different JSON file; the descriptor-pinned cache must not do so.
-        with tempfile.TemporaryDirectory() as tmp:
-            cache_dir = Path(tmp) / "cache"
-            cache_dir.mkdir(mode=0o700)
-            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
-            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
-            cached = cache_dir / filename
-            cached.write_text(json.dumps({
-                "body": '{"kind":"trusted"}', "link": "",
-            }), encoding="utf-8")
-            cached.chmod(0o600)
-            foreign = Path(tmp) / "foreign.json"
-            foreign.write_text(json.dumps({
-                "body": '{"kind":"swapped"}', "link": "",
-            }), encoding="utf-8")
-            foreign.chmod(0o600)
-            original = Path.is_symlink
-
-            def swap_on_preflight(path):
-                if path == cached:
-                    cached.unlink()
-                    cached.symlink_to(foreign)
-                    return False  # The old check returned before the swap.
-                return original(path)
-
-            with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
-                    Path, "is_symlink", swap_on_preflight):
-                body, _ = adapter.read(url, ttl=300)
-            self.assertEqual(body, b'{"kind":"trusted"}')
-
-
-    def test_cache_symlink_swap_at_descriptor_open_is_refused(self):
         # Exercise the actual dir_fd open, not the obsolete Path.is_symlink
         # preflight. Replace the cache entry *just before* os.open executes.
         with tempfile.TemporaryDirectory() as tmp:
