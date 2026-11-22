@@ -188,6 +188,37 @@ class GpuLegionPlanTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 gpu.load_inventory(alias)
 
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_DIRECTORY", "O_CLOEXEC")),
+        "POSIX pinned directory descriptors required",
+    )
+    def test_symlinked_inventory_ancestor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            actual = root / "actual"
+            actual.mkdir()
+            snapshot = actual / "inventory.json"
+            snapshot.write_text('{"source":"synthetic","gpus":[]}')
+            alias = root / "alias"
+            alias.symlink_to(actual, target_is_directory=True)
+            with self.assertRaises(OSError):
+                gpu.load_inventory(alias / "inventory.json")
+            data, devices = gpu.load_inventory(snapshot)
+            self.assertEqual(data["source"], "synthetic")
+            self.assertEqual(devices, [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX descriptor path contract")
+    def test_parent_traversal_is_rejected_before_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            actual = root / "actual"
+            actual.mkdir()
+            snapshot = actual / "inventory.json"
+            snapshot.write_text('{"source":"synthetic","gpus":[]}')
+            with self.assertRaisesRegex(gpu.InventoryError, "traverse parents"):
+                gpu.load_inventory(actual / ".." / "actual" / "inventory.json")
+
     def test_sparse_huge_file_rejected_before_materializing_contents(self):
         with tempfile.TemporaryDirectory() as folder:
             snapshot = Path(folder) / "sparse.json"
