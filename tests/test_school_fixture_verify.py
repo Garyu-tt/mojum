@@ -7,7 +7,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from mojum import school_verify
 from mojum.school import SchoolContractError, load_catalog, run_scripted_activity, write_fixture
 from mojum.school_verify import MAX_MANIFEST_BYTES, verify_scripted_fixture
 
@@ -99,6 +101,131 @@ class SchoolColdVerifyTests(unittest.TestCase):
             path.write_text('{"schema":"wrong","events":[]}', encoding="utf-8")
             with self.assertRaises(SchoolContractError):
                 verify_scripted_fixture(target, self.catalog)
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "POSIX directory nofollow support required",
+    )
+    def test_initial_fixture_directory_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            alias = Path(temp) / "school-alias"
+            alias.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(SchoolContractError, "real directory"):
+                verify_scripted_fixture(alias, self.catalog)
+            # A rejected alias must not alter the actual private fixture.
+            self.assertEqual(
+                verify_scripted_fixture(target, self.catalog)["status"],
+                "MATCHES_SCRIPTED_REPLAY",
+            )
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "POSIX directory descriptors required",
+    )
+    def test_renamed_directory_does_not_redirect_a_pinned_verification(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp, section="music")
+            alternate = Path(temp) / "alternate"
+            write_fixture(
+                run_scripted_activity(self.catalog, "visual_arts", start_tick=55),
+                alternate,
+            )
+            displaced = Path(temp) / "displaced"
+            original_read = school_verify._read_regular_bounded
+            switched = False
+
+            def swap_before_first_read(path, limit, *, directory_fd=None):
+                nonlocal switched
+                self.assertIsNotNone(directory_fd)
+                if not switched:
+                    switched = True
+                    target.rename(displaced)
+                    target.symlink_to(alternate, target_is_directory=True)
+                return original_read(path, limit, directory_fd=directory_fd)
+
+            with patch.object(school_verify, "_read_regular_bounded",
+                              side_effect=swap_before_first_read):
+                result = verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(switched)
+            self.assertEqual(result["section_id"], "music")
+            self.assertEqual(result["start_tick"], 17)
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "POSIX nofollow support required",
+    )
+    def test_symlink_inserted_just_before_open_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            manifest = target / "events.json"
+            outside = Path(temp) / "outside.json"
+            original_bytes = manifest.read_bytes()
+            outside.write_bytes(original_bytes)
+            real_open = os.open
+            switched = False
+
+            def swap_during_open(path, flags, *args, **kwargs):
+                nonlocal switched
+                if path == "events.json" and kwargs.get("dir_fd") is not None and not switched:
+                    switched = True
+                    manifest.unlink()
+                    manifest.symlink_to(outside)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(school_verify.os, "open", side_effect=swap_during_open):
+                with self.assertRaisesRegex(SchoolContractError, "nonregular"):
+                    verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(switched)
+            self.assertEqual(outside.read_bytes(), original_bytes)
+
+    def test_pinned_read_rejects_missing_nonblock_capability(self):
+        if os.name != "posix" or not all(
+            hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")
+        ):
+            self.skipTest("POSIX pinned nonblocking descriptor opens required")
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                # Simulate a POSIX host lacking O_NONBLOCK. Never open the
+                # manifest by a potentially blocking descriptor in this case.
+                with patch.object(school_verify.os, "O_NONBLOCK"):
+                    delattr(school_verify.os, "O_NONBLOCK")
+                    with patch.object(school_verify.os, "open",
+                                      side_effect=AssertionError("unsafe open attempted")):
+                        with self.assertRaisesRegex(SchoolContractError, "nonblocking"):
+                            school_verify._read_regular_bounded(
+                                target / "events.json", MAX_MANIFEST_BYTES, directory_fd=fd,
+                            )
+            finally:
+                os.close(fd)
+
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NONBLOCK"),
+        "POSIX nonblocking descriptor opens required",
+    )
+    def test_fifo_substituted_before_open_fails_without_blocking(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            manifest = target / "events.json"
+            real_open = os.open
+            swapped = False
+
+            def replace_with_fifo(path, flags, *args, **kwargs):
+                nonlocal swapped
+                if path == "events.json" and kwargs.get("dir_fd") is not None and not swapped:
+                    swapped = True
+                    self.assertTrue(flags & os.O_NONBLOCK)
+                    manifest.unlink()
+                    os.mkfifo(manifest)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(school_verify.os, "open", side_effect=replace_with_fifo):
+                with self.assertRaisesRegex(SchoolContractError, "nonregular"):
+                    verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(swapped)
 
     def test_cli_reports_only_non_private_summary(self):
         with tempfile.TemporaryDirectory() as temp:
