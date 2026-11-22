@@ -111,6 +111,56 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(sum(a for a, _ in ids), 1)
         self.assertEqual(len({rid for _, rid in ids}), 1)
 
+    def test_distinct_concurrent_claims_share_one_unresolved_slot(self):
+        admitted = []
+        deferred = []
+        errors = []
+        gate = threading.Barrier(4)
+
+        def worker(index):
+            try:
+                db = m.connect(self.db_path)
+                try:
+                    gate.wait(timeout=8)
+                    try:
+                        created, row = m.claim(
+                            db, self.ident(number=700 + index),
+                            limit_unresolved=True)
+                        admitted.append((created, row["id"]))
+                    except m.CapacityDeferred:
+                        deferred.append(index)
+                finally:
+                    db.close()
+            except Exception as exc:
+                errors.append(str(exc))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertFalse(errors)
+        self.assertEqual(len(admitted), 1)
+        self.assertTrue(admitted[0][0])
+        self.assertEqual(len(deferred), 3)
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM admission WHERE status='claimed'").fetchone()[0], 1)
+        run_id = str(uuid.uuid4())
+        m.mark_submitted(self.db, admitted[0][1], run_id)
+        with self.assertRaises(m.CapacityDeferred):
+            m.claim(self.db, self.ident(number=799), limit_unresolved=True)
+        m.mark_blocked(self.db, admitted[0][1], run_id)
+        self.assertTrue(m.claim(self.db, self.ident(number=799), limit_unresolved=True)[0])
+
+    def test_dispatch_cannot_bypass_other_pending_admission(self):
+        m.claim(self.db, self.ident(number=700))
+        with patch.object(m.urllib.request, "build_opener",
+                          side_effect=AssertionError("model dispatch must not happen")):
+            with self.assertRaises(m.CapacityDeferred):
+                m.dispatch(self.db, self.ident(number=701), self.private_prompt())
+        self.assertEqual(self.db.execute("SELECT count(*) FROM admission").fetchone()[0], 1)
+
     def test_private_state_permissions_and_symlink_refusal(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
         pub = Path(self.tmp.name) / "public"
