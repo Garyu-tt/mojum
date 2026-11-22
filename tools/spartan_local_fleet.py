@@ -228,6 +228,15 @@ def _private_output_fd(folder: Path) -> int:
         for component in parts:
             if component == ".":
                 continue
+            # Pin the ancestor before looking up its next child entry.
+            # Non-sticky writable or unowned parents allow path replacement
+            # after the lease reference has been recorded.
+            ancestor = os.fstat(fd)
+            if (not stat.S_ISDIR(ancestor.st_mode)
+                    or ancestor.st_uid not in (0, os.geteuid())
+                    or ((ancestor.st_mode & 0o022)
+                        and not (ancestor.st_mode & stat.S_ISVTX))):
+                raise FleetError("output directory ancestor replaceable")
             next_fd = os.open(component, flags, dir_fd=fd)
             os.close(fd)
             fd = next_fd
