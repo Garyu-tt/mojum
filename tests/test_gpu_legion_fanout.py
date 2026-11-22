@@ -175,6 +175,31 @@ class FanoutContract(unittest.TestCase):
             f._NoRedirect().redirect_request(
                 None,None,302,"no",{},"https://example.org")
 
+    def test_nested_bounded_response_json_fails_closed(self):
+        # A 30 KiB syntactically valid JSON document exceeds the parser's
+        # recursion limit on Python 3.11-3.13; bytes alone are insufficient.
+        payload = b"[" * 15000 + b"]" * 15000
+
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return payload[:limit]
+
+        class Opener:
+            def open(self, request, *, timeout):
+                return Response()
+
+        with self.assertRaisesRegex(f.FanoutError, "invalid JSON response"):
+            f._request_json(18180, "/health", opener=Opener())
+
     def test_infer_never_executes_generated_commands(self):
         observed=[]
         def fake(port,path,**kwargs):
