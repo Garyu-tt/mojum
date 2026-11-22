@@ -66,6 +66,8 @@ def load_catalog(path=DEFAULT_CATALOG):
                 or entry["optional"] is not True
                 or entry["license_review"] not in ("required", "approved")):
             raise ValueError("invalid integration gates")
+        if entry["status"] != "planned" and entry["license_review"] != "approved":
+            raise ValueError("integration progress requires approved license review")
         packages = entry["packages"]
         if type(packages) is not list or not 1 <= len(packages) <= 16:
             raise ValueError("invalid package collection")
