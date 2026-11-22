@@ -65,6 +65,20 @@ class QAFleetTests(unittest.TestCase):
             seen=json.loads((self.home/"history.json").read_text())["seen"]
             self.assertEqual(len(seen),3)
 
+    def test_unknown_draft_is_not_falsely_marked_ready_and_model_cap_is_reported(self):
+        # The public mirror does not carry trusted draft metadata. Do not turn
+        # that unknown value into an invented "False" prompt for the LLM.
+        with patch.object(fleet,"fetch_diff",return_value=("diff --git a/a b/a","digest")), \
+             patch.object(fleet,"model",return_value=("One concrete test",{})) as model:
+            self.assertEqual(fleet.main(["--max-workers","1"]),0)
+        prompt=model.call_args.args[1]
+        self.assertIn("Draft status: unknown",prompt)
+        self.assertNotIn("Draft: False",prompt)
+        snap=json.loads((self.home/"current.json").read_text())
+        self.assertEqual(snap["configured_capacity"],17)
+        self.assertEqual(snap["max_simultaneous_model_calls"],9)
+        self.assertLessEqual(snap["max_simultaneous_model_calls"],snap["configured_capacity"])
+
     def test_failed_pr_does_not_stop_other_workers(self):
         def model(port,prompt):
             if "PR #2:" in prompt: raise TimeoutError("fixture")
