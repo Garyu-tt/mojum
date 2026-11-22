@@ -106,6 +106,13 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
     def test_duplicate_json_keys_fail_closed(self):
         self.check_rejected(b'{"schema":1,"schema":2}')
 
+    def test_overdeep_json_rejected_without_recursion_traceback(self):
+        # 30 KiB malformed-depth input is inside the file-size cap and
+        # raises RecursionError in CPython json.loads without this guard.
+        nested = b"[" * 15000 + b"]" * 15000
+        self.assertLess(len(nested), 256 * 1024)
+        self.check_rejected(nested)
+
     def test_oversized_registry_rejected(self):
         self.check_rejected(b"x" * (256 * 1024 + 1))
 
