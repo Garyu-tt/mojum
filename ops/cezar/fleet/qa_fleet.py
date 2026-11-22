@@ -20,7 +20,9 @@ MAX_BODY=700_000
 SCHEMA="cezar.qa-fleet.v1"
 INITIAL_POOL=17
 GUARD=threading.RLock()
-PORT_SEMAPHORES={p:threading.Semaphore(min(2,n)) for p,n in PORT_CAPACITY}
+MODEL_PER_PORT_LIMIT=2  # conservative CPU limit; not all 17 slots infer simultaneously
+MAX_MODEL_INFLIGHT=sum(min(MODEL_PER_PORT_LIMIT,n) for _,n in PORT_CAPACITY)
+PORT_SEMAPHORES={p:threading.Semaphore(min(MODEL_PER_PORT_LIMIT,n)) for p,n in PORT_CAPACITY}
 run={}
 def now():return datetime.now(timezone.utc).isoformat()
 def save(path,data):
@@ -128,7 +130,9 @@ def one(worker,pr):
         except Exception:
             update(slot,state="failed",finished_at=now(),note="patch-unavailable",evidence="none")
             return n,"failed"
-        prompt=(f"PR #{n}: {str(pr.get('title',''))[:200]}\nDraft: {bool(pr.get('isDraft'))}.\n"
+        draft=pr.get('isDraft')
+        draft_status='unknown' if draft is None else ('yes' if draft is True else 'no')
+        prompt=(f"PR #{n}: {str(pr.get('title',''))[:200]}\nDraft status: {draft_status}.\n"
             f"Review evidence: {evidence}.\n{diff_excerpt}\n"
             "Return one specific likely risk or test. This is NOT final QA.")
         update(slot,state="waiting_model",evidence=evidence,diff_sha256=digest)
@@ -193,7 +197,8 @@ def main(argv=None):
         global run
         run={"schema":SCHEMA,"generated_at":now(),"started_at":now(),
              "source":"read-only public PR diffs + localhost CPU inference, not independent acceptance",
-             "configured_capacity":17,"assigned":len(selected),"active_requests":0,
+             "configured_capacity":17,"max_simultaneous_model_calls":MAX_MODEL_INFLIGHT,
+             "assigned":len(selected),"active_requests":0,
              "completed_tasks":0,"failed_tasks":0,"cycle":"running","workers":workers}
         save(SNAPSHOT,run)
         with ThreadPoolExecutor(max_workers=args.max_workers) as pool:
