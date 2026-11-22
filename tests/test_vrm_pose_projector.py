@@ -44,6 +44,15 @@ const invalid = packet(3);
 invalid.joints[0].angle_rad = Number.NaN;
 assert.throws(() => projector.apply(invalid));
 assert.equal(hip.rotation.y, 0.2);
+// A higher tick with backwards or repeated virtual time must not be rendered.
+const reversedTime = packet(3);
+reversedTime.simulation_time_ns = 0;
+assert.throws(() => projector.apply(reversedTime));
+assert.equal(hip.rotation.y, 0.2);
+const repeatedTime = packet(3);
+repeatedTime.simulation_time_ns = 20000000;
+assert.throws(() => projector.apply(repeatedTime));
+assert.equal(hip.rotation.y, 0.2);
 const unexpected = packet(3);
 unexpected.joints[0].id = 'unknown';
 assert.throws(() => projector.apply(unexpected));
