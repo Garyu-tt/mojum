@@ -6,9 +6,9 @@ importer, a GLB skin, a validated cloth-body contact model, or equip/unequip.
 It introduces no dependency to the default stdlib-only runtime.
 
 `tools/cloth_flex_spike.py` generates a self-contained MJCF with one `12 x 6`
-`flexcomp dim="2"` patch. The x=0 edge is pinned to a **mocap body in the same
-MuJoCo world**. During stepping, its x coordinate follows a deterministic,
-small sinusoidal motion. A floor and sphere provide collision geometries.
+`flexcomp dim="2"` patch. The x=0 edge is pinned to an **articulated slide-joint body** driven by a
+position servo. MuJoCo does not support 2D flex elasticity attached directly
+to mocap bodies; the servo receives a deterministic, small sinusoidal target. A floor and sphere provide collision geometries.
 All simulations remain CPU-only and locally initiated; the script never writes
 Aquarium journals, agent state, private traces, or output files.
 

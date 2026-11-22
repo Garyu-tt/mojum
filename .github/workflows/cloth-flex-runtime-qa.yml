@@ -1,0 +1,42 @@
+name: Mojum opt-in MuJoCo cloth real-engine QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cloth_flex_spike.py'
+      - 'tests/test_cloth_flex_spike.py'
+      - 'tests/test_cloth_flex_mujoco_runtime.py'
+      - '.github/workflows/cloth-flex-runtime-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let an old manual rerun cancel the required current-head run.
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.run_attempt == '1'
+      && format('pr-{0}', github.event.pull_request.number)
+      || format('run-{0}-attempt-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == '1' }}
+
+jobs:
+  actual-mujoco-flex:
+    name: actual-mujoco-flex (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    env:
+      MOJUM_MUJOCO_RUNTIME_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install optional MuJoCo CPU runtime
+        run: python -m pip install 'mujoco>=3.2,<4'
+      - name: Compile and simulate real flex models headlessly
+        run: python -m unittest discover -s tests -p 'test_cloth_flex_mujoco_runtime.py' -v
