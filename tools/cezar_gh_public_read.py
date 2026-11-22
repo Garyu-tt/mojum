@@ -24,8 +24,8 @@ CACHE_DIR = Path("/var/lib/cezar/home/public-gh-cache")
 MAX_BODY = 1500000
 MAX_ARG = 1200
 
-# Restrict public search to one repository and audited GitHub filters.
-# GitHub's OR / nested query grammar can otherwise widen a prefix-only repo: check.
+# GitHub's OR and nested search grammar can escape a prefix-only repo: test.
+# Accept only audited single-repository qualifiers, never arbitrary search text.
 SEARCH_SCOPE = re.compile(
     r"repo:Garyu-tt/mojum is:(?:issue|pr)"
     r"(?: (?:created|updated):(?:>=|<=|>|<)?[0-9]{4}-[0-9]{2}-[0-9]{2}"
