@@ -239,10 +239,13 @@ class CezarGhPublicReadTests(unittest.TestCase):
             foreign.chmod(0o600)
             original_open = os.open
             swapped = False
+            observed_flags = []
+            foreign_before = foreign.read_bytes()
 
             def swap_at_actual_open(path, flags, *args, **kwargs):
                 nonlocal swapped
                 if path == filename and kwargs.get("dir_fd") is not None:
+                    observed_flags.append(flags)
                     # Simulate same-UID attacker replacing the directory
                     # entry after the cache directory was pinned.
                     if not swapped:
@@ -257,6 +260,12 @@ class CezarGhPublicReadTests(unittest.TestCase):
                                             "untrusted cache entry"):
                     adapter.read(url, ttl=300)
             self.assertTrue(swapped, "race injection never executed")
+            self.assertEqual(len(observed_flags), 1,
+                             "injected descriptor open must execute exactly once")
+            self.assertTrue(observed_flags[0] & os.O_NOFOLLOW,
+                            "cache entry must be opened without following symlinks")
+            self.assertEqual(foreign.read_bytes(), foreign_before,
+                             "failed read must not mutate unrelated target")
             self.assertTrue(cached.is_symlink())
 
     def test_cache_rejects_symlink_in_ancestor(self):
