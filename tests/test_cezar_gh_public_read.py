@@ -314,6 +314,41 @@ class CezarGhPublicReadTests(unittest.TestCase):
             self.assertFalse(child.exists(),
                              "unsafe mkdir followed a symlinked ancestor")
 
+    def test_interrupted_cache_temp_does_not_block_next_fetch(self):
+        # A prior killed process may leave a mode-0600 <token>.tmp.<pid>
+        # behind. PID reuse or two writes in one process must not prevent
+        # a later cache refresh or overwrite the unrelated stale artifact.
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        class FakeResponse:
+            status = 200
+            headers = {}
+            def geturl(self):
+                return url
+            def read(self, limit):
+                return b'{"items":[]}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+        class FakeClient:
+            def open(self, req, timeout):
+                return FakeResponse()
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            token = hashlib.sha256(url.encode()).hexdigest()
+            stale = cache / (token + ".tmp." + str(os.getpid()))
+            stale.write_bytes(b"prior aborted write")
+            stale.chmod(0o600)
+            with patch.object(adapter, "CACHE_DIR", cache), patch.object(
+                    adapter.urllib.request, "build_opener", return_value=FakeClient()):
+                body, link = adapter.read(url, ttl=300)
+                again, _ = adapter.read(url, ttl=300)
+            self.assertEqual(body, b'{"items":[]}')
+            self.assertEqual(again, body)
+            self.assertEqual(link, "")
+            self.assertEqual(stale.read_bytes(), b"prior aborted write")
+            self.assertTrue((cache / (token + ".json")).is_file())
+
     def test_refused_cli_does_not_echo_sensitive_arguments(self):
         secret = "token_please_never_log_this"
         errors = io.StringIO()

@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import stat
 import sys
 import time
@@ -220,7 +221,7 @@ def read(url, ttl):
             link = response.headers.get("Link", "")[:3000]
         json.loads(raw)  # Reject non-JSON public responses.
         data = {"body": raw.decode("utf-8"), "link": link}
-        tempname = token + ".tmp." + str(os.getpid())
+        tempname = token + ".tmp." + str(os.getpid()) + "." + secrets.token_hex(12)
         tmp_fd = os.open(tempname, os.O_CREAT | os.O_EXCL | os.O_WRONLY |
                          os.O_NOFOLLOW, 0o600, dir_fd=cache_fd)
         try:
