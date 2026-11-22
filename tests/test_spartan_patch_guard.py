@@ -1,6 +1,9 @@
 """Untrusted model patch preflight is syntactic, exact-scope and fail-closed."""
 import importlib.util
 import io
+import os
+import subprocess
+import sys
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 import tempfile
@@ -130,6 +133,34 @@ class PatchGuardTests(unittest.TestCase):
         test = EDIT.replace("@@ -1,2 +1,2 @@\n one\n-old\n+new\n", "@@ -1,1 +1,1 @@\n one\n")
         with self.assertRaises(guard.PatchGuardError):
             guard.validate_patch(test, [PATH])
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "mkfifo")
+                         and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX nonblocking FIFO support required")
+    def test_cli_refuses_fifo_without_blocking(self):
+        with tempfile.TemporaryDirectory() as td:
+            fifo = Path(td) / "patch.fifo"
+            os.mkfifo(fifo)
+            command = [sys.executable, str(MODULE), "--patch", str(fifo),
+                       "--allow-path", PATH]
+            run = subprocess.run(command, capture_output=True, text=True,
+                                 check=False, timeout=5)
+            self.assertEqual(run.returncode, 2)
+            self.assertIn("patch input must be a regular file", run.stderr)
+
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0), "O_NOFOLLOW not supported")
+    def test_cli_refuses_symlinked_patch_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            patch = Path(td) / "real.diff"
+            patch.write_text(EDIT, encoding="utf-8")
+            link = Path(td) / "link.diff"
+            link.symlink_to(patch)
+            command = [sys.executable, str(MODULE), "--patch", str(link),
+                       "--allow-path", PATH]
+            run = subprocess.run(command, capture_output=True, text=True,
+                                 check=False, timeout=5)
+            self.assertEqual(run.returncode, 2)
+            self.assertIn('"accepted": false', run.stderr)
 
     def test_cli_success_and_failure(self):
         with tempfile.TemporaryDirectory() as td:
