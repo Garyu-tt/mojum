@@ -37,6 +37,22 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
         data["entries"][0]["optional"] = False
         self.check_rejected(json.dumps(data).encode())
 
+    def test_status_advancement_requires_approved_license(self):
+        for status in ("contract", "experiment", "accepted"):
+            with self.subTest(status=status):
+                data = load_catalog()
+                data["entries"][0]["status"] = status
+                self.check_rejected(json.dumps(data).encode())
+
+        # An independently reviewed candidate may advance in a later PR.
+        data = load_catalog()
+        data["entries"][0]["status"] = "contract"
+        data["entries"][0]["license_review"] = "approved"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "catalog.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(load_catalog(path)["entries"][0]["status"], "contract")
+
     def test_cannot_use_unsafe_reference(self):
         data = load_catalog()
         data["entries"][0]["packages"][0]["url"] = "http://internal.local/secret"
