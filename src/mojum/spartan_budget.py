@@ -10,7 +10,9 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 import hashlib
+import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -42,6 +44,54 @@ class Admission:
     reserved_tokens: int
     reserved_usd_micros: int
     duplicate: bool
+
+
+def _require_private_sqlite_path(path: str) -> None:
+    """Prevent exposing the persistent provider ledger to other local users.
+
+    Do not chmod an existing database or change the process-wide umask.
+    Directory ownership/mode checks are a POSIX local-account boundary,
+    not a defense against a malicious process running under the same UID.
+    """
+    if not path or path == ":memory:" or path.startswith("file:"):
+        raise ValueError("budget ledger needs an ordinary persistent file path")
+    if os.name != "posix":
+        return
+    if ".." in Path(path).parts:
+        raise PermissionError("budget SQLite parent traversal refused")
+    parent = Path(os.path.abspath(path)).parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError("budget SQLite parent chain contains a symlink")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise PermissionError("budget SQLite parent chain is replaceable")
+
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+             | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_CLOEXEC", 0))
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        os.close(fd)
+    for suffix in ("", "-wal", "-shm"):
+        target = path + suffix
+        try:
+            info = os.lstat(target)
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise PermissionError("budget SQLite file is not owner-private")
 
 
 class BudgetLedger:
@@ -102,6 +152,7 @@ class BudgetLedger:
                 raise
 
     def _connect(self) -> sqlite3.Connection:
+        _require_private_sqlite_path(self.path)
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         db.execute("PRAGMA busy_timeout=5000")
         db.execute("PRAGMA journal_mode=WAL")
