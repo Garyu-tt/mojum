@@ -238,11 +238,46 @@ class FleetTests(unittest.TestCase):
              patch.object(fleet, "_http", side_effect=fake_server):
             outcome = fleet.run(self.db, self.out, max_agents=300, max_jobs=32)
         self.assertEqual(outcome["addressable_agents"], 300)
-        self.assertEqual(outcome["admitted_concurrent_model_calls"], 6)
-        # No claims for extra nonexistent physical slots.
-        self.assertEqual(outcome["proposals"], 6)
+        self.assertEqual(outcome["live_free_model_slots"], 6)
+        # Qwen advertised 4 physical slots, but the real four-way request
+        # batch timed out. A successful 1-slot CPU + two 1-slot GPUs is
+        # safer than 4 simultaneous CPU model calls that deliver no patches.
+        self.assertEqual(outcome["per_backend_admission"],
+                         {18182: 1, 18180: 1, 18181: 1})
+        self.assertEqual(outcome["admitted_concurrent_model_calls"], 3)
+        self.assertEqual(outcome["proposals"], 3)
         with closing(sc.connect(str(self.db))) as db:
-            self.assertEqual(sc.status(db)["states"]["queued"], 2)
+            self.assertEqual(sc.status(db)["states"]["queued"], 5)
+
+    def test_cpu_admission_can_be_raised_only_explicitly(self):
+        for i in range(10):
+            self.add_task(f"case-{i}", scope=f"component.case.{i}")
+        with patch.object(fleet, "discover", return_value=self.backends), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            result = fleet.run(self.db, self.out, max_agents=300, max_jobs=32,
+                               max_cpu_inflight=2)
+        self.assertEqual(result["per_backend_admission"][18182], 2)
+        self.assertEqual(result["admitted_concurrent_model_calls"], 4)
+        self.assertEqual(result["proposals"], 4)
+
+    def test_invalid_cpu_admission_rejected_before_running(self):
+        for cap in (0, -1, True, 5, 300):
+            with self.subTest(cap=cap), self.assertRaises(fleet.FleetError):
+                fleet.run(self.db, self.out, max_agents=300, max_jobs=3,
+                          max_cpu_inflight=cap, backends=self.backends)
+
+    def test_interleaved_backend_admission_uses_gpu_immediately(self):
+        for i in range(4):
+            self.add_task(f"mixed-{i}", scope=f"component.mixed.{i}")
+        with patch.object(fleet, "discover", return_value=self.backends), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            result = fleet.run(self.db, self.out, max_agents=300, max_jobs=2)
+        self.assertEqual(result["proposals"], 2)
+        outputs = list(self.out.glob("*.json"))
+        self.assertEqual(len(outputs), 2)
+        used_ports = {json.loads(p.read_text())["model_calls"][0]["port"]
+                      for p in outputs}
+        self.assertEqual(used_ports, {18182, 18180})
 
     def test_transient_model_outage_requeues_until_attempt_budget(self):
         self.add_task("transient-model")
