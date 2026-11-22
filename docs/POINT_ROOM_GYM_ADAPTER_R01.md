@@ -1,6 +1,6 @@
 # Opt-in deterministic point-room episode facade (R0.1)
 
-Issue: #690. This is a **CPU stdlib-only fixture**, not a released Gymnasium package, a physics engine, a trainable organism, or a registered RL environment.
+Issue: #690. This is a **CPU stdlib-only fixture**, not a mandatory Gymnasium package, a physics engine, a trainable organism, or a registered RL environment.
 
 The entry point `mojum.point_room_env.PointRoomEnv` presents a Gymnasium-shaped API:
 
@@ -18,6 +18,16 @@ observation, reward, terminated, truncated, info = env.step((0.1, 0.0))
 - `reward=0.0` and `terminated=False` are intentional goal-free defaults. `truncated=True` when the configured step budget is reached. A separate experimental reward policy may be benchmarked later.
 - `seed` is validated and retained in reset metadata, but has no effect because the fixture is fully deterministic and has no RNG.
 - No Noosphere journal, model, SQLite file, network, GPU, hardware actuation or external import is touched. Each `reset` starts a fresh episode, not an authoritative organism continuation.
-- Later integration with `gymnasium.Env` and Stable-Baselines3 belongs in an isolated opt-in adapter after versioned observation/action spaces and held-out baseline evaluation are agreed.
+- An **optional actual Gymnasium wrapper** now exists at `mojum.gymnasium_adapter.make_gymnasium_point_room`. Constructing it requires separate `gymnasium` and `numpy` packages; importing the module or running the core Aquarium does not. It advertises a bounded Box action space and Dict observation space, returns 5-tuples from `step`, inherits `gym.Env`, and retains the zero-reward/fixed-reset fixture semantics. This is not a trained SB3 baseline, reward policy or registered `gymnasium.make()` environment. The smaller square action range sits inside the core's Euclidean displacement budget; complete movement coverage remains in the core facade.
+
+```python
+from mojum.gymnasium_adapter import make_gymnasium_point_room
+from mojum.world_room import Room
+env = make_gymnasium_point_room(Room(4, 4), start=(1, 1))
+obs, info = env.reset(seed=1)
+obs, reward, terminated, truncated, info = env.step([0.1, 0.0])
+```
+
+The optional smoke test skips when Gymnasium is absent. Stable-Baselines3 training, held-out evaluation and real articulated physics remain future work.
 
 Run regression tests with `PYTHONPATH=src python -m unittest tests.test_point_room_env -v` or the normal repository discover suite.
