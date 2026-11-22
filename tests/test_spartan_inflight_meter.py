@@ -68,6 +68,20 @@ class MeterTests(unittest.TestCase):
                                   ttl_ms=30_000, now_ms=29_999))
         self.assertTrue(finish(self.db, 1, "req-one", "ok", now_ms=59_998))
 
+    def test_clock_regression_cannot_forge_completion_or_shorten_lease(self):
+        # Even trusted wall clocks can move backwards; records must never
+        # claim a response before request start, nor reduce a live lease.
+        begin(self.db, 1, "req-causal", "model.x", now_ms=10_000)
+        self.assertFalse(heartbeat(self.db, 1, "req-causal", now_ms=9_999))
+        self.assertFalse(finish(self.db, 1, "req-causal", "ok", now_ms=9_999))
+        self.assertFalse(heartbeat(self.db, 1, "req-causal",
+                                   ttl_ms=30_000, now_ms=10_001))
+        self.assertEqual(snapshot(self.db, now_ms=10_002)["active"], 1)
+        self.assertEqual(snapshot(self.db, now_ms=10_002)["ok"], 0)
+        self.assertTrue(heartbeat(self.db, 1, "req-causal", now_ms=10_003))
+        self.assertTrue(finish(self.db, 1, "req-causal", "ok", now_ms=10_004))
+        self.assertEqual(snapshot(self.db, now_ms=10_005)["ok"], 1)
+
     def test_context_closes_exceptions_without_sensitive_messages(self):
         with track_call(self.db, 1, "success", "model.x") as done:
             done(input_tokens=8)
