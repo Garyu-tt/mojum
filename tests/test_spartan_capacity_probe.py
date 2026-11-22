@@ -76,6 +76,7 @@ class CapacityProbeTests(unittest.TestCase):
             path = shared / "private.sqlite3"
             with self.assertRaisesRegex(PermissionError, "replaceable"):
                 probe.connect(path)
+            self.assertEqual(probe.main(["--db", str(path), "report"]), 1)
             self.assertFalse(path.exists())
             real = Path(folder) / "real"
             real.mkdir(mode=0o700)
