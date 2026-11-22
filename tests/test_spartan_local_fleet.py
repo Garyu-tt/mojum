@@ -3,6 +3,7 @@ import json
 from contextlib import closing
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import time
@@ -49,6 +50,30 @@ class FleetTests(unittest.TestCase):
         with closing(sc.connect(str(self.db))) as db:
             sc.enqueue(db, [{"id": task_id, "scope": scope,
                              "priority": 10, "payload": payload}], 101)
+
+    def test_memory_database_does_not_create_literal_memory_file(self):
+        # Guard against pre-creating a disk file named ':memory:' before
+        # sqlite3 connects to its special in-memory database.
+        repo_root = Path(__file__).resolve().parents[1]
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = str(repo_root) + (
+            os.pathsep + environment["PYTHONPATH"]
+            if environment.get("PYTHONPATH") else ""
+        )
+        script = (
+            "from tools import spartan_coordinator as sc; "
+            "db=sc.connect(':memory:'); "
+            "sc.create_schema(db); "
+            "sc.init(db, 1, 0); "
+            "assert sc.status(db)['slots'] == 1; db.close()"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], cwd=self.root,
+            env=environment, capture_output=True, text=True,
+            timeout=10, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / ":memory:").exists())
 
     def test_coordinator_creates_owner_only_sqlite_with_permissive_umask(self):
         # Task payloads contain model prompts. Protect DB and WAL/SHM too,
