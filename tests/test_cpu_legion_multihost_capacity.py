@@ -2,6 +2,9 @@
 import importlib.util
 import io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -102,6 +105,33 @@ class CapacityTests(unittest.TestCase):
                     path.write_bytes(payload)
                     with self.assertRaises(legion.InventoryError):
                         legion.load_inventory(path)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX FIFO support required")
+    def test_inventory_fifo_is_rejected_without_blocking(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "inventory.fifo"
+            os.mkfifo(path)
+            # A regression to a blocking Path.open must fail on timeout,
+            # not wedge the entire GitHub Actions runner.
+            completed = subprocess.run(
+                [sys.executable, str(MODULE_PATH), "--inventory", str(path)],
+                text=True, capture_output=True, check=False, timeout=5,
+            )
+            self.assertEqual(completed.returncode, 1, completed.stderr)
+            self.assertEqual(completed.stdout, "")
+            self.assertIn("regular file", completed.stderr)
+
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0),
+                         "platform lacks O_NOFOLLOW")
+    def test_inventory_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            valid = Path(root) / "valid.json"
+            valid.write_text(json.dumps(inventory()), encoding="utf-8")
+            linked = Path(root) / "linked.json"
+            linked.symlink_to(valid)
+            with self.assertRaisesRegex(legion.InventoryError, "cannot read inventory"):
+                legion.load_inventory(linked)
 
     def test_cli_returns_machine_readable_plan_and_strict_shortfall(self):
         with tempfile.TemporaryDirectory() as root:
