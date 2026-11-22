@@ -11,6 +11,7 @@ import math
 import re
 
 
+_MAX_WIRE_I64 = 2**63 - 1
 _SCHEMA = "mojum.virtual-physics-observation/1"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\Z", re.ASCII)
 _ALLOWED = frozenset({
@@ -42,9 +43,9 @@ def validate_virtual_physics_observation(payload: object) -> dict:
         raise ValueError("invalid virtual physics packet keys")
     if payload["schema"] != _SCHEMA:
         raise ValueError("unsupported physics schema")
-    if type(payload["tick"]) is not int or payload["tick"] < 0:
+    if type(payload["tick"]) is not int or not 0 <= payload["tick"] <= _MAX_WIRE_I64:
         raise ValueError("invalid tick")
-    if type(payload["time_ns"]) is not int or payload["time_ns"] < 0:
+    if type(payload["time_ns"]) is not int or not 0 <= payload["time_ns"] <= _MAX_WIRE_I64:
         raise ValueError("invalid simulation timestamp")
     if payload["backend"] not in ("fixture", "mujoco"):
         raise ValueError("unknown virtual physics backend")
