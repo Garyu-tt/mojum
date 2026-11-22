@@ -1,3 +1,5 @@
+import hashlib
+import json
 import unittest
 
 from mojum.dataset_view import project_episodes
@@ -38,6 +40,24 @@ class PublicIndexStagingTests(unittest.TestCase):
     def test_rejects_visibility_injection(self):
         data = self.dataset()
         data["records"][0]["visibility"] = "PRIVATE"
+        with self.assertRaises(ValueError):
+            stage_public_index(data)
+
+    def test_spoofed_numeric_schema_with_matching_checksum_is_rejected(self):
+        # Equality alone is insufficient: a subclassed int can compare equal
+        # to the wire name but will be serialized as a JSON number.
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other == "mojum.dataset-view/1"
+
+        data = self.dataset()
+        data["schema"] = PretendInt(1)
+        body = json.dumps(
+            {"schema": data["schema"], "records": data["records"]},
+            sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        data["sha256"] = hashlib.sha256(body).hexdigest()
         with self.assertRaises(ValueError):
             stage_public_index(data)
 
