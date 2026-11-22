@@ -125,7 +125,7 @@ def identity(repo: str, kind: str, number: int, revision: str,
     }
 
 
-def claim(db, ident: dict) -> tuple[bool, dict]:
+def claim(db, ident: dict, *, require_idle: bool = False) -> tuple[bool, dict]:
     db.execute("BEGIN IMMEDIATE")
     try:
         row = db.execute("SELECT * FROM admission WHERE key=?", (ident["key"],)).fetchone()
@@ -134,6 +134,14 @@ def claim(db, ident: dict) -> tuple[bool, dict]:
                 raise AdmissionError("same source revision claimed with conflicting scope")
             db.execute("COMMIT")
             return False, dict(row)
+        # This check and the INSERT share one BEGIN IMMEDIATE transaction.
+        # Intake callers must not race a different unresolved run past their
+        # earlier advisory pending() preflight. Raw claim() remains a distinct
+        # identity reservation API for other phases and existing callers.
+        if require_idle and db.execute(
+            "SELECT 1 FROM admission WHERE status IN ('claimed','submitted') LIMIT 1"
+        ).fetchone() is not None:
+            raise AdmissionError("another unresolved admission blocks dispatch")
         admission_id = str(uuid.uuid4())
         db.execute("""
             INSERT INTO admission(id,key,repo,kind,number,revision,phase,scope_sha256,status)
@@ -222,7 +230,7 @@ def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8) -> di
         raise AdmissionError("prompt not UTF-8") from exc
     if not prompt.strip():
         raise AdmissionError("empty prompt")
-    created, row = claim(db, ident)
+    created, row = claim(db, ident, require_idle=True)
     if not created:
         return {"admitted": False, "reason": "already-claimed",
                 "admission_id": row["id"], "status": row["status"]}
