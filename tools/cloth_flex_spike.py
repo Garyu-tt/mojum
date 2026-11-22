@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional, headless MuJoCo flex cloth spike. No Aquarium integration.
 
-The default command benchmarks a movable-edge cloth patch under gravity.
+The default command benchmarks a servo-driven cloth edge under gravity.
 ``--print-mjcf`` works without MuJoCo; simulation requires the opt-in package.
 """
 from __future__ import annotations
@@ -37,7 +37,9 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
     <geom name="floor" type="plane" size="2 2 .1" pos="0 0 {FLOOR_Z}"/>
     <geom name="collision_ball" type="sphere" size="{BALL_RADIUS}"
           pos="{BALL_CENTER[0]} {BALL_CENTER[1]} {BALL_CENTER[2]}"/>
-    <body name="cloth_anchor" mocap="true" pos="0 -.125 1.05">
+    <body name="cloth_anchor" pos="0 -.125 1.05">
+      <joint name="anchor_slide_x" type="slide" axis="1 0 0" damping="2"/>
+      <inertial pos="0 0 0" mass=".5" diaginertia=".005 .005 .005"/>
       <flexcomp name="scarf" type="grid" dim="2" count="{GRID[0]} {GRID[1]} 1"
                 spacing=".05 .05 .05" mass=".14" radius="{VERTEX_RADIUS}">
         <pin gridrange="0 0 0 {GRID[1]-1}"/>
@@ -48,6 +50,9 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
       </flexcomp>
     </body>
   </worldbody>
+  <actuator>
+    <position name="anchor_x_servo" joint="anchor_slide_x" kp="500" kv="40"/>
+  </actuator>
 </mujoco>
 '''
 
@@ -84,20 +89,27 @@ def benchmark(mjcf: str, *, steps: int, warmup: int) -> dict:
 
     model = mujoco.MjModel.from_xml_string(mjcf)
     data = mujoco.MjData(model)
-    if model.nmocap != 1 or model.nflex != 1:
-        raise RuntimeError("unexpected model topology: require one mocap anchor and one flex")
+    anchor_joint = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "anchor_slide_x")
+    if model.nmocap != 0 or model.nu != 1 or model.nflex != 1 or anchor_joint < 0:
+        raise RuntimeError("unexpected model topology: require one slide servo and one flex")
+    anchor_qpos_adr = int(model.jnt_qposadr[anchor_joint])
     timings = []
     max_floor = 0.0
     max_sphere = 0.0
     measured = True
+    max_anchor_tracking_error = 0.0
     for i in range(warmup + steps):
-        # Deterministic, bounded movement of the pinned edge in the same world.
-        data.mocap_pos[0, 0] = .045 * math.sin(2 * math.pi * i / 160)
+        # Servo-actuated body has valid velocities for the flex damping model.
+        target_x = .045 * math.sin(2 * math.pi * i / 160)
+        data.ctrl[0] = target_x
         start = time.perf_counter_ns()
         mujoco.mj_step(model, data)
         elapsed = time.perf_counter_ns() - start
         if i >= warmup:
             timings.append(elapsed)
+            max_anchor_tracking_error = max(
+                max_anchor_tracking_error, abs(float(data.qpos[anchor_qpos_adr]) - target_x)
+            )
             floor, sphere = _vertex_penetrations(data)
             if floor is None or sphere is None:
                 measured = False
@@ -117,6 +129,7 @@ def benchmark(mjcf: str, *, steps: int, warmup: int) -> dict:
         "mjcf_sha256": hashlib.sha256(mjcf.encode("utf-8")).hexdigest(),
         "steps": steps, "warmup_steps": warmup, "dt_seconds": DT,
         "vertices": int(model.nflexvert), "flexes": int(model.nflex),
+        "max_anchor_tracking_error_m": round(max_anchor_tracking_error, 6),
         "cpu_ms_per_step_p50": round(statistics.median(timings) / 1_000_000, 6),
         "cpu_ms_per_step_p95": round(_percentile_ms(timings, .95), 6),
         "max_rss_kib_process": rss_kib,
