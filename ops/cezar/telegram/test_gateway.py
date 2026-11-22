@@ -56,6 +56,47 @@ class GatewayTests(unittest.TestCase):
             instance.redirect_request(None,None,302,"redirect",{},
                                       "https://evil.example/collect")
 
+    def test_private_fleet_snapshot_is_pinned_and_bounded(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            source=root/"current.json"
+            wire=b'{"schema":"cezar.fleet.visibility.v1"}'
+            source.write_bytes(wire)
+            source.chmod(0o600)
+            with patch.object(gateway,"FLEET_FILE",source):
+                # The former Path.read_bytes() was an unbounded second open.
+                with patch.object(Path,"read_bytes",side_effect=AssertionError("unsafe re-open")):
+                    self.assertEqual(gateway.read_private_fleet(),wire)
+                source.chmod(0o644)
+                with self.assertRaises(ValueError):
+                    gateway.read_private_fleet()
+                source.chmod(0o600)
+                source.write_bytes(b"x"*(gateway.MAX_BYTES+1))
+                with self.assertRaises(ValueError):
+                    gateway.read_private_fleet()
+
+    def test_private_fleet_symlink_is_refused(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        if not hasattr(os,"O_NOFOLLOW"):
+            self.skipTest("O_NOFOLLOW required on deployment target")
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            original=root/"real.json"
+            original.write_bytes(b'{"schema":"cezar.fleet.visibility.v1"}')
+            original.chmod(0o600)
+            alias=root/"alias.json"
+            alias.symlink_to(original)
+            with patch.object(gateway,"FLEET_FILE",alias):
+                with self.assertRaises(OSError):
+                    gateway.read_private_fleet()
+
     def test_check_query_never_accepts_more_than_eight_items(self):
         self.assertIsNone(gateway.route("/api/v1/github/checks?prs="+",".join(str(x) for x in range(1,10))))
         self.assertEqual(gateway.route("/api/v1/github/checks?prs=1,2,3,4,5,6,7,8"),
