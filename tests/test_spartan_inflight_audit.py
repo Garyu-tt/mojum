@@ -77,6 +77,19 @@ class SpartanInflightAuditTests(unittest.TestCase):
         self.assertEqual(result['successful_peak']['peak_distinct_workers'], 1)
         self.assertFalse(result['target_met_in_log'])
 
+    def test_request_and_distinct_worker_peaks_are_independent(self):
+        # Eight requests from one worker overlap first. Later two
+        # different workers overlap: the request and worker peaks differ.
+        events = [start(100, f'bulk{i}', 'w1') for i in range(8)]
+        events += [end(200, f'bulk{i}', 'w1') for i in range(8)]
+        events += [start(300, 'later1', 'w1'), start(300, 'later2', 'w2')]
+        events += [end(400, 'later1', 'w1'), end(400, 'later2', 'w2')]
+        result = audit(self.write(events), target=2)
+        self.assertEqual(result['successful_peak']['peak_requests'], 8)
+        self.assertEqual(result['successful_peak']['peak_distinct_workers'], 2)
+        self.assertEqual(result['successful_peak']['peak_at_ms'], 300)
+        self.assertTrue(result['target_met_in_log'])
+
     def test_decimal_cost_exact(self):
         self.write([start(1, 'a'), end(2, 'a'), start(3, 'b'), end(4, 'b')])
         self.assertEqual(audit(self.path)['cost_usd'], '0.002468')
