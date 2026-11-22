@@ -22,6 +22,31 @@ class SnapshotFileInputTests(unittest.TestCase):
             with mock.patch.object(Path, "read_text", side_effect=AssertionError("unbounded path read")):
                 self.assertEqual(_load_snapshot(str(path)), {"headRefOid": "abc"})
 
+    def test_overdeep_bounded_json_is_rejected_without_traceback(self):
+        # A 30 KiB valid JSON array still exceeds the Python parser depth.
+        payload = b"[" * 15000 + b"]" * 15000
+        self.assertLess(len(payload), MAX_INPUT_BYTES)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "deep.json"
+            path.write_bytes(payload)
+            with self.assertRaisesRegex(SnapshotError, "nesting limit"):
+                _load_snapshot(str(path))
+            with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(payload))):
+                with self.assertRaisesRegex(SnapshotError, "nesting limit"):
+                    _load_snapshot("-")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                exit_code = main([
+                    "--input", str(path),
+                    "--expected-head-sha", "a" * 40,
+                    "--expected-base-sha", "b" * 40,
+                ])
+            self.assertEqual(exit_code, 1)
+            verdict = json.loads(output.getvalue())
+            self.assertEqual(verdict["code"], "INVALID_INPUT")
+            self.assertFalse(verdict["merge_performed"])
+            self.assertNotIn(str(path), output.getvalue())
+
     def test_large_file_is_rejected_before_json_parsing(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "oversized.json"
