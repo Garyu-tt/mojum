@@ -138,7 +138,20 @@ function loadViewer() {
  assert.equal(get("tick").textContent,"0");
  assert.equal(get("play").disabled,false);
  assert.equal(get("seek").max,"2");
- assert.ok(timer.stops>=5,"timers did not stop for every state change");
+ // Replacing a running trace with an oversized file must stop its timer
+ // before any file bytes are read or a stale frame stays actionable.
+ get("play").listeners.click();
+ assert.equal(timer.ms,200);
+ let oversizedRead=false;
+ input.files=[{name:"oversized.synthetic.jsonl",size:24*1024*1024+1,
+   arrayBuffer:async()=>{oversizedRead=true;throw Error("oversized file read");}}];
+ await input.listeners.change.call(input);
+ assert.equal(oversizedRead,false,"oversized file was read");
+ assert.equal(timer.callback,null,"invalid import leaked playback timer");
+ assert.equal(get("play").disabled,true,"invalid import left play enabled");
+ assert.equal(get("tick").textContent,"—","stale frame survived import reset");
+ assert.match(get("status").textContent,/24 МиБ/);
+ assert.ok(timer.stops>=6,"timers did not stop for every state change");
  process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
