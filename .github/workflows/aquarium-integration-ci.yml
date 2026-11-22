@@ -40,7 +40,9 @@ jobs:
         env:
           PYTHONPATH: src
           MOJUM_EPOCH_V4_STRESS: '1'
-          PYTHONTRACEMALLOC: '1'
+          # Capture SQLite ResourceWarnings without tracing every allocation
+          # across the stress suite. For leak site debugging, rerun manually
+          # with PYTHONTRACEMALLOC=1; the audit still fails on unclosed DBs.
         run: python tests/audit_sqlite_resource_warnings.py
       - name: Offline habitat smoke and restart
         env:
