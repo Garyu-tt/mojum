@@ -191,10 +191,12 @@ class CanaryTests(LoopbackFixture):
     def test_interval_validation(self):
         with self.assertRaisesRegex(canary.CanaryError, "interval"):
             canary.peak_overlap([{"success": True, "start_ns": 8, "end_ns": 2}])
-        self.assertEqual(canary.peak_overlap([
+        intervals = [
             {"success": True, "start_ns": 1, "end_ns": 4},
             {"success": True, "start_ns": 2, "end_ns": 5},
-            {"success": False, "start_ns": 2, "end_ns": 7}]), 2)
+            {"success": False, "start_ns": 2, "end_ns": 7}]
+        self.assertEqual(canary.peak_overlap(intervals), 3)
+        self.assertEqual(canary.peak_overlap(intervals, successful_only=True), 2)
 
     def test_cli_handles_success_and_invalid_endpoint(self):
         out = io.StringIO()
