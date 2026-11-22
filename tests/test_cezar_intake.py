@@ -165,6 +165,22 @@ class IntakeTests(unittest.TestCase):
                              opener=self.fake([self.issue(labels=["cezar-ready",label])]))
                 self.assertEqual(r["dispatched"],0)
 
+    def test_public_api_denies_redirect_before_external_fetch(self):
+        with self.assertRaisesRegex(m.admission.AdmissionError, "redirect forbidden"):
+            m.admission.NoRedirect().redirect_request(
+                None, None, 302, "Found",
+                {"Location": "https://example.invalid/metadata"},
+                "https://example.invalid/metadata",
+            )
+
+        def inspect_opener(*handlers):
+            self.assertTrue(any(isinstance(h, m.admission.NoRedirect) for h in handlers))
+            raise RuntimeError("redirect-denying handler installed")
+
+        with patch.object(m.urllib.request, "build_opener", side_effect=inspect_opener):
+            with self.assertRaisesRegex(RuntimeError, "handler installed"):
+                m.fetch_json(self.api, list)
+
     def test_public_api_only_fixed_origin(self):
         with self.assertRaises(m.admission.AdmissionError):
             m.fetch_json("https://evil.example/metadata",list)
