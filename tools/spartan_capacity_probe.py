@@ -11,8 +11,10 @@ import argparse
 from collections import Counter
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sqlite3
 import sys
 import time
@@ -31,7 +33,59 @@ def _boot_id() -> str:
     return value
 
 
+def _require_private_parent(filename: str) -> None:
+    """Reject POSIX path components replaceable by other local accounts."""
+    if ".." in Path(filename).parts:
+        raise PermissionError("probe SQLite parent path traversal forbidden")
+    parent = Path(os.path.abspath(filename)).parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError("probe SQLite parent directory has a symlink")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise PermissionError("probe SQLite parent directory is replaceable")
+
+
+def _require_private_files(filename: str) -> None:
+    """Never chmod preexisting SQLite evidence or trust unsafe WAL sidecars."""
+    for suffix in ("", "-wal", "-shm"):
+        item = filename + suffix
+        try:
+            info = os.lstat(item)
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise PermissionError("probe SQLite file must be owner-only: " + item)
+
+
 def connect(path: str) -> sqlite3.Connection:
+    # Actual worker identities and operation timestamps belong in a PRIVATE DB.
+    # Precreating mode 0600 also makes SQLite-created WAL and SHM owner-private.
+    # Do not mutate process-wide umask shared by parallel workers.
+    if os.name == "posix":
+        filename = os.fspath(path)
+        if (isinstance(filename, bytes) or filename == ":memory:"
+                or filename.startswith("file:")):
+            raise ValueError("probe requires a persistent SQLite filesystem path")
+        _require_private_parent(filename)
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_CLOEXEC", 0))
+        try:
+            descriptor = os.open(filename, flags, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(descriptor)
+        _require_private_files(filename)
     db = sqlite3.connect(path, isolation_level=None, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=30000")
