@@ -1,0 +1,35 @@
+name: CPU Legion pinned-context independent QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cpu_legion.py'
+      - 'tests/test_cpu_legion.py'
+      - '.github/workflows/cpu-legion-pinned-context-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  pinned-context-stdlib:
+    name: pinned-context-stdlib (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify tracked context, inode replacement and loopback guard regressions
+        run: python -m unittest discover -s tests -p 'test_cpu_legion.py' -v

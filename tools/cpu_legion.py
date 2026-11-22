@@ -36,20 +36,28 @@ def parallel_limit(requested, server_slots, cpus, threads, free_mb, per_job_mb):
     return min(requested, server_slots, cpus // threads,
                max(0, (free_mb - 2048) // per_job_mb))
 
-def safe_file(root, name):
+def safe_file(root, name, *, with_inode=False):
     if not isinstance(name, str) or not PATH_RE.fullmatch(name):
         raise ValueError("not an allowlisted Python path")
     if Path(name).is_absolute() or ".." in Path(name).parts:
         raise ValueError("path traversal")
     path = root / name
-    if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root):
+    # Capture the validated inode before any potentially blocking Git check.
+    # A second pathname lookup after the preflight is not the same object.
+    try:
+        checked = path.lstat()
+    except OSError as exc:
+        raise ValueError("not a regular file") from exc
+    if not stat.S_ISREG(checked.st_mode) or not path.resolve().is_relative_to(root):
         raise ValueError("not a regular file")
-    if path.stat().st_size > 16000:
+    if checked.st_size > 16000:
         raise ValueError("context file too large")
     check = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch",
                             "--", name], capture_output=True, timeout=10)
     if check.returncode:
         raise ValueError("untracked context file")
+    if with_inode:
+        return path, (checked.st_dev, checked.st_ino)
     return path
 
 
@@ -60,7 +68,7 @@ def _read_context_file(root, name):
     separate preflight. This guards the data actually sent to the model, rather
     than trusting an earlier pathname-based stat.
     """
-    safe_file(root, name)  # tracked-path/scope and initial size validation
+    _, expected_inode = safe_file(root, name, with_inode=True)  # validated tracked inode
     if (os.name != "posix" or not getattr(os, "O_NOFOLLOW", 0)
             or not getattr(os, "O_DIRECTORY", 0)
             or os.open not in os.supports_dir_fd):
@@ -78,6 +86,8 @@ def _read_context_file(root, name):
         fd = os.open(parts[-1], file_flags, dir_fd=opened[-1])
         opened.append(fd)
         st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) != expected_inode:
+            raise ValueError("context inode changed after preflight")
         if not stat.S_ISREG(st.st_mode):
             raise ValueError("context file must be regular")
         if st.st_size > 16000:
