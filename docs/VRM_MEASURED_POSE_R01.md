@@ -16,7 +16,7 @@ projector.apply({
 });
 ```
 
-The mapper requires a **full absolute joint snapshot** per tick, finite radian rotations inside [-pi,pi], a lowercase SHA-256 *revision-shaped string* (not a signature), a monotonically increasing logical tick and declared, unique normalized humanoid bone axes. All inputs and target bones are checked before mutating visual rotations. `resetReplay()` only resets the renderer, never an organism journal. Any bridge from physics must explicitly map its own unit/coordinate frame and validate the source identity separately.
+The mapper requires a **full absolute joint snapshot** per tick, finite radian rotations inside [-pi,pi], a lowercase SHA-256 *revision-shaped string* (not a signature), a monotonically increasing logical tick, strictly increasing nonnegative `simulation_time_ns` per accepted tick, and declared, unique normalized humanoid bone axes. Replay reset clears both tick and simulation-time watermarks. All inputs and target bones are checked before mutating visual rotations. `resetReplay()` only resets the renderer, never an organism journal. Any bridge from physics must explicitly map its own unit/coordinate frame and validate the source identity separately.
 
 No solver, auto-animation, browser network, asset loader, character body, real motor command or authority to edit Noosphere state is included. The final Dante VRM, retargeting, draw/render loop and benchmark remain future steps.
 
