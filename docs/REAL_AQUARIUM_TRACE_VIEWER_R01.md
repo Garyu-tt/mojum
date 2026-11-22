@@ -44,13 +44,31 @@ unverified. SHA-256 detects accidental modification; it is not authentication,
 encryption, rollback protection, or permission to disclose PRIVATE history.
 
 The viewer has no external scripts or network connections and renders journal
-values as text. Its tests cover the current HTML/CSP contract, corrupted and
-truncated modern traces, legacy boundaries, oversized input, and a slower
-stale file read losing to the latest file selection:
+values as text. Select a file, then use Previous/Next or the timeline slider
+to step through the recorded ticks. Play starts at the beginning if the last
+frame was selected; click Pause to stop. Speed is 1×, 2× or 4× and only changes
+the *recorded playback interval*, not simulation time or the journal.
+
+Its tests cover the current HTML/CSP contract, corrupted and truncated modern
+traces, legacy boundaries, oversized input, and a slower stale file read
+losing to the latest file selection. A deterministic Node fake clock additionally
+executes the actual playback handlers: next/previous/start/end/seek, replay
+from last tick, speed change while playing, automatic end-of-recording stop,
+manual pause, and cancellation when an invalid new file is selected.
+These controls are exercised on a real replay-verified 3-frame SQLite export
+with no network or PRIVATE production data.
 
 ```sh
-PYTHONPATH=src python -m unittest -v tests.test_private_trace_integrity
+PYTHONPATH=src python -m unittest discover -s tests \
+  -p 'test_private_trace_integrity.py' -v
 ```
+
+The older Draft #74 viewer tests were audited rather than copied wholesale.
+Their file import, malformed/gapped/oversized JSONL refusal, HTML-looking
+value escaping, and stale asynchronous selection are already covered by
+the current private-trace test and real Chromium smoke. The newer viewer
+also requires terminal checkpoint and frame-byte SHA-256 metadata; these
+verification guards must not be weakened to restore old legacy behavior.
 
 These are offline synthetic-fixture checks, not manual browser/mobile
 acceptance and not evidence of a trained brain or a complete digital organism.
