@@ -26,7 +26,10 @@ def _reject_duplicates(pairs):
 
 def load_catalog(path=DEFAULT_CATALOG):
     """Fail closed on ambiguous, oversized or non-optional dependency entries."""
-    blob = Path(path).read_bytes()
+    # Bound the read itself: an operator-supplied catalog may be arbitrarily large.
+    # Reading the entire file before checking len(blob) defeats the memory cap.
+    with Path(path).open("rb") as source:
+        blob = source.read(256 * 1024 + 1)
     if len(blob) > 256 * 1024:
         raise ValueError("oversized integration registry")
     try:
