@@ -419,7 +419,9 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
     private_fd = _private_output_fd(folder)
     os.close(private_fd)
     db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Do not mkdir(parents=True) here: a symlinked ancestor can redirect
+    # directory creation before the security preflight has run. Operators
+    # must explicitly prepare an existing private state directory.
     # Validate the database/parent *before* opening the adjacent lock. A
     # group-writable directory could otherwise plant a symlink lock target.
     try:
