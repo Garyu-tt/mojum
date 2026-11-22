@@ -191,6 +191,45 @@ class FanoutContract(unittest.TestCase):
         self.assertLessEqual(peak[18181],1)
         self.assertEqual(len(set(x["task_id"] for x in results)),12)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX owner/mode isolation")
+    def test_shared_output_parent_is_rejected_before_any_model_inference(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shared = root / "shared"
+            shared.mkdir()
+            shared.chmod(0o777)
+            tasks_path = root / "tasks.json"
+            tasks_path.write_text(json.dumps(tasks(1)), encoding="utf-8")
+            output = shared / "result.json"
+            with patch.object(f, "discover_backend",
+                              side_effect=lambda port: f.Backend(port, 1, 1, 2048)), \
+                 patch.object(f, "execute",
+                              side_effect=AssertionError("inference must not run")) as execute:
+                with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
+                    f.main(["--tasks", str(tasks_path), "--execute", "--output", str(output)])
+                execute.assert_not_called()
+            self.assertFalse(output.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX output ancestor isolation")
+    def test_private_output_rejects_writable_ancestor_and_symlink_parent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shared = root / "shared"
+            shared.mkdir()
+            shared.chmod(0o777)
+            private = shared / "private"
+            private.mkdir(mode=0o700)
+            with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
+                f.exclusive_json_output(private / "result.json", {"secret": "synthetic"})
+            self.assertFalse((private / "result.json").exists())
+            trusted = root / "trusted"
+            trusted.mkdir(mode=0o700)
+            alias = root / "alias"
+            alias.symlink_to(trusted, target_is_directory=True)
+            with self.assertRaisesRegex(f.FanoutError, "symlink"):
+                f.exclusive_json_output(alias / "result.json", {"secret": "synthetic"})
+            self.assertFalse((trusted / "result.json").exists())
+
     def test_exclusive_output_is_private_and_never_overwritten(self):
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/"output.json"
