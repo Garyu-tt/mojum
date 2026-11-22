@@ -1,5 +1,6 @@
 """Offline proof that Cezar's public gh adapter cannot write or leave Mojum."""
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -216,6 +217,58 @@ class CezarGhPublicReadTests(unittest.TestCase):
                 self.assertIn('rel="next"', link)
                 self.assertFalse(any("Authorization" in str(a) for a in
                                      client.assert_header.items()))
+
+    def test_cached_response_cannot_be_swapped_to_unrelated_file(self):
+        # Old pathname preflight: is_file() followed by is_symlink()
+        # followed by read_text(). A replacement during the check leaked a
+        # different JSON file; the descriptor-pinned cache must not do so.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            cached = cache_dir / filename
+            cached.write_text(json.dumps({
+                "body": '{"kind":"trusted"}', "link": "",
+            }), encoding="utf-8")
+            cached.chmod(0o600)
+            foreign = Path(tmp) / "foreign.json"
+            foreign.write_text(json.dumps({
+                "body": '{"kind":"swapped"}', "link": "",
+            }), encoding="utf-8")
+            foreign.chmod(0o600)
+            original = Path.is_symlink
+
+            def swap_on_preflight(path):
+                if path == cached:
+                    cached.unlink()
+                    cached.symlink_to(foreign)
+                    return False  # The old check returned before the swap.
+                return original(path)
+
+            with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
+                    Path, "is_symlink", swap_on_preflight):
+                body, _ = adapter.read(url, ttl=300)
+            self.assertEqual(body, b'{"kind":"trusted"}')
+
+    def test_cache_rejects_symlink_in_ancestor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            private = root / "private"
+            directory = private / "cache"
+            directory.mkdir(parents=True, mode=0o700)
+            alias = root / "alias"
+            alias.symlink_to(private, target_is_directory=True)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            cached = directory / filename
+            cached.write_text(json.dumps({
+                "body": '{"kind":"outside"}', "link": "",
+            }), encoding="utf-8")
+            cached.chmod(0o600)
+            with patch.object(adapter, "CACHE_DIR", alias / "cache"):
+                with self.assertRaises((adapter.Refused, OSError)):
+                    adapter.read(url, ttl=300)
 
     def test_refused_cli_does_not_echo_sensitive_arguments(self):
         secret = "token_please_never_log_this"
