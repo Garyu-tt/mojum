@@ -74,3 +74,18 @@ The planned follow-up is to integrate this as a mandatory preflight of a
 sandboxed provider adapter, enforce the real provider rate limits separately,
 and run a staged 4/16/32 worker concurrency test before any larger ramp. This
 does **not** authorize activating the 300-worker fleet.
+
+## Private storage QA repair
+
+The budget gate **fails closed on non-POSIX hosts and relative paths** pending a
+platform-specific secure-store implementation. On Linux, use an absolute file
+path inside a dedicated directory owned by the worker UID with mode 0700.
+The directory must not be a symlink; writable non-sticky ancestors are rejected.
+Existing DB, WAL and SHM paths must be regular files owned by that UID, with
+one link and no group/world permission bits. New files are precreated with
+O_EXCL/O_NOFOLLOW and mode 0600 before SQLite connects, without changing the
+process-wide umask. Unsafe existing files are **not** silently chmodded;
+inspect them offline and explicitly migrate or restrict permissions first.
+The parent-directory check protects against other UIDs, **not** an attacker
+already running with the same UID. This remains a local SQLite ledger and not
+an authoritative provider-spend limit or a substitute for #415 admission.
