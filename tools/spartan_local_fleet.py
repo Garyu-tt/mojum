@@ -168,6 +168,10 @@ def call_model(backend, prompt, role, max_tokens, clone=0, request=None):
             "max_tokens": min(max_tokens, max(32, backend.ctx // 2)),
             "temperature": 0.2 if clone else 0,
             "stream": False}
+    if backend.model == "GPT20B":
+        # GPT-OSS's default chain-of-thought budget can exhaust 128 tokens
+        # before any final text. Low-effort reasoning is explicit per request.
+        body["reasoning_effort"] = "low"
     start = time.monotonic()
     data = request(backend.port, "/v1/chat/completions", body=body, timeout=90)
     if not isinstance(data, dict) or not data.get("choices"):
@@ -271,7 +275,9 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
             return {"worker": worker_id, "state": "lease_expired"}
         return {"worker": worker_id,
                 "state": "retry_queued" if retryable else "blocked",
-                "error": type(exc).__name__}
+                "error": type(exc).__name__,
+                "reason": str(exc)[:120] if isinstance(exc, FleetError)
+                          else "unexpected_internal_error"}
 
 
 def rotate_worker_ids(db_path, max_agents, count):
