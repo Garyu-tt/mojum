@@ -335,5 +335,55 @@ sys.exit(1)
         self.assertFalse((trusted / "patches").exists())
 
 
+    def _run_cli_with_fake_workers(self, fake_worker):
+        import io
+        import json
+        output = io.StringIO()
+        argv = ["cpu_legion.py", "--db", str(self.root / "unused.sqlite3"),
+                "--repo", str(self.root), "--out", str(self.root / "out"),
+                "--model", "fixture", "--workers", "2"]
+        with patch.object(sys, "argv", argv), \
+             patch.object(legion, "parallel_limit", return_value=2), \
+             patch.object(legion, "available_memory_mb", return_value=4096), \
+             patch.object(legion, "run_one", side_effect=fake_worker), \
+             patch("sys.stdout", output):
+            exit_code = legion.main()
+        records = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(records[0]["actual_parallel_limit"], 2)
+        self.assertEqual(len(records), 3)
+        return exit_code, records[1:]
+
+    def test_cli_partial_block_fails_closed_but_reports_successful_peer(self):
+        def worker(_db, worker_id, *_args):
+            if worker_id == 1:
+                return {"worker": worker_id, "state": "review", "patch": "fixture.patch"}
+            return {"worker": worker_id, "state": "blocked", "reason": "test failure"}
+
+        code, rows = self._run_cli_with_fake_workers(worker)
+        self.assertEqual(code, 1)
+        self.assertEqual([row["state"] for row in rows], ["review", "blocked"])
+
+    def test_cli_unexpected_worker_exception_keeps_other_worker_result(self):
+        def worker(_db, worker_id, *_args):
+            if worker_id == 1:
+                raise OSError("private details must not leak")
+            return {"worker": worker_id, "state": "review", "patch": "fixture.patch"}
+
+        code, rows = self._run_cli_with_fake_workers(worker)
+        self.assertEqual(code, 1)
+        self.assertEqual(rows[0],
+                         {"worker": 1, "state": "worker_failed", "error": "OSError"})
+        self.assertEqual(rows[1]["state"], "review")
+        self.assertNotIn("private details", str(rows))
+
+    def test_cli_idle_and_review_workers_exit_successfully(self):
+        def worker(_db, worker_id, *_args):
+            return {"worker": worker_id, "state": "idle" if worker_id == 1 else "review"}
+
+        code, rows = self._run_cli_with_fake_workers(worker)
+        self.assertEqual(code, 0)
+        self.assertEqual([row["state"] for row in rows], ["idle", "review"])
+
+
 if __name__ == "__main__":
     unittest.main()
