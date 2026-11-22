@@ -38,7 +38,10 @@ def _require_private_worktree_root(root: Path) -> None:
         if not stat.S_ISDIR(info.st_mode):
             raise IsolationError("worktree root path contains a non-directory")
         if depth == 0:
-            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+            # The root holds task checkouts and possible private work artifacts.
+            # Non-writable (0755) is not enough to keep these confidential.
+            unsafe = (info.st_uid != os.geteuid()
+                      or bool(stat.S_IMODE(info.st_mode) & 0o077))
         else:
             unsafe = (info.st_uid not in (0, os.geteuid())
                       or (bool(info.st_mode & 0o022)
