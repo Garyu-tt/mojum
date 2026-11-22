@@ -284,6 +284,27 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(duplicate)
         self.assertEqual(old["status"], "finished")
 
+    def test_dispatch_rejects_symlink_and_fifo_prompt_without_claiming(self):
+        p = self.private_prompt()
+        alias = self.home / "alias.txt"
+        alias.symlink_to(p)
+        with self.assertRaises(m.AdmissionError):
+            m.dispatch(self.db, self.ident(), alias)
+        if hasattr(os, "mkfifo"):
+            pipe = self.home / "pipe.txt"
+            os.mkfifo(pipe)
+            with self.assertRaises(m.AdmissionError):
+                m.dispatch(self.db, self.ident(), pipe)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
+    def test_dispatch_rejects_symlink_in_prompt_ancestors(self):
+        p = self.private_prompt()
+        alias = Path(self.tmp.name) / "alias-parent"
+        alias.symlink_to(self.home, target_is_directory=True)
+        with self.assertRaises(m.AdmissionError):
+            m.dispatch(self.db, self.ident(), alias / p.name)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
     def test_dispatch_refuses_nonprivate_prompt(self):
         p = self.private_prompt()
         p.chmod(0o644)
@@ -314,9 +335,10 @@ class AdmissionTests(unittest.TestCase):
                 self.asserted_url = req.full_url
                 return Response(req.full_url)
         client = Client()
-        with patch.object(m.urllib.request, "build_opener", return_value=client):
+        with patch.object(m.urllib.request, "build_opener", return_value=client) as build:
             result = m.dispatch(self.db, self.ident(), p)
             duplicate = m.dispatch(self.db, self.ident(), p)
+        self.assertTrue(any(isinstance(h, m.NoRedirect) for h in build.call_args.args))
         self.assertTrue(result["admitted"])
         self.assertFalse(duplicate["admitted"])
         self.assertEqual(result["run_id"], run_id)
@@ -327,6 +349,13 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(client.body["generateFollowups"])
         self.assertEqual(client.body["runner"], "opencode")
         self.assertEqual(client.asserted_url, "http://127.0.0.1:4329/api/v1/runs")
+
+    def test_dispatch_redirect_is_refused_before_followup(self):
+        req = m.urllib.request.Request(m._LOCAL_CEZAR, data=b"{}", method="POST")
+        with self.assertRaisesRegex(m.AdmissionError, "redirect forbidden"):
+            m.NoRedirect().redirect_request(
+                req, None, 302, "Found", {"Location": "https://example.invalid/collect"},
+                "https://example.invalid/collect")
 
     def test_uncertain_dispatch_keeps_claim_without_retry(self):
         p = self.private_prompt()
