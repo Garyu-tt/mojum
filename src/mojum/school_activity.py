@@ -55,7 +55,9 @@ def load_catalog(path):
             raise SchoolError("catalog byte budget exceeded")
         document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs,
                               parse_constant=_reject_constant)
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
+    except SchoolError:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         raise SchoolError("invalid catalog document") from exc
     return validate_catalog(document)
 
