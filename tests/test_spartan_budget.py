@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.spartan_budget import BudgetCaps, BudgetDenied, BudgetLedger
 
@@ -19,6 +20,56 @@ class BudgetLedgerTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "budget.sqlite3"
         self.caps = BudgetCaps(2, 100, 300)
         self.ledger = BudgetLedger(self.path, self.caps)
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_DIRECTORY", 0)
+                         and getattr(os, "O_NOFOLLOW", 0),
+                         "POSIX inode and directory fsync required")
+    def test_new_ledger_fsyncs_inode_then_private_parent(self):
+        path = Path(self.tmp.name) / "fresh-fsync.sqlite3"
+        original = os.fsync
+        calls = []
+
+        def trace(fd):
+            mode = os.fstat(fd).st_mode
+            calls.append("file" if stat.S_ISREG(mode) else
+                         "directory" if stat.S_ISDIR(mode) else "other")
+            return original(fd)
+
+        with patch("mojum.spartan_budget.os.fsync", side_effect=trace):
+            BudgetLedger(path, self.caps)
+        self.assertEqual(calls, ["file", "directory"])
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+        calls.clear()
+        with patch("mojum.spartan_budget.os.fsync", side_effect=trace):
+            BudgetLedger(path, self.caps)
+        self.assertEqual(calls, ["directory"])
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_DIRECTORY", 0)
+                         and getattr(os, "O_NOFOLLOW", 0),
+                         "POSIX inode and directory fsync required")
+    def test_ledger_sync_failure_prevents_initialization(self):
+        for stage in ("file", "directory"):
+            with self.subTest(stage=stage):
+                path = Path(self.tmp.name) / f"fail-{stage}.sqlite3"
+                original = os.fsync
+
+                def fail(fd):
+                    mode = os.fstat(fd).st_mode
+                    if (stage == "file" and stat.S_ISREG(mode)
+                            or stage == "directory" and stat.S_ISDIR(mode)):
+                        raise OSError("injected fsync failure")
+                    return original(fd)
+
+                with patch("mojum.spartan_budget.os.fsync", side_effect=fail):
+                    with self.assertRaisesRegex(OSError, "injected fsync failure"):
+                        BudgetLedger(path, self.caps)
+                self.assertTrue(path.exists())
+                # A subsequent secure reopen retries the private directory
+                # durability barrier rather than relying on a stale claim.
+                recovered = BudgetLedger(path, self.caps)
+                self.assertFalse(recovered.reserve(
+                    f"recover-{stage}", "m", 1, 1, now_s=1).duplicate)
 
     @unittest.skipUnless(os.name == "posix", "POSIX filesystem ownership/modes")
     def test_new_ledger_and_wal_shm_are_owner_only_under_umask_022(self):
