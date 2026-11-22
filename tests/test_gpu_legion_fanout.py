@@ -203,6 +203,70 @@ class FanoutContract(unittest.TestCase):
                 f.exclusive_json_output(path,{"overwritten":True})
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX owner/mode contract")
+    def test_shared_output_directory_rejected_before_inference(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            tasks_file = base / "tasks.json"
+            tasks_file.write_text(json.dumps(tasks(1)), encoding="utf-8")
+            shared = base / "shared"
+            shared.mkdir()
+            shared.chmod(0o777)
+            output = shared / "no-call.json"
+            with patch.object(f, "discover_backend",
+                              side_effect=lambda port: f.Backend(port, 1, 1, 2048)), \
+                 patch.object(f, "execute",
+                              side_effect=AssertionError("model inference was invoked")) as execute:
+                with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
+                    f.main(["--tasks", str(tasks_file), "--execute",
+                            "--output", str(output)])
+                execute.assert_not_called()
+            self.assertFalse(output.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX owner/mode contract")
+    def test_private_output_rejects_symlink_or_replaceable_ancestor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            real = root / "real"
+            real.mkdir(mode=0o700)
+            alias = root / "alias"
+            alias.symlink_to(real, target_is_directory=True)
+            with self.assertRaisesRegex(f.FanoutError, "symlinks"):
+                f.exclusive_json_output(alias / "result.json", {"x": 1})
+            self.assertFalse((real / "result.json").exists())
+
+            shared = root / "nonsticky-shared"
+            shared.mkdir()
+            shared.chmod(0o777)
+            private = shared / "private"
+            private.mkdir(mode=0o700)
+            with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
+                f.exclusive_json_output(private / "result.json", {"x": 1})
+            self.assertFalse((private / "result.json").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX sticky directory contract")
+    def test_private_output_under_sticky_ancestor_allowed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            shared = Path(temp) / "sticky"
+            shared.mkdir()
+            shared.chmod(0o1777)
+            private = shared / "private"
+            private.mkdir(mode=0o700)
+            target = private / "result.json"
+            f.exclusive_json_output(target, {"private": True})
+            self.assertTrue(json.loads(target.read_text())["private"])
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX traversal contract")
+    def test_output_parent_traversal_rejected_before_creation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            private = root / "private"
+            private.mkdir(mode=0o700)
+            with self.assertRaisesRegex(f.FanoutError, "traversal"):
+                f.exclusive_json_output(private / ".." / "result.json", {"x": 1})
+            self.assertFalse((root / "result.json").exists())
+
     def test_existing_output_refused_before_inference(self):
         with tempfile.TemporaryDirectory() as temp:
             directory=Path(temp)
