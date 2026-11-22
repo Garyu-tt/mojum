@@ -2,6 +2,8 @@
 import contextlib
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -142,6 +144,144 @@ class GpuLegionPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(gpu.InventoryError, "exceeds"):
                 gpu.load_inventory(file)
 
+
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")),
+        "POSIX secure nonblocking descriptor required",
+    )
+    def test_fifo_snapshot_is_rejected_without_waiting_for_writer(self):
+        # An accidental regression removing O_NONBLOCK must fail the test,
+        # not strand the entire CI runner on a FIFO open with no writer.
+        with tempfile.TemporaryDirectory() as folder:
+            fifo = Path(folder) / "blocked.json"
+            os.mkfifo(fifo)
+            script = (
+                "import sys\n"
+                "from tools import gpu_legion_plan as gpu\n"
+                "try:\n"
+                "    gpu.load_inventory(sys.argv[1])\n"
+                "except gpu.InventoryError as exc:\n"
+                "    if 'regular file' in str(exc):\n"
+                "        raise SystemExit(0)\n"
+                "    raise\n"
+                "raise SystemExit('FIFO unexpectedly accepted')\n"
+            )
+            completed = subprocess.run(
+                [sys.executable, "-c", script, str(fifo)],
+                cwd=REPO_ROOT, capture_output=True, text=True,
+                timeout=5, check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")),
+        "POSIX secure nofollow descriptor required",
+    )
+    def test_symlink_snapshot_is_rejected_before_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            real = Path(folder) / "private.json"
+            real.write_text('{"source":"synthetic","gpus":[]}')
+            alias = Path(folder) / "alias.json"
+            alias.symlink_to(real)
+            with self.assertRaises(OSError):
+                gpu.load_inventory(alias)
+
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_DIRECTORY", "O_CLOEXEC")),
+        "POSIX pinned directory descriptors required",
+    )
+    def test_symlinked_inventory_ancestor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            actual = root / "actual"
+            actual.mkdir()
+            snapshot = actual / "inventory.json"
+            snapshot.write_text('{"source":"synthetic","gpus":[]}')
+            alias = root / "alias"
+            alias.symlink_to(actual, target_is_directory=True)
+            with self.assertRaises(OSError):
+                gpu.load_inventory(alias / "inventory.json")
+            data, devices = gpu.load_inventory(snapshot)
+            self.assertEqual(data["source"], "synthetic")
+            self.assertEqual(devices, [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX descriptor path contract")
+    def test_parent_traversal_is_rejected_before_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            actual = root / "actual"
+            actual.mkdir()
+            snapshot = actual / "inventory.json"
+            snapshot.write_text('{"source":"synthetic","gpus":[]}')
+            with self.assertRaisesRegex(gpu.InventoryError, "traverse parents"):
+                gpu.load_inventory(actual / ".." / "actual" / "inventory.json")
+
+    def test_sparse_huge_file_rejected_before_materializing_contents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "sparse.json"
+            with snapshot.open("wb") as output:
+                output.truncate(1024**3)
+            with self.assertRaisesRegex(gpu.InventoryError, "exceeds 64 KiB"):
+                gpu.load_inventory(snapshot)
+
+    @unittest.skipUnless(
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")),
+        "secure local inventory reads required",
+    )
+    def test_exact_maximum_inventory_size_remains_accepted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "exact.json"
+            payload = b'{"source":"synthetic","gpus":[]}'
+            snapshot.write_bytes(payload + b" " * (gpu.MAX_INPUT_BYTES - len(payload)))
+            data, devices = gpu.load_inventory(snapshot)
+            self.assertEqual(data["source"], "synthetic")
+            self.assertEqual(devices, [])
+
+    @unittest.skipUnless(
+        os.name == "posix"
+        and all(hasattr(os, name) for name in
+                ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"))
+        and os.open in os.supports_dir_fd,
+        "secure descriptor-backed input required",
+    )
+    def test_deep_json_under_64k_is_controlled_preflight_failure(self):
+        # Deeply nested valid JSON exhausts the C JSON decoder's recursion
+        # budget long before it hits the documented file-size limit.
+        nested = "[" * 20000 + "0" + "]" * 20000
+        self.assertLess(len(nested), gpu.MAX_INPUT_BYTES)
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "deep.json"
+            snapshot.write_text(nested, encoding="ascii")
+            with self.assertRaisesRegex(gpu.InventoryError, "parser limits"):
+                gpu.load_inventory(snapshot)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = gpu.main(["--inventory", str(snapshot)])
+            self.assertEqual(rc, 2)
+            error = json.loads(stderr.getvalue())
+            self.assertIn("parser limits", error["error"])
+            self.assertFalse(error["deploy_performed"])
+            self.assertNotIn("Traceback", stderr.getvalue())
+
+    @unittest.skipUnless(
+        os.name == "posix"
+        and all(hasattr(os, name) for name in
+                ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"))
+        and os.open in os.supports_dir_fd,
+        "secure descriptor-backed input required",
+    )
+    def test_json_integer_digit_limit_is_controlled_preflight_failure(self):
+        limit = sys.get_int_max_str_digits()
+        if limit == 0 or limit + 1 > gpu.MAX_INPUT_BYTES:
+            self.skipTest("interpreter integer conversion limit is disabled/out of bounds")
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "big-int.json"
+            snapshot.write_text("9" * (limit + 1), encoding="ascii")
+            with self.assertRaisesRegex(gpu.InventoryError, "parser limits"):
+                gpu.load_inventory(snapshot)
 
     def test_imported_json_cannot_claim_hardware_verification(self):
         data, _ = p106_inventory(3)

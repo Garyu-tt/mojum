@@ -11,8 +11,10 @@ import csv
 from functools import lru_cache
 import itertools
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 
@@ -113,10 +115,61 @@ def validate_inventory(data):
 
 
 def load_inventory(path):
-    raw = Path(path).read_bytes()
+    """Read at most 64 KiB from a verified regular descriptor, never a FIFO.
+
+    Path.read_bytes() performs an unbounded read before the old limit check.
+    The size preflight and bounded descriptor read protect both memory and
+    blocking device/FIFO paths, including a file that grows after fstat.
+    """
+    if (not all(hasattr(os, flag) for flag in
+                ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"))
+            or os.open not in os.supports_dir_fd):
+        raise InventoryError("secure local inventory file reads unavailable")
+    # O_NOFOLLOW protects only the final component. Walk every parent via
+    # pinned directory descriptors to reject symlink ancestry and avoid
+    # resolving the path again after validating it.
+    source_path = Path(os.fspath(path))
+    if ".." in source_path.parts or not source_path.name:
+        raise InventoryError("GPU inventory path must not traverse parents")
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    directory_fd = os.open("/" if source_path.is_absolute() else ".", dir_flags)
+    try:
+        for component in source_path.parts[:-1]:
+            if component in ("/", "."):
+                continue
+            next_fd = os.open(component, dir_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        descriptor = os.open(
+            source_path.name,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=directory_fd,
+        )
+    finally:
+        os.close(directory_fd)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise InventoryError("GPU inventory must be a regular file")
+        if info.st_size > MAX_INPUT_BYTES:
+            raise InventoryError("GPU inventory exceeds 64 KiB")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            raw = source.read(MAX_INPUT_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if len(raw) > MAX_INPUT_BYTES:
         raise InventoryError("GPU inventory exceeds 64 KiB")
-    data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+    try:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+    except (RecursionError, ValueError) as exc:
+        # A <64 KiB JSON document can still contain tens of thousands of
+        # nested arrays, or a numeric token that exceeds Python integer
+        # conversion limits. Report a bounded preflight error, not a traceback.
+        if isinstance(exc, (InventoryError, json.JSONDecodeError)):
+            raise
+        raise InventoryError("GPU inventory JSON exceeds parser limits") from exc
     return data, validate_inventory(data)
 
 

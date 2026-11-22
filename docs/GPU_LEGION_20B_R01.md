@@ -90,6 +90,13 @@ python3 tools/gpu_legion_plan.py --model /models/gpt-oss-20b-mxfp4.gguf \
 
 The planner probes only local `nvidia-smi` and emits a machine-readable plan.
 It **never executes** the emitted commands or contacts an LLM endpoint.
+Offline `--inventory` input must be a regular file opened with fail-closed
+nonblocking/nofollow descriptor flags. The reader rejects symlinks, FIFOs,
+devices and files larger than 64 KiB **before** a bounded read, including
+sparse or concurrently growing files. Each directory component is opened via
+a pinned nofollow descriptor, so symlink ancestors and lexical parent traversal
+are rejected rather than re-resolved. It never reads an entire untrusted
+multi-gigabyte snapshot into memory before validating the size.
 The default new endpoint is **127.0.0.1:18180** (next: 18181), deliberately
 avoiding the existing ALT factory service on port 18080. The output field
 `hardware_verified` is **always false**: even live `nvidia-smi` is an
