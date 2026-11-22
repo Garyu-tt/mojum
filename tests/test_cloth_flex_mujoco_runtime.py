@@ -37,7 +37,9 @@ class ActualMuJoCoClothTests(unittest.TestCase):
     def test_mjcf_compiles_with_real_flex_and_pinned_anchor(self):
         model = self.mujoco.MjModel.from_xml_string(self.spike.make_mjcf())
         self.assertEqual(model.nflex, 1)
-        self.assertEqual(model.nmocap, 1)
+        self.assertEqual(model.nmocap, 0)
+        self.assertGreaterEqual(model.njnt, 1)
+        self.assertEqual(model.joint("cloth_anchor_x").type, self.mujoco.mjtJoint.mjJNT_SLIDE)
         self.assertEqual(model.nflexvert, self.spike.GRID[0] * self.spike.GRID[1])
         self.assertAlmostEqual(model.opt.timestep, self.spike.DT)
 
