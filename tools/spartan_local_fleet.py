@@ -260,11 +260,13 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
             task = coordinator.claim(db, worker_id, int(time.time()), ttl=240)
         finally:
             db.close()
-    except sqlite3.OperationalError:
-        # The coordinator rolls back an unsuccessful claim. An ambiguous
-        # post-commit failure leaves a fenced lease that expires normally.
+    except (sqlite3.Error, OSError) as exc:
+        # The coordinator rolls back a failed claim, but a post-commit
+        # disconnect can leave an uncertain fenced lease until TTL expiry.
+        # Never report unconfirmed coordinator state or raw SQL diagnostics.
         return {"worker": worker_id, "state": "claim_unavailable",
-                "error": "OperationalError"}
+                "error": type(exc).__name__,
+                "reason": "coordinator_claim_failed"}
     if task is None:
         return {"worker": worker_id, "state": "no_task"}
     attempt = task["attempts"]
@@ -463,11 +465,19 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
         meter = ModelCallMeter()
         results = []
         with ThreadPoolExecutor(max_workers=admitted) as pool:
-            futures = [pool.submit(single, db_path, n, slots[i], folder,
-                                   others=discovered, locks=locks, meter=meter)
-                       for i, n in enumerate(agents)]
+            futures = {pool.submit(single, db_path, n, slots[i], folder,
+                                   others=discovered, locks=locks, meter=meter): n
+                       for i, n in enumerate(agents)}
             for future in as_completed(futures):
-                results.append(future.result())
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    # Worker may already hold a lease; state remains unknown
+                    # until normal TTL recovery. Keep successful peer outputs.
+                    results.append({"worker": futures[future],
+                                    "state": "worker_failed",
+                                    "error": type(exc).__name__,
+                                    "reason": "unexpected_worker_failure"})
         return {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
                 "addressable_agents": max_agents,
                 "observed_physical_models": len(discovered),
@@ -488,6 +498,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                 "no_task": sum(r.get("state") == "no_task" for r in results),
                 "claim_unavailable": sum(r.get("state") == "claim_unavailable"
                                          for r in results),
+                "worker_failures": sum(r.get("state") == "worker_failed"
+                                       for r in results),
                 "before": before, "results": results,
                 "auto_merge": False, "generated_code_executed": False}
     finally:
@@ -536,10 +548,13 @@ def main():
                           "logical_agents_are_not_model_processes": True},
                          sort_keys=True))
         return
-    print(json.dumps(run(args.db, args.output_dir,
-                         max_agents=args.agents, max_jobs=args.max_jobs,
-                         max_cpu_inflight=args.max_cpu_inflight),
-                     ensure_ascii=False, sort_keys=True))
+    report = run(args.db, args.output_dir,
+                 max_agents=args.agents, max_jobs=args.max_jobs,
+                 max_cpu_inflight=args.max_cpu_inflight)
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    if report["claim_unavailable"] or report["worker_failures"]:
+        # Preserve partial work, but never claim complete batch success.
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
