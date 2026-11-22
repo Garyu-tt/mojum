@@ -77,11 +77,26 @@ class PointRoomEnvTests(unittest.TestCase):
         for bad in (True, 0, 100001):
             with self.assertRaises(ValueError):
                 self.make_env(max_steps=bad)
-        for bad in (True, float("nan"), 0, 2):
+        for bad in (True, float("nan"), 0, 0.250001, 0.5, 1, 2):
             with self.assertRaises(ValueError):
                 self.make_env(max_step_m=bad)
         with self.assertRaises(ValueError):
             PointRoomEnv(Room(4, 4), start=(True, 1))
+
+    def test_hard_cap_is_not_bypassed_by_mutating_public_budget(self):
+        env = self.make_env(max_step_m=0.125)
+        env.reset()
+        with self.assertRaises(ValueError):
+            env.step((0.2, 0))
+        env.max_step_m = 1.0
+        with self.assertRaises(ValueError):
+            env.step((0.5, 0))
+        env.max_step_m = float("nan")
+        with self.assertRaises(ValueError):
+            env.step((0.1, 0))
+        env.max_step_m = 0.25
+        observed, _, _, _, _ = env.step((0.25, 0))
+        self.assertEqual(observed["tick"], 1)
 
     def test_step_before_reset_refused(self):
         with self.assertRaises(RuntimeError):
