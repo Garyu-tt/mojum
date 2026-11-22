@@ -327,9 +327,12 @@ def rotate_worker_ids(db_path, max_agents, count):
         db.close()
 
 
-def run(db_path, folder, *, max_agents, max_jobs, backends=None):
+def run(db_path, folder, *, max_agents, max_jobs, backends=None,
+        max_cpu_inflight=1):
     if not 1 <= max_agents <= 300 or not 1 <= max_jobs <= MAX_PARALLEL:
         raise FleetError("invalid fleet bounds")
+    if type(max_cpu_inflight) is not int or not 1 <= max_cpu_inflight <= 4:
+        raise FleetError("CPU concurrent admission must be 1..4")
     folder = Path(folder)
     if not folder.is_dir() or folder.is_symlink():
         raise FleetError("private artifact folder required")
@@ -350,13 +353,23 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
         finally:
             db.close()
         discovered = discover() if backends is None else backends
-        # Spread the first few tasks across independent physical models.
-        # Filling a 4-slot CPU server first starved idle GPT GPUs and created
-        # CPU-only contention before any meaningful results were produced.
+        # Live /slots is the hard physical ceiling. CPU Qwen's 4 reported
+        # slots are NOT evidence that 4 simultaneous code generations finish:
+        # VM200's first four-way 7B attempt timed out. Admit one call per CPU
+        # model by default until measured successful completions justify more.
+        admitted_by_port = {b.port: min(b.free, max_cpu_inflight)
+                            if b.device.startswith("cpu") else b.free
+                            for b in discovered if b.free > 0}
         slots = []
-        remaining = {b.port: b.free for b in discovered if b.free}
+        # Interleave model families so 2 admitted tasks do not both saturate
+        # CPU while independent GPU capacity is idle.
+        cpu = [b for b in discovered if b.device.startswith("cpu")]
+        gpu = [b for b in discovered if not b.device.startswith("cpu")]
+        ordered = [b for pair in zip(cpu, gpu) for b in pair]
+        ordered += cpu[len(gpu):] + gpu[len(cpu):]
+        remaining = dict(admitted_by_port)
         while any(remaining.values()):
-            for backend in discovered:
+            for backend in ordered:
                 if remaining.get(backend.port, 0):
                     slots.append(backend)
                     remaining[backend.port] -= 1
@@ -364,7 +377,7 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
             raise FleetError("no observed live free inference slots")
         admitted = min(max_jobs, len(slots), max_agents)
         agents = rotate_worker_ids(db_path, max_agents, admitted)
-        locks = {b.port: BoundedSemaphore(b.free) for b in discovered if b.free}
+        locks = {p: BoundedSemaphore(cap) for p, cap in admitted_by_port.items()}
         results = []
         with ThreadPoolExecutor(max_workers=admitted) as pool:
             futures = [pool.submit(single, db_path, n, slots[i], folder,
@@ -375,6 +388,9 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
         return {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
                 "addressable_agents": max_agents,
                 "observed_physical_models": len(discovered),
+                "live_free_model_slots": sum(b.free for b in discovered),
+                "per_backend_admission": admitted_by_port,
+                "cpu_max_inflight_per_model": max_cpu_inflight,
                 "admitted_concurrent_model_calls": admitted,
                 "proposals": sum(r.get("state") == "proposal_for_independent_review"
                                  for r in results),
@@ -394,6 +410,8 @@ def main():
     p.add_argument("--output-dir", required=True)
     p.add_argument("--agents", type=int, default=300)
     p.add_argument("--max-jobs", type=int, default=8)
+    p.add_argument("--max-cpu-inflight", type=int, default=1,
+                   help="per-CPU-model calls, default 1 until throughput validated")
     p.add_argument("--status", action="store_true")
     args = p.parse_args()
     if args.status:
@@ -421,7 +439,8 @@ def main():
                          sort_keys=True))
         return
     print(json.dumps(run(args.db, args.output_dir,
-                         max_agents=args.agents, max_jobs=args.max_jobs),
+                         max_agents=args.agents, max_jobs=args.max_jobs,
+                         max_cpu_inflight=args.max_cpu_inflight),
                      ensure_ascii=False, sort_keys=True))
 
 
