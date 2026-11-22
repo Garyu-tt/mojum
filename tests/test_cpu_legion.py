@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from urllib.error import HTTPError
 from pathlib import Path
 from unittest.mock import patch
 from tools.cpu_legion import generate, local_url, parallel_limit, safe_file, task_context, verify
+from tools import cpu_legion as legion
 
 class CpuLegionTests(unittest.TestCase):
     def test_only_loopback(self):
@@ -177,6 +179,95 @@ class CpuLegionTests(unittest.TestCase):
                  "@@ -1 +1 @@\n-n = 1\n+n = 2\n")
         with self.assertRaises(ValueError):
             verify(self.root, patch, ["src/test.py"])
+
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and getattr(os, "O_DIRECTORY", 0),
+                         "requires POSIX pinned descriptor reads")
+    def test_context_content_is_read_from_pinned_regular_inode(self):
+        self.assertEqual(legion._read_context_file(self.root, "src/test.py"), "n = 1\n")
+        self.assertIn("n = 1", task_context(self.root, {
+            "payload": '{"paths":["src/test.py"],"instruction":"change value"}'
+        })[0])
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0),
+                         "requires POSIX nofollow")
+    def test_context_rejects_final_symlink_swapped_after_preflight(self):
+        original_safe = legion.safe_file
+        secret = self.root / "secret.py"
+        secret.write_text("PASSWORD=private\n")
+        path = self.root / "src/test.py"
+
+        def swap(root, name):
+            validated = original_safe(root, name)
+            path.unlink()
+            path.symlink_to(secret)
+            return validated
+
+        with patch("tools.cpu_legion.safe_file", side_effect=swap):
+            with self.assertRaises(ValueError):
+                legion._read_context_file(self.root, "src/test.py")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0),
+                         "requires POSIX nofollow")
+    def test_context_rejects_ancestor_symlink_swapped_after_preflight(self):
+        original_safe = legion.safe_file
+        src = self.root / "src"
+        alternate = self.root / "alternate"
+        alternate.mkdir()
+        (alternate / "test.py").write_text("PASSWORD=private\n")
+
+        def swap(root, name):
+            validated = original_safe(root, name)
+            src.rename(self.root / "src_saved")
+            src.symlink_to(alternate, target_is_directory=True)
+            return validated
+
+        with patch("tools.cpu_legion.safe_file", side_effect=swap):
+            with self.assertRaises(ValueError):
+                legion._read_context_file(self.root, "src/test.py")
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "mkfifo"),
+                         "requires POSIX FIFO")
+    def test_context_swapped_fifo_cannot_hang_reader(self):
+        script = """
+import os
+import sys
+from pathlib import Path
+from tools import cpu_legion as legion
+root = Path(sys.argv[1])
+def swap(root, name):
+    path = root / name
+    path.unlink()
+    os.mkfifo(path)
+    return path
+legion.safe_file = swap
+try:
+    legion._read_context_file(root, "src/test.py")
+except ValueError:
+    sys.exit(0)
+sys.exit(1)
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(self.root)], cwd=Path(__file__).resolve().parents[1],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX descriptor reads")
+    def test_context_refuses_growth_after_preflight(self):
+        original_safe = legion.safe_file
+        path = self.root / "src/test.py"
+
+        def grow(root, name):
+            validated = original_safe(root, name)
+            path.write_bytes(b"x" * 16001)
+            return validated
+
+        with patch("tools.cpu_legion.safe_file", side_effect=grow):
+            with self.assertRaises(ValueError):
+                legion._read_context_file(self.root, "src/test.py")
+
 
 if __name__ == "__main__":
     unittest.main()
