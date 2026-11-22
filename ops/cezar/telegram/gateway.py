@@ -50,6 +50,32 @@ def route(path):
     return None
 
 
+def read_private_fleet():
+    """Read from one pinned regular-file descriptor, with an actual byte cap.
+
+    A path lstat() followed by Path.read_bytes() is vulnerable to a
+    replacement race and does not constrain memory if the file grows.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(FLEET_FILE, flags)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or info.st_mode & 0o077
+                or info.st_size > MAX_BYTES):
+            raise ValueError("unsafe local fleet telemetry")
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            body = source.read(MAX_BYTES + 1)
+        if len(body) > MAX_BYTES:
+            raise ValueError("oversized fleet telemetry")
+        obj = json.loads(body)
+        if type(obj) is not dict or obj.get("schema") != "cezar.fleet.visibility.v1":
+            raise ValueError("untrusted fleet telemetry schema")
+        return body
+    finally:
+        os.close(fd)
+
+
 class ReadOnlyHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # No bot tokens or chat content ever appear in gateway logs.
@@ -62,14 +88,7 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
             return
         try:
             if path=="/api/v1/fleet":
-                info=os.lstat(FLEET_FILE)
-                if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid()
-                        or info.st_nlink!=1 or info.st_mode & 0o077 or info.st_size>MAX_BYTES):
-                    raise ValueError("unsafe local fleet telemetry")
-                body=FLEET_FILE.read_bytes()
-                obj=json.loads(body)
-                if not isinstance(obj,dict) or obj.get("schema")!="cezar.fleet.visibility.v1":
-                    raise ValueError("untrusted fleet telemetry schema")
+                body=read_private_fleet()
             else:
                 request = urllib.request.Request(UPSTREAM + path, headers={
                     "Accept":"application/json", "User-Agent":"cezar-bot-readonly-proxy/1.0"
