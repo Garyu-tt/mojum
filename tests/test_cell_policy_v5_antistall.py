@@ -428,13 +428,13 @@ class TranscriptSummaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     CellV5Error, "transcript intent/outcome provenance mismatch"
                 ):
-                    summarize_transcript([(intent, outcome)])
+                    summarize_transcript(transcript[:intent["tick"]] + [(intent, outcome)])
         # Even matching forged intent/outcome flags cannot make rest
         # masquerade as an active forced movement probe.
         with self.assertRaisesRegex(
             CellV5Error, "rest cannot be a forced movement probe"
         ):
-            summarize_transcript([(
+            summarize_transcript(transcript[:rest[0]["tick"]] + [(
                 {**rest[0], "forced_probe": True},
                 {**rest[1], "forced_probe": True},
             )])
