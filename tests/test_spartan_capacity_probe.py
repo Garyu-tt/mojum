@@ -1,6 +1,8 @@
 """CPU-only regression tests for real-operation span accounting."""
 import concurrent.futures
 from contextlib import closing
+import os
+import stat
 import sqlite3
 import sys
 import tempfile
@@ -27,6 +29,75 @@ class CapacityProbeTests(unittest.TestCase):
         self.db.close()
         self.patch.stop()
         self.tmp.cleanup()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX SQLite mode contract")
+    def test_new_probe_db_wal_shm_are_owner_only_with_umask_022(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "private.sqlite3")
+            previous = os.umask(0o022)
+            try:
+                with closing(probe.connect(path)) as db:
+                    probe.initialize(db, "private-run")
+                    probe.begin(db, "op", "worker", "model", now_ns=100)
+                    for suffix in ("", "-wal", "-shm"):
+                        item = Path(path + suffix)
+                        self.assertTrue(item.is_file(), suffix)
+                        self.assertEqual(stat.S_IMODE(item.stat().st_mode), 0o600, suffix)
+                self.assertEqual(os.umask(0o022), 0o022)
+            finally:
+                os.umask(previous)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX SQLite mode contract")
+    def test_existing_readable_db_and_wal_fail_without_chmod(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "legacy.sqlite3")
+            with closing(sqlite3.connect(path)) as db:
+                db.execute("CREATE TABLE old(x)")
+                db.commit()
+            os.chmod(path, 0o644)
+            with self.assertRaisesRegex(PermissionError, "owner-only"):
+                probe.connect(path)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o644)
+            os.chmod(path, 0o600)
+            with closing(probe.connect(path)) as db:
+                probe.initialize(db, "test-run")
+                sidecar = path + "-wal"
+                self.assertTrue(Path(sidecar).exists())
+                os.chmod(sidecar, 0o644)
+                with self.assertRaisesRegex(PermissionError, "owner-only"):
+                    probe.connect(path)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX SQLite parent contract")
+    def test_replaceable_parent_and_symlink_ancestor_fail_before_creation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            shared = Path(folder) / "shared"
+            shared.mkdir()
+            shared.chmod(0o777)
+            path = shared / "private.sqlite3"
+            with self.assertRaisesRegex(PermissionError, "replaceable"):
+                probe.connect(path)
+            self.assertFalse(path.exists())
+            real = Path(folder) / "real"
+            real.mkdir(mode=0o700)
+            alias = Path(folder) / "alias"
+            alias.symlink_to(real, target_is_directory=True)
+            with self.assertRaisesRegex(PermissionError, "symlink"):
+                probe.connect(alias / "private.sqlite3")
+            self.assertFalse((real / "private.sqlite3").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX SQLite path contract")
+    def test_memory_uri_and_db_symlink_are_not_persisted_evidence(self):
+        for item in (":memory:", "file:private.sqlite3?mode=memory"):
+            with self.assertRaisesRegex(ValueError, "persistent SQLite"):
+                probe.connect(item)
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "target.sqlite3"
+            with closing(probe.connect(target)) as db:
+                probe.initialize(db, "test-run")
+            alias = Path(folder) / "alias.sqlite3"
+            alias.symlink_to(target)
+            with self.assertRaisesRegex(PermissionError, "owner-only"):
+                probe.connect(alias)
 
     def test_300_distinct_overlapping_successful_model_spans(self):
         for i in range(300):
