@@ -269,6 +269,12 @@ def save_private(folder: Path, task_id: str, attempt: int, artifact):
         try:
             with os.fdopen(fd, "wb") as fp:
                 fp.write(blob)
+                fp.flush()
+                # The review lease must never outlive an unwritten artifact.
+                os.fsync(fp.fileno())
+            # Persist the new directory entry before coordinator.finish()
+            # commits the review state in its separate SQLite database.
+            os.fsync(dir_fd)
         except BaseException:
             os.unlink(filename, dir_fd=dir_fd)
             raise
