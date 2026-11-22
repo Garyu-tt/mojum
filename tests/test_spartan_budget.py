@@ -82,6 +82,40 @@ class BudgetLedgerTests(unittest.TestCase):
             BudgetLedger(private / "budget.sqlite3", self.caps)
         self.assertFalse((private / "budget.sqlite3").exists())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX hardlink semantics")
+    def test_hardlinked_db_and_sidecar_are_rejected_without_mutation(self):
+        duplicate = self.path.with_name("linked-budget.sqlite3")
+        os.link(self.path, duplicate)
+        try:
+            with self.assertRaisesRegex(BudgetDenied, "owner-only"):
+                self.ledger.reserve("hardlinked-db", "m", 1, 1, now_s=1)
+        finally:
+            duplicate.unlink()
+
+        sidecar = Path(str(self.path) + "-wal")
+        sidecar.write_bytes(b"preexisting-sidecar")
+        duplicate = self.path.with_name("linked-budget-wal")
+        os.link(sidecar, duplicate)
+        try:
+            with self.assertRaisesRegex(BudgetDenied, "owner-only"):
+                self.ledger.reserve("hardlinked-wal", "m", 1, 1, now_s=1)
+            self.assertEqual(sidecar.read_bytes(), b"preexisting-sidecar")
+        finally:
+            duplicate.unlink()
+            sidecar.unlink()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX absolute path contract")
+    def test_relative_path_and_world_searchable_parent_are_rejected(self):
+        with self.assertRaisesRegex(BudgetDenied, "absolute"):
+            BudgetLedger("relative-budget.sqlite3", self.caps)
+        parent = Path(self.tmp.name) / "world-searchable"
+        parent.mkdir(mode=0o700)
+        os.chmod(parent, 0o755)
+        target = parent / "ledger.sqlite3"
+        with self.assertRaisesRegex(BudgetDenied, "directory chain"):
+            BudgetLedger(target, self.caps)
+        self.assertFalse(target.exists())
+
     def test_memory_or_uri_ledger_path_is_refused(self):
         for bad in (":memory:", "file:budget.sqlite3", ""):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
