@@ -3,10 +3,12 @@
 from contextlib import closing
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import stat
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from mojum.spartan_budget import BudgetCaps, BudgetDenied, BudgetLedger
 
@@ -78,6 +80,32 @@ class BudgetPrivateStorageTests(unittest.TestCase):
         private.mkdir(mode=0o700)
         with self.assertRaisesRegex(BudgetDenied, "replaceable ancestor"):
             BudgetLedger(private / "ledger.sqlite3", self.caps)
+
+    def test_foreign_owned_ancestor_rejected_even_if_permissions_look_safe(self):
+        # A different UID owning a 0755 parent may rename our private child.
+        # A sticky 01777 parent is also unsafe when owned by that other UID.
+        foreign = self.root / "foreign-ancestor"
+        foreign.mkdir(mode=0o755)
+        private = foreign / "private"
+        private.mkdir(mode=0o700)
+        target = private / "ledger.sqlite3"
+        real_lstat = Path.lstat
+
+        def simulate_foreign_owner(path):
+            info = real_lstat(path)
+            if path == foreign:
+                return SimpleNamespace(
+                    st_mode=info.st_mode, st_uid=os.geteuid() + 100000
+                )
+            return info
+
+        for permissions in (0o755, 0o1777):
+            with self.subTest(permissions=permissions):
+                foreign.chmod(permissions)
+                with patch.object(Path, "lstat", simulate_foreign_owner):
+                    with self.assertRaisesRegex(BudgetDenied, "replaceable ancestor"):
+                        BudgetLedger(target, self.caps)
+                self.assertFalse(target.exists())
 
     def test_concurrent_connections_preserve_private_files(self):
         path = self.root / "concurrent.sqlite3"
