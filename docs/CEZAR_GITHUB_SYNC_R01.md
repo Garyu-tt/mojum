@@ -171,6 +171,84 @@ revision before unattended dispatch, and independently verify every
 produced patch. Both native GitHub event automations remain paused
 until the model quality and admission gates are established.
 
+## Cross-rule admission and real Cezar model pilot (2026-11-22)
+
+The native Cezar event scheduler has its own durable per-automation
+`(automationId,eventId)` receipt ledger. That **does not** stop two
+different automation rules from dispatching the same GitHub work.
+For these Mojum CPU resources we have now introduced **one actual
+dispatch path** for opt-in public Issue and PR review events:
+
+- `tools/cezar_admission.py` keeps a private SQLite database with
+  `BEGIN IMMEDIATE`, a unique SHA-256 key of
+  `(repo,kind,number,revision,phase)` and an exact scope hash.
+  It deliberately does **not** include the calling automation rule or
+  model in the identity. Duplicate requests return the existing receipt
+  and do not send a second `POST /api/v1/runs`. A failed/uncertain
+  remote POST keeps its original reservation until manual reconciliation
+  instead of risking a blind retry.
+- The only model task admitted by this path is a bounded, read-only
+  `quick-task` with `enforceReadOnly=true`, no autonomous approval,
+  GitHub writer, commit, push or merge. The URL is pinned to Cezar's
+  loopback API. `block` terminally rejects an untrusted/incorrect
+  output, with the exact admission UUID and Cezar run UUID, without
+  opening the same revision for automatic retries.
+- `tools/cezar_intake.py` only scans public open Mojum Issues/PRs with
+  the exact **`cezar-ready`** label. It excludes `cezar-hold`,
+  `security` and `needs-human`. PR identity uses the exact 40-hex
+  head SHA, while Issue identity uses its GitHub update revision.
+  No issue body, HTTP authentication, model API token or shell command
+  reaches the scheduler. A hard cap allows only **one unresolved**
+  Cezar model task for this CPU profile.
+- The versioned systemd service/timer in
+  `ops/cezar/systemd/cezar-mojum-admission-r01.*` runs the pinned
+  tested scripts every ~15 minutes under `mirbi`, with system files
+  read-only, restricted writable state/prompt directories, memory/CPU
+  caps, no laptop home or archived secrets. On the first live run it
+  discovered **zero currently labeled candidates**, dispatched **zero**
+  tasks and exited successfully.
+- Both *native* Cezar GitHub event rules remain explicitly **paused**,
+  to avoid bypassing the cross-rule gate. If another path is later
+  enabled, it must route every dispatch through this common registry
+  or the cross-rule deduplication promise will no longer hold.
+
+Actual supervised pilot: an exact-source PR #612 review for head
+`9b9a45d3f1252baff201d880edadd71325e11a70` created one Cezar
+run `ba409c36`. Repeating that admission returned
+`admitted:false,reason:already-claimed`, and the live Cezar task
+list contained only one matching run. The read-only OpenCode
+16k-context local Qwen2.5-Coder-3B eventually returned an answer,
+but it **incorrectly invented a database race** that was already
+prevented by `BEGIN IMMEDIATE` and cited unrelated SQLAlchemy.
+Independent review therefore **rejected** the output, cancelled
+the run and terminally marked its admission `blocked`.
+A third submission for the exact same PR revision was refused.
+**No code from the model was applied.**
+
+Two direct Qwen2.5-Coder-3B unified-diff attempts were also rejected
+by the existing `spartan_patch_guard.py` for incorrect syntax/scope.
+A small real input-type validation issue found while checking the
+new trusted admission code was fixed separately and covered by a
+negative test. Thus these experiments verify **transport, dedup,
+fail-closed model rejection and reproducibility**, but do **not**
+demonstrate reliable autonomous code generation.
+
+On the server, safe operational checks:
+
+```sh
+systemctl status cezar-mojum-admission-r01.timer
+systemctl status cezar-mojum-admission-r01.service
+python3 /var/lib/cezar/guarded-intake/cezar_admission.py \
+  --db /var/lib/cezar/home/admission/mojum.sqlite stats
+```
+
+Only an authorized operator with access to the owner-private admission
+database should mark a failed task blocked; never automatically mark
+an unreviewed model answer `finished`. GitHub CLI on the server
+still lacks write authorization. **The 300 Spartan names are logical
+identities, not 300 verified concurrent, useful local inference workers.**
+The QA gate remains separate from any eventual draft-PR publisher.
+
 ## Required release invariants
 
 1. Unique GitHub Issue/PR identity, deduplicated transitions and a
