@@ -145,8 +145,11 @@ class GpuLegionPlanTests(unittest.TestCase):
                 gpu.load_inventory(file)
 
 
-    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NONBLOCK"),
-                         "POSIX nonblocking descriptor required")
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")),
+        "POSIX secure nonblocking descriptor required",
+    )
     def test_fifo_snapshot_is_rejected_without_waiting_for_writer(self):
         # An accidental regression removing O_NONBLOCK must fail the test,
         # not strand the entire CI runner on a FIFO open with no writer.
@@ -171,8 +174,11 @@ class GpuLegionPlanTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"),
-                         "POSIX nofollow descriptor required")
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")),
+        "POSIX secure nofollow descriptor required",
+    )
     def test_symlink_snapshot_is_rejected_before_read(self):
         with tempfile.TemporaryDirectory() as folder:
             real = Path(folder) / "private.json"
