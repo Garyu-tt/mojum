@@ -81,7 +81,8 @@ def _request_json(port: int, path: str, *, body=None, timeout=5, opener=None):
     try:
         return json.loads(data, parse_constant=lambda x: (_ for _ in ()).throw(
             FanoutError("nonfinite JSON")))
-    except (ValueError, UnicodeError) as exc:
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        # Small JSON responses can exceed the parser nesting limit.
         raise FanoutError("invalid JSON response") from exc
 
 
