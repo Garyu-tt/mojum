@@ -169,6 +169,18 @@ class IntakeTests(unittest.TestCase):
         with self.assertRaises(m.admission.AdmissionError):
             m.fetch_json("https://evil.example/metadata",list)
 
+    def test_public_api_redirects_are_disabled_before_followup_request(self):
+        with self.assertRaises(m.admission.AdmissionError):
+            m.NoRedirect().redirect_request(
+                None, None, 307, "Temporary Redirect", {},
+                "https://external.example/collect")
+        client = self.fake([])
+        with patch.object(m.urllib.request, "build_opener", return_value=client) as build:
+            self.assertEqual(m.fetch_json(self.api, list), [])
+        self.assertEqual(client.calls, [self.api])
+        self.assertTrue(any(isinstance(h, m.NoRedirect) for h in build.call_args.args))
+
+
     def test_malformed_pr_sha_is_rejected(self):
         with self.assertRaises(m.admission.AdmissionError):
             m.discover(opener=self.fake([self.issue(612,kind="pull")],sha="not-sha"))
