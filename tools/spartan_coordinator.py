@@ -56,7 +56,10 @@ def _check_private_sqlite_path(path: str) -> None:
 
 
 def connect(path: str) -> sqlite3.Connection:
-    _check_private_sqlite_path(path)
+    # SQLite's special in-memory database must never be pre-created as a file.
+    # This is also used by isolated coordinator tests and ephemeral callers.
+    if path != ":memory:":
+        _check_private_sqlite_path(path)
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=30000")
