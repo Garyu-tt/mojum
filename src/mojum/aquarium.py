@@ -44,7 +44,7 @@ from .graph import validate as validate_graph
 from .room_draft_runtime import load_runtime_room
 from .room_spec import RoomSpecError
 from .noosphere import (
-    EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event,
+    EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event, _validate_event,
 )
 from .sensory_bridge import ToyContactBridge, SCHEMA as TOY_CONTACT_SCHEMA, OCCLUSION_SCHEMA
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
@@ -315,6 +315,15 @@ class Aquarium:
                 "expected head requires an existing journal; refusing to create a new one")
         elif self._read_only or legacy_v2b:
             raise AquariumError("this motor selector requires an existing journal")
+        else:
+            # A room draft may fit the 256 KiB input cap but expand beyond
+            # Noosphere's 128,000-byte event wire cap after float conversion.
+            # Validate the *actual* bootstrap event before opening writable
+            # SQLite, so an invalid new room leaves no empty PRIVATE journal.
+            _validate_event(self._record(
+                "aquarium.bootstrap", "aquarium-bootstrap", self.manifest,
+                0, self.graph_sha256,
+            ), self.agent_id)
         self.store = LocalNoosphere(db_path, agent_id, read_only=self._read_only)
         try:
             if self.store.count() == 0:
