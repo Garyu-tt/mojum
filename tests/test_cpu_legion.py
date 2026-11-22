@@ -198,14 +198,31 @@ class CpuLegionTests(unittest.TestCase):
         secret.write_text("PASSWORD=private\n")
         path = self.root / "src/test.py"
 
-        def swap(root, name):
-            validated = original_safe(root, name)
+        def swap(root, name, **kwargs):
+            validated = original_safe(root, name, **kwargs)
             path.unlink()
             path.symlink_to(secret)
             return validated
 
         with patch("tools.cpu_legion.safe_file", side_effect=swap):
             with self.assertRaises(ValueError):
+                legion._read_context_file(self.root, "src/test.py")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0),
+                         "requires POSIX pinned descriptor reads")
+    def test_context_rejects_regular_inode_replacement_after_preflight(self):
+        original_safe = legion.safe_file
+        replacement = self.root / "private_replacement.py"
+        replacement.write_text("PRIVATE_MARKER=leak\\n")
+        target = self.root / "src/test.py"
+
+        def swap(root, name, **kwargs):
+            validated = original_safe(root, name, **kwargs)
+            os.replace(replacement, target)
+            return validated
+
+        with patch("tools.cpu_legion.safe_file", side_effect=swap):
+            with self.assertRaisesRegex(ValueError, "inode changed"):
                 legion._read_context_file(self.root, "src/test.py")
 
     @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0),
@@ -217,8 +234,8 @@ class CpuLegionTests(unittest.TestCase):
         alternate.mkdir()
         (alternate / "test.py").write_text("PASSWORD=private\n")
 
-        def swap(root, name):
-            validated = original_safe(root, name)
+        def swap(root, name, **kwargs):
+            validated = original_safe(root, name, **kwargs)
             src.rename(self.root / "src_saved")
             src.symlink_to(alternate, target_is_directory=True)
             return validated
@@ -236,11 +253,13 @@ import sys
 from pathlib import Path
 from tools import cpu_legion as legion
 root = Path(sys.argv[1])
-def swap(root, name):
+original_safe = legion.safe_file
+def swap(root, name, **kwargs):
+    checked = original_safe(root, name, **kwargs)
     path = root / name
     path.unlink()
     os.mkfifo(path)
-    return path
+    return checked
 legion.safe_file = swap
 try:
     legion._read_context_file(root, "src/test.py")
@@ -259,8 +278,8 @@ sys.exit(1)
         original_safe = legion.safe_file
         path = self.root / "src/test.py"
 
-        def grow(root, name):
-            validated = original_safe(root, name)
+        def grow(root, name, **kwargs):
+            validated = original_safe(root, name, **kwargs)
             path.write_bytes(b"x" * 16001)
             return validated
 
