@@ -241,6 +241,30 @@ def _write_private_patch(out, name, diff):
             os.close(current_fd)
 
 
+
+def _discard_unreviewed_patch(out, name):
+    """Remove a lease-rejected private patch via no-follow directory handles."""
+    if not re.fullmatch(r"[0-9a-f]{16}-[0-9a-f]{16}\.patch", name):
+        raise ValueError("invalid unreviewed patch basename")
+    out = Path(out)
+    if ".." in out.parts:
+        raise ValueError("output directory traversal forbidden")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open("/", flags)
+    try:
+        for part in out.absolute().parts[1:]:
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        st = os.fstat(fd)
+        if st.st_uid != os.geteuid() or st.st_mode & 0o077:
+            raise ValueError("unreviewed patch directory is not private")
+        os.unlink(name, dir_fd=fd)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def run_one(db_path, worker, root, out, url, model, timeout):
     db = queue.connect(db_path)
     try:
@@ -261,6 +285,9 @@ def run_one(db_path, worker, root, out, url, model, timeout):
             _write_private_patch(out, name, diff)
             if not queue.finish(db, worker, task["id"], "review", int(time.time()),
                                 str(out / name), attempt=task["attempts"]):
+                # SQLite explicitly refused the fenced review transition:
+                # the private diff is now unreferenced, so reclaim it.
+                _discard_unreviewed_patch(out, name)
                 raise ValueError("lease expired before review")
             return {"worker": worker, "state": "review", "task": task["id"],
                     "patch": str(out / name), "sha256": digest, "base_sha": sha}

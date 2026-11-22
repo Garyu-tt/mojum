@@ -408,6 +408,38 @@ sys.exit(1)
         self.assertFalse((trusted / "patches").exists())
 
 
+
+    def test_expired_review_lease_discards_unreferenced_patch(self):
+        # A stale attempt must not leak disk space through orphan proposals.
+        from unittest.mock import Mock
+        out = self.root / "expired-review" / "patches"
+        task = {"id": "expired-task", "attempts": 1, "payload": "{}"}
+        conn = Mock()
+        diff = "diff --git a/src/test.py b/src/test.py\n"
+        with (
+            patch.object(legion.queue, "connect", return_value=conn),
+            patch.object(legion.queue, "claim", return_value=task),
+            patch.object(legion.queue, "finish",
+                         side_effect=lambda *args, **kwargs: args[3] == "blocked") as finish,
+            patch.object(legion.subprocess, "run",
+                         return_value=Mock(returncode=0, stdout=b"")),
+            patch.object(legion.subprocess, "check_output", return_value="a" * 40),
+            patch.object(legion, "task_context",
+                         return_value=("prompt", ["src/test.py"])),
+            patch.object(legion, "generate", return_value=diff),
+            patch.object(legion, "verify", return_value=diff),
+        ):
+            result = legion.run_one(
+                str(self.root / "not-written.sqlite3"), 1, self.root, out,
+                "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5,
+            )
+        self.assertEqual(result["state"], "blocked")
+        self.assertIn("lease expired", result["reason"])
+        self.assertEqual(list(out.glob("*.patch")), [])
+        self.assertEqual([call.args[3] for call in finish.call_args_list],
+                         ["review", "blocked"])
+        conn.close.assert_called_once()
+
     def _run_cli_with_fake_workers(self, fake_worker):
         import io
         import json
