@@ -6,7 +6,9 @@ not the raw draft bytes; this module does not mutate any journal.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import stat
 
 from .room_spec import (
     DRAFT_SCHEMA, MAX_INPUT_BYTES, RoomSpecError, _parse,
@@ -17,11 +19,26 @@ from .world_room import Room, initial_state
 
 def load_runtime_room(path: str | Path) -> tuple[Room, tuple[float, float]]:
     """Fail closed before SQLite birth on invalid, oversized or unsafe drafts."""
+    # Opening a FIFO normally blocks before we can enforce the byte limit.
+    # Open nonblocking and inspect the opened inode, not a prior pathname stat.
+    # O_NOFOLLOW also rejects symlinks on platforms that expose the flag.
+    if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+        raise RoomSpecError("cannot safely read room draft without O_NONBLOCK")
+    descriptor = -1
     try:
-        with Path(path).open("rb") as handle:
+        flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise RoomSpecError("room draft must be a regular file")
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
             raw = handle.read(MAX_INPUT_BYTES + 1)
     except OSError as exc:
         raise RoomSpecError(f"cannot read room draft: {exc}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if len(raw) > MAX_INPUT_BYTES:
         raise RoomSpecError("room document exceeds byte limit")
 
