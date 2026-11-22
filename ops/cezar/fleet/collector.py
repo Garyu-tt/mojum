@@ -65,10 +65,14 @@ def _parse_time(value):
 
 
 def _schedule_list(now):
-    # Pin the inspected file: lstat() followed by read_bytes() could
-    # follow a replaced symlink and would allocate an unbounded payload.
+    # Both symlink substitution and FIFO blocking must be rejected before
+    # a source can stall the entire fleet collector.
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nonblock is None:
+        raise FleetError("nonblocking schedule snapshot validation unavailable")
     try:
-        fd=os.open(SCHEDULES,os.O_RDONLY|os.O_NOFOLLOW|getattr(os,"O_CLOEXEC",0))
+        fd=os.open(SCHEDULES,os.O_RDONLY|os.O_NOFOLLOW|
+                   getattr(os,"O_CLOEXEC",0)|nonblock)
     except OSError as exc:
         raise FleetError("schedule snapshot cannot be opened safely") from exc
     try:
