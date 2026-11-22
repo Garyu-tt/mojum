@@ -183,6 +183,49 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(duplicate)
         self.assertEqual(old["status"], "finished")
 
+    def test_dispatch_rejects_symlink_and_fifo_prompt_without_claiming(self):
+        p = self.private_prompt()
+        alias = self.home / "alias.txt"
+        alias.symlink_to(p)
+        with self.assertRaises(m.AdmissionError):
+            m.dispatch(self.db, self.ident(), alias)
+        if hasattr(os, "mkfifo"):
+            pipe = self.home / "pipe.txt"
+            os.mkfifo(pipe)
+            with self.assertRaises(m.AdmissionError):
+                m.dispatch(self.db, self.ident(), pipe)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
+    def test_dispatch_rejects_symlink_in_prompt_ancestors(self):
+        p = self.private_prompt()
+        alias = Path(self.tmp.name) / "alias-parent"
+        alias.symlink_to(self.home, target_is_directory=True)
+        with self.assertRaises(m.AdmissionError):
+            m.dispatch(self.db, self.ident(), alias / p.name)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
+    def test_dispatch_installs_fail_closed_redirect_handler(self):
+        p = self.private_prompt()
+        class Client:
+            def open(self, *args, **kwargs):
+                raise urllib.error.HTTPError(
+                    "http://127.0.0.1:4329/api/v1/runs", 302,
+                    "simulated redirect", {}, None,
+                )
+        def opener(*handlers):
+            redirect_handlers = [h for h in handlers if isinstance(h, m.NoRedirect)]
+            self.assertEqual(len(redirect_handlers), 1)
+            with self.assertRaises(m.AdmissionError):
+                redirect_handlers[0].redirect_request(
+                    None, None, 302, "Found", {}, "https://example.invalid/",
+                )
+            return Client()
+        with patch.object(m.urllib.request, "build_opener", side_effect=opener):
+            with self.assertRaisesRegex(m.AdmissionError, "uncertain"):
+                m.dispatch(self.db, self.ident(), p)
+        row = self.db.execute("SELECT status FROM admission").fetchone()
+        self.assertEqual(row["status"], "claimed")
+
     def test_dispatch_refuses_nonprivate_prompt(self):
         p = self.private_prompt()
         p.chmod(0o644)
