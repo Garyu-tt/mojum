@@ -133,6 +133,19 @@ class CapacityTests(unittest.TestCase):
             with self.assertRaisesRegex(legion.InventoryError, "cannot read inventory"):
                 legion.load_inventory(linked)
 
+    def test_oversized_integer_literal_normalizes_parser_value_error(self):
+        if not hasattr(sys, "get_int_max_str_digits"):
+            self.skipTest("interpreter has no digit conversion limit")
+        maximum = sys.get_int_max_str_digits()
+        if maximum == 0 or maximum + 1 > legion.MAX_INPUT_BYTES:
+            self.skipTest("integer conversion limit is disabled or above input budget")
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "integer.json"
+            path.write_text('{"target_workers":' + '9' * (maximum + 1) + '}',
+                            encoding="utf-8")
+            with self.assertRaisesRegex(legion.InventoryError, "valid UTF-8 JSON"):
+                legion.load_inventory(path)
+
     def test_cli_returns_machine_readable_plan_and_strict_shortfall(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "inventory.json"
