@@ -198,10 +198,27 @@ function tickState() {
   click("start");
   const start = tickState();
 
+  // Reject oversize import before arrayBuffer(), including while a timer runs.
+  document.hidden = false;
+  click("play");
+  const beforeOversize = tickState();
+  let oversizeRead = false;
+  file.files = [{
+    name: "oversized.synthetic.private.jsonl",
+    size: 24 * 1024 * 1024 + 1,
+    arrayBuffer: async () => {oversizeRead = true; throw Error("oversize was read");}
+  }];
+  await file.listeners.change.call(file);
+  const rejectedOversize = {
+    ...tickState(), read: oversizeRead, playDisabled: get("play").disabled,
+    seekDisabled: get("seek").disabled, seekMax: get("seek").max,
+    status: get("status").textContent
+  };
+
   process.stdout.write(JSON.stringify({
     loaded, next, prev, end, restart, initialPeriod,
     playing, pause, fastPeriod, changedPeriod, speedTimers,
-    seek, ended, hidden, start
+    seek, ended, hidden, start, beforeOversize, rejectedOversize
   }));
 })().catch(error => {console.error(error.stack || error); process.exitCode = 1;});
 """
@@ -272,6 +289,13 @@ class OfflineViewerControlsQA(unittest.TestCase):
         self.assertEqual(values["ended"]["activeTimers"], 0)
         self.assertEqual(values["hidden"]["activeTimers"], 0)
         self.assertEqual(values["start"]["tick"], "4")
+        self.assertEqual(values["beforeOversize"]["activeTimers"], 1)
+        self.assertEqual(values["rejectedOversize"]["activeTimers"], 0)
+        self.assertFalse(values["rejectedOversize"]["read"])
+        self.assertTrue(values["rejectedOversize"]["playDisabled"])
+        self.assertTrue(values["rejectedOversize"]["seekDisabled"])
+        self.assertEqual(values["rejectedOversize"]["seekMax"], "0")
+        self.assertIn("24 МиБ", values["rejectedOversize"]["status"])
 
 
 if __name__ == "__main__":
