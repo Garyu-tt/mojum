@@ -154,8 +154,12 @@ the existing TTL/fencing protocol; no automatic retry is performed.
 
 The batch includes `claim_unavailable` and `worker_failures` counters.
 The CLI prints the complete partial JSON summary and returns exit status
-**2** if either counter is nonzero. A partial batch is not a successful
-all-worker run and may have already consumed inference tokens.
+**2** if any worker has an unavailable claim, unexpected crash, blocked task,
+queued retry or expired lease. These include `claim_unavailable`,
+`worker_failures`, `blocked`, `retry_queued` and `lease_expired` counters.
+An idle batch containing only `no_task` workers is not an error. A partial
+batch is not a successful all-worker run and may have already consumed
+inference tokens.
 
 ## Instrumented concurrency accounting
 
