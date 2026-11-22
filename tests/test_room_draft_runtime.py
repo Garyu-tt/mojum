@@ -133,5 +133,29 @@ class RoomDraftRuntimeTests(unittest.TestCase):
         self.assertFalse(db.exists())
 
 
+    def test_valid_draft_over_noosphere_event_cap_fails_before_sqlite_birth(self):
+        # A 256 KiB-valid room can produce a bootstrap event beyond the
+        # Noosphere 128,000-byte limit after the room is materialized.
+        from mojum.room_spec import validate_room_bytes
+
+        doc = json.loads(VALID)
+        doc.update(width=10, height=10, start=[0, 0],
+                   obstacles=[[2.123456789, 1.123456789,
+                               0.0123456789, 0.0123456789]] * 3000)
+        raw = json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertLess(len(raw), MAX_INPUT_BYTES)
+        self.assertTrue(validate_room_bytes(raw).valid)
+        self.path.write_bytes(raw)
+        room, start = load_runtime_room(self.path)
+        self.assertEqual(len(room.obstacles), 3000)
+        self.assertEqual(start, (0.0, 0.0))
+
+        db = self.dir / "oversized_bootstrap_PRIVATE.sqlite3"
+        result = self._cli(db)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("event exceeds maximum size", result.stderr)
+        self.assertFalse(db.exists(), "failed bootstrap must not leave a journal")
+
+
 if __name__ == "__main__":
     unittest.main()
