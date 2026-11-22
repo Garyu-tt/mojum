@@ -185,7 +185,7 @@ class CpuLegionTests(unittest.TestCase):
                          and getattr(os, "O_DIRECTORY", 0),
                          "requires POSIX pinned descriptor reads")
     def test_context_content_is_read_from_pinned_regular_inode(self):
-        self.assertEqual(legion._read_context_file(self.root, "src/test.py"), "n = 1\\n")
+        self.assertEqual(legion._read_context_file(self.root, "src/test.py"), "n = 1\n")
         self.assertIn("n = 1", task_context(self.root, {
             "payload": '{"paths":["src/test.py"],"instruction":"change value"}'
         })[0])
@@ -195,7 +195,7 @@ class CpuLegionTests(unittest.TestCase):
     def test_context_rejects_final_symlink_swapped_after_preflight(self):
         original_safe = legion.safe_file
         secret = self.root / "secret.py"
-        secret.write_text("PASSWORD=private\\n")
+        secret.write_text("PASSWORD=private\n")
         path = self.root / "src/test.py"
 
         def swap(root, name):
@@ -215,7 +215,7 @@ class CpuLegionTests(unittest.TestCase):
         src = self.root / "src"
         alternate = self.root / "alternate"
         alternate.mkdir()
-        (alternate / "test.py").write_text("PASSWORD=private\\n")
+        (alternate / "test.py").write_text("PASSWORD=private\n")
 
         def swap(root, name):
             validated = original_safe(root, name)
