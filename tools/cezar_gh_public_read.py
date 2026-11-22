@@ -85,7 +85,8 @@ def parse(args):
         # historical closed/merged event queries.
         if ("is:pr" in terms and "created:>=" in q
                 and not any(t in terms for t in
-                            ("is:open", "is:closed", "state:open", "state:closed"))):
+                            ("is:open", "is:closed", "state:open", "state:closed"))
+                and not any(t.startswith("closed:") for t in terms)):
             q += " is:open"
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
