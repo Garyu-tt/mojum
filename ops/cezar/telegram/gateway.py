@@ -27,14 +27,14 @@ NO_REDIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRed
 
 
 def route(path):
-    parsed = urllib.parse.urlsplit(path)
-    if parsed.scheme or parsed.netloc or parsed.fragment:
-        return None
     try:
+        parsed = urllib.parse.urlsplit(path)
         pairs = urllib.parse.parse_qs(parsed.query, strict_parsing=True)
     except ValueError:
-        # Malformed or dangling query parameters are denied, not allowed to
-        # escape the HTTP handler before it can send a normal 404 response.
+        # A malformed URL or dangling query must be denied before reaching
+        # the HTTP handler, rather than terminating the client connection.
+        return None
+    if parsed.scheme or parsed.netloc or parsed.fragment:
         return None
     if parsed.path in ("/api/v1/health", "/api/v1/runs", "/api/v1/fleet") and not pairs:
         return parsed.path
