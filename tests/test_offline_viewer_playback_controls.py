@@ -152,6 +152,8 @@ function loadViewer() {
  assert.equal(oversizeRead,false,"oversized import read bytes before rejection");
  assert.equal(timer.callback,null,"oversized import left playback timer running");
  assert.equal(get("play").disabled,true,"old playback remained enabled");
+ assert.equal(get("seek").disabled,true,"seek remained enabled on invalid import");
+ assert.equal(get("seek").max,"0","seek retained stale range after invalid import");
  assert.equal(get("tick").textContent,"—","stale frame survived rejected import");
  assert.match(get("status").textContent,/24 МиБ/);
  input.files=[{name:"synthetic.private.jsonl",size:bytes.length,
