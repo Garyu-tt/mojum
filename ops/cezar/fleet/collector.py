@@ -229,7 +229,7 @@ def _github(now):
         "open_issues": count_issues,
         "new_prs_last_90m_visible": recent,
         "latest_open_prs": _public_summary(prs, max_items=12, kind="pr"),
-        "latest_open_issues": _public_summary(data.get("issues"), max_items=8, kind="issue"),
+        "latest_open_issues": _public_summary(data.get("issues", []), max_items=8, kind="issue"),
         "visibility": "public open GitHub artifacts, NOT live agent executions",
     }
 
@@ -357,7 +357,9 @@ def _github_closed_history(now):
     }
 
 
-def collect(now=None):
+def collect(now=None, *, include_history=False):
+    if type(include_history) is not bool:
+        raise FleetError("invalid GitHub history selector")
     now=now or NOW()
     observations={"schema":"cezar.fleet.visibility.v1","generated_at":now.isoformat()}
     sections=[
@@ -365,8 +367,11 @@ def collect(now=None):
         ("schedules",lambda:_schedule_list(now)),
         ("models",_models),
         ("github",lambda:_github(now)),
-        ("github_history",lambda:_github_closed_history(now)),
     ]
+    if include_history:
+        sections.append(("github_history",lambda:_github_closed_history(now)))
+    else:
+        observations["github_history"]={"available":False,"reason":"not-requested"}
     # A temporary failure in one source is explicit, never silently zero.
     for name,run in sections:
         try:
@@ -413,7 +418,7 @@ def save(data,path):
 
 
 if __name__=="__main__":
-    info=collect()
+    info=collect(include_history=True)
     save(info,PRIVATE)
     save(info,WEB)
     print(json.dumps({
