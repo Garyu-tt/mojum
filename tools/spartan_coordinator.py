@@ -41,15 +41,22 @@ def _check_private_parent(path: str) -> None:
     A file-mode check followed by sqlite3.connect(path) is unsafe if another
     local account can replace the checked path between those operations.
     """
-    parent = os.path.dirname(os.path.abspath(path))
-    info = os.lstat(parent)
-    if (not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.geteuid()
-            or info.st_mode & 0o022):
-        raise PermissionError(
-            "Spartan SQLite parent directory must be owner-controlled "
-            "and not group/world-writable"
-        )
+    # An unsafe ancestor permits replacing even an owner-only parent.
+    parent = Path(os.path.abspath(path)).parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError("Spartan SQLite parent directory chain contains a symlink")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise PermissionError(
+                f"Spartan SQLite parent directory chain is replaceable: {directory}"
+            )
 
 
 def connect(path: str) -> sqlite3.Connection:
