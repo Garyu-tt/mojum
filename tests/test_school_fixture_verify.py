@@ -167,6 +167,28 @@ class SchoolColdVerifyTests(unittest.TestCase):
         and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NONBLOCK"),
         "POSIX nonblocking descriptor opens required",
     )
+    def test_pinned_read_rejects_missing_nonblock_capability(self):
+        if os.name != "posix" or not all(
+            hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")
+        ):
+            self.skipTest("POSIX pinned nonblocking descriptor opens required")
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                # Simulate a POSIX host lacking O_NONBLOCK. Never open the
+                # manifest by a potentially blocking descriptor in this case.
+                with patch.object(school_verify.os, "O_NONBLOCK"):
+                    delattr(school_verify.os, "O_NONBLOCK")
+                    with patch.object(school_verify.os, "open",
+                                      side_effect=AssertionError("unsafe open attempted")):
+                        with self.assertRaisesRegex(SchoolContractError, "nonblocking"):
+                            school_verify._read_regular_bounded(
+                                target / "events.json", MAX_MANIFEST_BYTES, directory_fd=fd,
+                            )
+            finally:
+                os.close(fd)
+
     def test_fifo_substituted_before_open_fails_without_blocking(self):
         with tempfile.TemporaryDirectory() as temp:
             target = self._create(temp)
