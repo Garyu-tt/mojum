@@ -1,8 +1,8 @@
 {
   "schema": "mojum.school-catalog/1",
-  "revision": "0.2.0-proposal",
+  "revision": "0.2.1-proposal",
   "status": "CATALOG_ONLY_NOT_EXECUTABLE",
-  "note": "Proposed architecture, sculpture, logistics, urban planning and engineering lessons. Catalog-only descriptions, not executable training or evidence of learned skills.",
+  "note": "Proposed architecture, sculpture, logistics, urban planning and engineering lessons, including a voluntary Factorio-based logistics case. Catalog-only descriptions, not executable training or evidence of learned skills.",
   "principles": [
     "opt_in_exploration",
     "no_forced_grades_or_punishment",
@@ -466,13 +466,15 @@
         "запасы и склады",
         "планирование работ",
         "цепочки поставок",
-        "устойчивость к сбоям"
+        "устойчивость к сбоям",
+        "поточное производство и узкие места"
       ],
       "artifact_types": [
         "маршрутная карта",
         "реестр запасов",
         "граф зависимостей",
-        "план снабжения"
+        "план снабжения",
+        "схема производственной линии"
       ],
       "cross_subject_ids": [
         "architecture",
@@ -545,6 +547,20 @@
           "transfer_to": [
             "urban_planning",
             "structural_engineering"
+          ]
+        },
+        {
+          "id": "logistics.factory_06",
+          "title": "Производственные цепочки и узкие места (кейс Factorio)",
+          "level": "advanced",
+          "goal": "Понимать поток материалов, пропускную способность, загрузку оборудования и устойчивость фабрики к сбоям",
+          "activity": "На примере Factorio или в оригинальном CPU-first виртуальном аналоге собрать цепочку добыча → переработка → производство → склад; использовать конвейеры, манипуляторы, затем сравнить железнодорожные и роботизированные доставки, найти узкое место и исправить его, повторить тест после дефицита ресурсов",
+          "evidence": "Схема потоков, скорость выпуска изделий за виртуальную минуту до и после улучшения, запас материалов, загрузка мощностей, описание узкого места и восстановления после сбоя",
+          "transfer_to": [
+            "structural_engineering",
+            "craft_making",
+            "architecture",
+            "urban_planning"
           ]
         }
       ]
