@@ -709,5 +709,43 @@ class FleetTests(unittest.TestCase):
             fleet.main()
         self.assertEqual(json.loads(output.getvalue()), report)
 
+
+class ModelJsonDepthTests(unittest.TestCase):
+    def test_oversized_nesting_isolated_without_live_network(self):
+        # 40 KiB is far below MAX_RESPONSE but far past the JSON decoder limit.
+        nested = b"[" * 20000 + b"0" + b"]" * 20000
+        self.assertLess(len(nested), fleet.MAX_RESPONSE)
+
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return nested[:limit]
+
+        class Opener:
+            def open(self, req, timeout):
+                return Response()
+
+        with patch.object(fleet, "build_opener", return_value=Opener()):
+            with self.assertRaisesRegex(fleet.FleetError, "JSON nesting exceeds"):
+                fleet._http(18182, "/slots")
+
+            def source(port, path):
+                if port == 18182:
+                    return fleet._http(port, path)
+                return fake_server(port, path)
+
+            # Bad /slots from one CPU backend must not abort the whole
+            # discovery or hide independently healthy GPU backends.
+            backends = fleet.discover(request=source)
+        self.assertEqual({b.port for b in backends}, {18180, 18181})
+
 if __name__ == "__main__":
     unittest.main()
