@@ -56,6 +56,24 @@ class CezarGhPublicReadTests(unittest.TestCase):
                 self.assertEqual(result_q, query)
                 self.assertNotIn("is:open", result_q)
 
+    def test_created_pr_with_explicit_closed_date_stays_historical(self):
+        from urllib.parse import parse_qs, urlsplit
+        for suffix in ("closed:>=2026-11-21", "is:open", "state:open"):
+            with self.subTest(suffix=suffix):
+                query = ("repo:Garyu-tt/mojum is:pr created:>=2026-11-20 "
+                         + suffix)
+                _, request, _ = adapter.parse([
+                    "api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+                self.assertEqual(
+                    parse_qs(urlsplit(request[0]).query)["q"], [query])
+
+    def test_non_intake_created_window_does_not_gain_open_filter(self):
+        from urllib.parse import parse_qs, urlsplit
+        query = "repo:Garyu-tt/mojum is:pr created:<=2026-11-20"
+        _, request, _ = adapter.parse([
+            "api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+        self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
+
     def test_conflicting_pr_states_fail_closed(self):
         query = ("repo:Garyu-tt/mojum is:pr is:closed "
                  "state:open created:>=2026-11-20")
