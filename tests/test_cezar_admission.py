@@ -115,6 +115,7 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
         pub = Path(self.tmp.name) / "public"
         pub.mkdir(mode=0o755)
+        pub.chmod(0o755)
         with self.assertRaises(m.AdmissionError):
             m.connect(pub / "admission.sqlite")
         link = Path(self.tmp.name) / "alias"
