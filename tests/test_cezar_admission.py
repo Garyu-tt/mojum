@@ -139,6 +139,43 @@ class AdmissionTests(unittest.TestCase):
             m.mark_submitted(self.db, row["id"], str(uuid.uuid4()))
         self.assertEqual(m.claim(self.db, self.ident())[0], False)
 
+    def test_blocking_rejected_model_result_is_terminal_and_idempotent(self):
+        ident = self.ident()
+        _, row = m.claim(self.db, ident)
+        run_id = str(uuid.uuid4())
+        submitted = m.mark_submitted(self.db, row["id"], run_id)
+        blocked = m.mark_blocked(self.db, row["id"], run_id)
+        self.assertEqual(submitted["status"], "submitted")
+        self.assertEqual(blocked["status"], "blocked")
+        self.assertEqual(m.mark_blocked(self.db, row["id"], run_id)["status"], "blocked")
+        retry, old = m.claim(self.db, ident)
+        self.assertFalse(retry)
+        self.assertEqual(old["status"], "blocked")
+
+    def test_block_wrong_run_id_or_unsubmitted_claim_refused(self):
+        _, row = m.claim(self.db, self.ident())
+        run_id = str(uuid.uuid4())
+        with self.assertRaises(m.AdmissionError):
+            m.mark_blocked(self.db, row["id"], run_id)
+        m.mark_submitted(self.db, row["id"], run_id)
+        with self.assertRaises(m.AdmissionError):
+            m.mark_blocked(self.db, row["id"], str(uuid.uuid4()))
+        with self.assertRaises(m.AdmissionError):
+            m.mark_blocked(self.db, str(uuid.uuid4()), run_id)
+        self.assertEqual(self.db.execute("SELECT status FROM admission").fetchone()[0], "submitted")
+
+    def test_cli_block_does_not_echo_prompts_or_auto_requeue(self):
+        _, row = m.claim(self.db, self.ident())
+        run_id = str(uuid.uuid4())
+        m.mark_submitted(self.db, row["id"], run_id)
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            rc = m.main(["--db", str(self.db_path), "block", "--admission-id", row["id"],
+                         "--run-id", run_id])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM admission").fetchone()[0], 1)
+
     def test_completed_claim_never_implicitly_requeues(self):
         _, row = m.claim(self.db, self.ident())
         self.db.execute("UPDATE admission SET status='finished' WHERE id=?", (row["id"],))
