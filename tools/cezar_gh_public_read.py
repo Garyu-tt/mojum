@@ -64,6 +64,11 @@ def parse(args):
         q = params.get("q", "")
         if not q.startswith("repo:" + REPO + " "):
             raise Refused("unapproved repository scope")
+        # A valid prefix is not enough: an added repo/org/user selector or
+        # boolean OR could broaden a GitHub search beyond the pinned repo.
+        extra = q[len("repo:" + REPO + " "):]
+        if re.search(r"(?i)\b(?:repo|org|user):|\bOR\b", extra):
+            raise Refused("search must remain in the pinned repository")
         if "is:issue" not in q and "is:pr" not in q:
             raise Refused("missing issue or PR qualifier")
         if len(q) > 400:
