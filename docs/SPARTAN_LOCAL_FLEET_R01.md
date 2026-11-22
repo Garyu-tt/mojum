@@ -44,7 +44,7 @@ From a *checked-out* Mojum repository on the same VM200 as the model
 servers, prepare a private work directory (700) and SQLite state:
 
 ~~~sh
-install -d -m 700 /srv/alt/spartans/proposals
+install -d -m 700 /srv/alt/spartans /srv/alt/spartans/proposals
 python3 tools/spartan_coordinator.py \
   --db /srv/alt/spartans/tasks.sqlite3 init --slots 300
 python3 tools/spartan_coordinator.py \
@@ -56,6 +56,13 @@ python3 -m tools.spartan_local_fleet \
   --db /srv/alt/spartans/tasks.sqlite3 \
   --output-dir /srv/alt/spartans/proposals --agents 300 --max-jobs 8
 ~~~
+
+The SQLite database contains task prompts and must be private, not just the proposal files.
+The coordinator creates new SQLite DB/WAL/SHM files with owner-only permissions,
+rejects unsafe pre-existing files or symlinks, and refuses a group/other-writable
+parent directory. Before reopening an older deployment with insecure state files,
+stop its workers and migrate the database into an audited private directory;
+do not blindly chmod arbitrary paths while workers are running.
 
 Example \`tasks.json\` entries must be **real independently testable
 Mojum work**, not 300 copies of one vague architecture idea:
