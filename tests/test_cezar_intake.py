@@ -131,6 +131,34 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(r["deferred"],1)
         self.assertEqual(r["dispatched"],0)
 
+    def test_capacity_taken_after_preflight_is_deferred_without_post(self):
+        """A competing poller can claim after pending() returns zero."""
+        previous_pending = m.pending
+
+        def preflight_race(db):
+            observed = previous_pending(db)
+            self.assertEqual(observed, 0)
+            competitor = m.discover(
+                opener=self.fake([self.issue(478)]))[0]["identity"]
+            fresh, _ = m.admission.claim(db, competitor)
+            self.assertTrue(fresh)
+            return observed
+
+        with patch.object(m, "pending", side_effect=preflight_race), \
+             patch.object(m.admission.urllib.request, "build_opener",
+                          side_effect=AssertionError("unexpected second POST")):
+            result = m.one_poll(
+                self.db, self.prompts, execute=True,
+                opener=self.fake([self.issue(479)]))
+
+        self.assertEqual(result["dispatched"], 0)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(result["duplicates"], 0)
+        self.assertEqual(list(self.prompts.iterdir()), [])
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission WHERE status IN ('claimed','submitted')"
+        ).fetchone()[0], 1)
+
     def test_blocked_previous_work_allows_distinct_revision(self):
         record=m.discover(opener=self.fake([self.issue(478)]))[0]["identity"]
         fresh,row=m.admission.claim(self.db,record)
