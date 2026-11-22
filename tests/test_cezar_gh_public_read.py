@@ -351,6 +351,66 @@ class CezarGhPublicReadTests(unittest.TestCase):
             self.assertEqual(stale.read_bytes(), b"prior aborted write")
             self.assertTrue((cache / (token + ".json")).is_file())
 
+    def test_deeply_nested_cached_json_refreshes_without_crashing(self):
+        # A private but corrupt bounded cache entry must not crash Cezar.
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        class FakeResponse:
+            status = 200
+            headers = {}
+            def geturl(self):
+                return url
+            def read(self, count):
+                return b'{"items":[]}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+        class FakeClient:
+            def open(self, req, timeout):
+                return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            token = hashlib.sha256(url.encode()).hexdigest()
+            entry = cache / (token + ".json")
+            entry.write_bytes(b"[" * 15000 + b"]" * 15000)
+            entry.chmod(0o600)
+            with patch.object(adapter, "CACHE_DIR", cache), patch.object(
+                    adapter.urllib.request, "build_opener",
+                    return_value=FakeClient()):
+                body, link = adapter.read(url, ttl=300)
+            self.assertEqual(body, b'{"items":[]}')
+            self.assertEqual(link, "")
+            self.assertIn('"body"', entry.read_text(encoding="utf-8"))
+
+    def test_deeply_nested_public_json_refuses_without_cache_write(self):
+        # Max-byte bounds are not enough to bound the JSON parser's depth.
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        class FakeResponse:
+            status = 200
+            headers = {}
+            def geturl(self):
+                return url
+            def read(self, count):
+                return b"[" * 15000 + b"]" * 15000
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+        class FakeClient:
+            def open(self, req, timeout):
+                return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            token = hashlib.sha256(url.encode()).hexdigest()
+            with patch.object(adapter, "CACHE_DIR", cache), patch.object(
+                    adapter.urllib.request, "build_opener",
+                    return_value=FakeClient()):
+                with self.assertRaisesRegex(adapter.Refused, "nesting"):
+                    adapter.read(url, ttl=300)
+            self.assertFalse((cache / (token + ".json")).exists())
+
     def test_refused_cli_does_not_echo_sensitive_arguments(self):
         secret = "token_please_never_log_this"
         errors = io.StringIO()

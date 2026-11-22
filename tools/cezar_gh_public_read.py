@@ -203,7 +203,8 @@ def read(url, ttl):
                         if len(raw) > MAX_BODY or len(link) > 3000:
                             raise ValueError("cached response exceeds bounds")
                         return raw, link
-                    except (ValueError, KeyError, TypeError, UnicodeError):
+                    except (ValueError, KeyError, TypeError, UnicodeError,
+                            RecursionError):
                         pass  # Stale/corrupt cache: fetch fresh public data.
 
         req = urllib.request.Request(url, headers={
@@ -219,7 +220,10 @@ def read(url, ttl):
             if len(raw) > MAX_BODY:
                 raise Refused("GitHub response too large")
             link = response.headers.get("Link", "")[:3000]
-        json.loads(raw)  # Reject non-JSON public responses.
+        try:
+            json.loads(raw)  # Reject non-JSON public responses.
+        except RecursionError as exc:
+            raise Refused("GitHub response JSON nesting exceeds limit") from exc
         data = {"body": raw.decode("utf-8"), "link": link}
         tempname = token + ".tmp." + str(os.getpid()) + "." + secrets.token_hex(12)
         tmp_fd = os.open(tempname, os.O_CREAT | os.O_EXCL | os.O_WRONLY |
