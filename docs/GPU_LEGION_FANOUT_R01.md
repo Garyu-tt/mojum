@@ -96,6 +96,32 @@ history, and does not give models shell or tool privileges.
 For durable agent memory, attach the agent-specific Noosphere context
 through a separately permissioned application.
 
+## Partial result preservation and retry boundary
+
+When a model request raises an exception but other requests in the same
+batch succeed, execution records a sanitized per-request failure containing
+the task, logical agent, clone, physical port and exception **class** only.
+No exception message, generated prompt or failed response content is logged.
+Completed peer proposals are still committed to the exclusive-create 0600
+JSON output; the report distinguishes `inference_requests_completed`,
+`inference_requests_failed`, and `partial_batch`. The CLI returns exit
+status **2** for a partially failed batch even though the private report is
+available for recovery and independent review.
+
+A failure receipt does **not** prove zero upstream token spend: a server may
+have generated tokens before the timeout. There is no automatic retry and no
+claim of exactly-once model execution. A caller must inspect the private report,
+reconcile the uncertain request cost and explicitly resubmit only selected
+tasks. An infrastructure failure outside individual calls can still abort
+the batch and delete the incomplete reservation, so this is not a crash-durable
+inference journal or an executor sandbox.
+
+Offline CPU tests:
+
+```sh
+PYTHONPATH=. python3 -m unittest discover -s tests -p 'test_gpu_legion_fanout.py' -v
+```
+
 ## Required engineering before 8+ simultaneous contexts
 
 1. Health watchdog and rolling restarts must negotiate a **bounded
