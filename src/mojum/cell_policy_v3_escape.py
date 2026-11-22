@@ -170,6 +170,7 @@ class CellExplorerV3Escape:
                                       or state["consecutive_blocked_probes"]):
             raise CellV3EscapeError("unobserved escape counters")
         observed_live = 0
+        observations_by_tick = {}
         for key, actions in state["records"].items():
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
@@ -198,6 +199,9 @@ class CellExplorerV3Escape:
                 raise CellV3EscapeError(
                     "more escape cell observations than elapsed ticks"
                 )
+            if last_seen in observations_by_tick:
+                raise CellV3EscapeError("multiple escape cells observed on one tick")
+            observations_by_tick[last_seen] = cell_observations
             observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV3EscapeError("escape lost or double-counted observations")
@@ -206,6 +210,29 @@ class CellExplorerV3Escape:
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
         _check_streak_counters(state)
+
+        # Each observation belongs to exactly one cell and tick. A live
+        # snapshot must retain the latest observed cell, and an eviction can
+        # only happen after the bounded table has first reached capacity.
+        if state["updates"] and not state["records"]:
+            raise CellV3EscapeError("escape updates without a retained cell")
+        if state["updates"] and max(observations_by_tick) != state["last_tick"]:
+            raise CellV3EscapeError("latest escape cell observation does not match tick")
+        if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
+            raise CellV3EscapeError("impossible escape eviction history")
+        if state["evictions"] and len(state["records"]) != MAX_CELLS:
+            raise CellV3EscapeError("escape retention shrank after eviction")
+
+        # Evicted LRU observations predate the last observation of every
+        # retained cell. Their cumulative count must fit each tick prefix;
+        # per-cell deadlines alone do not guarantee a possible history.
+        observed_prefix = state["forgotten_observations"]
+        for tick, count in sorted(observations_by_tick.items()):
+            observed_prefix += count
+            if observed_prefix > tick + 1:
+                raise CellV3EscapeError(
+                    "combined escape cell observations exceed elapsed ticks"
+                )
 
         model = cls()
         model.last_tick = state["last_tick"]
