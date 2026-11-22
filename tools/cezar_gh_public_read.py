@@ -62,10 +62,20 @@ def parse(args):
 
     if path == "/search/issues":
         q = params.get("q", "")
-        if not q.startswith("repo:" + REPO + " "):
+        # A prefix alone permits "repo:Mojum is:pr OR repo:other is:pr".
+        # Allow only a conjunctive, bounded subset of GitHub search syntax.
+        terms = q.split()
+        if not terms or terms[0] != "repo:" + REPO:
             raise Refused("unapproved repository scope")
-        if "is:issue" not in q and "is:pr" not in q:
-            raise Refused("missing issue or PR qualifier")
+        allowed = re.compile(
+            r"(?:is:(?:issue|pr|open|closed)|state:(?:open|closed)|"
+            r"(?:created|updated):(?:[<>]=?)?[0-9]{4}-[0-9]{2}-[0-9]{2}|"
+            r"-?label:[A-Za-z0-9_.-]+)\Z"
+        )
+        if sum(term in ("is:issue", "is:pr") for term in terms[1:]) != 1:
+            raise Refused("exactly one issue or PR qualifier required")
+        if any(allowed.fullmatch(term) is None for term in terms[1:]):
+            raise Refused("unsupported GitHub search operator or scope")
         if len(q) > 400:
             raise Refused("query too large")
         sort = params.get("sort", "updated")
