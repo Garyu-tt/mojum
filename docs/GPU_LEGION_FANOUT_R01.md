@@ -89,6 +89,19 @@ python3 tools/gpu_legion_fanout.py --tasks tasks-300.json \
   --max-jobs 300 --execute --output /srv/alt/gpu-legion-stage/agents-300.json
 ```
 
+## Private output directory contract
+
+On POSIX, the output file's parent directory must be owned by the invoking
+account and not writable by group or other users. Ancestors must be owned
+by root or the invoking account, and may be writable by others only when
+protected by a sticky bit (for example `/tmp`). Symlink ancestors and
+explicit `..` traversal are rejected before model inference starts.
+
+This complements the `O_EXCL` / `0600` output reservation. It does not
+protect against same-UID actors, root, or concurrent permission changes;
+run it in an operator-controlled directory. Existing output files are never
+overwritten.
+
 Agent outputs may contain sensitive task content, so they are not
 printed to stdout in execution mode. This prototype writes local
 output with exclusive-create semantics, retains no persistent chat
