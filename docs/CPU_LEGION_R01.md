@@ -16,7 +16,12 @@ execute candidate tests in its own credential scope, push commits, approve PRs
 or merge proposals.
 
 Each worker atomically leases one task from the Spartan coordinator, reads up to
-five explicitly assigned tracked Python files, requests a small unified diff,
+five explicitly assigned tracked Python files through descriptor-pinned POSIX
+regular-file reads with no-follow directory traversal and a 16,000-byte
+per-file cap enforced on the bytes actually read. Symlink/FIFO substitutions
+and file growth after a path preflight fail closed; platforms without POSIX
+`dir_fd` and `O_NOFOLLOW` support cannot generate a model request. The worker
+then requests a small unified diff,
 checks file scope and `git apply --check`, and writes a private 0600 patch
 artifact. A **separate isolated runner** must verify that the submitted patch
 matches its recorded digest, execute the relevant tests without model
