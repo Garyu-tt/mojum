@@ -214,7 +214,7 @@ class FanoutContract(unittest.TestCase):
             tasks_path.write_text(json.dumps(tasks(1)),encoding="utf-8")
             output=shared/"should-not-exist.json"
             with patch.object(f,"discover_backend",
-                              side_effect=lambda port:f.Backend(port,1,1,2048)), \\
+                              side_effect=lambda port:f.Backend(port,1,1,2048)), \
                  patch.object(f,"execute",side_effect=AssertionError("inference started")) as execute:
                 with self.assertRaisesRegex(f.FanoutError,"owner-controlled"):
                     f.main(["--tasks",str(tasks_path),"--execute","--output",str(output)])
