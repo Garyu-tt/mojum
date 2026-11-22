@@ -61,6 +61,23 @@ class PatchGuardTests(unittest.TestCase):
         with self.assertRaises(guard.PatchGuardError):
             guard.validate_patch(changed, [PATH])
 
+    def test_overlapping_or_reordered_hunks_are_rejected(self):
+        first_hunk = "@@ -1,2 +1,2 @@\n one\n-old\n+new\n"
+        for later_hunk in (
+            first_hunk,  # Duplicate source/output lines.
+            "@@ -3 +1 @@\n-old\n+new\n",  # New range moves backwards.
+            "@@ -2 +4 @@\n-old\n+new\n",  # Old range overlaps.
+        ):
+            with self.subTest(later_hunk=later_hunk):
+                with self.assertRaisesRegex(
+                        guard.PatchGuardError, "overlapping or out-of-order"):
+                    guard.validate_patch(EDIT + later_hunk, [PATH])
+
+    def test_distinct_ordered_hunks_still_accepted(self):
+        next_hunk = "@@ -4 +4 @@\n-old\n+new\n"
+        result = guard.validate_patch(EDIT + next_hunk, [PATH])
+        self.assertEqual(result["hunks"], 2)
+
     def test_stale_hunk_counts_are_rejected(self):
         for wrong in ("@@ -1,2 +1,3 @@", "@@ -1,1 +1,2 @@", "@@ -0,2 +1,2 @@"):
             with self.subTest(wrong=wrong), self.assertRaises(guard.PatchGuardError):
