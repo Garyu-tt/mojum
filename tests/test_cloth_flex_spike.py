@@ -23,11 +23,15 @@ make_mjcf = _module.make_mjcf
 
 
 class ClothFlexSpikeTests(unittest.TestCase):
-    def test_pinned_edge_follows_mocap_rig_anchor(self):
+    def test_pinned_edge_follows_servo_rig_anchor(self):
         root = ET.fromstring(make_mjcf())
         anchor = root.find("./worldbody/body[@name='cloth_anchor']")
         self.assertIsNotNone(anchor)
-        self.assertEqual(anchor.get("mocap"), "true")
+        self.assertIsNone(anchor.get("mocap"))
+        self.assertEqual(anchor.find("joint").get("name"), "anchor_slide_x")
+        servo = root.find("./actuator/position")
+        self.assertIsNotNone(servo)
+        self.assertEqual(servo.get("joint"), "anchor_slide_x")
         flex = anchor.find("flexcomp")
         self.assertEqual(flex.get("dim"), "2")
         self.assertEqual(flex.get("count"), f"{GRID[0]} {GRID[1]} 1")
