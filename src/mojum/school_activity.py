@@ -104,6 +104,55 @@ def _preflight_catalog_fragments(document):
             raise SchoolError("invalid catalog JSON encoding")
 
 
+def _catalog_metadata_children(mapping):
+    """Walk mapping keys and values without materializing a giant work queue."""
+    for key, value in mapping.items():
+        yield key
+        yield value
+
+
+def _preflight_catalog_strings(document):
+    """Reject oversized nested strings before JSONEncoder allocates a fragment.
+
+    iterencode() yields a complete string token at once, not bounded chunks.
+    Inspect caller-owned values in small UTF-8/JSON-escaped slices first.
+    Bound traversal, handle shared subobjects, and fail closed on cycles.
+    """
+    budget = MAX_CATALOG_BYTES
+    count = 0
+    frames = [(iter((document,)), None)]
+    active = set()
+    while frames:
+        iterator, identity = frames[-1]
+        try:
+            value = next(iterator)
+        except StopIteration:
+            frames.pop()
+            if identity is not None:
+                active.remove(identity)
+            continue
+        count += 1
+        if count > MAX_CATALOG_BYTES:
+            raise SchoolError("catalog byte budget exceeded")
+        if type(value) is str:
+            if len(value) > budget:
+                raise SchoolError("catalog byte budget exceeded")
+            for start in range(0, len(value), 4096):
+                # Slice before escaping: no attacker-sized JSON string fragment.
+                escaped = json.dumps(value[start:start + 4096], ensure_ascii=False)
+                budget -= len(escaped[1:-1].encode("utf-8", errors="strict"))
+                if budget < 0:
+                    raise SchoolError("catalog byte budget exceeded")
+        elif type(value) in (dict, list, tuple):
+            obj_id = id(value)
+            if obj_id in active or len(frames) > 256:
+                raise SchoolError("invalid catalog JSON encoding")
+            active.add(obj_id)
+            children = (_catalog_metadata_children(value) if type(value) is dict
+                        else iter(value))
+            frames.append((iter(children), obj_id))
+
+
 def _validate_catalog_wire_budget(document):
     """Enforce the same bounded UTF-8 JSON contract on in-memory catalogs.
 
@@ -112,6 +161,7 @@ def _validate_catalog_wire_budget(document):
     """
     try:
         _preflight_catalog_fragments(document)
+        _preflight_catalog_strings(document)
         encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True,
                                    separators=(",", ":"), allow_nan=False)
         size = 0
