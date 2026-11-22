@@ -157,7 +157,8 @@
     const qa=d.qa_fleet||{};
     if(qa.available===true && Array.isArray(qa.workers)){
       panel.appendChild(el("div","CPU QA: 17 локальных слотов","fleet-title fleet-sub"));
-      const active=(qa.snapshot_fresh===true && Number.isSafeInteger(qa.active_requests))?
+      const known=qa.snapshot_fresh===true || qa.cycle==="completed" || qa.cycle==="idle";
+      const active=(known && Number.isSafeInteger(qa.active_requests))?
         String(qa.active_requests):"неизвестно (устарело)";
       row("Модельные запросы выполняются",active,qa.snapshot_fresh===true?"fleet-good":"fleet-warn");
       row("Задания в текущем цикле",typeof qa.assigned==="number"?qa.assigned:"?");
