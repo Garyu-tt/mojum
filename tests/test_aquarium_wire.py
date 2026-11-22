@@ -9,14 +9,22 @@ import sqlite3
 import tempfile
 import unittest
 
-from mojum.aquarium import Aquarium, AquariumError
+from mojum.aquarium import Aquarium, AquariumError, V2B_MODE, V3_ESCAPE_MODE, V3_MODE
 from mojum.aquarium_wire import inspect_journal
 from mojum.noosphere import LocalNoosphere, NoosphereError
+from mojum.sensory_play import Toy, ToyScene
+from mojum.world_room import Room
 
 
 DATA = files("mojum").joinpath("data")
 SEED = json.loads(DATA.joinpath("genesis_seed.json").read_text(encoding="utf-8"))
 GRAPH = json.loads(DATA.joinpath("first_loop.json").read_text(encoding="utf-8"))
+SENSORY_ROOM = Room(0.32, 0.32)
+SENSORY_SCENE = ToyScene(
+    width=0.32,
+    height=0.32,
+    toys=(Toy("spectator.synthetic", 0.16, 0.16, 0.15, (42, 90, 174), 0.4),),
+)
 
 
 class AquariumWireTests(unittest.TestCase):
@@ -27,6 +35,178 @@ class AquariumWireTests(unittest.TestCase):
 
     def aquarium(self, motor_mode="scripted"):
         return Aquarium(self.db, SEED, GRAPH, motor_mode=motor_mode)
+
+    def sensory_aquarium(self):
+        return Aquarium(
+            self.db,
+            SEED,
+            GRAPH,
+            room=SENSORY_ROOM,
+            start=(0.16, 0.16),
+            neural_mode="disabled",
+            motor_mode="developmental_fixture",
+            sensory_mode="toy_probe_v2",
+            sensory_scene=SENSORY_SCENE,
+        )
+
+    def committed_sensory_events(self, ticks=3):
+        with self.sensory_aquarium() as aquarium:
+            for _ in range(ticks):
+                aquarium.step()
+            return [
+                item["event"]
+                for item in aquarium.store.dataset(
+                    include_nonpublic=True)["projection"]["items"]
+            ]
+
+    def committed_v4_sensory_events(self, ticks=3):
+        with Aquarium(
+            self.db.with_name("v4-sensory-source.sqlite3"),
+            SEED,
+            GRAPH,
+            neural_mode="disabled",
+            motor_mode="local_cell_v4",
+            sensory_mode="toy_probe_v2",
+        ) as aquarium:
+            for _ in range(ticks):
+                aquarium.step()
+            return [
+                item["event"]
+                for item in aquarium.store.dataset(
+                    include_nonpublic=True)["projection"]["items"]
+            ]
+
+    def rewrite_journal(self, events, name):
+        """Re-append events into a fresh chain so only the payload is forged."""
+        path = self.db.with_name(name)
+        with LocalNoosphere(path, events[0]["agent_id"]) as store:
+            head = store.head()
+            for event in events:
+                head = store.append(event, expected_head=head)
+        return path, head
+
+    def assert_forged_frame_rejected(self, mutate, pattern, name):
+        events = json.loads(json.dumps(self.committed_sensory_events()))
+        frames = [event for event in events if event["topic"] == "aquarium.frame"]
+        self.assertGreaterEqual(len(frames), 3)
+        mutate(frames)
+        path, head = self.rewrite_journal(events, name)
+        with self.assertRaisesRegex(NoosphereError, pattern):
+            inspect_journal(path, external_expected_head=head)
+
+    def test_inspector_rejects_forged_sensory_frame_ticks(self):
+        def observation_tick(frames):
+            frames[0]["payload"]["toy_contact"]["observation"]["tick"] = 99
+
+        def probe_tick(frames):
+            frames[0]["payload"]["toy_contact"]["probe_intent"]["tick"] = 99
+
+        def measurement_tick(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["measured_contact"])
+            contact["measured_contact"]["source_tick"] = 99
+
+        def stale_prediction(frames):
+            frames[2]["payload"]["toy_contact"]["prediction_before"]["model_updates"] = 0
+
+        cases = (
+            (observation_tick, "observation disagrees with the frame tick",
+             "forged-observation.sqlite3"),
+            (probe_tick, "probe intent disagrees with the frame",
+             "forged-probe.sqlite3"),
+            (measurement_tick, "measurement disagrees with the frame tick",
+             "forged-measurement.sqlite3"),
+            (stale_prediction, "sensory prediction disagrees with the frame",
+             "forged-prediction.sqlite3"),
+        )
+        for mutate, pattern, name in cases:
+            with self.subTest(case=name):
+                self.assert_forged_frame_rejected(mutate, pattern, name)
+
+    def test_inspector_rejects_inconsistent_measurement_and_learning_presence(self):
+        def drop_learning(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["learning"])
+            contact["learning"] = None
+
+        def unrequested_measurement(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["measured_contact"])
+            contact["probe_intent"]["requested"] = False
+            contact["probe_intent"]["reason"] = "no_probe_needed"
+
+        self.assert_forged_frame_rejected(
+            drop_learning,
+            "measurement and learning evidence disagree",
+            "forged-learning-drop.sqlite3",
+        )
+        self.assert_forged_frame_rejected(
+            unrequested_measurement,
+            "probe request and measurement disagree",
+            "forged-learning-extra.sqlite3",
+        )
+
+    def test_inspector_replays_the_complete_sensory_state_transition(self):
+        def state_digest(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            contact["association_state_sha256"] = "0" * 64
+
+        def prediction_cue(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            contact["prediction_before"]["cue"] = "0:0:0"
+
+        def learning_status(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["learning"])
+            contact["learning"]["status"] = "forged_status"
+
+        def impossible_deflection(frames):
+            contact = frames[0]["payload"]["toy_contact"]
+            self.assertIsNotNone(contact["measured_contact"])
+            contact["measured_contact"]["measured_deflection"] = 2.0
+
+        cases = (
+            (state_digest, "association state digest disagrees with replay",
+             "forged-association-state.sqlite3"),
+            (prediction_cue, "prediction disagrees with the frame",
+             "forged-prediction-cue.sqlite3"),
+            (learning_status, "learning evidence is not replayable",
+             "forged-learning-status.sqlite3"),
+            (impossible_deflection, "measurement is not replayable",
+             "forged-measured-deflection.sqlite3"),
+        )
+        for mutate, pattern, name in cases:
+            with self.subTest(case=name):
+                self.assert_forged_frame_rejected(mutate, pattern, name)
+
+    def test_inspector_rejects_sensory_revision_detached_from_world(self):
+        cases = (
+            (self.committed_sensory_events, 1,
+             "forged-sensory-world-continuity.sqlite3"),
+            (self.committed_v4_sensory_events, 0,
+             "forged-v4-sensory-motor-revision.sqlite3"),
+        )
+        for make_events, frame_index, name in cases:
+            with self.subTest(case=name):
+                events = json.loads(json.dumps(make_events()))
+                frames = [
+                    event for event in events
+                    if event["topic"] == "aquarium.frame"
+                ]
+                contact = frames[frame_index]["payload"]["toy_contact"]
+                contact["observation"]["world_revision"] = "0" * 64
+                contact["probe_intent"]["source_revision"] = "0" * 64
+                path, head = self.rewrite_journal(events, name)
+                with self.assertRaisesRegex(
+                        NoosphereError, "causal world revision"):
+                    inspect_journal(path, external_expected_head=head)
+
+    def test_genuine_versioned_sensory_journal_still_inspects(self):
+        events = self.committed_sensory_events()
+        path, head = self.rewrite_journal(events, "genuine-sensory.sqlite3")
+        info = inspect_journal(path, external_expected_head=head)
+        self.assertEqual(info["format"], "motor_play_v1+toy_probe_v2")
+        self.assertEqual(info["frames"], 3)
 
     def make_rollback_journal(self):
         with closing(sqlite3.connect(self.db)) as connection:
@@ -122,6 +302,29 @@ class AquariumWireTests(unittest.TestCase):
             inspect_journal(foreign, external_expected_head=head)
         self.assertEqual(foreign.read_bytes(), before)
 
+    def test_inspector_refuses_unwritten_sensory_v2_combinations(self):
+        sensory_path = self.db.with_name("sensory-v2.sqlite3")
+        with Aquarium(sensory_path, SEED, GRAPH, motor_mode="developmental_fixture",
+                      sensory_mode="toy_probe_v2") as aquarium:
+            sensory_fields = {
+                key: value for key, value in aquarium.manifest.items()
+                if key.startswith("sensory_") or key in {"contact_bridge_schema", "occlusion_schema"}
+            }
+        for motor_mode in ("scripted", V2B_MODE, V3_MODE, V3_ESCAPE_MODE):
+            with self.subTest(motor_mode=motor_mode):
+                source = self.db.with_name(f"{motor_mode}.sqlite3")
+                with Aquarium(source, SEED, GRAPH, motor_mode=motor_mode) as aquarium:
+                    event = aquarium.store.dataset(include_nonpublic=True)["projection"]["items"][0]["event"]
+                event["payload"].update(sensory_fields)
+                mixed = self.db.with_name(f"{motor_mode}-mixed.sqlite3")
+                with LocalNoosphere(mixed, event["agent_id"]) as store:
+                    head = store.append(event, expected_head=store.head())
+                    self.assertEqual(store.verify_chain()["head"], head)
+                before = mixed.read_bytes()
+                with self.assertRaisesRegex(NoosphereError, "toy_probe_v2 is not allowed"):
+                    inspect_journal(mixed, external_expected_head=head)
+                self.assertEqual(mixed.read_bytes(), before)
+
     def test_inspector_refuses_unpinned_contact_with_valid_hash_chain(self):
         # The independent inspector must not certify sensory observations
         # that the committed bootstrap never selected, even when the chain
@@ -150,6 +353,35 @@ class AquariumWireTests(unittest.TestCase):
         with self.assertRaisesRegex(
             NoosphereError, "unexpected sensory frame"
         ):
+            inspect_journal(foreign, external_expected_head=head)
+        self.assertEqual(foreign.read_bytes(), before)
+
+    def test_inspector_refuses_float_selector_that_equals_an_integer(self):
+        # ``3.0 == 3`` in Python, but a JSON float is not the pinned wire
+        # integer. The chain is re-signed correctly here; only the scalar
+        # type differs, and that alone must not certify another policy.
+        with Aquarium(self.db, SEED, GRAPH, motor_mode="local_cell_v3_escape",
+                      neural_mode="disabled") as aquarium:
+            aquarium.step()
+            events = [
+                item["event"] for item in aquarium.store.dataset(
+                    include_nonpublic=True
+                )["projection"]["items"]
+            ]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(inspect_journal(self.db)["format"], "local_cell_v3_escape")
+        bootstrap, frame = json.loads(json.dumps(events))
+        pinned = bootstrap["payload"]["max_consecutive_rests"]
+        self.assertIs(type(pinned), int)
+        bootstrap["payload"]["max_consecutive_rests"] = float(pinned)
+        foreign = self.db.with_name("float-selector.sqlite3")
+        with LocalNoosphere(foreign, bootstrap["agent_id"]) as store:
+            head = store.head()
+            for event in (bootstrap, frame):
+                head = store.append(event, expected_head=head)
+            self.assertEqual(store.verify_chain()["head"], head)
+        before = foreign.read_bytes()
+        with self.assertRaisesRegex(NoosphereError, "selectors"):
             inspect_journal(foreign, external_expected_head=head)
         self.assertEqual(foreign.read_bytes(), before)
 

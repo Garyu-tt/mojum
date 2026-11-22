@@ -214,6 +214,16 @@ class GateVerdictTests(unittest.TestCase):
                 required=REQUIRED,
             )
 
+    def test_expected_head_with_trailing_newline_raises(self):
+        for value in ["a" * 40 + "\n", "abcdef1\n", "abcdef1 ", "\nabcdef1"]:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    evaluate(
+                        facts(self.green()),
+                        expected_head_sha=value,
+                        required=REQUIRED,
+                    )
+
     def test_pending_check_defers(self):
         checks = self.green() + [run(status="IN_PROGRESS", conclusion=None, workflow="Mesh contract")]
         result = evaluate_checks(checks)
@@ -248,6 +258,18 @@ class GateVerdictTests(unittest.TestCase):
         result = evaluate_checks(checks)
         self.assertEqual(result.verdict, "reject")
         self.assertEqual(result.code, "CHECK_FAILED")
+
+    def test_negative_conclusion_rejects_even_with_inconsistent_status(self):
+        # A partially refreshed CI rollup can contradict itself: an explicit
+        # failure must not become a merely deferred pending check.
+        for status in ("IN_PROGRESS", "QUEUED", "WAITING", "bogus"):
+            with self.subTest(status=status):
+                checks = self.green() + [
+                    run(status=status, conclusion="FAILURE", workflow="Mesh contract"),
+                ]
+                result = evaluate_checks(checks)
+                self.assertEqual(result.verdict, "reject")
+                self.assertEqual(result.code, "CHECK_FAILED")
 
     def test_skipped_check_requires_a_waiver(self):
         checks = self.green()[:2] + [
