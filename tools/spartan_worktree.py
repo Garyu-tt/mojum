@@ -20,6 +20,10 @@ class IsolationError(RuntimeError):
 def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
     if not TASK.fullmatch(task) or not SHA.fullmatch(base_sha):
         raise IsolationError("invalid task or base SHA")
+    # Reject parent traversal before checking ancestors: symlink/.. can
+    # resolve differently from lexical Path.parents and bypass the guard.
+    if ".." in Path(root).parts:
+        raise IsolationError("parent traversal in worktree root refused")
     raw_root = Path(root).absolute()
     if any(part.is_symlink() for part in (raw_root, *raw_root.parents)):
         raise IsolationError("symlink in worktree root path refused")
