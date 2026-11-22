@@ -74,9 +74,22 @@ def _vertex_penetrations(data: object) -> tuple[float | None, float | None]:
     floor = 0.0
     sphere = 0.0
     for x, y, z in points:
-        floor = max(floor, FLOOR_Z + VERTEX_RADIUS - float(z))
-        distance = math.sqrt(sum((float(a) - b)**2 for a, b in
-                                 zip((x, y, z), BALL_CENTER)))
+        try:
+            coords = (float(x), float(y), float(z))
+        except (OverflowError, ValueError) as exc:
+            raise RuntimeError("nonfinite flex vertex coordinate") from exc
+        # NaN silently disappears from max(0.0, nan), giving a false zero
+        # penetration and a green-looking benchmark after solver failure.
+        if not all(math.isfinite(value) for value in coords):
+            raise RuntimeError("nonfinite flex vertex coordinate")
+        floor = max(floor, FLOOR_Z + VERTEX_RADIUS - coords[2])
+        try:
+            distance = math.sqrt(sum((value - center) ** 2 for value, center in
+                                     zip(coords, BALL_CENTER)))
+        except OverflowError as exc:
+            raise RuntimeError("nonfinite flex vertex coordinate") from exc
+        if not math.isfinite(distance):
+            raise RuntimeError("nonfinite flex vertex coordinate")
         sphere = max(sphere, BALL_RADIUS + VERTEX_RADIUS - distance)
     return floor, sphere
 
