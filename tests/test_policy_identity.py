@@ -160,6 +160,51 @@ class TwoDraftsTests(unittest.TestCase):
             )))
 
 
+class SelectorTypeStrictnessTests(unittest.TestCase):
+    """Selectors pin an exact wire scalar, not something that merely compares equal.
+
+    Python treats ``3.0 == 3`` and ``True == 1``, so a stored manifest could
+    otherwise borrow another policy's identity by spelling its integer
+    selector as a JSON float or boolean.  That is the same class of silent
+    reinterpretation #116 exists to block, so resolution must compare types.
+    """
+
+    def _escape_selectors(self, value):
+        return {
+            "exploration_mode": "goal_free",
+            "developmental_schema": cell_policy_v3_escape.SCHEMA,
+            "developmental_policy": "local_cell_v3_escape",
+            "max_consecutive_rests": value,
+        }
+
+    def test_integer_selector_matches_only_the_exact_integer(self):
+        pinned = cell_policy_v3_escape.MAX_CONSECUTIVE_RESTS
+        exact = by_selector(self._escape_selectors(pinned))
+        self.assertEqual(exact.inspection_id, "local_cell_v3_escape")
+        self.assertEqual(exact.selector_dict["max_consecutive_rests"], pinned)
+        # ``float(pinned) == pinned`` and ``str(pinned) != pinned``: a
+        # value-equality check accepts the first and rejects the second.
+        for impostor in (float(pinned), str(pinned), None, [pinned], {pinned: 1}):
+            with self.subTest(value=impostor):
+                with self.assertRaises(PolicyIdentityError):
+                    by_selector(self._escape_selectors(impostor))
+
+    def test_boolean_cannot_impersonate_one(self):
+        # ``True == 1`` in Python; a JSON boolean is not a wire integer.
+        self.assertEqual(True, 1)
+        self.assertEqual(False, 0)
+        for value in (True, False):
+            with self.subTest(value=value):
+                with self.assertRaises(PolicyIdentityError):
+                    by_selector({"epoch_ticks": value})
+
+    def test_non_string_selector_keys_fail_closed(self):
+        for selectors in ({1: "goal_free"}, {"": "goal_free"}, {"k": "v"}):
+            with self.subTest(selectors=selectors):
+                with self.assertRaises(PolicyIdentityError):
+                    by_selector(selectors)
+
+
 class ListPoliciesCliTests(unittest.TestCase):
     def _run(self, *args):
         return subprocess.run(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 import sys
+from pathlib import Path
 import tracemalloc
 import unittest
 import warnings
@@ -33,9 +34,16 @@ def _leak_diagnostic(warning: warnings.WarningMessage) -> str:
 
 
 def main() -> int:
+    # Direct script execution puts tests/ on sys.path, not the repository root.
+    # Test modules importing tools.* must resolve the checked-out local tools.
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     with warnings.catch_warnings(record=True) as emitted:
         warnings.simplefilter("always", ResourceWarning)
-        suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
+        # Match ``python -m unittest discover -s tests`` exactly, including
+        # any future test module named ``testX.py`` without an underscore.
+        suite = unittest.defaultTestLoader.discover("tests", pattern="test*.py")
         outcome = unittest.TextTestRunner(verbosity=1, stream=sys.stdout).run(suite)
         # sqlite3.Connection warnings can appear during delayed GC, long after
         # the test that allocated the leaked handle has already finished.
