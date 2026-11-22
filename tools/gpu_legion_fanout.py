@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
@@ -264,20 +265,35 @@ def execute(work, backends, *, caller=infer):
     return sorted(output,key=lambda x:(x["task_id"],x["clone"]))
 
 
-def exclusive_json_output(path, data):
+@contextmanager
+def reserve_private_output(path):
+    """Atomically claim the 0600 output before any paid/model inference.
+
+    A pre-execution Path.exists() check is racy. O_EXCL is the actual
+    reservation; a failing inference run cannot leave an empty artifact.
+    """
     path=Path(path)
     if not path.parent.is_dir():
         raise FanoutError("output directory does not exist")
-    encoded=(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2)+"\n").encode()
     flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
     if hasattr(os,"O_NOFOLLOW"):flags|=os.O_NOFOLLOW
     fd=os.open(path,flags,0o600)
+    committed=False
     try:
         with os.fdopen(fd,"wb") as stream:
-            stream.write(encoded)
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
+            yield stream
+            stream.flush()
+            os.fsync(stream.fileno())
+        committed=True
+    finally:
+        if not committed:
+            path.unlink(missing_ok=True)
+
+
+def exclusive_json_output(path, data):
+    encoded=(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2)+"\n").encode()
+    with reserve_private_output(path) as stream:
+        stream.write(encoded)
 
 
 def main(argv=None):
@@ -316,11 +332,15 @@ def main(argv=None):
              "logical_workers_are_not_distinct_model_processes":True,
              "model_calls_performed":0},sort_keys=True))
         return 0
-    results=execute(work,backends)
-    exclusive_json_output(args.output,{"schema":"mojum.gpu-legion-fanout.v1",
-          "physical_models":len(backends),
-          "observed_total_slots":sum(b.total_slots for b in backends),
-          "inference_requests_completed":len(results),"results":results})
+    # Refuse an occupied/unwritable artifact path BEFORE launching model calls.
+    with reserve_private_output(args.output) as stream:
+        results=execute(work,backends)
+        report={"schema":"mojum.gpu-legion-fanout.v1",
+                "physical_models":len(backends),
+                "observed_total_slots":sum(b.total_slots for b in backends),
+                "inference_requests_completed":len(results),"results":results}
+        stream.write((json.dumps(report,ensure_ascii=False,
+                                 sort_keys=True,indent=2)+"\n").encode())
     print(json.dumps({"completed":len(results),"saved_to":str(args.output),
                       "content_printed":False},sort_keys=True))
     return 0
