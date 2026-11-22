@@ -14,6 +14,18 @@ from mojum.merge_gate import MAX_INPUT_BYTES, SnapshotError, _load_snapshot, mai
 
 
 class SnapshotFileInputTests(unittest.TestCase):
+    def test_overdeep_snapshot_json_fails_closed_for_file_and_stdin(self):
+        # Under the 4 MiB byte bound, but beyond CPython JSON parser depth.
+        payload = b"[" * 20_000 + b"0" + b"]" * 20_000
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "deep.json"
+            path.write_bytes(payload)
+            with self.assertRaisesRegex(SnapshotError, "nesting exceeds"):
+                _load_snapshot(str(path))
+        with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8")):
+            with self.assertRaisesRegex(SnapshotError, "nesting exceeds"):
+                _load_snapshot("-")
+
     def test_regular_json_is_read_and_path_read_text_is_not_used(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "pr.json"
