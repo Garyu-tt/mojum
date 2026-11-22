@@ -1,0 +1,13 @@
+[Unit]
+Description=Poll opt-in Mojum Cezar GitHub work through one deduplicating admission gate
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+AccuracySec=1min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=cezar-mojum-admission-r01.service
+
+[Install]
+WantedBy=timers.target
