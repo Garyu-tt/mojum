@@ -111,6 +111,74 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(sum(a for a, _ in ids), 1)
         self.assertEqual(len({rid for _, rid in ids}), 1)
 
+    def test_dispatch_distinct_sources_admits_only_one_unresolved(self):
+        # Different revisions are valid claim identities, but dispatch is a
+        # global single-slot lease until the earlier run is reconciled.
+        p = self.private_prompt()
+        calls = []
+        class Response:
+            status = 201
+            def __init__(self, url): self.url = url
+            def geturl(self): return self.url
+            def read(self, n): return json.dumps({"id": str(uuid.uuid4())}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+        class Client:
+            def open(self, req, timeout=8):
+                calls.append(req.full_url)
+                return Response(req.full_url)
+        with patch.object(m.urllib.request, "build_opener", return_value=Client()):
+            accepted = m.dispatch(self.db, self.ident(), p)
+            with self.assertRaisesRegex(m.AdmissionError, "another unresolved"):
+                m.dispatch(self.db, self.ident(revision="b" * 40), p)
+            self.assertEqual(len(calls), 1)
+            m.mark_blocked(self.db, accepted["admission_id"], accepted["run_id"])
+            second = m.dispatch(self.db, self.ident(revision="b" * 40), p)
+        self.assertTrue(second["admitted"])
+        self.assertEqual(len(calls), 2)
+
+    def test_dispatch_distinct_sources_race_is_atomic(self):
+        p = self.private_prompt()
+        gate = threading.Barrier(2)
+        calls = []
+        outcomes = []
+        lock = threading.Lock()
+        class Response:
+            status = 201
+            def __init__(self, url): self.url = url
+            def geturl(self): return self.url
+            def read(self, n): return json.dumps({"id": str(uuid.uuid4())}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+        class Client:
+            def open(self, req, timeout=8):
+                with lock: calls.append(req.full_url)
+                return Response(req.full_url)
+        def worker(revision):
+            db = m.connect(self.db_path)
+            try:
+                gate.wait(timeout=8)
+                try:
+                    outcome = ("accepted", m.dispatch(db, self.ident(revision=revision), p)["admitted"])
+                except m.AdmissionError as exc:
+                    outcome = ("refused", str(exc))
+                with lock: outcomes.append(outcome)
+            finally:
+                db.close()
+        with patch.object(m.urllib.request, "build_opener", return_value=Client()):
+            threads = [threading.Thread(target=worker, args=(letter * 40,))
+                       for letter in ("b", "c")]
+            for t in threads: t.start()
+            for t in threads: t.join(timeout=15)
+        self.assertTrue(all(not t.is_alive() for t in threads))
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual([x[0] for x in outcomes].count("accepted"), 1)
+        self.assertEqual([x[0] for x in outcomes].count("refused"), 1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission WHERE status IN ('claimed','submitted')"
+        ).fetchone()[0], 1)
+
     def test_private_state_permissions_and_symlink_refusal(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
         pub = Path(self.tmp.name) / "public"
