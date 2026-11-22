@@ -90,6 +90,10 @@ def _http(port: int, path: str, body=None, timeout=5):
             FleetError("nonfinite JSON value")))
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
         raise TransientFleetError("model API unavailable: " + type(exc).__name__) from exc
+    except RecursionError as exc:
+        # Bounded byte size alone cannot bound JSON parser nesting depth.
+        # Isolate a malformed backend rather than aborting all discovery.
+        raise FleetError("model response JSON nesting exceeds limit") from exc
 
 
 @dataclass(frozen=True)
