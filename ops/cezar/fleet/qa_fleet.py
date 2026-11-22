@@ -141,11 +141,11 @@ def one(worker,pr):
     except Exception as exc:
         update(slot,state="failed",finished_at=now(),note=type(exc).__name__,summary=None)
         return n,"failed"
-def main():
+def main(argv=None):
     ap=argparse.ArgumentParser()
     ap.add_argument("--max-workers",type=int,default=17)
     ap.add_argument("--dry-run",action="store_true")
-    args=ap.parse_args()
+    args=ap.parse_args(argv)
     if not 1<=args.max_workers<=17:ap.error("max workers must be 1..17")
     HOME.mkdir(mode=0o700,exist_ok=True)
     os.chmod(HOME,0o700)
