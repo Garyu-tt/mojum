@@ -41,6 +41,8 @@ from .epoch_sense_v2 import (
 from .local_cell_sense import Proprioception
 from .graph import GraphError, load_graph
 from .graph import validate as validate_graph
+from .room_draft_runtime import load_runtime_room
+from .room_spec import RoomSpecError
 from .noosphere import (
     EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event,
 )
@@ -916,6 +918,8 @@ def main():
     parser.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"),
                         help="genotype JSON providing the organism identity")
     parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
+    parser.add_argument("--room-file", type=Path,
+                        help="versioned offline room draft JSON; pinned to a new journal on first boot")
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--dx", type=float)
     parser.add_argument("--dy", type=float)
@@ -974,6 +978,15 @@ def main():
     else:
         # The internal controller selects each action from committed history.
         dx, dy = None, None
+    if args.room_file is not None and args.motor_mode in (
+            V2A_ARCHIVE_MODE, V2B_MODE, V2B_WIRE_MODE,
+            V3_MODE, V3_ESCAPE_MODE, V4_MODE):
+        parser.error("--room-file is incompatible with fixed-geometry local-cell modes")
+    try:
+        room, start = (load_runtime_room(args.room_file) if args.room_file is not None
+                       else (None, (1.0, 2.0)))
+    except RoomSpecError as exc:
+        parser.error(str(exc))
     seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
     try:
         graph = load_graph(args.graph)
@@ -982,7 +995,7 @@ def main():
         parser.error(str(exc))
     try:
         aquarium = Aquarium(
-            args.db, seed, graph, agent_id=seed["genome_id"],
+            args.db, seed, graph, agent_id=seed["genome_id"], room=room, start=start,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
             brain_mode=args.brain_mode,
