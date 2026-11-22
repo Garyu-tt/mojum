@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.aquarium import Aquarium
 from mojum.aquarium_trace_export import export_private_trace
@@ -145,8 +146,28 @@ function loadViewer() {
 
 
 class OfflineViewerPlaybackQA(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node required in viewer CI")
+    def _require_node_for_ci(self):
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+                self.fail("Node required in CI for actual offline viewer playback QA")
+            self.skipTest("Node unavailable: optional local viewer QA")
+        return node
+
+    def test_missing_node_must_fail_ci(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "true", "GITHUB_ACTIONS": ""}):
+                with self.assertRaisesRegex(AssertionError, "Node required in CI"):
+                    self._require_node_for_ci()
+
+    def test_missing_node_may_skip_outside_ci(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "", "GITHUB_ACTIONS": ""}):
+                with self.assertRaises(unittest.SkipTest):
+                    self._require_node_for_ci()
+
     def test_play_pause_speed_seek_visibility_and_file_replace(self):
+        node = self._require_node_for_ci()
         with tempfile.TemporaryDirectory(prefix="mojum-viewer-controls-") as tmp:
             source = Path(tmp) / "synthetic.sqlite3"
             output = Path(tmp) / "synthetic.private.jsonl"
@@ -160,7 +181,7 @@ class OfflineViewerPlaybackQA(unittest.TestCase):
                 motor_mode="developmental_fixture", sensory_mode="toy_probe",
             )
             run = subprocess.run(
-                [shutil.which("node"), "-e", NODE_CONTROLS,
+                [node, "-e", NODE_CONTROLS,
                  str(VIEWER), str(output)],
                 cwd=ROOT, env=dict(os.environ), encoding="utf-8",
                 capture_output=True, check=False, timeout=30,
