@@ -27,8 +27,8 @@ false on subsequent same-ID calls. The latter **must not** invoke the model.
 Conflicting reused IDs, exhausted caps and over-reservation fail closed.
 A changed provider settlement receipt commits a durable frozen state before
 rejecting the contradiction; it never reopens admission or overwrites the
-previously recorded usage. An identical repeat remains idempotent. Settlement records actual usage but **never refunds** a
-reservation: timeouts, crashes and delayed provider invoices remain safe with
+previously recorded usage. An identical repeat remains idempotent.
+Settlement records actual usage but **never refunds** a reservation: timeouts, crashes and delayed provider invoices remain safe with
 respect to the *local reserved cap*.
 
 ## Strict safety boundary
