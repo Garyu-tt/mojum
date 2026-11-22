@@ -195,6 +195,21 @@ class MeterTests(unittest.TestCase):
             wal.chmod(original_mode)
 
     @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_checks_both_wal_and_shm_even_when_wal_exists(self):
+        begin(self.db, 1, "private-shm", "model.x", now_ms=100)
+        wal = Path(self.path + "-wal")
+        shm = Path(self.path + "-shm")
+        self.assertTrue(wal.exists())
+        self.assertTrue(shm.exists())
+        original_mode = stat.S_IMODE(shm.stat().st_mode)
+        shm.chmod(0o644)
+        try:
+            with self.assertRaisesRegex(PermissionError, "private owner-only"):
+                connect(self.path)
+        finally:
+            shm.chmod(original_mode)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
     def test_rejects_relative_paths_and_symlinked_db(self):
         with self.assertRaisesRegex(ValueError, "absolute"):
             connect("local.sqlite3")
