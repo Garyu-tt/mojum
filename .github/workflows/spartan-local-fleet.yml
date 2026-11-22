@@ -4,8 +4,11 @@ on:
   pull_request:
     paths:
       - 'tools/spartan_local_fleet.py'
+      - 'tools/spartan_coordinator.py'
       - 'tests/test_spartan_local_fleet.py'
+      - 'tests/test_spartan_mirbi_profile.py'
       - 'docs/SPARTAN_LOCAL_FLEET_R01.md'
+      - 'docs/SPARTAN_MIRBI_CPU_R01.md'
       - '.github/workflows/spartan-local-fleet.yml'
   workflow_dispatch:
 
@@ -31,4 +34,6 @@ jobs:
         env:
           PYTHONPATH: .
           PYTHONWARNINGS: error::ResourceWarning
-        run: python -m unittest discover -s tests -p 'test_spartan_local_fleet.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_spartan_local_fleet.py' -v
+          python -m unittest discover -s tests -p 'test_spartan_mirbi_profile.py' -v

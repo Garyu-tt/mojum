@@ -206,21 +206,38 @@ def call_model(backend, prompt, role, max_tokens, clone=0, request=None):
 
 
 def _private_output_fd(folder: Path) -> int:
-    """Pin an owner-private artifact directory before creating any proposal."""
-    flags = (os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-             | getattr(os, "O_NOFOLLOW", 0)
-             | getattr(os, "O_CLOEXEC", 0))
+    """Pin a private artifact dir; reject symlinks in every ancestor."""
+    folder = Path(folder)
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if (any(not hasattr(os, name) for name in required)
+            or os.open not in os.supports_dir_fd):
+        raise FleetError("secure output directory descriptors unavailable")
+    if ".." in folder.parts:
+        raise FleetError("output directory parent traversal forbidden")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = -1
     try:
-        fd = os.open(folder, flags)
+        fd = os.open("/" if folder.is_absolute() else ".", flags)
+        parts = folder.parts[1:] if folder.is_absolute() else folder.parts
+        for component in parts:
+            if component == ".":
+                continue
+            next_fd = os.open(component, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
         info = os.fstat(fd)
+        if (not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            raise FleetError("output directory must be owner-private (0700)")
+        pinned = fd
+        fd = -1
+        return pinned
     except OSError as exc:
-        raise FleetError("output directory missing or unsafe") from exc
-    if (not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.geteuid()
-            or stat.S_IMODE(info.st_mode) & 0o077):
-        os.close(fd)
-        raise FleetError("output directory must be owner-private (0700)")
-    return fd
+        raise FleetError("output directory missing, symlinked or unsafe") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def save_private(folder: Path, task_id: str, attempt: int, artifact):
@@ -419,9 +436,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
     private_fd = _private_output_fd(folder)
     os.close(private_fd)
     db_path = Path(db_path)
-    # Do not mkdir(parents=True) here: a symlinked ancestor can redirect
-    # directory creation before the security preflight has run. Operators
-    # must explicitly prepare an existing private state directory.
+    # The coordinator directory must already exist and pass ancestor checks.
+    # mkdir(parents=True) here would follow an untrusted symlink first.
     # Validate the database/parent *before* opening the adjacent lock. A
     # group-writable directory could otherwise plant a symlink lock target.
     try:

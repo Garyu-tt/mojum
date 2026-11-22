@@ -502,6 +502,19 @@ class FleetTests(unittest.TestCase):
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["review"], 4)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestry")
+    def test_artifact_store_rejects_symlinked_ancestor_without_writing(self):
+        real_parent = self.root / "real-artifact-parent"
+        real_parent.mkdir(mode=0o700)
+        actual = real_parent / "outputs"
+        actual.mkdir(mode=0o700)
+        alias = self.root / "alias-artifact-parent"
+        alias.symlink_to(real_parent, target_is_directory=True)
+        with self.assertRaisesRegex(fleet.FleetError, "output directory"):
+            fleet.save_private(alias / "outputs", "symlink-ancestor", 1,
+                               {"secret": "must not be stored"})
+        self.assertEqual(list(actual.iterdir()), [])
+
     def test_no_duplicate_artifact_overwrite(self):
         x = fleet.save_private(self.out, "task-one", 1, {"a": 1})
         with self.assertRaises(FileExistsError):
@@ -530,6 +543,19 @@ class FleetTests(unittest.TestCase):
                       backends=self.backends)
         self.assertEqual(lock.stat().st_mode & 0o777, 0o644)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestry")
+    def test_database_path_rejected_before_creating_symlinked_parent(self):
+        real_parent = self.root / "real-database-parent"
+        real_parent.mkdir(mode=0o700)
+        alias = self.root / "alias-database-parent"
+        alias.symlink_to(real_parent, target_is_directory=True)
+        untrusted_created = real_parent / "must-not-create"
+        with self.assertRaisesRegex(fleet.FleetError,
+                                    "unsafe private coordinator"):
+            fleet.run(alias / "must-not-create" / "tasks.sqlite3", self.out,
+                      max_agents=2, max_jobs=1, backends=self.backends)
+        self.assertFalse(untrusted_created.exists())
+
     def test_fleet_refuses_unsafe_parent_before_lock_creation(self):
         unsafe = self.root / "shared-state"
         unsafe.mkdir()
@@ -539,20 +565,6 @@ class FleetTests(unittest.TestCase):
             fleet.run(db_path, self.out, max_agents=10, max_jobs=2,
                       backends=self.backends)
         self.assertFalse(Path(str(db_path) + ".fleet.lock").exists())
-
-    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestor contract")
-    def test_fleet_does_not_create_missing_child_under_symlinked_parent(self):
-        external = self.root / "fleet-external"
-        external.mkdir(mode=0o700)
-        alias = self.root / "fleet-alias"
-        alias.symlink_to(external, target_is_directory=True)
-        child = external / "must-not-create"
-        db_path = alias / child.name / "tasks.sqlite3"
-        with self.assertRaises(fleet.FleetError):
-            fleet.run(db_path, self.out, max_agents=2, max_jobs=1,
-                      backends=self.backends)
-        self.assertFalse(child.exists(),
-                         "fleet preflight created a child through symlink ancestry")
 
     @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestor contract")
     def test_coordinator_cli_does_not_create_missing_child_through_symlink(self):
