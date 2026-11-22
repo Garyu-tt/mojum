@@ -173,6 +173,45 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(m.AdmissionError):
             m.connect(f)
 
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_DIRECTORY"),
+                         "POSIX directory fsync required")
+    def test_sqlite_creation_fsyncs_new_inode_then_private_parent(self):
+        path = self.home / "new-durable.sqlite"
+        original = os.fsync
+        calls = []
+
+        def record(fd):
+            mode = m.stat.S_IFMT(os.fstat(fd).st_mode)
+            calls.append("file" if mode == m.stat.S_IFREG else
+                         "directory" if mode == m.stat.S_IFDIR else "other")
+            return original(fd)
+
+        with patch.object(m.os, "fsync", side_effect=record):
+            with m.connect(path) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+        self.assertEqual(calls, ["file", "directory"])
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+        calls.clear()
+        with patch.object(m.os, "fsync", side_effect=record):
+            with m.connect(path):
+                pass
+        self.assertEqual(calls, ["directory"])
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_DIRECTORY"),
+                         "POSIX directory fsync required")
+    def test_sqlite_durability_sync_failure_denies_new_and_existing_db(self):
+        path = self.home / "sync-failure.sqlite"
+        with patch.object(m.os, "fsync", side_effect=OSError("sync failure")):
+            with self.assertRaisesRegex(OSError, "sync failure"):
+                m.connect(path)
+        self.assertTrue(path.exists())
+        # Failed initial file fsync cannot be bypassed just because the file
+        # survived long enough to be reopened.
+        with patch.object(m.os, "fsync", side_effect=OSError("sync failure")):
+            with self.assertRaisesRegex(OSError, "sync failure"):
+                m.connect(path)
+
     def test_mark_submitted_and_idempotency(self):
         _, row = m.claim(self.db, self.ident())
         run_id = str(uuid.uuid4())
