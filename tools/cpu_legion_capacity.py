@@ -100,7 +100,12 @@ def load_inventory(path):
     try:
         return json.loads(data.decode("utf-8"), object_pairs_hook=_object,
                           parse_constant=_constant)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except InventoryError:
+        # Preserve precise duplicate-key and nonfinite-constant diagnostics.
+        raise
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        # CPython may raise ValueError, not JSONDecodeError, for integer tokens
+        # exceeding its configured digit limit (3.11+).
         raise InventoryError("inventory must be valid UTF-8 JSON") from exc
 
 
