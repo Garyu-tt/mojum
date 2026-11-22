@@ -35,6 +35,23 @@ def _check_private_file(path: str) -> None:
             )
 
 
+def _check_private_parent(path: str) -> None:
+    """Refuse writable or replaceable SQLite parent directories.
+
+    A file-mode check followed by sqlite3.connect(path) is unsafe if another
+    local account can replace the checked path between those operations.
+    """
+    parent = os.path.dirname(os.path.abspath(path))
+    info = os.lstat(parent)
+    if (not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022):
+        raise PermissionError(
+            "Spartan SQLite parent directory must be owner-controlled "
+            "and not group/world-writable"
+        )
+
+
 def connect(path: str) -> sqlite3.Connection:
     # The SQLite connection stores user-supplied prompts and exact work scopes.
     # sqlite3.connect creates a new DB using the process umask (often 0644).
@@ -44,6 +61,7 @@ def connect(path: str) -> sqlite3.Connection:
         filename = os.fspath(path)
         if isinstance(filename, bytes) or filename.startswith("file:"):
             raise ValueError("Spartan SQLite requires a filesystem path")
+        _check_private_parent(filename)
         flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
                  | getattr(os, "O_NOFOLLOW", 0)
                  | getattr(os, "O_CLOEXEC", 0))
