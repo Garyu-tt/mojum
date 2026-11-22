@@ -105,6 +105,21 @@ def _check_streak_counters(state):
         )
         if probes > measured_blocks:
             raise CellV3EscapeError("blocked-probe streak lacks measured outcomes")
+    # A retained cell last seen during the terminal streak must have at
+    # least one measured outcome of the claimed kind. Global counts alone
+    # cannot prove a streak: older rests/blocks may belong to unrelated ticks.
+    first_streak_tick = state["last_tick"] - (rests or probes) + 1
+    for cell, seen_at in state["last_seen_at"].items():
+        if seen_at < first_streak_tick:
+            continue
+        recorded = state["records"][cell]
+        if rests and "rest" not in recorded:
+            raise CellV3EscapeError("recent cell lacks measured rest")
+        if probes and not any(
+            action != "rest" and counts[1] > 0
+            for action, counts in recorded.items()
+        ):
+            raise CellV3EscapeError("recent cell lacks measured blocked move")
 
 
 class CellExplorerV3Escape:
