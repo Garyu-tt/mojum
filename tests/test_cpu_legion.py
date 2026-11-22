@@ -310,7 +310,7 @@ sys.exit(1)
                          "POSIX pinned output directory writes required")
     def test_patch_artifact_fsyncs_file_then_directory(self):
         out = self.root / "private-sync" / "patches"
-        out.mkdir(parents=True)
+        out.mkdir(parents=True, mode=0o700)
         original = os.fsync
         calls = []
 
@@ -351,7 +351,7 @@ sys.exit(1)
                          "POSIX pinned output directory writes required")
     def test_patch_artifact_file_sync_failure_unlinks_partial(self):
         out = self.root / "private-file-sync" / "patches"
-        out.mkdir(parents=True)
+        out.mkdir(parents=True, mode=0o700)
         with patch.object(legion.os, "fsync", side_effect=OSError("sync failure")):
             with self.assertRaisesRegex(ValueError, "persist"):
                 legion._write_private_patch(out, "candidate.patch", "incomplete")
@@ -363,7 +363,7 @@ sys.exit(1)
                          "POSIX pinned output directory writes required")
     def test_patch_artifact_directory_sync_failure_unlinks_partial(self):
         out = self.root / "private-dir-sync" / "patches"
-        out.mkdir(parents=True)
+        out.mkdir(parents=True, mode=0o700)
         original = os.fsync
 
         def fail_directory(fd):
