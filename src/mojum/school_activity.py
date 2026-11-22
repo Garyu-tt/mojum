@@ -134,7 +134,10 @@ def _preflight_catalog_strings(document):
         count += 1
         if count > MAX_CATALOG_BYTES:
             raise SchoolError("catalog byte budget exceeded")
-        if type(value) is str:
+        if isinstance(value, str):
+            # JSONEncoder also accepts str subclasses; deny custom hooks.
+            if type(value) is not str:
+                raise SchoolError("invalid catalog JSON encoding")
             if len(value) > budget:
                 raise SchoolError("catalog byte budget exceeded")
             for start in range(0, len(value), 4096):
@@ -143,7 +146,11 @@ def _preflight_catalog_strings(document):
                 budget -= len(escaped[1:-1].encode("utf-8", errors="strict"))
                 if budget < 0:
                     raise SchoolError("catalog byte budget exceeded")
-        elif type(value) in (dict, list, tuple):
+        elif isinstance(value, (dict, list, tuple)):
+            # Reject custom container subclasses rather than trusting an
+            # overridable iteration method to match JSONEncoder's behavior.
+            if type(value) not in (dict, list, tuple):
+                raise SchoolError("invalid catalog JSON encoding")
             obj_id = id(value)
             if obj_id in active or len(frames) > 256:
                 raise SchoolError("invalid catalog JSON encoding")
