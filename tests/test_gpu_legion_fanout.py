@@ -201,10 +201,10 @@ class FanoutContract(unittest.TestCase):
             shared.mkdir()
             shared.chmod(0o777)
             output = shared / "proposals.json"
-            with patch.object(f, "discover_backend",
-                              side_effect=lambda port: f.Backend(port, 1, 1, 2048)), \\
-                 patch.object(f, "execute",
-                              side_effect=AssertionError("inference started")) as execute:
+            with (patch.object(f, "discover_backend",
+                               side_effect=lambda port: f.Backend(port, 1, 1, 2048)),
+                  patch.object(f, "execute",
+                               side_effect=AssertionError("inference started")) as execute):
                 with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
                     f.main(["--tasks", str(tasks_path), "--execute", "--output", str(output)])
                 execute.assert_not_called()
