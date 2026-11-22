@@ -32,7 +32,7 @@ def validate_neural_proposal(packet: object) -> dict:
         "learning_revision", "sensory", "motor_proposal",
     }:
         raise ValueError("invalid neural packet fields")
-    if packet["schema"] != _SCHEMA:
+    if type(packet["schema"]) is not str or packet["schema"] != _SCHEMA:
         raise ValueError("unsupported neural wire")
     if type(packet["tick"]) is not int or not 0 <= packet["tick"] <= _MAX_WIRE_I64:
         raise ValueError("invalid tick")
