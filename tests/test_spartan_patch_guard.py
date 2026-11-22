@@ -66,6 +66,14 @@ class PatchGuardTests(unittest.TestCase):
             with self.subTest(wrong=wrong), self.assertRaises(guard.PatchGuardError):
                 guard.validate_patch(EDIT.replace("@@ -1,2 +1,2 @@", wrong), [PATH])
 
+    def test_unbounded_or_non_ascii_hunk_coordinates_fail_closed(self):
+        for coordinate in ("9" * 5000, "9" * 13, "\u0661"):
+            with self.subTest(digits=len(coordinate)):
+                malformed = EDIT.replace(
+                    "@@ -1,2 +1,2 @@", f"@@ -{coordinate},2 +1,2 @@")
+                with self.assertRaises(guard.PatchGuardError):
+                    guard.validate_patch(malformed, [PATH])
+
     def test_no_newline_comment_refused(self):
         with self.assertRaises(guard.PatchGuardError):
             guard.validate_patch(EDIT + "\\ No newline at end of file\n", [PATH])

@@ -21,11 +21,23 @@ MAX_HUNKS = 128
 SAFE_ROOTS = ("src/mojum/", "tests/", "docs/", "tools/")
 _PATH_RE = re.compile(r"[A-Za-z0-9_./-]+\Z")
 _INDEX_RE = re.compile(r"index [0-9a-f]{7,64}\.\.[0-9a-f]{7,64}(?: 100644)?\Z")
-_HUNK_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: [^\r\n]{0,160})?\Z")
+_HUNK_RE = re.compile(r"@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@(?: [^\r\n]{0,160})?\Z")
 
 
 class PatchGuardError(ValueError):
     """An untrusted diff does not meet the bounded textual patch contract."""
+
+
+def _hunk_position(raw: str) -> int:
+    # Limit decimal conversion work before int() sees untrusted attacker text.
+    # A 256 KiB patch can otherwise contain 5,000-digit numbers, which raise
+    # a bare ValueError on Python's integer-string conversion limit.
+    if len(raw) > 12:
+        raise PatchGuardError("hunk coordinate exceeds supported range")
+    try:
+        return int(raw)
+    except (ValueError, OverflowError) as exc:
+        raise PatchGuardError("invalid hunk coordinate") from exc
 
 
 def _safe_path(path: str) -> str:
@@ -103,7 +115,8 @@ def validate_patch(patch: str, allowed_paths: list[str] | tuple[str, ...]) -> di
             if not match:
                 raise PatchGuardError("malformed hunk header")
             old_start, old_count, new_start, new_count = (
-                int(match[1]), int(match[2] or 1), int(match[3]), int(match[4] or 1)
+                _hunk_position(match[1]), _hunk_position(match[2] or "1"),
+                _hunk_position(match[3]), _hunk_position(match[4] or "1")
             )
             if (new_file and (old_start != 0 or old_count != 0)) or (
                 not new_file and (old_start < 1 or new_start < 1)
