@@ -34,6 +34,11 @@ class FleetError(ValueError):
     pass
 
 
+class CorruptClosedCache(FleetError):
+    """Validated owner-only cache file contains unusable data (not unsafe I/O)."""
+    pass
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise FleetError("HTTP redirect forbidden")
@@ -381,13 +386,13 @@ def _load_closed_cache():
     if (type(parsed) is not dict
             or set(parsed) != {"schema", "observed_at", "recent"}
             or parsed["schema"] != "cezar.github-closed-cache/1"):
-        raise FleetError("unknown closed PR cache schema")
+        raise CorruptClosedCache("unknown closed PR cache schema")
     stamp = _parse_time(parsed["observed_at"])
     recent = parsed["recent"]
     if stamp is None or type(recent) is not list or len(recent) > 20:
-        raise FleetError("invalid cached PR list")
+        raise CorruptClosedCache("invalid cached PR list")
     if len(json.dumps(recent)) > 20_000:
-        raise FleetError("oversized cached PR list")
+        raise CorruptClosedCache("oversized cached PR list")
     for item in recent:
         if (type(item) is not dict
                 or set(item) != {"number", "title", "outcome", "updated_at", "merged_at"}
@@ -396,14 +401,22 @@ def _load_closed_cache():
                 or type(item["title"]) is not str or len(item["title"]) > 160
                 or item["outcome"] not in ("merged", "closed-unmerged")
                 or _parse_time(item["updated_at"]) is None
+                or (item["outcome"] == "merged") != (item["merged_at"] is not None)
                 or (item["merged_at"] is not None and
                     _parse_time(item["merged_at"]) is None)):
-            raise FleetError("unsafe cached PR item")
+            raise CorruptClosedCache("unsafe cached PR item")
     return parsed
 
 
 def _github_closed_history(now):
-    cache = _load_closed_cache()
+    try:
+        cache = _load_closed_cache()
+    except (CorruptClosedCache, json.JSONDecodeError, UnicodeError,
+            RecursionError):
+        # An owner-only regular cache may be truncated/corrupt. Retry the
+        # pinned bounded public GET rather than permanently disabling history.
+        # Unsafe path/type/permission errors intentionally stay fatal.
+        cache = None
     stamp = _parse_time(cache["observed_at"]) if cache else None
     age = (now - stamp).total_seconds() if stamp else None
     fresh = age is not None and 0 <= age < CLOSED_TTL_SECONDS
