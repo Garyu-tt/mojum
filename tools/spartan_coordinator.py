@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -17,7 +19,44 @@ def _reject_nonfinite_constant(value: str):
     raise ValueError(f"non-finite JSON constant not allowed: {value}")
 
 
+def _check_private_sqlite_path(path: str) -> None:
+    """Create owner-only SQLite storage before SQLite opens DB/WAL/SHM.
+
+    Reject an unsafe existing inode instead of chmod-ing a caller-selected
+    path. The parent must not be group/other writable, preventing a different
+    local user from replacing the checked path between validation and open.
+    """
+    db_path = Path(path)
+    parent = os.lstat(db_path.parent)
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_mode & 0o022:
+        raise ValueError("Spartan SQLite parent must not be group/other writable")
+
+    owner = os.getuid()
+    for filename in (str(db_path), str(db_path) + "-wal", str(db_path) + "-shm"):
+        try:
+            existing = os.lstat(filename)
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(existing.st_mode)
+                or existing.st_uid != owner
+                or stat.S_IMODE(existing.st_mode) & 0o077):
+            raise ValueError("Spartan SQLite files must be owner-only regular files")
+
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(db_path, flags, 0o600)
+    try:
+        opened = os.fstat(descriptor)
+        if (not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != owner
+                or stat.S_IMODE(opened.st_mode) & 0o077):
+            raise ValueError("Spartan SQLite database is not owner-only")
+    finally:
+        os.close(descriptor)
+
+
 def connect(path: str) -> sqlite3.Connection:
+    _check_private_sqlite_path(path)
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=30000")
