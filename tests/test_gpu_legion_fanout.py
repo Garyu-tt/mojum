@@ -175,6 +175,34 @@ class FanoutContract(unittest.TestCase):
             f._NoRedirect().redirect_request(
                 None,None,302,"no",{},"https://example.org")
 
+    def test_overdeep_loopback_json_response_fails_closed(self):
+        # A 3 KiB JSON array can exceed CPython's nesting limit despite
+        # satisfying the network byte cap. Health/slots must fail as a
+        # controlled FanoutError rather than aborting main() with traceback.
+        nested = b"[" * 1500 + b"0" + b"]" * 1500
+
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                self_limit = limit
+                assert self_limit >= len(nested)
+                return nested
+
+        opener = Mock()
+        opener.open.return_value = Response()
+        with self.assertRaisesRegex(f.FanoutError, "invalid JSON response"):
+            f._request_json(18180, "/health", opener=opener)
+        with self.assertRaisesRegex(f.FanoutError, "invalid JSON response"):
+            f._request_json(18180, "/slots", opener=opener)
+
     def test_infer_never_executes_generated_commands(self):
         observed=[]
         def fake(port,path,**kwargs):
