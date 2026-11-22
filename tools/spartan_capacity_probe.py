@@ -53,8 +53,8 @@ def _require_private_parent(filename: str) -> None:
 
 
 def _require_private_files(filename: str) -> None:
-    """Never chmod preexisting SQLite evidence or trust unsafe WAL sidecars."""
-    for suffix in ("", "-wal", "-shm"):
+    """Never chmod or open insecure DB, WAL, SHM or rollback-journal evidence."""
+    for suffix in ("", "-wal", "-shm", "-journal"):
         item = filename + suffix
         try:
             info = os.lstat(item)

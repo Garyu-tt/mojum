@@ -63,7 +63,9 @@ included separately. Report is capped at 200,000 spans per run; rotate files.
   place secrets in operation IDs, worker IDs or model identifiers. The PRIVATE
   local SQLite file still exposes worker/activity metadata and is therefore
   protected on POSIX: new databases, WAL and SHM are owner-only (0600) even
-  with umask 022. Existing group/world-accessible files, symlinked DBs,
+  with umask 022. Existing DB, WAL, SHM and rollback-journal sidecars are
+  checked before SQLite opens them, including 0644 or symlinked journals in
+  otherwise owner-controlled directories. Existing group/world-accessible files, symlinked DBs,
   writable/replaceable directory chains and SQLite memory/URI pseudo-paths
   fail closed before opening. Use an operator-owned, non-group/world-writable
   directory (e.g. a private subdirectory of /tmp). This does not silently

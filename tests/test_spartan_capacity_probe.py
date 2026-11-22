@@ -67,6 +67,33 @@ class CapacityProbeTests(unittest.TestCase):
                 with self.assertRaisesRegex(PermissionError, "owner-only"):
                     probe.connect(path)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX SQLite rollback journal contract")
+    def test_world_readable_rollback_journal_is_refused_before_sqlite_open(self):
+        # A 0755 owner-controlled directory is permitted by the parent check.
+        # A preexisting 0644 rollback journal in it may expose private pages.
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o755)
+            path = str(Path(folder) / "legacy.sqlite3")
+            with closing(probe.connect(path)) as db:
+                probe.initialize(db, "journal-run")
+            journal = Path(path + "-journal")
+            journal.write_bytes(b"private rollback-journal evidence")
+            journal.chmod(0o644)
+            with self.assertRaisesRegex(PermissionError, "owner-only"):
+                probe.connect(path)
+            # Reject without silently deleting or chmodding the evidence.
+            self.assertTrue(journal.exists())
+            self.assertEqual(stat.S_IMODE(journal.stat().st_mode), 0o644)
+
+            journal.chmod(0o600)
+            journal.unlink()
+            sensitive = Path(folder) / "sensitive.txt"
+            sensitive.write_text("PRIVATE")
+            journal.symlink_to(sensitive)
+            with self.assertRaisesRegex(PermissionError, "owner-only"):
+                probe.connect(path)
+            self.assertTrue(journal.is_symlink())
+
     @unittest.skipUnless(os.name == "posix", "POSIX SQLite parent contract")
     def test_replaceable_parent_and_symlink_ancestor_fail_before_creation(self):
         with tempfile.TemporaryDirectory() as folder:
