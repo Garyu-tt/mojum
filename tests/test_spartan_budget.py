@@ -18,6 +18,62 @@ class BudgetLedgerTests(unittest.TestCase):
         self.caps = BudgetCaps(2, 100, 300)
         self.ledger = BudgetLedger(self.path, self.caps)
 
+    def test_sqlite_files_are_0600_with_umask_022(self):
+        import os
+        import stat
+        fresh = Path(self.tmp.name) / "private-budget.sqlite3"
+        previous = os.umask(0o022)
+        try:
+            ledger = BudgetLedger(fresh, self.caps)
+            with closing(sqlite3.connect(fresh)) as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("INSERT OR IGNORE INTO budget_settings (singleton, rpm, tpm, daily_usd_micros) VALUES (1, 2, 100, 300)")
+                db.commit()
+                for suffix in ("", "-wal", "-shm"):
+                    file = Path(str(fresh) + suffix)
+                    self.assertTrue(file.is_file(), suffix)
+                    self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
+            ledger.reserve("private", "model", 1, 1, now_s=100)
+        finally:
+            os.umask(previous)
+
+    def test_refuses_existing_world_readable_db_without_chmod(self):
+        import os
+        import stat
+        fresh = Path(self.tmp.name) / "old.sqlite3"
+        with closing(sqlite3.connect(fresh)) as db:
+            db.execute("CREATE TABLE example(x)")
+        os.chmod(fresh, 0o644)
+        with self.assertRaisesRegex(PermissionError, "owner-private"):
+            BudgetLedger(fresh, self.caps)
+        self.assertEqual(stat.S_IMODE(fresh.stat().st_mode), 0o644)
+
+    def test_refuses_unsafe_sidecar_and_symlink(self):
+        import os
+        db = Path(self.tmp.name) / "sidecar.sqlite3"
+        BudgetLedger(db, self.caps)
+        sidecar = Path(str(db) + "-wal")
+        sidecar.write_bytes(b"synthetic")
+        os.chmod(sidecar, 0o644)
+        with self.assertRaisesRegex(PermissionError, "owner-private"):
+            BudgetLedger(db, self.caps)
+        sidecar.unlink()
+        link = Path(self.tmp.name) / "link.sqlite3"
+        link.symlink_to(db)
+        with self.assertRaisesRegex(PermissionError, "owner-private"):
+            BudgetLedger(link, self.caps)
+
+    def test_refuses_replaceable_parent_and_ephemeral_path(self):
+        import os
+        with self.assertRaisesRegex(ValueError, "persistent"):
+            BudgetLedger(":memory:", self.caps)
+        unsafe = Path(self.tmp.name) / "shared"
+        unsafe.mkdir()
+        os.chmod(unsafe, 0o777)
+        with self.assertRaisesRegex(PermissionError, "replaceable"):
+            BudgetLedger(unsafe / "budget.sqlite3", self.caps)
+        self.assertFalse((unsafe / "budget.sqlite3").exists())
+
     def test_atomic_rate_token_and_daily_caps(self):
         self.ledger.reserve("a", "local-20b", 50, 100, now_s=1000)
         self.ledger.reserve("b", "local-20b", 50, 100, now_s=1000)
