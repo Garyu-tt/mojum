@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sqlite3
+import stat
 from pathlib import Path
 
 MAX_VALUE = 10**12
@@ -34,13 +36,78 @@ def _id(value: str) -> str:
     return value
 
 
+def _check_private_ledger_files(filename: str) -> None:
+    """Refuse insecure existing SQLite DB, WAL, SHM or journal files."""
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        try:
+            info = os.lstat(filename + suffix)
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or bool(info.st_mode & 0o077)
+                or info.st_nlink != 1):
+            raise BudgetError("SQLite ledger file or sidecar is not owner-private")
+
+
+def _private_ledger_path(path: str | Path) -> str:
+    """Require a private POSIX directory chain before any SQLite pathname open.
+
+    Other-UID replacement is excluded by a mode-0700 leaf directory and
+    nonreplaceable ancestors. Same-UID/root races are outside this contract.
+    """
+    if (os.name != "posix"
+            or not all(hasattr(os, flag) for flag in
+                       ("O_NOFOLLOW", "O_CLOEXEC", "O_EXCL"))):
+        raise BudgetError("private POSIX ledger storage is required")
+    filename = os.fspath(path)
+    if (not isinstance(filename, str) or not filename
+            or not Path(filename).is_absolute()
+            or filename.startswith("file:")
+            or ".." in Path(filename).parts):
+        raise BudgetError("ledger requires an absolute private filesystem path")
+    target = Path(filename)
+    try:
+        for index, directory in enumerate((target.parent, *target.parent.parents)):
+            info = os.lstat(directory)
+            if not stat.S_ISDIR(info.st_mode):
+                raise BudgetError("ledger directory chain contains a symlink")
+            if index == 0:
+                unsafe = (info.st_uid != os.geteuid()
+                          or bool(info.st_mode & 0o077))
+            else:
+                unsafe = (info.st_uid not in (0, os.geteuid())
+                          or (bool(info.st_mode & 0o022)
+                              and not bool(info.st_mode & stat.S_ISVTX)))
+            if unsafe:
+                raise BudgetError("ledger directory chain is not owner-private")
+        # Fail before creating anything when a pre-existing sidecar is unsafe.
+        _check_private_ledger_files(filename)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+        try:
+            descriptor = os.open(filename, flags, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(descriptor)
+        _check_private_ledger_files(filename)
+    except OSError as exc:
+        raise BudgetError("cannot safely inspect or open private SQLite ledger") from exc
+    return filename
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
-    db = sqlite3.connect(path, timeout=30, isolation_level=None)
+    filename = _private_ledger_path(path)
+    try:
+        db = sqlite3.connect(filename, timeout=30, isolation_level=None)
+    except sqlite3.Error as exc:
+        raise BudgetError("cannot open private SQLite ledger") from exc
     try:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=30000")
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA foreign_keys=ON")
+        _check_private_ledger_files(filename)
         return db
     except BaseException:
         db.close()
@@ -201,7 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--actual-micro-usd", type=int, required=True)
     sub.add_parser("status")
     args = parser.parse_args(argv)
-    db = connect(args.db)
+    try:
+        db = connect(args.db)
+    except BudgetError as exc:
+        parser.exit(2, f"budget denied: {exc}\\n")
     try:
         schema(db)
         if args.command == "init":
