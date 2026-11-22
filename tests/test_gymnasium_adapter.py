@@ -33,6 +33,24 @@ class GymnasiumPointRoomTests(unittest.TestCase):
         self.assertTrue(truncated)
         env.close()
 
+    def test_float64_just_outside_box_is_rejected_before_rounding(self):
+        # Previously step() cast to float32 before Box.contains() and
+        # silently accepted an out-of-range float64 right at the boundary.
+        import math
+        import numpy as np
+        env = make_gymnasium_point_room(Room(4, 4), start=(1, 1))
+        env.reset(seed=0)
+        upper = float(env.action_space.high[0])
+        just_outside = math.nextafter(upper, math.inf)
+        self.assertGreater(just_outside, upper)
+        self.assertEqual(float(np.float32(just_outside)), upper)
+        self.assertLess(just_outside, 0.25)
+        with self.assertRaisesRegex(ValueError, "outside the advertised"):
+            env.step([just_outside, 0.0])
+        obs, _, _, _, _ = env.step([0.0, 0.0])
+        self.assertEqual(obs["tick"], 1)
+        env.close()
+
     def test_seed_is_deterministic_for_fixture(self):
         env = make_gymnasium_point_room(Room(4, 4), start=(1, 1))
         a, _ = env.reset(seed=99)
