@@ -171,7 +171,10 @@ def fleet_text():
             if not isinstance(agent,dict): continue
             stamp=agent.get("last_run")
             when=stamp[:16].replace("T"," ")+" UTC" if isinstance(stamp,str) else "неизвестно"
-            lines.append("• "+stable_text(agent.get("name","?"),52)+": "+when)
+            state={"completed":"завершён","in_progress":"выполнялся",
+                   "failed":"ошибка","no_update":"нет результата"}.get(
+                       agent.get("last_status"),"статус неизвестен")
+            lines.append("• "+stable_text(agent.get("name","?"),52)+": "+when+" ("+state+")")
     lines.append("Расписания, занятые слоты и PR не суммируются в «активных агентов».")
     return "\n".join(lines)
 
