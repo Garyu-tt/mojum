@@ -52,6 +52,12 @@ Reservations are durable, even if a process crashes or the provider times out.
 - A backward wall-clock jump denies new admissions. A changed policy on an
   existing database is rejected. Persist the SQLite file and its sidecars
   securely; losing it loses the accounting evidence.
+  On POSIX, the ledger now precreates database files as 0600, checks database/WAL/SHM
+  ownership and permissions and refuses replaceable directory ancestors. Existing
+  unsafe files are **rejected**, not silently chmodded. Inspect and explicitly
+  repair permissions before continuing. A same-UID adversary or mutable
+  filesystem remains outside this local preflight, and non-POSIX hosts have no
+  equivalent mode guarantee. In-memory/URI database paths are refused.
 - Do not store credentials, prompts, model responses, or raw task content in
   the ledger. The key is stored as SHA-256; model identifier, reserved ceilings,
   and provider-reported usage totals are stored in plaintext.
