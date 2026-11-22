@@ -69,7 +69,8 @@ class CezarGhPublicReadTests(unittest.TestCase):
         from urllib.parse import parse_qs, urlsplit
         # Created-date triage may default to open PRs only when the caller
         # did not explicitly ask for a historical closed subset.
-        for suffix in ("is:closed", "state:closed", "is:open", "state:open"):
+        for suffix in ("is:closed", "state:closed", "is:open", "state:open",
+                       "closed:>=2026-11-21"):
             query = ("repo:Garyu-tt/mojum is:pr created:>=2026-11-20 "
                      + suffix)
             with self.subTest(suffix=suffix):
