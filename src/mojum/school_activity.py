@@ -55,19 +55,154 @@ def load_catalog(path):
             raise SchoolError("catalog byte budget exceeded")
         document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs,
                               parse_constant=_reject_constant)
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
+    except SchoolError:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         raise SchoolError("invalid catalog document") from exc
     return validate_catalog(document)
 
 
+def _preflight_catalog_fragments(document):
+    """Reject giant single JSON tokens before the encoder creates them.
+
+    JSONEncoder.iterencode yields entire quoted strings and integer literals
+    as single fragments.  Byte-accounting after yield is too late to bound
+    their allocations.  This iterative, cycle-safe preflight uses only O(1)
+    size probes for primitive tokens and caps traversal work; the ordinary
+    encoder still enforces the exact final UTF-8 byte limit.
+    """
+    pending = [document]
+    seen = set()
+    visited = 0
+    while pending:
+        visited += 1
+        if visited > MAX_CATALOG_BYTES:
+            raise SchoolError("catalog byte budget exceeded")
+        value = pending.pop()
+        kind = type(value)
+        if kind is str:
+            # Even all-ASCII JSON requires at least one byte per character.
+            # Encoding/escaping can expand a permitted token at most 6-fold.
+            if len(value) > MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+        elif kind is int:
+            # Any integer with >4 bits per allowed decimal digit is too
+            # large for the wire, without materializing its decimal spelling.
+            if value.bit_length() > 4 * MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+        elif kind in (dict, list, tuple):
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if len(value) > MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+            if kind is dict:
+                for key, child in value.items():
+                    pending.append(key)
+                    pending.append(child)
+            else:
+                pending.extend(value)
+        elif kind not in (float, bool, type(None)):
+            raise SchoolError("invalid catalog JSON encoding")
+
+
+def _catalog_metadata_children(mapping):
+    """Walk mapping keys and values without materializing a giant work queue."""
+    for key, value in mapping.items():
+        yield key
+        yield value
+
+
+def _preflight_catalog_strings(document):
+    """Reject oversized nested strings before JSONEncoder allocates a fragment.
+
+    iterencode() yields a complete string token at once, not bounded chunks.
+    Inspect caller-owned values in small UTF-8/JSON-escaped slices first.
+    Bound traversal, handle shared subobjects, and fail closed on cycles.
+    """
+    budget = MAX_CATALOG_BYTES
+    count = 0
+    frames = [(iter((document,)), None)]
+    active = set()
+    while frames:
+        iterator, identity = frames[-1]
+        try:
+            value = next(iterator)
+        except StopIteration:
+            frames.pop()
+            if identity is not None:
+                active.remove(identity)
+            continue
+        count += 1
+        if count > MAX_CATALOG_BYTES:
+            raise SchoolError("catalog byte budget exceeded")
+        if isinstance(value, str):
+            # JSONEncoder also accepts str subclasses; deny custom hooks.
+            if type(value) is not str:
+                raise SchoolError("invalid catalog JSON encoding")
+            if len(value) > budget:
+                raise SchoolError("catalog byte budget exceeded")
+            for start in range(0, len(value), 4096):
+                # Slice before escaping: no attacker-sized JSON string fragment.
+                escaped = json.dumps(value[start:start + 4096], ensure_ascii=False)
+                budget -= len(escaped[1:-1].encode("utf-8", errors="strict"))
+                if budget < 0:
+                    raise SchoolError("catalog byte budget exceeded")
+        elif isinstance(value, (dict, list, tuple)):
+            # Reject custom container subclasses rather than trusting an
+            # overridable iteration method to match JSONEncoder's behavior.
+            if type(value) not in (dict, list, tuple):
+                raise SchoolError("invalid catalog JSON encoding")
+            obj_id = id(value)
+            if obj_id in active or len(frames) > 256:
+                raise SchoolError("invalid catalog JSON encoding")
+            active.add(obj_id)
+            children = (_catalog_metadata_children(value) if type(value) is dict
+                        else iter(value))
+            frames.append((iter(children), obj_id))
+
+
+def _validate_catalog_wire_budget(document):
+    """Enforce the same bounded UTF-8 JSON contract on in-memory catalogs.
+
+    Iterative encoding stops at the byte limit instead of allocating an
+    unbounded serialized copy of caller-provided extra metadata.
+    """
+    try:
+        _preflight_catalog_fragments(document)
+        _preflight_catalog_strings(document)
+        encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":"), allow_nan=False)
+        size = 0
+        fragments = []
+        for fragment in encoder.iterencode(document):
+            size += len(fragment.encode("utf-8", errors="strict"))
+            if size > MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+            # Buffer at most one valid wire-size catalog for a lossless check.
+            fragments.append(fragment)
+        if json.loads("".join(fragments)) != document:
+            raise SchoolError("catalog cannot round-trip losslessly as JSON")
+    except SchoolError:
+        raise
+    except (TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as exc:
+        raise SchoolError("invalid catalog JSON encoding") from exc
+
+
 def _nonempty(value, *, limit=160):
-    return isinstance(value, str) and 0 < len(value.strip()) <= limit and not any(ord(c) < 32 for c in value)
+    # Prevent unpaired surrogates and control characters from crossing the
+    # event/catalog boundary as strings that cannot be encoded or audited.
+    return (type(value) is str and 0 < len(value) <= limit
+            and bool(value.strip())
+            and not any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f
+                        or 0xd800 <= ord(c) <= 0xdfff for c in value))
 
 
 def validate_catalog(document):
     """Validate the R0.1 sections without redefining their PLANNED status."""
     if not isinstance(document, dict) or document.get("schema") != CATALOG_SCHEMA:
         raise SchoolError("unknown school catalog schema")
+    _validate_catalog_wire_budget(document)
     if document.get("learning_loop") != list(PHASES):
         raise SchoolError("invalid learning loop")
     sections = document.get("sections")
