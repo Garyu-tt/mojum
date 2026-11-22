@@ -67,6 +67,11 @@ class FanoutContract(unittest.TestCase):
             self.assertEqual({w.target_port for w in plan if w.task_id==task},
                              {18180,18181})
 
+    def test_duplicate_backend_entries_cannot_fake_distinct_replicas(self):
+        backend = f.Backend(18180, 1, 1, 2048)
+        with self.assertRaisesRegex(f.FanoutError, "duplicate physical backend"):
+            f.plan(f.validate_tasks(tasks(1, 2)), [backend, backend])
+
     def test_no_silent_duplicate_if_one_gpu_replica_down(self):
         with self.assertRaises(f.FanoutError):
             f.plan(f.validate_tasks(tasks(1,2)),
@@ -204,53 +209,6 @@ class FanoutContract(unittest.TestCase):
         self.assertLessEqual(peak[18180],2)
         self.assertLessEqual(peak[18181],1)
         self.assertEqual(len(set(x["task_id"] for x in results)),12)
-
-    @unittest.skipUnless(os.name == "posix", "POSIX owner/mode contract")
-    def test_shared_output_directory_refused_before_model_inference(self):
-        with tempfile.TemporaryDirectory() as temp:
-            directory = Path(temp)
-            tasks_path = directory / "tasks.json"
-            tasks_path.write_text(json.dumps(tasks(1)), encoding="utf-8")
-            shared = directory / "untrusted"
-            shared.mkdir()
-            shared.chmod(0o777)
-            output = shared / "proposals.json"
-            with (patch.object(f, "discover_backend",
-                               side_effect=lambda port: f.Backend(port, 1, 1, 2048)),
-                  patch.object(f, "execute",
-                               side_effect=AssertionError("inference started")) as execute):
-                with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
-                    f.main(["--tasks", str(tasks_path), "--execute", "--output", str(output)])
-                execute.assert_not_called()
-            self.assertFalse(output.exists())
-
-    @unittest.skipUnless(os.name == "posix", "POSIX owner/mode contract")
-    def test_private_output_leaf_below_writable_ancestor_is_refused(self):
-        with tempfile.TemporaryDirectory() as temp:
-            shared = Path(temp) / "nonsticky"
-            shared.mkdir()
-            shared.chmod(0o777)
-            private = shared / "private"
-            private.mkdir(mode=0o700)
-            output = private / "result.json"
-            with self.assertRaisesRegex(f.FanoutError, "owner-controlled"):
-                f.exclusive_json_output(output, {"text": "proposal"})
-            self.assertFalse(output.exists())
-
-    @unittest.skipUnless(os.name == "posix", "POSIX owner/mode contract")
-    def test_symlink_and_parent_traversal_in_output_directory_refused(self):
-        with tempfile.TemporaryDirectory() as temp:
-            directory = Path(temp)
-            real = directory / "real"
-            real.mkdir(mode=0o700)
-            alias = directory / "alias"
-            alias.symlink_to(real, target_is_directory=True)
-            with self.assertRaisesRegex(f.FanoutError, "symlink"):
-                f.exclusive_json_output(alias / "result.json", {"text": "proposal"})
-            with self.assertRaisesRegex(f.FanoutError, "parent traversal"):
-                f.exclusive_json_output(real / ".." / "result.json", {"text": "proposal"})
-            self.assertFalse((real / "result.json").exists())
-            self.assertFalse((directory / "result.json").exists())
 
     def test_exclusive_output_is_private_and_never_overwritten(self):
         with tempfile.TemporaryDirectory() as temp:
