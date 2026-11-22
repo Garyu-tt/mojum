@@ -144,7 +144,12 @@ def settle(db: sqlite3.Connection, request_id: str, worker: int,
             raise BudgetError("reported usage exceeds reservation; ledger frozen")
         if row["state"] == "settled":
             if (row["actual_tokens"], row["actual_micro_usd"]) != (actual_tokens, actual_micro_usd):
-                raise BudgetError("settlement receipt changed")
+                # Contradictory provider evidence invalidates the spending bound.
+                # Commit the freeze before raising: exception handling must not
+                # rollback it or admit another chargeable request.
+                db.execute("UPDATE budget SET frozen=1 WHERE id=1")
+                db.execute("COMMIT")
+                raise BudgetError("settlement receipt changed; ledger frozen")
             new = False
         else:
             db.execute("UPDATE requests SET state='settled', actual_tokens=?, "

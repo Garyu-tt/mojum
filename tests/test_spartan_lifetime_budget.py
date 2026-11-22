@@ -79,6 +79,26 @@ class BudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(budget.BudgetError, "changed"):
             budget.settle(self.db, "ticket", 1, 11, 2)
 
+    def test_conflicting_settled_receipt_freezes_future_dispatch(self):
+        budget.reserve(self.db, "receipt", 1, 20, 40)
+        self.assertTrue(budget.settle(self.db, "receipt", 1, 10, 5)["new_settlement"])
+        self.assertFalse(budget.settle(self.db, "receipt", 1, 10, 5)["new_settlement"])
+        with self.assertRaisesRegex(budget.BudgetError, "settlement receipt changed"):
+            budget.settle(self.db, "receipt", 1, 11, 5)
+        state = budget.status(self.db)
+        self.assertTrue(state["frozen"])
+        self.assertEqual(state["reported_tokens"], 10)
+        self.assertEqual(state["reported_micro_usd"], 5)
+        with closing(budget.connect(self.path)) as reopened:
+            self.assertTrue(budget.status(reopened)["frozen"])
+            with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+                budget.reserve(reopened, "another", 2, 1, 1)
+            with self.assertRaisesRegex(budget.BudgetError, "frozen"):
+                budget.reserve(reopened, "receipt", 1, 20, 40)
+            # Repeating the original receipt cannot remove the freeze.
+            self.assertFalse(budget.settle(reopened, "receipt", 1, 10, 5)["new_settlement"])
+            self.assertTrue(budget.status(reopened)["frozen"])
+
     def test_provider_overrun_persistently_freezes_future_dispatch(self):
         budget.reserve(self.db, "overrun", 1, 10, 20)
         with self.assertRaisesRegex(budget.BudgetError, "ledger frozen"):
