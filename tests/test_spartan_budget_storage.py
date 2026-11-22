@@ -7,6 +7,7 @@ import stat
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from mojum.spartan_budget import BudgetCaps, BudgetDenied, BudgetLedger
 
@@ -78,6 +79,29 @@ class BudgetPrivateStorageTests(unittest.TestCase):
         private.mkdir(mode=0o700)
         with self.assertRaisesRegex(BudgetDenied, "replaceable ancestor"):
             BudgetLedger(private / "ledger.sqlite3", self.caps)
+
+    def test_foreign_owned_ancestor_is_rejected_even_if_mode_0755(self):
+        # The owner of an ancestor can rename a private descendant despite
+        # no group/world write bits. Mock its UID without requiring root.
+        foreign = self.root / "foreign-owned"
+        foreign.mkdir(mode=0o755)
+        foreign.chmod(0o755)
+        private = foreign / "private"
+        private.mkdir(mode=0o700)
+        original_lstat = Path.lstat
+
+        def foreign_lstat(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            if path != foreign:
+                return info
+            fields = list(info)
+            fields[4] = os.geteuid() + 1
+            return os.stat_result(fields)
+
+        with patch.object(Path, "lstat", autospec=True, side_effect=foreign_lstat):
+            with self.assertRaisesRegex(BudgetDenied, "replaceable ancestor"):
+                BudgetLedger(private / "ledger.sqlite3", self.caps)
+        self.assertFalse((private / "ledger.sqlite3").exists())
 
     def test_concurrent_connections_preserve_private_files(self):
         path = self.root / "concurrent.sqlite3"
