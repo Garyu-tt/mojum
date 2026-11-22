@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import closing
 import hashlib
+from importlib.resources import files
 import os
 from pathlib import Path
 import re
@@ -16,12 +17,15 @@ import sqlite3
 import stat
 import tempfile
 
-from .aquarium import Aquarium, AquariumError
+from .aquarium import Aquarium, AquariumError, MOTOR_MODES
+from .genesis import validate_seed
+from .graph import load_graph
 from .noosphere import STORE_SCHEMA, _open_readonly
 from .noosphere import _read_first_event
 
 MAX_BACKUP_BYTES = 128_000_000
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
+_SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 
 
 def _source_file(path):
@@ -49,6 +53,8 @@ def _destination(path):
         raise ValueError("destination requires an existing trusted local parent")
     if os.path.lexists(dest):
         raise FileExistsError("checkpoint destination already exists")
+    if any(os.path.lexists(str(dest) + suffix) for suffix in _SQLITE_SIDECARS):
+        raise FileExistsError("checkpoint destination has existing SQLite sidecars")
     return dest
 
 
@@ -88,19 +94,16 @@ def _sha256(path):
     return hasher.hexdigest()
 
 
-def _options(agent_id, neural_mode, room, start, dt_ns):
-    return dict(agent_id=agent_id, neural_mode=neural_mode,
-                room=room, start=start, dt_ns=dt_ns)
-
-
 def verify_cold_copy(path, seed, graph, *, expected_agent_id,
                      expected_journal_head, expected_sha256=None,
                      expected_tick=None, neural_mode="shadow",
-                     room=None, start=(1.0, 2.0), dt_ns=10_000_000):
+                     room=None, start=(1.0, 2.0), dt_ns=10_000_000,
+                     motor_mode="scripted", brain_mode="placeholder",
+                     sensory_mode="none", sensory_scene=None, temporal_mode="none"):
     """Verify a complete cold SQLite history against an independently held head.
 
     The optional byte hash detects any change in the exact artifact. Reopening
-    replays the complete PRIVATE log and validates all Aquarium events.
+    replays the complete PRIVATE log with the supplied Aquarium configuration.
     No physical actuators or motor gates are restored.
     """
     source = _source_file(path)
@@ -115,8 +118,8 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
         raise ValueError("expected organism ID required")
     # Verification must not open an untrusted input through writable Aquarium:
     # an empty SQLite database would otherwise receive a bootstrap event.
-    # A cold-copy artifact is self-contained; never silently ignore WAL pages.
-    if any(os.path.lexists(str(source) + suffix) for suffix in ("-wal", "-shm")):
+    # A cold-copy artifact is self-contained, including any journal state.
+    if any(os.path.lexists(str(source) + suffix) for suffix in _SQLITE_SIDECARS):
         raise ValueError("cold-copy verification requires a self-contained SQLite file")
     checksum = _sha256(source)
     if expected_sha256 is not None and checksum != expected_sha256:
@@ -128,8 +131,13 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
             raise ValueError("cold-copy source changed during verification")
         # SQLite setup/replay may write: isolate all such effects in this
         # private temporary copy, never the caller's original artifact.
-        with Aquarium(staged, seed, graph, external_expected_head=expected_journal_head,
-                      **_options(expected_agent_id, neural_mode, room, start, dt_ns)) as child:
+        with Aquarium(
+            staged, seed, graph, agent_id=expected_agent_id,
+            external_expected_head=expected_journal_head, neural_mode=neural_mode,
+            room=room, start=start, dt_ns=dt_ns, motor_mode=motor_mode,
+            brain_mode=brain_mode, sensory_mode=sensory_mode,
+            sensory_scene=sensory_scene, temporal_mode=temporal_mode,
+        ) as child:
             snapshot = child.checkpoint()
             if snapshot["journal_head"] != expected_journal_head:
                 raise AquariumError("unexpected journal head after replay")
@@ -145,12 +153,15 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
 
 def export_cold_copy(source_db, destination_db, seed, graph, *,
                      agent_id="dante-fixture-001", neural_mode="shadow",
-                     room=None, start=(1.0, 2.0), dt_ns=10_000_000):
+                     room=None, start=(1.0, 2.0), dt_ns=10_000_000,
+                     motor_mode="scripted", brain_mode="placeholder",
+                     sensory_mode="none", sensory_scene=None, temporal_mode="none"):
     """Make and replay-verify a no-clobber SQLite backup of a running journal.
 
     A read-only SQLite connection takes a consistent online backup, including
     committed WAL pages. Only the temporary backup is opened for full Aquarium
-    replay, so source history is never opened writable during export.
+    replay with the supplied Aquarium configuration. The source history is
+    never opened writable during export.
     Concurrent commits are reflected in the backup's verified snapshot.
     """
     source = _source_file(source_db)
@@ -160,7 +171,6 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
     # Inspect the existing source read-only before allowing that side effect.
     if _read_first_event(source, agent_id) is None:
         raise ValueError("export requires an existing nonempty Aquarium journal")
-    opts = _options(agent_id, neural_mode, room, start, dt_ns)
     _require_existing_source_journal(source, agent_id)
     # The source is an archive input, never a writable Aquarium. Reopening
     # it through Aquarium would create a bootstrap in a valid-but-empty SQLite
@@ -195,22 +205,31 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
             if row is None:
                 raise ValueError("source lacks committed Aquarium history")
             copied_head = row[0]
-        with Aquarium(temporary, seed, graph,
-                      external_expected_head=copied_head, **opts) as reopened:
+        with Aquarium(
+            temporary, seed, graph, agent_id=agent_id,
+            external_expected_head=copied_head, neural_mode=neural_mode,
+            room=room, start=start, dt_ns=dt_ns, motor_mode=motor_mode,
+            brain_mode=brain_mode, sensory_mode=sensory_mode,
+            sensory_scene=sensory_scene, temporal_mode=temporal_mode,
+        ) as reopened:
             before = reopened.checkpoint()
             if before["journal_head"] != copied_head:
                 raise AquariumError("copied journal differs from committed source head")
             count = reopened.store.count()
-        # Reopening in WAL mode must not leave any unexported sidecars.
-        if any(os.path.exists(temporary + suffix) for suffix in ("-wal", "-shm")):
-            raise AquariumError("unexported SQLite backup WAL sidecar")
+        # Publish a standalone file that SQLite can inspect without creating
+        # WAL sidecars. Only the staged backup changes journal mode.
+        with closing(sqlite3.connect(temporary)) as copied:
+            if copied.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+                raise AquariumError("cannot finalize standalone SQLite backup")
+        if any(os.path.lexists(temporary + suffix) for suffix in _SQLITE_SIDECARS):
+            raise AquariumError("unexported SQLite backup sidecar")
         checksum = _sha256(temporary)
         with open(temporary, "r+b") as stream:
             os.fsync(stream.fileno())
         # Publish the validated artifact under a new name, never clobbering.
-        os.link(temporary, destination)
+        os.link(temporary, _destination(destination))
     finally:
-        for suffix in ("", "-wal", "-shm"):
+        for suffix in ("", *_SQLITE_SIDECARS):
             try:
                 os.unlink(temporary + suffix)
             except FileNotFoundError:
@@ -230,16 +249,21 @@ def main():
     parser = argparse.ArgumentParser(
         description="PRIVATE synthetic Aquarium SQLite cold-copy/replay check",
     )
+    packaged = files("mojum").joinpath("data")
     modes = parser.add_subparsers(dest="mode", required=True)
     for mode in ("export", "verify"):
         p = modes.add_parser(mode)
         p.add_argument("--db", type=Path, required=True)
-        p.add_argument("--genome", type=Path, default=Path(__file__).resolve().parents[2]
-                       / "examples/genesis_seed.json")
-        p.add_argument("--graph", type=Path, default=Path(__file__).resolve().parents[2]
-                       / "examples/first_loop.json")
-        p.add_argument("--agent-id", default="dante-fixture-001")
+        p.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
+        p.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
+        p.add_argument("--agent-id", help="journal owner, defaults to the supplied genome ID")
         p.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
+        p.add_argument("--motor-mode", choices=MOTOR_MODES, default="scripted")
+        p.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
+                       default="placeholder")
+        p.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
+                       default="none")
+        p.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
         if mode == "export":
             p.add_argument("--output", type=Path, required=True)
         else:
@@ -247,18 +271,24 @@ def main():
             p.add_argument("--expected-sha256")
             p.add_argument("--expected-tick", type=int)
     args = parser.parse_args()
-    seed = json.loads(args.genome.read_text(encoding="utf-8"))
-    graph = json.loads(args.graph.read_text(encoding="utf-8"))
-    if args.mode == "export":
-        result = export_cold_copy(args.db, args.output, seed, graph,
-                                  agent_id=args.agent_id, neural_mode=args.neural_mode)
-    else:
-        result = verify_cold_copy(args.db, seed, graph,
-                                  expected_agent_id=args.agent_id,
-                                  expected_journal_head=args.expected_head,
-                                  expected_sha256=args.expected_sha256,
-                                  expected_tick=args.expected_tick,
-                                  neural_mode=args.neural_mode)
+    options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
+                   brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
+                   temporal_mode=args.temporal_mode)
+    try:
+        seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+        graph = load_graph(args.graph)
+        agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
+        if args.mode == "export":
+            result = export_cold_copy(args.db, args.output, seed, graph,
+                                      agent_id=agent_id, **options)
+        else:
+            result = verify_cold_copy(args.db, seed, graph,
+                                      expected_agent_id=agent_id,
+                                      expected_journal_head=args.expected_head,
+                                      expected_sha256=args.expected_sha256,
+                                      expected_tick=args.expected_tick, **options)
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        parser.error(str(exc))
     print(json.dumps(result, sort_keys=True, allow_nan=False))
 
 

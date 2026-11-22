@@ -273,6 +273,37 @@ class PortableHostTests(unittest.TestCase):
             self.assertEqual(reopened.checkpoint()["journal_head"],
                              two["journal_head"])
 
+    def test_cli_uses_custom_genome_identity_on_birth_and_anchored_restart(self):
+        agent_id = "dante-foreground-fixture"
+        seed_path = self.root / "genesis.json"
+        seed_path.write_text(
+            json.dumps(dict(SEED, genome_id=agent_id)), encoding="utf-8",
+        )
+        genome_options = ("--genome", str(seed_path))
+
+        first = self.invoke(*genome_options)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        born = json.loads(first.stdout)
+        self.assertEqual(born["agent_id"], agent_id)
+        self.assertEqual((born["start_tick"], born["end_tick"],
+                          born["journal_events"]), (0, 4, 5))
+        anchor_options = ("--expected-head", born["journal_head"])
+
+        before = self.db.read_bytes()
+        wrong_genome = self.invoke(*anchor_options)
+        self.assertEqual(wrong_genome.returncode, 2)
+        self.assertIn("agent owner does not match", wrong_genome.stderr)
+        self.assertEqual(wrong_genome.stdout, "")
+        self.assertEqual(self.db.read_bytes(), before)
+
+        second = self.invoke(*genome_options, *anchor_options)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        resumed = json.loads(second.stdout)
+        self.assertEqual(resumed["agent_id"], agent_id)
+        self.assertEqual((resumed["start_tick"], resumed["end_tick"],
+                          resumed["journal_events"]), (4, 8, 9))
+        self.assertNotEqual(resumed["journal_head"], born["journal_head"])
+
     def test_wrong_mode_or_head_refuses_extra_events(self):
         self.assertEqual(self.invoke().returncode, 0)
         with self.open_aquarium() as q:

@@ -23,6 +23,7 @@ from .aquarium import MAX_REPLAY_EVENTS as AQUARIUM_REPLAY_EVENTS
 from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
+from .noosphere import NoosphereError
 
 
 SCHEMA = "mojum.portable-host.run/2"
@@ -76,19 +77,25 @@ def termination_signals(stop_event):
     def request_stop(_signum, _frame):
         stop_event.set()
 
-    for name in ("SIGINT", "SIGTERM"):
-        signum = getattr(signal, name, None)
-        if signum is None:
-            continue
-        try:
-            previous[signum] = signal.getsignal(signum)
-            signal.signal(signum, request_stop)
-        except ValueError as exc:
-            raise PortableHostError("signal handlers require the main thread") from exc
+    # Registration can fail after a previous signal was installed. Keep the
+    # installation loop inside the cleanup guard so partial changes are always
+    # rolled back before returning an error to the caller.
     try:
+        for name in ("SIGINT", "SIGTERM"):
+            signum = getattr(signal, name, None)
+            if signum is None:
+                continue
+            try:
+                handler = signal.getsignal(signum)
+                signal.signal(signum, request_stop)
+            except ValueError as exc:
+                raise PortableHostError("signal handlers require the main thread") from exc
+            # Only restore signals whose temporary handler was installed.
+            previous[signum] = handler
         yield
     finally:
-        for signum, handler in previous.items():
+        # Reverse installation order, including if the body raises.
+        for signum, handler in reversed(tuple(previous.items())):
             signal.signal(signum, handler)
 
 
@@ -218,7 +225,7 @@ def main(argv=None):
     with termination_signals(stopped):
         try:
             with Aquarium(
-                args.db, seed, graph,
+                args.db, seed, graph, agent_id=seed["genome_id"],
                 neural_mode=args.neural_mode,
                 motor_mode=args.motor_mode,
                 brain_mode=args.brain_mode,
@@ -257,7 +264,7 @@ def main(argv=None):
                         "motor_mode": aquarium.motor_mode,
                         "sensory_mode": aquarium.sensory_mode,
                     })
-        except (AquariumError, PortableHostError) as exc:
+        except (AquariumError, NoosphereError, PortableHostError) as exc:
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
     # measurements or learner state.
@@ -265,5 +272,10 @@ def main(argv=None):
     return status
 
 
-if __name__ == "__main__":
+def cli():
+    """Run the console command without returning status metadata to sys.exit."""
     main()
+
+
+if __name__ == "__main__":
+    cli()

@@ -5,13 +5,16 @@ import copy
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError
-from mojum.aquarium_cold_copy import export_cold_copy, verify_cold_copy
+from mojum.aquarium import Aquarium, AquariumError, V4_MODE
+from mojum.aquarium_cold_copy import _sha256, export_cold_copy, verify_cold_copy
+from mojum.aquarium_wire import inspect_journal
 from mojum.genesis import ACQUISITION_SCHEMA
 
 
@@ -48,6 +51,8 @@ class ColdAquariumCopyTests(unittest.TestCase):
             self.assertEqual(exported["journal_head"], baseline["journal_head"])
             self.assertEqual(exported["tick"], baseline["tick"])
             self.assertEqual(exported["event_count"], 10)
+            inspected = inspect_journal(self.exported, external_expected_head=exported["journal_head"])
+            self.assertEqual(inspected["events"], exported["event_count"])
             self.assertEqual(self._verify(exported)["tick"], 9)
             # A second isolated process may resume the verified copy. This
             # does NOT mean both databases form a replicated organism.
@@ -137,6 +142,35 @@ class ColdAquariumCopyTests(unittest.TestCase):
             self._export()
         self.assertEqual(self.exported.read_bytes(), old_bytes)
         self.assertEqual(self._verify(first)["journal_head"], first["journal_head"])
+        self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
+
+    def test_export_rejects_existing_destination_sqlite_sidecars(self):
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            child.step()
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                sidecar = self.exported.with_name(self.exported.name + suffix)
+                sidecar.write_bytes(b"existing sidecar")
+                with self.assertRaisesRegex(FileExistsError, "existing SQLite sidecars"):
+                    self._export()
+                self.assertFalse(self.exported.exists())
+                self.assertEqual(sidecar.read_bytes(), b"existing sidecar")
+                sidecar.unlink()
+
+    def test_export_rechecks_destination_after_replay(self):
+        with Aquarium(self.source, SEED, GRAPH) as child:
+            child.step()
+        sidecar = self.exported.with_name(self.exported.name + "-wal")
+
+        def add_sidecar_after_replay(path):
+            sidecar.write_bytes(b"new sidecar")
+            return _sha256(path)
+
+        with patch("mojum.aquarium_cold_copy._sha256", side_effect=add_sidecar_after_replay):
+            with self.assertRaisesRegex(FileExistsError, "existing SQLite sidecars"):
+                self._export()
+        self.assertFalse(self.exported.exists())
+        self.assertEqual(sidecar.read_bytes(), b"new sidecar")
         self.assertFalse(list(self.root.glob(".mojum-cold-copy-*")))
 
     def test_existing_empty_sqlite_source_refused_without_bootstrap(self):
@@ -243,9 +277,6 @@ class ColdAquariumCopyTests(unittest.TestCase):
         self.assertEqual(protected.read_bytes(), b"protected-data")
 
     def test_cli_export_then_verify_in_two_processes(self):
-        import subprocess
-        import sys
-
         with Aquarium(self.source, SEED, GRAPH) as child:
             for _ in range(6):
                 child.step()
@@ -264,6 +295,50 @@ class ColdAquariumCopyTests(unittest.TestCase):
         self.assertEqual(exported["journal_head"], verified["journal_head"])
         self.assertEqual(verified["event_count"], 7)
         self.assertNotIn("payload", json.dumps(verified))
+
+    def test_cli_copies_and_cold_replays_opt_in_sensorimotor_journals(self):
+        cases = (
+            dict(motor_mode=V4_MODE, sensory_mode="toy_probe_v2"),
+            dict(motor_mode="developmental_fixture", sensory_mode="toy_probe",
+                 brain_mode="developmental_controller", temporal_mode="range_guided"),
+        )
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        prefix = [sys.executable, "-m", "mojum.aquarium_cold_copy"]
+        for options in cases:
+            with self.subTest(options=options):
+                source = self.root / f"{options['motor_mode']}.sqlite3"
+                backup = source.with_suffix(".backup.sqlite3")
+                wal = source.with_name(source.name + "-wal")
+                flags = [arg for name, value in options.items()
+                         for arg in ("--" + name.replace("_", "-"), value)]
+                export = [*prefix, "export", "--db", str(source), "--output", str(backup)]
+                with Aquarium(source, SEED, GRAPH, **options) as aquarium:
+                    for _ in range(12):
+                        aquarium.step()
+                    checkpoint = aquarium.checkpoint()
+                    before = (source.read_bytes(), wal.read_bytes())
+                    refused = subprocess.run(export, env=env, text=True, capture_output=True)
+                    self.assertEqual(refused.returncode, 2, refused.stderr)
+                    self.assertIn("mode mismatch", refused.stderr)
+                    self.assertFalse(backup.exists())
+                    exported = json.loads(subprocess.check_output([*export, *flags], env=env))
+                    self.assertEqual((source.read_bytes(), wal.read_bytes()), before)
+                self.assertEqual(exported["journal_head"], checkpoint["journal_head"])
+
+                before = backup.read_bytes()
+                verified = json.loads(subprocess.check_output([
+                    *prefix, "verify", "--db", str(backup),
+                    "--expected-head", checkpoint["journal_head"],
+                    "--expected-sha256", exported["db_sha256"], "--expected-tick", "12",
+                    *flags,
+                ], env=env))
+                self.assertEqual(verified["event_count"], 13)
+                self.assertEqual(verified["db_sha256_before_replay"], exported["db_sha256"])
+                self.assertEqual(backup.read_bytes(), before)
+                with Aquarium(backup, SEED, GRAPH, **options) as restored:
+                    self.assertEqual(restored.checkpoint(), checkpoint)
+                    restored.step()
+                    self.assertEqual(restored.tick, 13)
 
 
 

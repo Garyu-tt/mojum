@@ -63,7 +63,8 @@ FAILING_CONCLUSIONS = frozenset(
     }
 )
 
-_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+# Used with fullmatch: a bare ``$`` would also accept a trailing newline.
+_SHA_RE = re.compile(r"[0-9a-fA-F]{7,64}")
 _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"
@@ -194,7 +195,7 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     head_sha = _text(raw, "headRefOid", "head_sha", "headSha")
     if not head_sha:
         raise SnapshotError("snapshot has no head SHA")
-    if not _SHA_RE.match(head_sha):
+    if not _SHA_RE.fullmatch(head_sha):
         raise SnapshotError("snapshot head SHA is not hexadecimal")
 
     base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
@@ -249,7 +250,7 @@ def evaluate(
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
 
-    if expected_head_sha is not None and not _SHA_RE.match(expected_head_sha):
+    if expected_head_sha is not None and not _SHA_RE.fullmatch(expected_head_sha):
         raise ValueError("expected_head_sha must be 7-64 hexadecimal characters")
 
     waivers = dict(waivers or {})
@@ -337,6 +338,17 @@ def evaluate(
                 )
                 continue
 
+            # A failed conclusion is authoritative even if a partially
+            # refreshed rollup still reports PENDING or an unknown status.
+            if check.conclusion in FAILING_CONCLUSIONS:
+                rejects.append(
+                    GateReason(
+                        "CHECK_FAILED",
+                        f"{check.label} concluded {check.conclusion}",
+                    )
+                )
+                continue
+
             if check.status == "PENDING":
                 defers.append(
                     GateReason(
@@ -362,14 +374,6 @@ def evaluate(
                     GateReason(
                         "CHECK_SKIPPED_UNWAIVED",
                         f"{check.label} was skipped without an explicit waiver",
-                    )
-                )
-                continue
-            if check.conclusion in FAILING_CONCLUSIONS:
-                rejects.append(
-                    GateReason(
-                        "CHECK_FAILED",
-                        f"{check.label} concluded {check.conclusion}",
                     )
                 )
                 continue
