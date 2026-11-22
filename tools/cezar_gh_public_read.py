@@ -83,7 +83,9 @@ def parse(args):
             raise Refused("unsupported GitHub search qualifier")
         # Preserve the PR-opened triage filter without altering explicit
         # historical closed/merged event queries.
-        if "is:pr" in terms and "created:>=" in q and "is:open" not in terms:
+        if ("is:pr" in terms and "created:>=" in q
+                and not any(t in terms for t in
+                            ("is:open", "is:closed", "state:open", "state:closed"))):
             q += " is:open"
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
