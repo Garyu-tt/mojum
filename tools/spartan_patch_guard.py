@@ -110,6 +110,8 @@ def validate_patch(patch: str, allowed_paths: list[str] | tuple[str, ...]) -> di
             raise PatchGuardError("file markers do not match declared path")
         i += 2
         file_hunks = 0
+        last_old_end = 0
+        last_new_end = 0
         while i < len(lines) and lines[i].startswith("@@ "):
             match = _HUNK_RE.fullmatch(lines[i])
             if not match:
@@ -122,6 +124,10 @@ def validate_patch(patch: str, allowed_paths: list[str] | tuple[str, ...]) -> di
                 not new_file and (old_start < 1 or new_start < 1)
             ):
                 raise PatchGuardError("invalid hunk positions")
+            if old_start < last_old_end or new_start < last_new_end:
+                raise PatchGuardError("overlapping or out-of-order hunks")
+            last_old_end = old_start + old_count
+            last_new_end = new_start + new_count
             hunks += 1
             file_hunks += 1
             if hunks > MAX_HUNKS:
