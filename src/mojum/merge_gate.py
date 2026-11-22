@@ -1,12 +1,13 @@
-"""Offline exact-head CI gate for PR acceptance (issue #415).
+"""Offline exact-head CI rollup preflight for PR acceptance (issue #415).
 
 The merge endpoint is not proof that the PR-triggered workflows finished, and
 parallel automation can poll a stale rollup. This module turns a *snapshot* of
-a pull request plus the SHA the caller intends to merge into a deterministic
-verdict:
+a pull request plus the head and base SHAs the caller accepted into a
+deterministic verdict:
 
-* ``ready``  -- every required check completed successfully for that exact
-  head SHA, the base matches, and GitHub reports a clean merge state;
+* ``ready``  -- every required check completed successfully in the supplied
+  head rollup, the PR's recorded base is still the current target commit, and
+  GitHub reports a clean merge state;
 * ``defer``  -- checks are queued/running/missing, the PR is a draft, or the
   merge state is not fresh enough to decide (re-query later);
 * ``reject`` -- a required check failed/was cancelled/timed out/was skipped
@@ -14,8 +15,13 @@ verdict:
 
 The module never calls a merge endpoint and never mutates a repository. A
 caller is expected to run it immediately before merging and to pass the same
-SHA to ``gh pr merge --match-head-commit`` so a last-second push cannot slip
-past the verdict.
+head SHA to ``gh pr merge --match-head-commit`` so a last-second push cannot
+slip past the verdict. Repository protection is still required to close the
+equivalent last-second base movement race.
+
+GitHub's rollup can omit each check's tested head/base provenance. A ``ready``
+preflight is therefore not merge authorization; callers must also verify the
+check runs as required by the repository acceptance policy.
 
 Inputs are the JSON produced by ``gh pr view --json ...`` (camelCase) and a
 small snake_case fixture schema used by the tests. No third-party packages and
@@ -26,13 +32,14 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
-from fnmatch import fnmatchcase
 import json
-from pathlib import Path
+import os
+import stat
 import re
 import subprocess
 import sys
 from typing import Iterable, Mapping, Sequence
+from urllib.parse import quote
 
 SCHEMA = "mojum.merge-gate.v1"
 MAX_INPUT_BYTES = 4 * 1024 * 1024
@@ -63,11 +70,21 @@ FAILING_CONCLUSIONS = frozenset(
     }
 )
 
-# Used with fullmatch: a bare ``$`` would also accept a trailing newline.
-_SHA_RE = re.compile(r"[0-9a-fA-F]{7,64}")
+_SHA_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
 _GH_FIELDS = (
     "number,headRefOid,baseRefName,headRefName,isDraft,mergeable,"
     "mergeStateStatus,statusCheckRollup"
+)
+# These three workflows run on every pull request. Pin their exact job
+# identities independently of the live rollup, which may only show a subset.
+MAIN_REQUIRED_JOBS = tuple(
+    f"{workflow} / {job} ({version})"
+    for workflow, job in (
+        ("Mojum R0.3 online-learning aquarium regression", "aquarium-stdlib"),
+        ("Mojum motor-gate independent QA", "motor-gate-stdlib"),
+        ("Mojum mesh contract independent QA", "mesh-stdlib"),
+    )
+    for version in ("3.11", "3.12", "3.13")
 )
 
 
@@ -88,6 +105,7 @@ class CheckOutcome:
     conclusion: str | None = None
     workflow: str | None = None
     head_sha: str | None = None
+    has_explicit_run_status: bool = True
 
     @property
     def label(self) -> str:
@@ -106,6 +124,8 @@ class PullRequestFacts:
     is_draft: bool = False
     mergeable: str = "UNKNOWN"
     merge_state_status: str | None = None
+    base_sha: str | None = None
+    current_base_sha: str | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +158,35 @@ def _text(raw: Mapping[str, object], *keys: str) -> str | None:
     return None
 
 
+def _read_oid(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
+    oid = None
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or _SHA_RE.fullmatch(value) is None:
+            raise SnapshotError(f"{label} must be a full hexadecimal Git object ID")
+        if oid is not None and oid.lower() != value.lower():
+            raise SnapshotError(f"{label} has conflicting aliases")
+        oid = value
+    return oid
+
+
+def _read_ref(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
+    ref = None
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise SnapshotError(f"{label} must be a nonblank string")
+        value = value.strip()
+        if ref is not None and ref != value:
+            raise SnapshotError(f"{label} has conflicting aliases")
+        ref = value
+    return ref
+
+
 def _parse_check(raw: object, index: int) -> CheckOutcome:
     if not isinstance(raw, Mapping):
         raise SnapshotError(f"check[{index}] must be an object")
@@ -147,20 +196,26 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         raise SnapshotError(f"check[{index}] has no name or context")
 
     workflow = _text(raw, "workflowName", "workflow")
-    head_sha = _text(raw, "headSha", "head_sha")
-    typename = raw.get("__typename")
+    head_sha = _read_oid(raw, f"check[{index}] head SHA", "headSha", "head_sha")
     status_raw = _text(raw, "status")
+    has_explicit_run_status = (
+        status_raw is not None and raw.get("__typename") in (None, "CheckRun")
+    )
     conclusion_raw = _text(raw, "conclusion")
     state_raw = _text(raw, "state")
 
-    if state_raw is not None and status_raw is None:
+    if state_raw is not None:
         # StatusContext: EXPECTED/PENDING are non-terminal; SUCCESS/FAILURE/
         # ERROR are terminal legacy commit statuses.
         state = state_raw.upper()
-        if state in {"SUCCESS", "FAILURE", "ERROR"}:
-            status_raw, conclusion_raw = "COMPLETED", state
-        else:
-            status_raw = state
+        if state in {"FAILURE", "ERROR"}:
+            conclusion_raw = state
+        if status_raw is None:
+            if state in {"SUCCESS", "FAILURE", "ERROR"}:
+                status_raw = "COMPLETED"
+                conclusion_raw = conclusion_raw or state
+            else:
+                status_raw = state
 
     if status_raw is None:
         if conclusion_raw is not None:
@@ -183,6 +238,7 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         conclusion=conclusion,
         workflow=workflow,
         head_sha=head_sha,
+        has_explicit_run_status=has_explicit_run_status,
     )
 
 
@@ -192,15 +248,21 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     if not isinstance(raw, Mapping):
         raise SnapshotError("snapshot must be a JSON object")
 
-    head_sha = _text(raw, "headRefOid", "head_sha", "headSha")
-    if not head_sha:
+    head_sha = _read_oid(raw, "snapshot head SHA", "headRefOid", "head_sha", "headSha")
+    if head_sha is None:
         raise SnapshotError("snapshot has no head SHA")
-    if not _SHA_RE.fullmatch(head_sha):
-        raise SnapshotError("snapshot head SHA is not hexadecimal")
 
-    base_ref = _text(raw, "baseRefName", "base_ref", "baseRef")
+    base_ref = _read_ref(raw, "snapshot base ref", "baseRefName", "base_ref", "baseRef")
     if not base_ref:
         raise SnapshotError("snapshot has no base ref")
+    base_sha = _read_oid(raw, "snapshot base SHA", "baseRefOid", "base_sha", "baseSha")
+    current_base_sha = _read_oid(
+        raw,
+        "current base SHA",
+        "currentBaseRefOid",
+        "current_base_sha",
+        "currentBaseSha",
+    )
 
     rollup = raw.get("statusCheckRollup", raw.get("checks", []))
     if rollup is None:
@@ -222,6 +284,8 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
     return PullRequestFacts(
         head_sha=head_sha,
         base_ref=base_ref,
+        base_sha=base_sha,
+        current_base_sha=current_base_sha,
         checks=checks,
         number=number,
         head_ref=_text(raw, "headRefName", "head_ref", "headRef"),
@@ -232,12 +296,10 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
 
 
 def _matches(pattern: str, check: CheckOutcome) -> bool:
-    targets = [check.name]
-    if check.workflow:
-        # A workflow name matches every job it produced, so all of that
-        # workflow's checks must pass; "workflow / job" targets one job.
-        targets.extend([check.workflow, f"{check.workflow} / {check.name}"])
-    return any(fnmatchcase(target, pattern) for target in targets)
+    # A qualified selector requires both identities from the check rollup.
+    if " / " in pattern:
+        return check.workflow is not None and pattern == check.label
+    return pattern == check.name
 
 
 def evaluate(
@@ -245,18 +307,32 @@ def evaluate(
     *,
     expected_head_sha: str | None,
     expected_base: str = "main",
+    expected_base_sha: str | None = None,
     required: Sequence[str] = (),
     waivers: Mapping[str, str] | None = None,
 ) -> GateResult:
     """Return the gate verdict for an already-parsed snapshot."""
 
-    if expected_head_sha is not None and not _SHA_RE.fullmatch(expected_head_sha):
-        raise ValueError("expected_head_sha must be 7-64 hexadecimal characters")
+    if expected_head_sha is not None and (
+        not isinstance(expected_head_sha, str) or _SHA_RE.fullmatch(expected_head_sha) is None
+    ):
+        raise ValueError("expected_head_sha must be a full 40- or 64-character hexadecimal Git object ID")
+    if not isinstance(expected_base, str) or not expected_base.strip():
+        raise ValueError("expected_base must name a branch")
+    if expected_base_sha is not None and (
+        not isinstance(expected_base_sha, str)
+        or _SHA_RE.fullmatch(expected_base_sha) is None
+    ):
+        raise ValueError(
+            "expected_base_sha must be a full 40- or 64-character hexadecimal Git object ID"
+        )
 
     waivers = dict(waivers or {})
     rejects: list[GateReason] = []
     defers: list[GateReason] = []
+    main_jobs = MAIN_REQUIRED_JOBS if facts.base_ref == "main" else ()
     patterns = tuple(required)
+    patterns += tuple(job for job in main_jobs if job not in patterns)
     matched_labels: list[str] = []
 
     if not expected_head_sha:
@@ -274,11 +350,42 @@ def evaluate(
             )
         )
 
-    if expected_base and facts.base_ref != expected_base:
+    if facts.base_ref != expected_base:
         rejects.append(
             GateReason(
                 "BASE_MISMATCH",
                 f"PR targets {facts.base_ref!r}, expected {expected_base!r}",
+            )
+        )
+
+    if not expected_base_sha:
+        rejects.append(
+            GateReason(
+                "EXPECTED_BASE_SHA_REQUIRED",
+                "pass the current target-branch SHA; a branch name alone cannot prove CI tested the current base",
+            )
+        )
+    elif facts.current_base_sha and (
+        facts.current_base_sha.lower() != expected_base_sha.lower()
+    ):
+        rejects.append(
+            GateReason(
+                "CURRENT_BASE_SHA_MISMATCH",
+                f"live base {facts.current_base_sha} is not the expected {expected_base_sha}",
+            )
+        )
+    elif facts.base_sha is None:
+        rejects.append(
+            GateReason(
+                "BASE_SHA_REQUIRED",
+                "snapshot has no PR base SHA; mergeStateStatus alone does not prove an up-to-date tested base",
+            )
+        )
+    elif facts.base_sha.lower() != expected_base_sha.lower():
+        defers.append(
+            GateReason(
+                "STALE_BASE",
+                f"PR checks are based on {facts.base_sha}, not current {expected_base_sha}; update the branch and rerun CI",
             )
         )
 
@@ -312,11 +419,21 @@ def evaluate(
         rejects.append(
             GateReason(
                 "NO_REQUIRED_CHECKS",
-                "no required check patterns were supplied; a gate without requirements proves nothing",
+                "supply at least one exact required job for a non-main target",
             )
         )
 
     for pattern in patterns:
+        # A rollup does not list jobs which have not registered yet. A
+        # wildcard (or workflow-only selector) cannot prove matrix completeness.
+        # Fail closed unless each required *job* is named exactly.
+        if (not isinstance(pattern, str) or not pattern.strip()
+                or any(meta in pattern for meta in "*?[]")):
+            rejects.append(GateReason(
+                "AMBIGUOUS_REQUIRED_PATTERN",
+                f"required job {pattern!r} must be an exact job name or workflow / job label",
+            ))
+            continue
         matches = [check for check in facts.checks if _matches(pattern, check)]
         if not matches:
             defers.append(
@@ -327,6 +444,19 @@ def evaluate(
             )
             continue
 
+        # A GitHub Actions job name is not globally unique: another workflow
+        # can publish the same name. Require the workflow-qualified identity
+        # whenever the rollup supplies one. Bare selectors remain useful for
+        # legacy commit statuses and external checks which have no workflow
+        # identity to qualify.
+        if " / " not in pattern and any(check.workflow for check in matches):
+            rejects.append(GateReason(
+                "AMBIGUOUS_REQUIRED_PATTERN",
+                f"Actions job {pattern!r} must be required as workflow / job",
+            ))
+            continue
+
+        strict_main_job = facts.base_ref == "main"
         for check in matches:
             matched_labels.append(check.label)
             if check.head_sha and check.head_sha.lower() != facts.head_sha.lower():
@@ -365,6 +495,22 @@ def evaluate(
                     )
                 )
                 continue
+            if check.workflow is not None and not check.has_explicit_run_status:
+                defers.append(
+                    GateReason(
+                        "REQUIRED_RUN_STATUS_MISSING",
+                        f"{check.label} lacks an explicit workflow job status",
+                    )
+                )
+                continue
+            if strict_main_job and check.conclusion != "SUCCESS":
+                rejects.append(
+                    GateReason(
+                        "CHECK_NOT_SUCCESS",
+                        f"{check.label} must succeed for main (conclusion {check.conclusion!r})",
+                    )
+                )
+                continue
             if check.conclusion in PASSING_CONCLUSIONS:
                 continue
             if check.conclusion in WAIVABLE_CONCLUSIONS:
@@ -384,6 +530,14 @@ def evaluate(
                 )
             )
 
+        if len(matches) > 1:
+            defers.append(
+                GateReason(
+                    "AMBIGUOUS_REQUIRED_CHECK",
+                    f"multiple entries matched required job {pattern!r}",
+                )
+            )
+
     reasons = tuple(rejects + defers)
     if rejects:
         verdict, code = REJECT, rejects[0].code
@@ -400,12 +554,9 @@ def evaluate(
     )
 
 
-def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
-    """Read a PR snapshot through the GitHub CLI (network; opt-in only)."""
+def _run_gh_json(command: Sequence[str], *, label: str) -> dict[str, object]:
+    """Run one read-only ``gh`` query and require an object response."""
 
-    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
-        raise ValueError("PR number must be a positive integer")
-    command = [gh, "pr", "view", str(pr), "--json", _GH_FIELDS]
     try:
         completed = subprocess.run(
             command, capture_output=True, text=True, check=False, timeout=60
@@ -414,13 +565,79 @@ def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
         raise FetchError(f"cannot run {' '.join(command)}: {error}") from error
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
-        raise FetchError(f"gh pr view exited {completed.returncode}: {detail}")
+        raise FetchError(f"{label} exited {completed.returncode}: {detail}")
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise FetchError(f"gh pr view returned invalid JSON: {error}") from error
+        raise FetchError(f"{label} returned invalid JSON: {error}") from error
     if not isinstance(payload, dict):
-        raise FetchError("gh pr view did not return a JSON object")
+        raise FetchError(f"{label} did not return a JSON object")
+    return payload
+
+
+def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
+    """Read a PR rollup plus its tested and current base SHAs through ``gh``."""
+
+    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
+        raise ValueError("PR number must be a positive integer")
+
+    payload = _run_gh_json(
+        [gh, "pr", "view", str(pr), "--json", _GH_FIELDS],
+        label="gh pr view",
+    )
+    pull = _run_gh_json(
+        [gh, "api", f"repos/{{owner}}/{{repo}}/pulls/{pr}"],
+        label="gh api pull",
+    )
+
+    head = pull.get("head")
+    base = pull.get("base")
+    if not isinstance(head, Mapping) or not isinstance(base, Mapping):
+        raise FetchError("gh api pull response has no head/base objects")
+    base_repo = base.get("repo")
+    if not isinstance(base_repo, Mapping):
+        raise FetchError("gh api pull response has no base repository")
+
+    try:
+        api_head_sha = _read_oid(head, "API head SHA", "sha")
+        api_base_sha = _read_oid(base, "API base SHA", "sha")
+    except SnapshotError as error:
+        raise FetchError(str(error)) from error
+    api_base_ref = _text(base, "ref")
+    api_base_repo = _text(base_repo, "full_name")
+    if api_head_sha is None or api_base_sha is None or not api_base_ref:
+        raise FetchError("gh api pull response has incomplete head/base identity")
+    if not api_base_repo or len(api_base_repo.split("/")) != 2:
+        raise FetchError("gh api pull response has an invalid base repository name")
+
+    snapshot_head = _read_oid(payload, "snapshot head SHA", "headRefOid")
+    snapshot_base_ref = _text(payload, "baseRefName")
+    snapshot_number = payload.get("number")
+    if snapshot_number != pr:
+        raise FetchError(f"gh snapshots disagree on PR number {snapshot_number!r} != {pr}")
+    if snapshot_head is None or snapshot_head.lower() != api_head_sha.lower():
+        raise FetchError("PR head changed while the acceptance snapshot was being read")
+    if snapshot_base_ref != api_base_ref:
+        raise FetchError("PR base changed while the acceptance snapshot was being read")
+
+    encoded_repo = quote(api_base_repo, safe="/")
+    encoded_ref = quote(api_base_ref, safe="")
+    current_ref = _run_gh_json(
+        [gh, "api", f"repos/{encoded_repo}/git/ref/heads/{encoded_ref}"],
+        label="gh api base ref",
+    )
+    current_object = current_ref.get("object")
+    if not isinstance(current_object, Mapping):
+        raise FetchError("gh api base ref response has no object")
+    try:
+        current_base_sha = _read_oid(current_object, "current base SHA", "sha")
+    except SnapshotError as error:
+        raise FetchError(str(error)) from error
+    if current_base_sha is None:
+        raise FetchError("gh api base ref response has no SHA")
+
+    payload["baseRefOid"] = api_base_sha
+    payload["currentBaseRefOid"] = current_base_sha
     return payload
 
 
@@ -434,10 +651,32 @@ def _load_snapshot(path: str) -> object:
             raise SnapshotError(f"stdin exceeds {MAX_INPUT_BYTES} bytes")
         return json.loads(data.decode("utf-8"))
 
-    source = Path(path)
-    if source.stat().st_size > MAX_INPUT_BYTES:
-        raise SnapshotError(f"{path} exceeds {MAX_INPUT_BYTES} bytes")
-    return json.loads(source.read_text(encoding="utf-8"))
+    # Open once and bound reads before parsing. Path.stat + read_text
+    # races a replacement with an oversized file or blocking FIFO.
+    # Missing descriptor protections must fail closed on unsupported platforms.
+    if not all(getattr(os, flag, 0) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")):
+        raise SnapshotError("secure snapshot file reads unavailable")
+    descriptor = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_CLOEXEC", 0)
+                 | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise SnapshotError("snapshot source must be a regular file")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            data = source.read(MAX_INPUT_BYTES + 1)
+    except OSError as exc:
+        # Do not leak sensitive input paths into INVALID_INPUT reports.
+        raise SnapshotError("snapshot source unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(data) > MAX_INPUT_BYTES:
+        raise SnapshotError(f"snapshot exceeds {MAX_INPUT_BYTES} bytes")
+    return json.loads(data.decode("utf-8"))
 
 
 class _Parser(argparse.ArgumentParser):
@@ -470,25 +709,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--expected-head-sha",
         required=True,
-        help="the exact commit SHA the caller intends to merge",
+        help="the full 40- or 64-character commit SHA the caller intends to merge",
     )
     parser.add_argument("--expected-base", default="main", help="expected base ref")
+    parser.add_argument(
+        "--expected-base-sha",
+        help=(
+            "current full target-branch SHA; --pr reads it independently when omitted"
+        ),
+    )
     parser.add_argument(
         "--require",
         action="append",
         default=[],
-        metavar="PATTERN",
+        metavar="JOB",
         help=(
-            "required check name, 'workflow / name', or fnmatch pattern; repeatable. "
-            "All checks matching a pattern must have completed successfully."
+            "one exact 'workflow / job' label, or a bare legacy/external status; "
+            "repeat as needed (main already requires the Aquarium, Motor Gate, "
+            "and Mesh matrices)"
         ),
     )
     parser.add_argument(
         "--waive",
         action="append",
         default=[],
-        metavar="PATTERN=REASON",
-        help="accept a skipped check matching PATTERN, recording REASON",
+        metavar="JOB=REASON",
+        help="accept a skipped extra job, recording REASON",
     )
     parser.add_argument("--gh", default="gh", help="GitHub CLI executable for --pr")
     return parser
@@ -514,10 +760,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             snapshot = _load_snapshot(args.input)
         facts = parse_snapshot(snapshot)
+        expected_base_sha = args.expected_base_sha or facts.current_base_sha
         result = evaluate(
             facts,
             expected_head_sha=args.expected_head_sha,
             expected_base=args.expected_base,
+            expected_base_sha=expected_base_sha,
             required=args.require,
             waivers=waivers,
         )
@@ -545,6 +793,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "expected_head_sha": args.expected_head_sha,
             "base_ref": facts.base_ref,
             "expected_base": args.expected_base,
+            "base_sha": facts.base_sha,
+            "current_base_sha": facts.current_base_sha,
+            "expected_base_sha": expected_base_sha,
             "required": list(result.required),
             "matched": list(result.matched),
             "waivers": waivers,
