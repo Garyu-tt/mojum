@@ -203,6 +203,52 @@ class FanoutContract(unittest.TestCase):
                 f.exclusive_json_output(path,{"overwritten":True})
 
 
+    @unittest.skipUnless(os.name=="posix", "POSIX directory permission gate")
+    def test_world_writable_output_parent_refused_before_inference(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            shared=directory/"shared"
+            shared.mkdir()
+            shared.chmod(0o777)
+            tasks_path=directory/"tasks.json"
+            tasks_path.write_text(json.dumps(tasks(1)),encoding="utf-8")
+            output=shared/"should-not-exist.json"
+            with patch.object(f,"discover_backend",
+                              side_effect=lambda port:f.Backend(port,1,1,2048)), \
+                 patch.object(f,"execute",side_effect=AssertionError("inference started")) as execute:
+                with self.assertRaisesRegex(f.FanoutError,"owner-controlled"):
+                    f.main(["--tasks",str(tasks_path),"--execute","--output",str(output)])
+                execute.assert_not_called()
+            self.assertFalse(output.exists())
+
+    @unittest.skipUnless(os.name=="posix", "POSIX symlink ancestor gate")
+    def test_symlink_output_directory_ancestor_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            real=directory/"real"
+            private=real/"private"
+            private.mkdir(parents=True,mode=0o700)
+            alias=directory/"alias"
+            alias.symlink_to(real,target_is_directory=True)
+            output=alias/"private"/"should-not-exist.json"
+            with self.assertRaisesRegex(f.FanoutError,"symlink"):
+                f.exclusive_json_output(output,{"private":"text"})
+            self.assertFalse((private/"should-not-exist.json").exists())
+
+    @unittest.skipUnless(os.name=="posix", "POSIX sticky ancestor gate")
+    def test_private_output_beneath_sticky_ancestor_allowed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            shared=directory/"sticky"
+            shared.mkdir()
+            shared.chmod(0o1777)
+            private=shared/"mine"
+            private.mkdir(mode=0o700)
+            output=private/"result.json"
+            f.exclusive_json_output(output,{"private":"text"})
+            self.assertEqual(json.loads(output.read_text()),{"private":"text"})
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode),0o600)
+
     def test_existing_output_refused_before_inference(self):
         with tempfile.TemporaryDirectory() as temp:
             directory=Path(temp)

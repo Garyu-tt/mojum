@@ -89,6 +89,21 @@ python3 tools/gpu_legion_fanout.py --tasks tasks-300.json \
   --max-jobs 300 --execute --output /srv/alt/gpu-legion-stage/agents-300.json
 ```
 
+## Private output directory contract
+
+Before any model inference, the POSIX output path must be inside an
+operator-owned, non-group/world-writable directory whose ancestors are not
+replaceable by another local user. Non-sticky writable ancestors and symlink
+ancestors are refused. A sticky directory such as `/tmp` is allowed only as
+an ancestor of a genuinely owner-private output directory. The output file
+itself is atomically reserved with `O_EXCL` and mode 0600.
+
+These checks are a fail-closed local multiuser safety boundary, **not** a
+sandbox against same-UID attackers, concurrent trusted writers or live changes
+to directory permissions. Create a trusted output directory before invoking
+`--execute`; existing files are never overwritten. Unsafe output paths are
+rejected **before** inference so token time is not spent on unsavable results.
+
 Agent outputs may contain sensitive task content, so they are not
 printed to stdout in execution mode. This prototype writes local
 output with exclusive-create semantics, retains no persistent chat
