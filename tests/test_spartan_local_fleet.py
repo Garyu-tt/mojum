@@ -556,6 +556,22 @@ class FleetTests(unittest.TestCase):
                       max_agents=2, max_jobs=1, backends=self.backends)
         self.assertFalse(untrusted_created.exists())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestor contract")
+    def test_coordinator_cli_does_not_create_missing_child_through_symlink(self):
+        external = self.root / "coordinator-external"
+        external.mkdir(mode=0o700)
+        alias = self.root / "coordinator-alias"
+        alias.symlink_to(external, target_is_directory=True)
+        child = external / "must-not-create"
+        db_path = alias / child.name / "tasks.sqlite3"
+        argv = ["spartan_coordinator", "--db", str(db_path), "init",
+                "--slots", "1"]
+        with patch.object(sys, "argv", argv):
+            with self.assertRaises(OSError):
+                sc.main()
+        self.assertFalse(child.exists(),
+                         "coordinator CLI created a child through symlink ancestry")
+
     def test_fleet_refuses_unsafe_parent_before_lock_creation(self):
         unsafe = self.root / "shared-state"
         unsafe.mkdir()
