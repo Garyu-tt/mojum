@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -17,7 +19,41 @@ def _reject_nonfinite_constant(value: str):
     raise ValueError(f"non-finite JSON constant not allowed: {value}")
 
 
+def _check_private_file(path: str) -> None:
+    """Existing SQLite database and WAL sidecars must be owner-private."""
+    for suffix in ("", "-wal", "-shm"):
+        filename = path + suffix
+        try:
+            info = os.lstat(filename)
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise PermissionError(
+                f"Spartan SQLite file must be a regular owner-only file (0600): {filename}"
+            )
+
+
 def connect(path: str) -> sqlite3.Connection:
+    # The SQLite connection stores user-supplied prompts and exact work scopes.
+    # sqlite3.connect creates a new DB using the process umask (often 0644).
+    # Creating the DB as 0600 first also makes SQLite's WAL and SHM 0600.
+    # Do not change a process-wide umask: parallel workers share it.
+    if os.name == "posix" and path != ":memory:":
+        filename = os.fspath(path)
+        if isinstance(filename, bytes) or filename.startswith("file:"):
+            raise ValueError("Spartan SQLite requires a filesystem path")
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_CLOEXEC", 0))
+        try:
+            descriptor = os.open(filename, flags, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(descriptor)
+        _check_private_file(filename)
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=30000")
