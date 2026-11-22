@@ -36,6 +36,11 @@ class AdmissionError(ValueError):
     pass
 
 
+class CapacityDeferred(AdmissionError):
+    """Another unresolved Cezar admission already owns the singleton slot."""
+    pass
+
+
 def _reject_constant(_):
     raise AdmissionError("nonfinite JSON")
 
@@ -130,7 +135,7 @@ def identity(repo: str, kind: str, number: int, revision: str,
     }
 
 
-def claim(db, ident: dict) -> tuple[bool, dict]:
+def claim(db, ident: dict, *, limit_unresolved=False) -> tuple[bool, dict]:
     db.execute("BEGIN IMMEDIATE")
     try:
         row = db.execute("SELECT * FROM admission WHERE key=?", (ident["key"],)).fetchone()
@@ -139,6 +144,12 @@ def claim(db, ident: dict) -> tuple[bool, dict]:
                 raise AdmissionError("same source revision claimed with conflicting scope")
             db.execute("COMMIT")
             return False, dict(row)
+        # Check capacity under the SAME SQLite write lock as INSERT. A prior
+        # pending() read in a separate intake process is never authoritative.
+        if (limit_unresolved and db.execute(
+                "SELECT 1 FROM admission WHERE status IN ('claimed','submitted') LIMIT 1"
+        ).fetchone() is not None):
+            raise CapacityDeferred("another unresolved admission owns the singleton slot")
         admission_id = str(uuid.uuid4())
         db.execute("""
             INSERT INTO admission(id,key,repo,kind,number,revision,phase,scope_sha256,status)
@@ -227,7 +238,7 @@ def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8) -> di
         raise AdmissionError("prompt not UTF-8") from exc
     if not prompt.strip():
         raise AdmissionError("empty prompt")
-    created, row = claim(db, ident)
+    created, row = claim(db, ident, limit_unresolved=True)
     if not created:
         return {"admitted": False, "reason": "already-claimed",
                 "admission_id": row["id"], "status": row["status"]}
