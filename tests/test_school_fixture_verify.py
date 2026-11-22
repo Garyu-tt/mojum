@@ -152,6 +152,33 @@ class SchoolColdVerifyTests(unittest.TestCase):
             self.assertEqual(result["start_tick"], 17)
 
     @unittest.skipUnless(
+        os.name == "posix" and all(hasattr(os, flag) for flag in
+                                   ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")),
+        "POSIX pinned descriptor support required",
+    )
+    def test_regular_inode_swap_with_identical_bytes_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            manifest = target / "events.json"
+            replacement = Path(temp) / "same-bytes-replacement"
+            replacement.write_bytes(manifest.read_bytes())
+            real_open = os.open
+            swapped = False
+
+            def swap_during_open(path, flags, *args, **kwargs):
+                nonlocal swapped
+                if (path == "events.json" and kwargs.get("dir_fd") is not None
+                        and not swapped):
+                    swapped = True
+                    replacement.replace(manifest)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(school_verify.os, "open", side_effect=swap_during_open):
+                with self.assertRaisesRegex(SchoolContractError, "changed while opening"):
+                    verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(swapped)
+
+    @unittest.skipUnless(
         os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
         "POSIX nofollow support required",
     )
