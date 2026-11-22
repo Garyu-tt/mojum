@@ -5,7 +5,9 @@ This tool does not provision hosts, start processes, or enforce resource limits.
 
 import argparse
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -76,8 +78,23 @@ def _node(value):
 
 def load_inventory(path):
     """Read at most 1 MiB of strict UTF-8 JSON, rejecting duplicate keys."""
-    with Path(path).open("rb") as stream:
-        data = stream.read(MAX_INPUT_BYTES + 1)
+    # Opening a FIFO with Path.open() can block before any byte limit applies.
+    # Inspect the opened inode and do not follow a final symlink on POSIX.
+    descriptor = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise InventoryError("inventory must be a regular file")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            data = stream.read(MAX_INPUT_BYTES + 1)
+    except OSError as exc:
+        raise InventoryError("cannot read inventory file") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if len(data) > MAX_INPUT_BYTES:
         raise InventoryError("inventory exceeds 1 MiB")
     try:
