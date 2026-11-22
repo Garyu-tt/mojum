@@ -190,9 +190,11 @@ class IntakeTests(unittest.TestCase):
         r=m.discover(opener=self.fake([self.issue()]))[0]
         m.admission.claim(self.db,r["identity"])
         self.assertEqual(m.pending(self.db),1)
-        self.db.close()
-        self.db=m.admission.connect(self.db_path)
-        self.assertEqual(m.pending(self.db),1)
+        second=m.admission.connect(self.db_path)
+        try:
+            self.assertEqual(m.pending(second),1)
+        finally:
+            second.close()
 
 
 if __name__ == "__main__":
