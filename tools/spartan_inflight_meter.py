@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
+import os
 import re
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -16,12 +18,77 @@ _MAX_TTL = 3_600_000
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,119}\Z")
 
 
+def _private_sqlite_path(path: str) -> Path:
+    """Fail closed before SQLite touches private worker/provider telemetry.
+
+    Private directories rule out cross-UID pathname replacement between
+    validation and sqlite3.connect. Same-UID attackers are out of scope.
+    """
+    if os.name != "posix":
+        raise PermissionError("private telemetry requires a POSIX owner/mode gate")
+    if not isinstance(path, str) or not path or path == ":memory:":
+        raise ValueError("telemetry DB must use an absolute filesystem path")
+    target = Path(path)
+    if not target.is_absolute() or ".." in target.parts or target.name in ("", ".", ".."):
+        raise ValueError("telemetry DB must use a normalized absolute path")
+
+    parent = target.parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        try:
+            info = os.lstat(directory)
+        except OSError as exc:
+            raise PermissionError("cannot inspect private telemetry directory") from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError("telemetry path contains non-directory or symlink ancestor")
+        if depth == 0:
+            if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise PermissionError("telemetry directory must be owner-only (0700)")
+        elif info.st_uid not in (0, os.geteuid()) or (
+            info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX
+        ):
+            raise PermissionError("telemetry ancestor is replaceable")
+
+    def check_existing(candidate: Path) -> bool:
+        try:
+            info = os.lstat(candidate)
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise PermissionError("cannot inspect private telemetry file") from exc
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or info.st_mode & 0o077):
+            raise PermissionError("telemetry DB/WAL/SHM must be private owner-only regular files")
+        return True
+
+    exists = check_existing(target)
+    sidecars = [Path(str(target) + suffix) for suffix in ("-wal", "-shm")]
+    has_sidecar = any(check_existing(sidecar) for sidecar in sidecars)
+    if not exists and has_sidecar:
+        raise PermissionError("orphaned telemetry journal sidecar")
+    if not exists:
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        fd = os.open(target, flags, 0o600)
+        os.close(fd)
+        check_existing(target)
+    return target
+
+
 def connect(path: str) -> sqlite3.Connection:
-    db = sqlite3.connect(path, isolation_level=None, timeout=30)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout=30000")
-    db.execute("PRAGMA journal_mode=WAL")
-    return db
+    safe_path = _private_sqlite_path(path)
+    db = sqlite3.connect(str(safe_path), isolation_level=None, timeout=30)
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=30000")
+        mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if mode.lower() != "wal":
+            raise PermissionError("telemetry SQLite WAL mode unavailable")
+        # Verify sidecars created during WAL activation before publishing handle.
+        _private_sqlite_path(str(safe_path))
+        return db
+    except BaseException:
+        db.close()
+        raise
 
 
 def create_schema(db: sqlite3.Connection) -> None:
