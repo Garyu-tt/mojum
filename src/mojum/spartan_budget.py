@@ -205,7 +205,15 @@ class BudgetLedger:
                 rt, rc, state, old_tokens, old_cost = row
                 if state != "reserved":
                     if (old_tokens, old_cost) != (tokens, usd_micros):
-                        raise BudgetDenied("conflicting provider usage receipt")
+                        # Persist the freeze before raising, otherwise a
+                        # contradictory provider receipt fails open.
+                        db.execute(
+                            "UPDATE budget_settings SET frozen=1 WHERE singleton=1"
+                        )
+                        db.commit()
+                        raise BudgetDenied(
+                            "conflicting provider usage receipt; ledger frozen"
+                        )
                     db.commit()
                     if state == "overrun":
                         raise BudgetDenied("provider exceeded reservation; ledger frozen")
