@@ -169,6 +169,10 @@ class CellExplorerV3:
         if type(blocked) is not bool or intent != self.decide(sense):
             raise CellV3Error("stale, forged or unmeasured v3 motor outcome")
         cell, action = intent["zone"], intent["action"]
+        # from_snapshot() rejects any blocked rest count, so accepting one
+        # here would append a policy state that can never be reloaded.
+        if action == "rest" and blocked:
+            raise CellV3Error("blocked rest is impossible")
         evicted = None
         dropped = 0
         if cell not in self.records and len(self.records) >= MAX_CELLS:
