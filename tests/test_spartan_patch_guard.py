@@ -99,6 +99,24 @@ class PatchGuardTests(unittest.TestCase):
         with self.assertRaises(guard.PatchGuardError):
             guard.validate_patch(EDIT + EDIT, [PATH])
 
+    def test_unicode_line_separators_cannot_forge_git_hunk_lines(self):
+        # splitlines() would treat Unicode NEL/LS/PS as new Git diff lines.
+        for separator in ("\u0085", "\u2028", "\u2029"):
+            with self.subTest(separator=repr(separator)):
+                forged = CREATED.replace("+hello\n+world\n",
+                                         "+hello" + separator + "+world\n")
+                with self.assertRaises(guard.PatchGuardError):
+                    guard.validate_patch(forged, ["tests/test_new_case.py"])
+
+        # Valid Unicode inside one physically LF-delimited line stays one line.
+        single = CREATED.replace(
+            "@@ -0,0 +1,2 @@\n+hello\n+world\n",
+            "@@ -0,0 +1 @@\n+hello\u2028world\n",
+        )
+        self.assertEqual(
+            guard.validate_patch(single, ["tests/test_new_case.py"])["additions"], 1
+        )
+
     def test_truncated_or_crlf_or_nul_or_surrogate_refused(self):
         for payload in (EDIT[:-1], EDIT.replace("\n", "\r\n"), EDIT + "\0", EDIT + "\ud800"):
             with self.subTest(payload=repr(payload[-20:])), self.assertRaises(guard.PatchGuardError):
