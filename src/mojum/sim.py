@@ -21,7 +21,10 @@ class Simulation:
         if type(dt_ns) is not int or not 1_000 <= dt_ns <= 1_000_000_000:
             raise GraphError("dt_ns must be integer in [1000, 1000000000]")
         self.dt_ns = dt_ns
-        self.graph_hash = digest(graph)
+        # Hash the validated, pinned graph, never the caller's mutable input.
+        # Otherwise a concurrent mutation (or a custom deepcopy source) can
+        # produce a checkpoint identity for a graph this runner never executes.
+        self.graph_hash = digest(self.graph)
         self.tick = 0
         self.episodes = []
 
