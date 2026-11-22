@@ -39,7 +39,7 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
           pos="{BALL_CENTER[0]} {BALL_CENTER[1]} {BALL_CENTER[2]}"/>
     <body name="cloth_anchor" pos="0 -.125 1.05">
       <joint name="anchor_slide" type="slide" axis="1 0 0"
-             damping="8" armature=".05"/>
+             limited="true" range="-.06 .06" damping="8" armature=".05"/>
       <inertial pos="0 0 0" mass=".3" diaginertia=".002 .002 .002"/>
       <flexcomp name="scarf" type="grid" dim="2" count="{GRID[0]} {GRID[1]} 1"
                 spacing=".05 .05 .05" mass=".14" radius="{VERTEX_RADIUS}">
@@ -52,7 +52,8 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
     </body>
   </worldbody>
   <actuator>
-    <position name="anchor_position" joint="anchor_slide" kp="200"/>
+    <position name="anchor_position" joint="anchor_slide" kp="200"
+              ctrllimited="true" ctrlrange="-.045 .045"/>
   </actuator>
 </mujoco>
 '''
