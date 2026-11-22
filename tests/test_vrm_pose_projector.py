@@ -61,6 +61,30 @@ assert.equal(hip.rotation.y, 0);
 assert.equal(head.rotation.x, 0);
 assert.equal(projector.apply(packet(0, 0.1)).tick, 0);
 assert.equal(hip.rotation.y, 0.1);
+
+// A loaded avatar can carry nonzero initial normalized rotations. Replaying
+// absolute measurements must not irreversibly erase that original rest pose.
+const tiltedHead = {rotation: {x: 0.35, y: -0.15, z: 0.4}};
+const tiltedVrm = {humanoid: {getNormalizedBoneNode: name =>
+  name === 'head' ? tiltedHead : null}};
+const second = createVrmPoseProjector(tiltedVrm, [
+  {id:'neck.pitch',bone:'head',axis:'x'},
+]);
+second.apply({
+  schema:'mojum.vrm-measured-pose/1', tick:1,
+  simulation_time_ns:10000000, revision:'a'.repeat(64),
+  joints:[{id:'neck.pitch',angle_rad:-0.25}],
+});
+assert.equal(tiltedHead.rotation.x, -0.25);
+second.resetReplay();
+assert.equal(tiltedHead.rotation.x, 0.35, 'replay reset erased loaded rest pose');
+assert.equal(tiltedHead.rotation.y, -0.15);
+assert.equal(tiltedHead.rotation.z, 0.4);
+assert.equal(second.apply({
+  schema:'mojum.vrm-measured-pose/1', tick:0,
+  simulation_time_ns:0, revision:'a'.repeat(64),
+  joints:[{id:'neck.pitch',angle_rad:0.1}],
+}).tick, 0);
 """ % json.dumps(uri)
         result = subprocess.run(
             [shutil.which("node"), "--input-type=module", "-e", js],
