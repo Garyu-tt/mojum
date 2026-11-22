@@ -36,6 +36,13 @@ class AdmissionError(ValueError):
     pass
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not let a loopback Cezar response induce a second HTTP request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AdmissionError("Cezar dispatch redirect forbidden")
+
+
 def _reject_constant(_):
     raise AdmissionError("nonfinite JSON")
 
@@ -56,6 +63,68 @@ def _validate_dir(parent: Path):
     if (not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid()
             or stat.S_IMODE(st.st_mode) & 0o077):
         raise AdmissionError("state parent must be owner-private")
+
+
+def read_private_prompt(prompt_file: Path) -> str:
+    """Pin the directory chain and read only a private regular file.
+
+    Never follow a symlink, including in ancestors; O_NONBLOCK prevents a
+    substituted FIFO from stalling an intake worker. The size cap applies to
+    bytes actually obtained from the open descriptor, not a prior path stat.
+    """
+    if (not prompt_file.is_absolute() or ".." in prompt_file.parts or
+            not prompt_file.name):
+        raise AdmissionError("prompt path must be absolute without traversal")
+    flags = ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY", "O_CLOEXEC")
+    if (os.name != "posix" or os.open not in os.supports_dir_fd or
+            not all(getattr(os, flag, 0) for flag in flags)):
+        raise AdmissionError("secure prompt descriptor reads unavailable")
+
+    parent_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    parent_fd = -1
+    file_fd = -1
+    try:
+        parent_fd = os.open(prompt_file.anchor, parent_flags)
+        for component in prompt_file.parts[1:-1]:
+            next_fd = os.open(component, parent_flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = next_fd
+
+        parent = os.fstat(parent_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or
+                parent.st_uid != os.geteuid() or
+                stat.S_IMODE(parent.st_mode) & 0o077):
+            raise AdmissionError("prompt directory must be owner-private")
+
+        file_fd = os.open(
+            prompt_file.name,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=parent_fd,
+        )
+        opened = os.fstat(file_fd)
+        if (not stat.S_ISREG(opened.st_mode) or
+                opened.st_uid != os.geteuid() or opened.st_nlink != 1 or
+                stat.S_IMODE(opened.st_mode) & 0o077):
+            raise AdmissionError("prompt file must be private regular file")
+        with os.fdopen(file_fd, "rb") as stream:
+            file_fd = -1
+            raw = stream.read(MAX_PROMPT + 1)
+    except OSError as exc:
+        raise AdmissionError("private prompt unavailable") from exc
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+    if not raw or len(raw) > MAX_PROMPT:
+        raise AdmissionError("prompt length invalid")
+    try:
+        prompt = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise AdmissionError("prompt not UTF-8") from exc
+    if not prompt.strip():
+        raise AdmissionError("empty prompt")
+    return prompt
 
 
 def connect(path: Path):
@@ -212,21 +281,7 @@ def mark_blocked(db, admission_id: str, run_id: str) -> dict:
 def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8) -> dict:
     if url != _LOCAL_CEZAR:
         raise AdmissionError("only pinned loopback cockpit may receive dispatch")
-    _validate_dir(prompt_file.parent)
-    st = os.lstat(prompt_file)
-    if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-            or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) & 0o077):
-        raise AdmissionError("prompt file must be private regular file")
-    with prompt_file.open("rb") as stream:
-        raw = stream.read(MAX_PROMPT + 1)
-    if not raw or len(raw) > MAX_PROMPT:
-        raise AdmissionError("prompt length invalid")
-    try:
-        prompt = raw.decode("utf-8")
-    except UnicodeError as exc:
-        raise AdmissionError("prompt not UTF-8") from exc
-    if not prompt.strip():
-        raise AdmissionError("empty prompt")
+    prompt = read_private_prompt(prompt_file)
     created, row = claim(db, ident)
     if not created:
         return {"admitted": False, "reason": "already-claimed",
@@ -243,8 +298,9 @@ def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8) -> di
     req = urllib.request.Request(url, json.dumps(body).encode("utf-8"),
                                  method="POST", headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
-                req, timeout=timeout) as response:
+        with urllib.request.build_opener(
+                urllib.request.ProxyHandler({}), NoRedirect()
+        ).open(req, timeout=timeout) as response:
             if response.status != 201 or response.geturl() != url:
                 raise AdmissionError("unexpected Cezar dispatch response")
             response_body = response.read(15000)
