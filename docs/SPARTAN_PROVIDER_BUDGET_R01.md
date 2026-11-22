@@ -52,6 +52,12 @@ Reservations are durable, even if a process crashes or the provider times out.
 - A backward wall-clock jump denies new admissions. A changed policy on an
   existing database is rejected. Persist the SQLite file and its sidecars
   securely; losing it loses the accounting evidence.
+  On POSIX the ledger requires an owner-controlled, non-writable parent,
+  rejects replaceable ancestors, symlink paths and preexisting insecure
+  DB/WAL/SHM files, and precreates new databases with mode 0600. Existing
+  unsafe ledgers are **not** chmod-repaired automatically; inspect and migrate
+  them explicitly before retrying. `:memory:` and SQLite URI paths are refused
+  because this budget must survive process restarts.
 - Do not store credentials, prompts, model responses, or raw task content in
   the ledger. The key is stored as SHA-256; model identifier, reserved ceilings,
   and provider-reported usage totals are stored in plaintext.
@@ -66,8 +72,9 @@ Reservations are durable, even if a process crashes or the provider times out.
 PYTHONPATH=src python -m unittest discover -s tests -p test_spartan_budget.py -v
 ```
 
-Seven stdlib tests cover atomic quota caps, eight competing threads, restart
-persistence, idempotency, bad input, backward time and overrun freeze. The
+Thirteen stdlib tests cover atomic quota caps, eight competing threads, restart
+persistence, idempotency, bad input, backward time, overrun freeze, and
+POSIX ledger/WAL privacy, symlink and directory-replacement safety. The
 module imports no providers or credentials and makes no network requests.
 
 The planned follow-up is to integrate this as a mandatory preflight of a
