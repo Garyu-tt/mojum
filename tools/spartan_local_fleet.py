@@ -240,8 +240,17 @@ def _private_output_fd(folder: Path) -> int:
             os.close(fd)
 
 
+def _check_artifact_reference_length(folder: Path) -> None:
+    """Avoid generating proposals whose full path cannot fit the lease ledger."""
+    # The artifact basename always has 24 digest hex chars and attempt 1..3.
+    reference = Path(folder) / (("0" * 24) + "-attempt-3.json")
+    if len(str(reference)) > coordinator.MAX_ARTIFACT_PATH:
+        raise FleetError("artifact path exceeds coordinator reference limit")
+
+
 def save_private(folder: Path, task_id: str, attempt: int, artifact):
     folder = Path(folder)
+    _check_artifact_reference_length(folder)
     dir_fd = _private_output_fd(folder)
     try:
         digest = hashlib.sha256(task_id.encode()).hexdigest()[:24]
@@ -283,6 +292,7 @@ class ModelCallMeter:
 
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
            request=None, meter=None):
+    _check_artifact_reference_length(folder)
     # A transient SQLite claim failure affects this worker, not the other
     # model calls in this batch. Do not leak raw SQLite error messages.
     try:
@@ -433,6 +443,7 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
     if type(max_cpu_inflight) is not int or not 1 <= max_cpu_inflight <= 4:
         raise FleetError("CPU concurrent admission must be 1..4")
     folder = Path(folder)
+    _check_artifact_reference_length(folder)
     private_fd = _private_output_fd(folder)
     os.close(private_fd)
     db_path = Path(db_path)

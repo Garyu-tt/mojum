@@ -472,6 +472,34 @@ class FleetTests(unittest.TestCase):
             self.assertEqual(status["states"]["blocked"], 1)
             self.assertEqual(status["states"]["queued"], 0)
 
+    def test_long_artifact_reference_fails_before_lease_or_model_call(self):
+        # coordinator.finish() rejects reference strings longer than 500.
+        # Without preflight a model proposal is written, then lost at finish.
+        long_parent = self.root / ("p" * 230)
+        long_parent.mkdir(mode=0o700)
+        long_folder = long_parent / ("q" * 230)
+        long_folder.mkdir(mode=0o700)
+        self.assertGreater(
+            len(str(long_folder / (("0" * 24) + "-attempt-3.json"))),
+            sc.MAX_ARTIFACT_PATH,
+        )
+        self.add_task("overlong-artifact", scope="artifact.path")
+        with patch.object(sc, "claim",
+                          side_effect=AssertionError("must not claim")), \
+             patch.object(fleet, "_http",
+                          side_effect=AssertionError("must not call model")):
+            with self.assertRaisesRegex(fleet.FleetError, "artifact path"):
+                fleet.run(self.db, long_folder, max_agents=2, max_jobs=1,
+                          backends=self.backends)
+            with self.assertRaisesRegex(fleet.FleetError, "artifact path"):
+                fleet.single(self.db, 1, self.backends[0], long_folder)
+            with self.assertRaisesRegex(fleet.FleetError, "artifact path"):
+                fleet.save_private(long_folder, "overlong-artifact", 1, {"x": 1})
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["queued"], 1)
+            self.assertEqual(sc.status(db)["states"]["blocked"], 0)
+        self.assertEqual(list(long_folder.iterdir()), [])
+
     def test_artifact_write_failure_is_retryable_not_permanently_blocked(self):
         self.add_task("transient-artifact")
         with patch.object(fleet, "save_private",
