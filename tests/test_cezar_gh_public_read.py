@@ -220,9 +220,9 @@ class CezarGhPublicReadTests(unittest.TestCase):
                                      client.assert_header.items()))
 
     def test_cached_response_cannot_be_swapped_to_unrelated_file(self):
-        # Old pathname preflight: is_file() followed by is_symlink()
-        # followed by read_text(). A replacement during the check leaked a
-        # different JSON file; the descriptor-pinned cache must not do so.
+        # Inject the race at the descriptor-relative open the adapter actually
+        # performs. A stale Path.is_symlink mock would never exercise the
+        # fixed implementation and could yield a false-green regression.
         with tempfile.TemporaryDirectory() as tmp:
             cache_dir = Path(tmp) / "cache"
             cache_dir.mkdir(mode=0o700)
@@ -234,23 +234,32 @@ class CezarGhPublicReadTests(unittest.TestCase):
             }), encoding="utf-8")
             cached.chmod(0o600)
             foreign = Path(tmp) / "foreign.json"
-            foreign.write_text(json.dumps({
+            foreign_content = json.dumps({
                 "body": '{"kind":"swapped"}', "link": "",
-            }), encoding="utf-8")
+            })
+            foreign.write_text(foreign_content, encoding="utf-8")
             foreign.chmod(0o600)
-            original = Path.is_symlink
+            original_open = os.open
+            observed_flags = []
 
-            def swap_on_preflight(path):
-                if path == cached:
+            def swap_at_actual_open(path, flags, *args, **kwargs):
+                if path == filename and kwargs.get("dir_fd") is not None:
+                    observed_flags.append(flags)
                     cached.unlink()
                     cached.symlink_to(foreign)
-                    return False  # The old check returned before the swap.
-                return original(path)
+                return original_open(path, flags, *args, **kwargs)
 
             with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
-                    Path, "is_symlink", swap_on_preflight):
-                body, _ = adapter.read(url, ttl=300)
-            self.assertEqual(body, b'{"kind":"trusted"}')
+                    adapter.os, "open", side_effect=swap_at_actual_open):
+                with self.assertRaisesRegex(adapter.Refused,
+                                            "untrusted cache entry"):
+                    adapter.read(url, ttl=300)
+            self.assertEqual(len(observed_flags), 1,
+                             "cache race injection never executed")
+            self.assertTrue(observed_flags[0] & os.O_NOFOLLOW,
+                            "cached entry must never follow a symlink")
+            self.assertTrue(cached.is_symlink())
+            self.assertEqual(foreign.read_text(encoding="utf-8"), foreign_content)
 
     def test_cache_rejects_symlink_in_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:
