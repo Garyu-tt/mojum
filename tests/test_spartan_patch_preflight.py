@@ -86,6 +86,14 @@ class PatchPreflightTests(unittest.TestCase):
         self.rejects(patch(body="@@ -0,0 +0,0 @@\n"))
         self.rejects(patch(body=""))
 
+    def test_unicode_line_separators_cannot_forge_hunk_lines(self):
+        # Git interprets these as characters inside one physical deleted
+        # line, not as an extra added line. splitlines() falsely accepted it.
+        for separator in ("\u0085", "\u2028", "\u2029"):
+            forged = patch(body=f"@@ -1 +1 @@\n-old{separator}+new\n")
+            with self.subTest(separator=repr(separator)):
+                self.rejects(forged)
+
     def test_binary_encoding_and_cr(self):
         self.rejects(patch() + b"\x00")
         self.rejects(patch().replace(b"\n", b"\r\n"))

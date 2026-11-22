@@ -79,7 +79,10 @@ def inspect_patch(blob: bytes, *, allow: tuple[str, ...], checkout: Path | None 
     if checkout is not None:
         if not checkout.is_dir() or checkout.is_symlink():
             raise PatchRejected("checkout must be a real directory")
-    lines = source.splitlines()
+    # Git patch records are separated only by LF. str.splitlines() also
+    # splits Unicode NEL/LS/PS inside a single physical hunk line, which
+    # could counterfeit a deletion and an addition from one real line.
+    lines = source[:-1].split("\n")
     i = 0
     files: list[str] = []
     changes = 0
