@@ -4,12 +4,15 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from unittest.mock import Mock
 
+# The independent SQLite resource audit imports tests by absolute test path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import gpu_legion_fanout as f
 
 
