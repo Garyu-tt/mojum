@@ -228,6 +228,56 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(duplicate)
         self.assertEqual(old["status"], "finished")
 
+    def test_dispatch_fails_closed_on_regular_file_swap_after_preflight(self):
+        p = self.private_prompt()
+        replacement = self.home / "replacement.txt"
+        replacement.write_text("UNTRUSTED_REPLACEMENT", encoding="utf-8")
+        replacement.chmod(0o600)
+        original_lstat = os.lstat
+        swapped = False
+
+        def raced_lstat(path, *args, **kwargs):
+            nonlocal swapped
+            st = original_lstat(path, *args, **kwargs)
+            if Path(path) == p and not swapped:
+                swapped = True
+                os.replace(replacement, p)
+            return st
+
+        with patch.object(m.os, "lstat", side_effect=raced_lstat):
+            with self.assertRaises(m.AdmissionError):
+                m.dispatch(self.db, self.ident(), p)
+        self.assertTrue(swapped)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
+    def test_dispatch_fails_closed_on_symlink_swap_after_preflight(self):
+        p = self.private_prompt()
+        secret = self.home / "secret.txt"
+        secret.write_text("MUST_NOT_READ_SECRET", encoding="utf-8")
+        secret.chmod(0o600)
+        original_lstat = os.lstat
+        swapped = False
+
+        def raced_lstat(path, *args, **kwargs):
+            nonlocal swapped
+            st = original_lstat(path, *args, **kwargs)
+            if Path(path) == p and not swapped:
+                swapped = True
+                p.rename(self.home / "original.txt")
+                p.symlink_to(secret)
+            return st
+
+        with patch.object(m.os, "lstat", side_effect=raced_lstat):
+            with self.assertRaises(m.AdmissionError):
+                m.dispatch(self.db, self.ident(), p)
+        self.assertTrue(swapped)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
+    def test_cezar_dispatch_redirect_is_refused(self):
+        with self.assertRaises(m.AdmissionError):
+            m.NoRedirect().redirect_request(None, None, 307, "redirect", {},
+                                            "https://example.invalid/receive")
+
     def test_dispatch_refuses_nonprivate_prompt(self):
         p = self.private_prompt()
         p.chmod(0o644)

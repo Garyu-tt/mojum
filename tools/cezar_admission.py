@@ -216,17 +216,63 @@ def mark_blocked(db, admission_id: str, run_id: str) -> dict:
         raise
 
 
+def _read_private_prompt(prompt_file: Path) -> bytes:
+    """Pin the private directory and file inodes for the bounded model prompt."""
+    parent = prompt_file.parent
+    _validate_dir(parent)
+    try:
+        expected_dir = os.lstat(parent)
+        expected_file = os.lstat(prompt_file)
+    except OSError as exc:
+        raise AdmissionError("private prompt preflight failed") from exc
+    if (not stat.S_ISREG(expected_file.st_mode)
+            or expected_file.st_uid != os.geteuid() or expected_file.st_nlink != 1
+            or stat.S_IMODE(expected_file.st_mode) & 0o077):
+        raise AdmissionError("prompt file must be private regular file")
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")
+    if any(not hasattr(os, flag) for flag in required) or os.open not in os.supports_dir_fd:
+        raise AdmissionError("secure prompt reader unavailable")
+    dirfd = None
+    fd = None
+    try:
+        dirfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY
+                        | os.O_NOFOLLOW | os.O_CLOEXEC)
+        actual_dir = os.fstat(dirfd)
+        if (not stat.S_ISDIR(actual_dir.st_mode) or actual_dir.st_uid != os.geteuid()
+                or stat.S_IMODE(actual_dir.st_mode) & 0o077
+                or (actual_dir.st_dev, actual_dir.st_ino)
+                   != (expected_dir.st_dev, expected_dir.st_ino)):
+            raise AdmissionError("private prompt directory changed")
+        fd = os.open(prompt_file.name, os.O_RDONLY | os.O_NOFOLLOW
+                     | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dirfd)
+        actual = os.fstat(fd)
+        if (not stat.S_ISREG(actual.st_mode) or actual.st_uid != os.geteuid()
+                or actual.st_nlink != 1 or stat.S_IMODE(actual.st_mode) & 0o077
+                or (actual.st_dev, actual.st_ino)
+                   != (expected_file.st_dev, expected_file.st_ino)):
+            raise AdmissionError("private prompt inode changed")
+        with os.fdopen(fd, "rb") as stream:
+            fd = None
+            return stream.read(MAX_PROMPT + 1)
+    except OSError as exc:
+        raise AdmissionError("private prompt descriptor rejected") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if dirfd is not None:
+            os.close(dirfd)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AdmissionError("local Cezar POST redirect refused")
+
+
 def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
              single_flight=True) -> dict:
     if url != _LOCAL_CEZAR:
         raise AdmissionError("only pinned loopback cockpit may receive dispatch")
-    _validate_dir(prompt_file.parent)
-    st = os.lstat(prompt_file)
-    if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-            or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) & 0o077):
-        raise AdmissionError("prompt file must be private regular file")
-    with prompt_file.open("rb") as stream:
-        raw = stream.read(MAX_PROMPT + 1)
+    raw = _read_private_prompt(prompt_file)
     if not raw or len(raw) > MAX_PROMPT:
         raise AdmissionError("prompt length invalid")
     try:
@@ -252,7 +298,7 @@ def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
     req = urllib.request.Request(url, json.dumps(body).encode("utf-8"),
                                  method="POST", headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(
                 req, timeout=timeout) as response:
             if response.status != 201 or response.geturl() != url:
                 raise AdmissionError("unexpected Cezar dispatch response")
