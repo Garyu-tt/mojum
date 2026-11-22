@@ -197,6 +197,29 @@ class IntakeTests(unittest.TestCase):
         with self.assertRaises(m.admission.AdmissionError):
             m.fetch_json("https://evil.example/metadata",list)
 
+    def test_public_api_redirect_rejected_before_network_follow(self):
+        # urllib's default HTTPRedirectHandler follows 30x *before* geturl().
+        # The intake must refuse that follow, not merely inspect the final URL.
+        with self.assertRaises(m.admission.AdmissionError):
+            m.NoRedirect().redirect_request(
+                None, None, 302, "Moved", {},
+                "https://untrusted.invalid/redirected",
+            )
+
+        class ProbeStopped(Exception):
+            pass
+
+        class ProbeClient:
+            def open(self, request, timeout=12):
+                raise ProbeStopped
+
+        with patch.object(m.urllib.request, "build_opener",
+                          return_value=ProbeClient()) as factory:
+            with self.assertRaises(ProbeStopped):
+                m.fetch_json(self.api, list)
+        self.assertTrue(any(isinstance(handler, m.NoRedirect)
+                            for handler in factory.call_args.args))
+
     def test_malformed_pr_sha_is_rejected(self):
         with self.assertRaises(m.admission.AdmissionError):
             m.discover(opener=self.fake([self.issue(612,kind="pull")],sha="not-sha"))
