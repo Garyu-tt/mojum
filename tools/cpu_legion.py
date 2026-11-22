@@ -206,6 +206,10 @@ def _write_private_patch(out, name, diff):
                 next_fd = os.open(part, flags, dir_fd=current_fd)
             except FileNotFoundError:
                 os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                # A crash after the task enters SQLite review must not lose
+                # an ancestor created for its patch artifact. Sync each new
+                # child directory entry in the still-pinned parent first.
+                os.fsync(current_fd)
                 next_fd = os.open(part, flags, dir_fd=current_fd)
             os.close(current_fd)
             current_fd = next_fd
@@ -216,11 +220,20 @@ def _write_private_patch(out, name, diff):
             name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
             | getattr(os, "O_CLOEXEC", 0), 0o600, dir_fd=current_fd,
         )
-        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
-            file_fd = -1
-            handle.write(diff)
+        try:
+            with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+                file_fd = -1
+                handle.write(diff)
+                handle.flush()
+                os.fsync(handle.fileno())
+            # Commit the directory entry before the separate SQLite review
+            # state can point to this patch after an abrupt power loss.
+            os.fsync(current_fd)
+        except BaseException:
+            os.unlink(name, dir_fd=current_fd)
+            raise
     except OSError as exc:
-        raise ValueError("cannot securely write patch artifact") from exc
+        raise ValueError("cannot securely persist patch artifact") from exc
     finally:
         if file_fd >= 0:
             os.close(file_fd)
@@ -228,7 +241,37 @@ def _write_private_patch(out, name, diff):
             os.close(current_fd)
 
 
+
+def _discard_unreviewed_patch(out, name):
+    """Remove a lease-rejected private patch via no-follow directory handles."""
+    if not re.fullmatch(r"[0-9a-f]{16}-[0-9a-f]{16}\.patch", name):
+        raise ValueError("invalid unreviewed patch basename")
+    out = Path(out)
+    if ".." in out.parts:
+        raise ValueError("output directory traversal forbidden")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open("/", flags)
+    try:
+        for part in out.absolute().parts[1:]:
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        st = os.fstat(fd)
+        if st.st_uid != os.geteuid() or st.st_mode & 0o077:
+            raise ValueError("unreviewed patch directory is not private")
+        os.unlink(name, dir_fd=fd)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def run_one(db_path, worker, root, out, url, model, timeout):
+    # Pin the lexical absolute pathname before writing the durable SQLite
+    # proposal reference; a reviewer may run from a different working dir.
+    out = Path(out)
+    if ".." in out.parts:
+        raise ValueError("output directory traversal forbidden")
+    out = Path(os.path.abspath(out))
     db = queue.connect(db_path)
     try:
         task = queue.claim(db, worker, int(time.time()), max(600, timeout * 3))
@@ -248,6 +291,9 @@ def run_one(db_path, worker, root, out, url, model, timeout):
             _write_private_patch(out, name, diff)
             if not queue.finish(db, worker, task["id"], "review", int(time.time()),
                                 str(out / name), attempt=task["attempts"]):
+                # SQLite explicitly refused the fenced review transition:
+                # the private diff is now unreferenced, so reclaim it.
+                _discard_unreviewed_patch(out, name)
                 raise ValueError("lease expired before review")
             return {"worker": worker, "state": "review", "task": task["id"],
                     "patch": str(out / name), "sha256": digest, "base_sha": sha}
