@@ -65,6 +65,22 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
         data["entries"][0]["packages"][0]["url"] = "http://internal.local/secret"
         self.check_rejected(json.dumps(data).encode())
 
+    def test_rejects_malformed_https_origins(self):
+        # urllib.parse.urlsplit() may parse these as HTTPS while leaving
+        # hostname absent, malformed or containing unsafe control characters.
+        invalid = (
+            "https://:", "https://:443", "https://example..com/package",
+            "https://-invalid.example/package", "https://localhost/path",
+            "https://upstream.example:bad/path",
+            "https://upstream.example\u0000.fake/path",
+            "https://upstream.example/path#fragment",
+        )
+        for url in invalid:
+            with self.subTest(url=repr(url)):
+                data = load_catalog()
+                data["entries"][0]["packages"][0]["url"] = url
+                self.check_rejected(json.dumps(data).encode())
+
     def test_rejects_duplicate_issue_and_package(self):
         data = load_catalog()
         data["entries"][1]["issue"] = data["entries"][0]["issue"]
