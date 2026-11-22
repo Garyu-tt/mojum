@@ -41,6 +41,11 @@ def _check_private_parent(path: str) -> None:
     A file-mode check followed by sqlite3.connect(path) is unsafe if another
     local account can replace the checked path between those operations.
     """
+    # Lexical abspath() collapses '..' before resolving symlinks, while
+    # sqlite3.connect() follows the original path in filesystem order.
+    # Reject this ambiguity before checking any directory inode.
+    if ".." in Path(path).parts:
+        raise PermissionError("Spartan SQLite parent directory path traversal is forbidden")
     # An unsafe ancestor permits replacing even an owner-only parent.
     parent = Path(os.path.abspath(path)).parent
     for depth, directory in enumerate((parent, *parent.parents)):
