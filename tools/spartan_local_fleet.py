@@ -230,22 +230,31 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
             # Prefer a different model family for independent comparison.
             alternatives.sort(key=lambda b: (b.model == backend.model, -b.ctx, b.port))
             targets.append(alternatives[0])
-        results = []
-        for clone, target in enumerate(targets):
+        def invoke(clone, target):
             if locks is None:
-                results.append(call_model(target, prompt, role, max_tokens,
-                                          clone=clone, request=request))
-            else:
-                # Cap local semaphore delay as well as the 90s HTTP request:
-                # two clone calls must complete within the 240s task lease.
-                lock = locks[target.port]
-                if not lock.acquire(timeout=MODEL_SLOT_WAIT_SECONDS):
-                    raise TransientFleetError("model slot remained busy")
-                try:
-                    results.append(call_model(target, prompt, role, max_tokens,
-                                              clone=clone, request=request))
-                finally:
-                    lock.release()
+                return call_model(target, prompt, role, max_tokens,
+                                  clone=clone, request=request)
+            # All requests, including clones, share their physical backend
+            # semaphore; a clone never circumvents CPU or GPU admission.
+            lock = locks[target.port]
+            if not lock.acquire(timeout=MODEL_SLOT_WAIT_SECONDS):
+                raise TransientFleetError("model slot remained busy")
+            try:
+                return call_model(target, prompt, role, max_tokens,
+                                  clone=clone, request=request)
+            finally:
+                lock.release()
+
+        if len(targets) == 1:
+            results = [invoke(0, targets[0])]
+        else:
+            # These are genuinely simultaneous independent model calls when
+            # the two distinct physical backends have spare slots, rather
+            # than two sequential copies of the same proposal.
+            with ThreadPoolExecutor(max_workers=2) as clones_pool:
+                futures = [clones_pool.submit(invoke, i, target)
+                           for i, target in enumerate(targets)]
+                results = [future.result() for future in futures]
         artifact = {"schema": "mojum.spartan.local-proposal.v1",
                     "task_id": task["id"], "scope": task["scope"],
                     "worker": worker_id, "attempt": attempt,
@@ -269,7 +278,8 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
             return {"worker": worker_id, "state": "lease_expired",
                     "artifact_created": True}
         return {"worker": worker_id, "state": "proposal_for_independent_review",
-                "artifact": saved, "port": backend.port}
+                "artifact": saved, "port": backend.port,
+                "model_calls_completed": len(results)}
     except Exception as exc:
         retryable = (isinstance(exc, TransientFleetError)
                      and attempt < coordinator.MAX_ATTEMPTS)
@@ -394,6 +404,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                 "admitted_concurrent_model_calls": admitted,
                 "proposals": sum(r.get("state") == "proposal_for_independent_review"
                                  for r in results),
+                "model_calls_completed": sum(r.get("model_calls_completed", 0)
+                                             for r in results),
                 "blocked": sum(r.get("state") == "blocked" for r in results),
                 "retry_queued": sum(r.get("state") == "retry_queued"
                                     for r in results),
