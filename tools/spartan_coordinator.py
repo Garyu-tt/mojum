@@ -19,49 +19,71 @@ def _reject_nonfinite_constant(value: str):
     raise ValueError(f"non-finite JSON constant not allowed: {value}")
 
 
-def _check_private_sqlite_path(path: str) -> None:
-    """Create owner-only SQLite storage before SQLite opens DB/WAL/SHM.
-
-    Reject an unsafe existing inode instead of chmod-ing a caller-selected
-    path. The parent must not be group/other writable, preventing a different
-    local user from replacing the checked path between validation and open.
-    """
-    db_path = Path(path)
-    parent = os.lstat(db_path.parent)
-    if (not stat.S_ISDIR(parent.st_mode)
-            or parent.st_uid != os.geteuid()
-            or parent.st_mode & 0o022):
-        raise ValueError("Spartan SQLite parent must be owner-controlled and not group/other writable")
-
-    owner = os.geteuid()
-    for filename in (str(db_path), str(db_path) + "-wal", str(db_path) + "-shm"):
+def _check_private_file(path: str) -> None:
+    """Existing SQLite database and WAL sidecars must be owner-private."""
+    for suffix in ("", "-wal", "-shm"):
+        filename = path + suffix
         try:
-            existing = os.lstat(filename)
+            info = os.lstat(filename)
         except FileNotFoundError:
             continue
-        if (not stat.S_ISREG(existing.st_mode)
-                or existing.st_uid != owner
-                or stat.S_IMODE(existing.st_mode) & 0o077):
-            raise ValueError("Spartan SQLite files must be owner-only regular files")
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise PermissionError(
+                f"Spartan SQLite file must be a regular owner-only file (0600): {filename}"
+            )
 
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    flags |= getattr(os, "O_CLOEXEC", 0)
-    descriptor = os.open(db_path, flags, 0o600)
-    try:
-        opened = os.fstat(descriptor)
-        if (not stat.S_ISREG(opened.st_mode)
-                or opened.st_uid != owner
-                or stat.S_IMODE(opened.st_mode) & 0o077):
-            raise ValueError("Spartan SQLite database is not owner-only")
-    finally:
-        os.close(descriptor)
+
+def _check_private_parent(path: str) -> None:
+    """Refuse writable or replaceable SQLite parent directories.
+
+    A file-mode check followed by sqlite3.connect(path) is unsafe if another
+    local account can replace the checked path between those operations.
+    """
+    # Lexical abspath() collapses '..' before resolving symlinks, while
+    # sqlite3.connect() follows the original path in filesystem order.
+    # Reject this ambiguity before checking any directory inode.
+    if ".." in Path(path).parts:
+        raise PermissionError("Spartan SQLite parent directory path traversal is forbidden")
+    # An unsafe ancestor permits replacing even an owner-only parent.
+    parent = Path(os.path.abspath(path)).parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError("Spartan SQLite parent directory chain contains a symlink")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise PermissionError(
+                f"Spartan SQLite parent directory chain is replaceable: {directory}"
+            )
 
 
 def connect(path: str) -> sqlite3.Connection:
-    # SQLite's special in-memory database must never be pre-created as a file.
-    # This is also used by isolated coordinator tests and ephemeral callers.
-    if path != ":memory:":
-        _check_private_sqlite_path(path)
+    # The SQLite connection stores user-supplied prompts and exact work scopes.
+    # sqlite3.connect creates a new DB using the process umask (often 0644).
+    # Creating the DB as 0600 first also makes SQLite's WAL and SHM 0600.
+    # Do not change a process-wide umask: parallel workers share it.
+    if os.name == "posix" and path != ":memory:":
+        filename = os.fspath(path)
+        if isinstance(filename, bytes) or filename.startswith("file:"):
+            raise ValueError("Spartan SQLite requires a filesystem path")
+        _check_private_parent(filename)
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_CLOEXEC", 0))
+        try:
+            descriptor = os.open(filename, flags, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(descriptor)
+        _check_private_file(filename)
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=30000")
