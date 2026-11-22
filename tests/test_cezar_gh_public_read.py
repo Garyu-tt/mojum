@@ -71,6 +71,8 @@ class CezarGhPublicReadTests(unittest.TestCase):
             "repo:Garyu-tt/mojum is:pr state:closed created:>=2026-11-20",
             "repo:Garyu-tt/mojum is:pr is:closed created:>=2026-11-20",
             "repo:Garyu-tt/mojum is:pr state:open created:>=2026-11-20",
+            "repo:Garyu-tt/mojum is:pr is:open created:>=2026-11-20",
+            "repo:Garyu-tt/mojum is:pr created:>=2026-11-20 closed:>=2026-11-21",
         )
         for query in explicit:
             with self.subTest(query=query):
