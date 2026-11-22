@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -147,11 +148,28 @@ class GpuLegionPlanTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NONBLOCK"),
                          "POSIX nonblocking descriptor required")
     def test_fifo_snapshot_is_rejected_without_waiting_for_writer(self):
+        # An accidental regression removing O_NONBLOCK must fail the test,
+        # not strand the entire CI runner on a FIFO open with no writer.
         with tempfile.TemporaryDirectory() as folder:
             fifo = Path(folder) / "blocked.json"
             os.mkfifo(fifo)
-            with self.assertRaisesRegex(gpu.InventoryError, "regular file"):
-                gpu.load_inventory(fifo)
+            script = (
+                "import sys\n"
+                "from tools import gpu_legion_plan as gpu\n"
+                "try:\n"
+                "    gpu.load_inventory(sys.argv[1])\n"
+                "except gpu.InventoryError as exc:\n"
+                "    if 'regular file' in str(exc):\n"
+                "        raise SystemExit(0)\n"
+                "    raise\n"
+                "raise SystemExit('FIFO unexpectedly accepted')\n"
+            )
+            completed = subprocess.run(
+                [sys.executable, "-c", script, str(fifo)],
+                cwd=REPO_ROOT, capture_output=True, text=True,
+                timeout=5, check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"),
                          "POSIX nofollow descriptor required")
@@ -172,6 +190,10 @@ class GpuLegionPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(gpu.InventoryError, "exceeds 64 KiB"):
                 gpu.load_inventory(snapshot)
 
+    @unittest.skipUnless(
+        all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")),
+        "secure local inventory reads required",
+    )
     def test_exact_maximum_inventory_size_remains_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
             snapshot = Path(folder) / "exact.json"
