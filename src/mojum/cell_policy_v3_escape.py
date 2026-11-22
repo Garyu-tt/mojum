@@ -58,6 +58,70 @@ class CellV3EscapeError(ValueError):
     """Invalid snapshot, causal observation or exhausted replay envelope."""
 
 
+def _check_streak_counters(state):
+    """Reject streak counters that no real observe() history can produce.
+
+    observe() resets the blocked-probe streak on rest and the rest streak on
+    any move, so both can never be non-zero together. The most recently
+    observed cell is never evicted (eviction only happens when a new cell is
+    being added, and that cell becomes the newest), so a live streak must be
+    backed by an outcome of the right kind in the cell seen at last_tick.
+    """
+    rests = state["consecutive_rests"]
+    probes = state["consecutive_blocked_probes"]
+    updates = state["updates"]
+    if rests and probes:
+        raise CellV3EscapeError("rest and blocked-probe streaks coexist")
+    if rests > updates or probes > updates:
+        raise CellV3EscapeError("escape streak longer than observed history")
+    if not (rests or probes):
+        return
+    last_cells = [
+        key for key, seen in state["last_seen_at"].items()
+        if seen == state["last_tick"]
+    ]
+    if len(last_cells) != 1:
+        raise CellV3EscapeError("escape streak without a last observed cell")
+    actions = state["records"][last_cells[0]]
+    if rests and "rest" not in actions:
+        raise CellV3EscapeError("rest streak without rest in last cell")
+    if probes and not any(
+        name != "rest" and counts[1] > 0 for name, counts in actions.items()
+    ):
+        raise CellV3EscapeError("blocked-probe streak without blocked move")
+    # A terminal streak spans at most four consecutive ticks. All cells
+    # observed during those ticks must still be in the 512-cell LRU table;
+    # older evicted observations cannot substantiate a recent streak.
+    if rests:
+        measured_rests = sum(
+            acts.get("rest", (0, 0))[0] for acts in state["records"].values()
+        )
+        if rests > measured_rests:
+            raise CellV3EscapeError("rest streak lacks measured outcomes")
+    if probes:
+        measured_blocks = sum(
+            counts[1] for acts in state["records"].values()
+            for action, counts in acts.items() if action != "rest"
+        )
+        if probes > measured_blocks:
+            raise CellV3EscapeError("blocked-probe streak lacks measured outcomes")
+    # A retained cell last seen during the terminal streak must have at
+    # least one measured outcome of the claimed kind. Global counts alone
+    # cannot prove a streak: older rests/blocks may belong to unrelated ticks.
+    first_streak_tick = state["last_tick"] - (rests or probes) + 1
+    for cell, seen_at in state["last_seen_at"].items():
+        if seen_at < first_streak_tick:
+            continue
+        recorded = state["records"][cell]
+        if rests and "rest" not in recorded:
+            raise CellV3EscapeError("recent cell lacks measured rest")
+        if probes and not any(
+            action != "rest" and counts[1] > 0
+            for action, counts in recorded.items()
+        ):
+            raise CellV3EscapeError("recent cell lacks measured blocked move")
+
+
 class CellExplorerV3Escape:
     """Bounded 4cm memory plus measured rest-escape probing (opt-in profile)."""
 
@@ -128,6 +192,7 @@ class CellExplorerV3Escape:
                                       or state["consecutive_blocked_probes"]):
             raise CellV3EscapeError("unobserved escape counters")
         observed_live = 0
+        observations_by_tick = {}
         for key, actions in state["records"].items():
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
@@ -156,6 +221,9 @@ class CellExplorerV3Escape:
                 raise CellV3EscapeError(
                     "more escape cell observations than elapsed ticks"
                 )
+            if last_seen in observations_by_tick:
+                raise CellV3EscapeError("multiple escape cells observed on one tick")
+            observations_by_tick[last_seen] = cell_observations
             observed_live += cell_observations
         if observed_live + state["forgotten_observations"] != state["updates"]:
             raise CellV3EscapeError("escape lost or double-counted observations")
@@ -163,6 +231,30 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
+        _check_streak_counters(state)
+
+        # Each observation belongs to exactly one cell and tick. A live
+        # snapshot must retain the latest observed cell, and an eviction can
+        # only happen after the bounded table has first reached capacity.
+        if state["updates"] and not state["records"]:
+            raise CellV3EscapeError("escape updates without a retained cell")
+        if state["updates"] and max(observations_by_tick) != state["last_tick"]:
+            raise CellV3EscapeError("latest escape cell observation does not match tick")
+        if state["evictions"] > max(0, state["updates"] - MAX_CELLS):
+            raise CellV3EscapeError("impossible escape eviction history")
+        if state["evictions"] and len(state["records"]) != MAX_CELLS:
+            raise CellV3EscapeError("escape retention shrank after eviction")
+
+        # Evicted LRU observations predate the last observation of every
+        # retained cell. Their cumulative count must fit each tick prefix;
+        # per-cell deadlines alone do not guarantee a possible history.
+        observed_prefix = state["forgotten_observations"]
+        for tick, count in sorted(observations_by_tick.items()):
+            observed_prefix += count
+            if observed_prefix > tick + 1:
+                raise CellV3EscapeError(
+                    "combined escape cell observations exceed elapsed ticks"
+                )
 
         model = cls()
         model.last_tick = state["last_tick"]
@@ -194,6 +286,14 @@ class CellExplorerV3Escape:
             if (selected == "rest"
                     and self.consecutive_rests >= MAX_CONSECUTIVE_RESTS):
                 selected = unblocked_moves[0]
+            elif (selected != "rest"
+                    and self.consecutive_rests < MAX_CONSECUTIVE_RESTS
+                    and self.consecutive_blocked_probes
+                        >= REPROBE_BLOCKED_BEFORE_REST):
+                # The pause after a measured bout of failed probes is a
+                # property of the streak, not of the current cell. A fresh or
+                # foreign cell cannot extend it beyond the versioned ceiling.
+                selected = "rest"
         elif (self.consecutive_rests < MAX_CONSECUTIVE_RESTS
                 and self.consecutive_blocked_probes >= REPROBE_BLOCKED_BEFORE_REST):
             # One bounded pause after a measured bout of failed probes.
