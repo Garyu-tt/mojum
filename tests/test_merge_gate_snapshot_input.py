@@ -107,6 +107,29 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertNotIn(secret, stdout.getvalue())
             self.assertEqual(result["error"], "snapshot source unavailable")
 
+    def test_overdeep_snapshot_json_fails_closed_for_file_and_stdin(self):
+        # A small JSON document can exceed CPython's nesting limit even when
+        # it is well below the input byte cap. Do not leak a traceback.
+        nested = "[" * 15000 + "0" + "]" * 15000
+        self.assertLess(len(nested), MAX_INPUT_BYTES)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "overdeep.json"
+            path.write_text(nested, encoding="utf-8")
+            with self.assertRaisesRegex(SnapshotError, "JSON nesting limit"):
+                _load_snapshot(str(path))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main(["--input", str(path),
+                             "--expected-head-sha", "a" * 40,
+                             "--expected-base-sha", "b" * 40])
+            self.assertEqual(code, 1)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["code"], "INVALID_INPUT")
+            self.assertEqual(result["error"], "snapshot JSON nesting limit exceeded")
+        with mock.patch.object(sys, "stdin", io.StringIO(nested)):
+            with self.assertRaisesRegex(SnapshotError, "JSON nesting limit"):
+                _load_snapshot("-")
+
     @unittest.skipUnless(
         sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
         "Linux process fd inventory required",
