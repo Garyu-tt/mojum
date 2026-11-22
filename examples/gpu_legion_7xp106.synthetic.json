@@ -1,0 +1,54 @@
+{
+  "source": "synthetic",
+  "gpus": [
+    {
+      "index": 0,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    },
+    {
+      "index": 1,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    },
+    {
+      "index": 2,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    },
+    {
+      "index": 3,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    },
+    {
+      "index": 4,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    },
+    {
+      "index": 5,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    },
+    {
+      "index": 6,
+      "name": "P106-100 synthetic (not observed)",
+      "total_mib": 6144,
+      "free_mib": 6144,
+      "compute_cap": "6.1"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+name: Mojum current-main MuJoCo 3.17 cloth compatibility QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cloth_flex_spike.py'
+      - 'tests/test_cloth_flex_mujoco317_current_main.py'
+      - '.github/workflows/cloth-flex-mujoco317-main-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # An old-head rerun must not cancel new-head acceptance evidence on this PR.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  cloth-mujoco317-main:
+    name: cloth-mujoco317-main (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    env:
+      MOJUM_MUJOCO_317_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned MuJoCo 3.17.0
+        run: python -m pip install --disable-pip-version-check 'mujoco==3.17.0'
+      - name: Compile and simulate exact current-main cloth in four modes
+        run: python -m unittest discover -s tests -p 'test_cloth_flex_mujoco317_current_main.py' -v
