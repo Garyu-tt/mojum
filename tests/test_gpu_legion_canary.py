@@ -94,6 +94,20 @@ class CanaryTests(LoopbackFixture):
         self.assertFalse(report["deployment_performed"])
         self.assertFalse(report["gpu_compute_concurrency_verified"])
 
+    def test_untrusted_model_field_cannot_echo_generated_text(self):
+        secret = "SYNTHETIC_GENERATED_CONTENT_MUST_NOT_LEAK"
+        self.server.reply = json.dumps({
+            "model": secret,
+            "choices": [{"message": {"content": secret}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 7},
+        }).encode()
+        result = canary.call_once(self.url, "gpt-oss-20b", 4)
+        self.assertFalse(result["reported_model_matches_requested"])
+        self.assertNotIn(secret, json.dumps(result))
+        report = canary.run_canary([self.url], timeout=4)
+        self.assertEqual(report["successful_responses"], 1)
+        self.assertNotIn(secret, json.dumps(report))
+
     def test_reject_untrusted_urls(self):
         forbidden = [
             "https://127.0.0.1:18880/v1/chat/completions",
