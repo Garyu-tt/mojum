@@ -9,6 +9,7 @@ on:
       - "examples/aquarium_trace_viewer.html"
       - "tests/smoke_real_chromium_viewer.py"
       - "tests/test_private_trace_integrity.py"
+      - "tests/test_offline_viewer_playback_controls.py"
       - ".github/workflows/offline-viewer-chrome.yml"
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - "examples/aquarium_trace_viewer.html"
       - "tests/smoke_real_chromium_viewer.py"
       - "tests/test_private_trace_integrity.py"
+      - "tests/test_offline_viewer_playback_controls.py"
       - ".github/workflows/offline-viewer-chrome.yml"
   workflow_dispatch:
 
