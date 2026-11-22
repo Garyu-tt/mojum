@@ -81,7 +81,9 @@ def _request_json(port: int, path: str, *, body=None, timeout=5, opener=None):
     try:
         return json.loads(data, parse_constant=lambda x: (_ for _ in ()).throw(
             FanoutError("nonfinite JSON")))
-    except (ValueError, UnicodeError) as exc:
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        # A loopback endpoint is not inherently trusted: <64 KiB of JSON can
+        # still exceed Python's recursion limit and otherwise leak a traceback.
         raise FanoutError("invalid JSON response") from exc
 
 
