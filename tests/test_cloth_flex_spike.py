@@ -27,7 +27,18 @@ class ClothFlexSpikeTests(unittest.TestCase):
         root = ET.fromstring(make_mjcf())
         anchor = root.find("./worldbody/body[@name='cloth_anchor']")
         self.assertIsNotNone(anchor)
-        self.assertEqual(anchor.get("mocap"), "true")
+        target = root.find("./worldbody/body[@name='cloth_target']")
+        self.assertIsNotNone(target)
+        self.assertEqual(target.get("mocap"), "true")
+        self.assertIsNone(anchor.get("mocap"))
+        self.assertEqual(
+            [joint.get("type") for joint in anchor.findall("joint")],
+            ["slide", "slide", "slide"],
+        )
+        weld = root.find("./equality/weld[@name='cloth_target_weld']")
+        self.assertIsNotNone(weld)
+        self.assertEqual((weld.get("body1"), weld.get("body2")),
+                         ("cloth_target", "cloth_anchor"))
         flex = anchor.find("flexcomp")
         self.assertEqual(flex.get("dim"), "2")
         self.assertEqual(flex.get("count"), f"{GRID[0]} {GRID[1]} 1")
