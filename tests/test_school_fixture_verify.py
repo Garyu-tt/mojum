@@ -162,6 +162,32 @@ class SchoolColdVerifyTests(unittest.TestCase):
             self.assertTrue(switched)
             self.assertEqual(outside.read_bytes(), original_bytes)
 
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NONBLOCK"),
+        "POSIX nonblocking descriptor opens required",
+    )
+    def test_fifo_substituted_before_open_fails_without_blocking(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = self._create(temp)
+            manifest = target / "events.json"
+            real_open = os.open
+            swapped = False
+
+            def replace_with_fifo(path, flags, *args, **kwargs):
+                nonlocal swapped
+                if path == "events.json" and kwargs.get("dir_fd") is not None and not swapped:
+                    swapped = True
+                    self.assertTrue(flags & os.O_NONBLOCK)
+                    manifest.unlink()
+                    os.mkfifo(manifest)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(school_verify.os, "open", side_effect=replace_with_fifo):
+                with self.assertRaisesRegex(SchoolContractError, "nonregular"):
+                    verify_scripted_fixture(target, self.catalog)
+            self.assertTrue(swapped)
+
     def test_cli_reports_only_non_private_summary(self):
         with tempfile.TemporaryDirectory() as temp:
             target = self._create(temp, section="visual_arts", mode="frozen_control")
