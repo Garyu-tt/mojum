@@ -24,6 +24,9 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 | exporter frame budget | `test_aquarium_trace_export.py::test_exact_maximum_frame_history_and_first_overflow` (5001-frame journal: a 5000-frame slice succeeds, the full export fails closed with no output) and `::test_frame_limit_validation_boundary_is_inclusive_at_maximum` |
 | real Chrome | `tests/smoke_real_chromium_viewer.py`, `tests/smoke_r09_chromium_viewer.py` |
 | playback UI: play/pause/restart, speed change, seek/buttons, hidden-page stop, file replacement | `test_offline_viewer_playback_controls.py` (actual shipped JS in Node VM, 3-frame verified disposable SQLite export) |
+| oversized replacement during active playback cancels timer without reading and valid export reload recovers | `test_offline_viewer_playback_controls.py` (verified SQLite trace and Node VM timers) |
+
+The two maintained Node VM suites in this map must **fail in CI when Node.js is missing** rather than silently skip playback coverage; an optional local environment may skip when Node is not installed.
 
 The limit boundaries are inclusive: the documented maxima are accepted and
 only the next unit is rejected, in both the viewer JS and the exporter.
