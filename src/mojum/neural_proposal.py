@@ -10,6 +10,7 @@ import math
 import re
 
 
+_MAX_WIRE_I64 = 2**63 - 1
 _SCHEMA = "mojum.neural-proposal/1"
 _PORT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z", re.ASCII)
 _SHA = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -33,9 +34,9 @@ def validate_neural_proposal(packet: object) -> dict:
         raise ValueError("invalid neural packet fields")
     if packet["schema"] != _SCHEMA:
         raise ValueError("unsupported neural wire")
-    if type(packet["tick"]) is not int or packet["tick"] < 0:
+    if type(packet["tick"]) is not int or not 0 <= packet["tick"] <= _MAX_WIRE_I64:
         raise ValueError("invalid tick")
-    if type(packet["observed_at_ns"]) is not int or packet["observed_at_ns"] < 0:
+    if type(packet["observed_at_ns"]) is not int or not 0 <= packet["observed_at_ns"] <= _MAX_WIRE_I64:
         raise ValueError("invalid observation time")
     if type(packet["backend"]) is not str or packet["backend"] not in (
         "fixture", "annarchy", "brian2",
