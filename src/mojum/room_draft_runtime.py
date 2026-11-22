@@ -22,6 +22,8 @@ def load_runtime_room(path: str | Path) -> tuple[Room, tuple[float, float]]:
     # Opening a FIFO normally blocks before we can enforce the byte limit.
     # Open nonblocking and inspect the opened inode, not a prior pathname stat.
     # O_NOFOLLOW also rejects symlinks on platforms that expose the flag.
+    if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+        raise RoomSpecError("cannot safely read room draft without O_NONBLOCK")
     descriptor = -1
     try:
         flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
