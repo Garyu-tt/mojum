@@ -1,0 +1,47 @@
+# Temporary, tightly scoped bootstrap for an opt-in Cezar label.
+# No checkout or execution of pull-request code. Remove after verification.
+name: Bootstrap Cezar opt-in GitHub label
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '.github/workflows/cezar-bootstrap-label.yml'
+permissions:
+  contents: none
+  issues: write
+jobs:
+  provision:
+    if: ${{ github.event.pull_request.number == 612 && github.event.pull_request.head.ref == 'ops/cezar-github-sync-r01-20261122' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create cezar-ready label once without checking out PR code
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --fail-with-body --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GH_REPOSITORY}/labels/cezar-ready" || true)
+          if [ "$code" = 200 ]; then
+            echo 'cezar-ready already exists'
+            exit 0
+          fi
+          if [ "$code" != 404 ]; then
+            echo "Unexpected label GET status: ${code}" >&2
+            exit 2
+          fi
+          post=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            --data '{"name":"cezar-ready","color":"768a9b","description":"Explicit opt-in for bounded read-only Cezar intake"}' \
+            "https://api.github.com/repos/${GH_REPOSITORY}/labels")
+          test "$post" = 201
+          echo 'cezar-ready label created'

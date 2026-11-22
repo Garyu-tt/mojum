@@ -285,7 +285,6 @@ def mark_blocked(db, admission_id: str, run_id: str) -> dict:
         raise
 
 
-
 def mark_finished(db, admission_id: str, run_id: str) -> dict:
     """Manual, exact-run completion after independently verifying Cezar's output.
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Release stale Mojum Cezar admission slots via verified status checks
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=3min
+AccuracySec=30s
+Persistent=true
+Unit=cezar-mojum-reconcile-r01.service
+
+[Install]
+WantedBy=timers.target
