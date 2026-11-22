@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional, headless MuJoCo flex cloth spike. No Aquarium integration.
 
-The default command benchmarks a movable-edge cloth patch under gravity.
+The default command benchmarks a joint-servo-driven cloth edge under gravity.
 ``--print-mjcf`` works without MuJoCo; simulation requires the opt-in package.
 """
 from __future__ import annotations
@@ -37,7 +37,10 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
     <geom name="floor" type="plane" size="2 2 .1" pos="0 0 {FLOOR_Z}"/>
     <geom name="collision_ball" type="sphere" size="{BALL_RADIUS}"
           pos="{BALL_CENTER[0]} {BALL_CENTER[1]} {BALL_CENTER[2]}"/>
-    <body name="cloth_anchor" mocap="true" pos="0 -.125 1.05">
+    <body name="cloth_anchor" pos="0 -.125 1.05">
+      <joint name="cloth_anchor_slide" type="slide" axis="1 0 0"
+             limited="true" range="-.06 .06" damping="1"/>
+      <inertial pos="0 0 0" mass=".05" diaginertia=".001 .001 .001"/>
       <flexcomp name="scarf" type="grid" dim="2" count="{GRID[0]} {GRID[1]} 1"
                 spacing=".05 .05 .05" mass=".14" radius="{VERTEX_RADIUS}">
         <pin gridrange="0 0 0 {GRID[1]-1}"/>
@@ -48,6 +51,10 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
       </flexcomp>
     </body>
   </worldbody>
+  <actuator>
+    <position name="cloth_anchor_drive" joint="cloth_anchor_slide"
+              kp="100" ctrllimited="true" ctrlrange="-.045 .045"/>
+  </actuator>
 </mujoco>
 '''
 
@@ -84,15 +91,16 @@ def benchmark(mjcf: str, *, steps: int, warmup: int) -> dict:
 
     model = mujoco.MjModel.from_xml_string(mjcf)
     data = mujoco.MjData(model)
-    if model.nmocap != 1 or model.nflex != 1:
-        raise RuntimeError("unexpected model topology: require one mocap anchor and one flex")
+    if model.nmocap != 0 or model.nu != 1 or model.nflex != 1:
+        raise RuntimeError("unexpected model topology: require one joint-driven anchor and one flex")
     timings = []
     max_floor = 0.0
     max_sphere = 0.0
     measured = True
     for i in range(warmup + steps):
-        # Deterministic, bounded movement of the pinned edge in the same world.
-        data.mocap_pos[0, 0] = .045 * math.sin(2 * math.pi * i / 160)
+        # Joint servo drives a physical parent body; mocap flex anchors are
+        # not supported with elastic damping by the MuJoCo compiler.
+        data.ctrl[0] = .045 * math.sin(2 * math.pi * i / 160)
         start = time.perf_counter_ns()
         mujoco.mj_step(model, data)
         elapsed = time.perf_counter_ns() - start
