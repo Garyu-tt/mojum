@@ -50,6 +50,53 @@ class FleetTests(unittest.TestCase):
             sc.enqueue(db, [{"id": task_id, "scope": scope,
                              "priority": 10, "payload": payload}], 101)
 
+    def test_coordinator_creates_owner_only_sqlite_with_permissive_umask(self):
+        # Task payloads contain model prompts. Protect DB and WAL/SHM too,
+        # not only the generated proposal artifacts.
+        fresh = self.root / "private-prompts.sqlite3"
+        previous = os.umask(0o022)
+        try:
+            with closing(sc.connect(str(fresh))) as db:
+                sc.create_schema(db)
+                sc.init(db, 300, 100)
+                sc.enqueue(db, [{"id": "private-task", "scope": "private.scope",
+                                 "payload": {"prompt": "private example"}}], 101)
+                for name in (str(fresh), str(fresh) + "-wal", str(fresh) + "-shm"):
+                    with self.subTest(file=name):
+                        self.assertTrue(Path(name).is_file())
+                        self.assertEqual(os.stat(name).st_mode & 0o077, 0)
+        finally:
+            os.umask(previous)
+
+    def test_coordinator_rejects_public_and_symlinked_sqlite_state(self):
+        exposed = self.root / "readable.sqlite3"
+        exposed.touch()
+        exposed.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, "owner-only"):
+            sc.connect(str(exposed))
+        self.assertEqual(exposed.stat().st_mode & 0o777, 0o644)
+
+        safe = self.root / "safe.sqlite3"
+        safe.touch(mode=0o600)
+        linked = self.root / "alias.sqlite3"
+        linked.symlink_to(safe)
+        with self.assertRaisesRegex(ValueError, "owner-only"):
+            sc.connect(str(linked))
+
+        wal = self.root / "fresh.sqlite3-wal"
+        wal.touch()
+        wal.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, "owner-only"):
+            sc.connect(str(self.root / "fresh.sqlite3"))
+
+    def test_coordinator_rejects_untrusted_parent_directory(self):
+        writable = self.root / "group-writable"
+        writable.mkdir()
+        writable.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, "parent"):
+            sc.connect(str(writable / "tasks.sqlite3"))
+        self.assertFalse((writable / "tasks.sqlite3").exists())
+
     def test_status_never_creates_missing_sqlite_and_reads_existing(self):
         from contextlib import redirect_stdout
         from io import StringIO
