@@ -192,3 +192,49 @@ owner and service units. Reinstall the read-only overlay using the existing
 idempotent installer and roll back to the saved original index on mismatch.
 Do not touch the Cezar native run ledger, unpause the automation templates,
 expose the loopback service publicly, or deploy a new scheduling authority.
+
+
+### Browser immutable-cache repair and live rollout (2026-11-22)
+
+The Cezar 0.20.0 static asset server replies with
+Cache-Control: public, max-age=31536000, immutable for JavaScript, even
+though the HTML shell itself is no-cache. Replacing cezar-fleet-r01.js in
+place while leaving its old script URL in index.html therefore does not
+force already-open browsers to load the updated UI.
+
+The R02 installer accepts exactly one old or new known script marker,
+migrates the previous unversioned path to a versioned
+/assets/cezar-fleet-r01.js?v=r02 URL, and rejects mixed/duplicate tags.
+It keeps the original HTML backup untouched, with private modes, and
+is idempotent on repeated runs. Both query-versioned JS and the HTML shell
+were verified through the actual loopback Cezar HTTP server.
+
+An authorized operator performed a read-only source baseline check
+against existing PR #688, saved two owner-private backups, and replaced
+only the observer and static JS via atomic writes with owner mirbi and
+mode 0600. The collector unit was run successfully. Its real snapshot
+contained four historical native Cezar runs (zero active), five enabled
+ChatGPT automations (no live-status claim), 47 open PRs, 34 open Issues,
+and 20 recently updated closed PRs including three mergers in that
+limited sample. The count is point-in-time, not a guaranteed latest value.
+
+The first rollout encountered a root-owned /var/lib/cezar parent:
+unprivileged atomic replacement was refused *before* changing the live
+source. The already-created backups were validated, and the specific
+owner-preserving atomic replacements were completed under the existing
+authorized root control plane. No Cezar process restart or native
+automation enablement occurred. The cache-busting HTML migration ran
+through the unprivileged installer with the original backup preserved.
+
+The ChatGPT Automations inventory was subsequently refreshed by the
+connected first-party task reader (five last runs completed at capture).
+That produces a fresh historical snapshot, not a live cross-platform
+heartbeat; this limitation remains unresolved. End-to-end tests:
+30/30 hermetic fleet cases and Node 22 syntax check passed on the
+source-pinned private QA checkout before the HTML installation.
+
+Rollout requires no local Cezar task deletion, GitHub credentials or
+listener changes. The operator's private laptop URL retains the same
+path; a normal page reload should request the no-cache HTML and the
+new versioned script. Never expose this unauthenticated loopback UI on
+a public interface.
