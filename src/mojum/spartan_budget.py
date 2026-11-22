@@ -10,7 +10,9 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 import hashlib
+import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -44,6 +46,43 @@ class Admission:
     duplicate: bool
 
 
+def _check_private_sqlite_path(path: str) -> None:
+    """Restrict access to a local budget ledger before any SQLite I/O."""
+    if ".." in Path(path).parts:
+        raise BudgetDenied("budget ledger parent traversal is forbidden")
+    parent = Path(os.path.abspath(path)).parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        try:
+            info = os.lstat(directory)
+        except OSError as exc:
+            raise BudgetDenied("cannot inspect budget ledger directory") from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise BudgetDenied("budget ledger directory chain contains a symlink")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise BudgetDenied("budget ledger directory chain is replaceable")
+
+    # Never repair permissions or follow a preexisting symlink: the contents
+    # could be an audit record belonging to a different local user.
+    for suffix in ("", "-wal", "-shm"):
+        name = path + suffix
+        try:
+            info = os.lstat(name)
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise BudgetDenied(
+                "budget ledger files must be regular owner-only files (0600)"
+            )
+
+
 class BudgetLedger:
     """SQLite-backed concurrent fixed-window rate and daily budget gate.
 
@@ -54,6 +93,9 @@ class BudgetLedger:
 
     def __init__(self, path: str | Path, caps: BudgetCaps):
         self.path = str(path)
+        if (not self.path or self.path == ":memory:"
+                or self.path.startswith("file:") or "\x00" in self.path):
+            raise ValueError("budget ledger requires a persistent filesystem path")
         self.caps = caps
         with closing(self._connect()) as db:
             db.executescript("""
@@ -102,10 +144,28 @@ class BudgetLedger:
                 raise
 
     def _connect(self) -> sqlite3.Connection:
+        if os.name == "posix":
+            _check_private_sqlite_path(self.path)
+            flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                     | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_CLOEXEC", 0))
+            try:
+                fd = os.open(self.path, flags, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                os.close(fd)
+            _check_private_sqlite_path(self.path)
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        db.execute("PRAGMA busy_timeout=5000")
-        db.execute("PRAGMA journal_mode=WAL")
-        return db
+        try:
+            db.execute("PRAGMA busy_timeout=5000")
+            db.execute("PRAGMA journal_mode=WAL")
+            if os.name == "posix":
+                _check_private_sqlite_path(self.path)
+            return db
+        except BaseException:
+            db.close()
+            raise
 
     @staticmethod
     def _digest(key: str) -> str:
