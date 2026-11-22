@@ -25,6 +25,7 @@ STATE_DIR = Path("/var/lib/cezar-telegram")
 STATE_FILE = STATE_DIR / "state.json"
 LOCK = STATE_DIR / "singleton.lock"
 STATE_MAX_BYTES = 256 * 1024
+TELEGRAM_MAX_BYTES = 2 * 1024 * 1024
 POLL_SECONDS = 70
 REPO = "Garyu-tt/mojum"
 SHORT = 84
@@ -76,7 +77,10 @@ def telegram(token, method, args, *, timeout=32):
         with urllib.request.build_opener(NoRedirect()).open(request,timeout=timeout) as r:
             if r.status != 200:
                 raise BotFailure("Telegram API unavailable")
-            response = json.load(r)
+            payload = r.read(TELEGRAM_MAX_BYTES + 1)
+            if len(payload) > TELEGRAM_MAX_BYTES:
+                raise BotFailure("Telegram response exceeds byte budget")
+            response = json.loads(payload)
         if not isinstance(response,dict) or response.get("ok") is not True:
             raise BotFailure("Telegram operation rejected")
         return response.get("result")
