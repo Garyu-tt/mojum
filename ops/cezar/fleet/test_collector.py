@@ -220,6 +220,33 @@ class GitHubLifecycleTests(unittest.TestCase):
         self.assertFalse(status["snapshot_fresh"])
         self.assertEqual(status["merged_in_visible_sample"], 1)
 
+    def test_recursive_public_response_uses_stale_cache_without_crash(self):
+        with patch.object(f, "_fetch_closed_rest",
+                          return_value=f._closed_from_response(self._closed())):
+            f._github_closed_history(self.now)
+        # A bounded JSON response can still exceed the decoder recursion limit.
+        with patch.object(f, "_fetch_closed_rest",
+                          side_effect=RecursionError("deep public JSON")):
+            status = f._github_closed_history(self.now + timedelta(minutes=17))
+        self.assertFalse(status["snapshot_fresh"])
+        self.assertEqual(status["merged_in_visible_sample"], 1)
+
+    def test_recursive_private_cache_does_not_take_down_other_sources(self):
+        # This owner-private file is valid on disk but not valid bounded JSON.
+        self.cache.write_text("[" * 1500 + "]" * 1500, encoding="utf-8")
+        self.cache.chmod(0o600)
+        with (patch.object(f, "_cezar", return_value={"active": 1}),
+              patch.object(f, "_schedule_list", return_value={"enabled": 5}),
+              patch.object(f, "_models", return_value={"inference_busy_known": 0}),
+              patch.object(f, "_github", return_value={"open_prs": 12})):
+            snap = f.collect(self.now, include_history=True)
+        self.assertEqual(snap["cezar"]["active"], 1)
+        self.assertEqual(snap["schedules"]["enabled"], 5)
+        self.assertEqual(snap["github"]["open_prs"], 12)
+        self.assertEqual(snap["models"]["inference_busy_known"], 0)
+        self.assertEqual(snap["github_history"],
+                         {"available": False, "reason": "RecursionError"})
+
     def test_absent_cache_and_network_failure_is_unavailable(self):
         with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
             with self.assertRaises(f.FleetError):
