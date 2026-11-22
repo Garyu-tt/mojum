@@ -89,6 +89,15 @@ python3 tools/gpu_legion_fanout.py --tasks tasks-300.json \
   --max-jobs 300 --execute --output /srv/alt/gpu-legion-stage/agents-300.json
 ```
 
+## Private output directory preflight
+
+Before `--execute`, the POSIX output directory must be owned by the operator,
+not writable by group/others, and must have no symlink or non-sticky writable
+ancestor. Sticky shared directories such as `/tmp` are allowed only above a
+private owner-controlled output directory. Unsafe paths are refused before
+model inference; the output itself is exclusively created with mode `0600`.
+This is not a sandbox against same-UID filesystem mutation or hostile root.
+
 Agent outputs may contain sensitive task content, so they are not
 printed to stdout in execution mode. This prototype writes local
 output with exclusive-create semantics, retains no persistent chat
