@@ -27,6 +27,7 @@ MAX_AGENTS = 300
 MAX_PARALLEL = 32
 MAX_RESPONSE = 262144
 MAX_PROMPT = 8192
+MODEL_SLOT_WAIT_SECONDS = 15
 BACKENDS = (
     (18182, "QwenCoder7B", "cpu", "coder"),
     (18183, "QwenCoder30B", "cpu-moe", "coder"),
@@ -234,9 +235,16 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
                 results.append(call_model(target, prompt, role, max_tokens,
                                           clone=clone, request=request))
             else:
-                with locks[target.port]:
+                # Cap local semaphore delay as well as the 90s HTTP request:
+                # two clone calls must complete within the 240s task lease.
+                lock = locks[target.port]
+                if not lock.acquire(timeout=MODEL_SLOT_WAIT_SECONDS):
+                    raise TransientFleetError("model slot remained busy")
+                try:
                     results.append(call_model(target, prompt, role, max_tokens,
                                               clone=clone, request=request))
+                finally:
+                    lock.release()
         artifact = {"schema": "mojum.spartan.local-proposal.v1",
                     "task_id": task["id"], "scope": task["scope"],
                     "worker": worker_id, "attempt": attempt,
