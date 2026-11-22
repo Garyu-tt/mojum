@@ -113,7 +113,7 @@ class FanoutContract(unittest.TestCase):
                             encoding="utf-8")
             with self.assertRaisesRegex(f.FanoutError, "nonfinite"):
                 f.load_tasks_file(path)
-            path.write_bytes(b"\\xff")
+            path.write_bytes(b"\xff")
             with self.assertRaisesRegex(f.FanoutError, "invalid tasks JSON"):
                 f.load_tasks_file(path)
 
