@@ -332,6 +332,55 @@ not full bidirectional synchronization**. The real server `gh auth
 status` remains unauthenticated. Independent QA and GitHub's exact
 HEAD/BASE release gate still control acceptance and merge.
 
+## Native Cezar CI indicator for open PRs (2026-11-22)
+
+A second UI bug was reproduced after PR discovery was repaired:
+`GET /api/v1/github/checks?prs=612,685,684` returned
+`available:true` but all three glyphs were `null`, because the
+native Cezar check provider invokes **another GraphQL query** which
+the public-read CLI adapter did not support.
+
+`tools/cezar_public_ci_checks.py` provides a bounded read-only
+translation of **only** the exact aliased `pullRequest(number: N)`
+head-commit `statusCheckRollup { state }` query. It reads public
+GitHub REST open-PR heads and **check-runs for those exact SHAs**.
+It computes a conservative glyph: any failing check is red, pending
+checks prevent green, success requires at least one successful
+check, and missing/incomplete/too-many checks stay unknown. It
+never invents a successful CI result or grants GitHub write access.
+
+For unauthenticated rate safety, at most eight new PR check fetches
+are attempted per UI query and sixteen per hour globally, with a
+private on-disk quota ledger. HEAD metadata is cached up to ten
+minutes and check results up to thirty minutes. A new visible HEAD
+SHA invalidates any prior result for the old SHA. These glyphs are
+informational and **not authoritative exact-HEAD merge clearance**:
+always re-check current SHA and required CI during independent QA.
+Permission mode for private caches is 0600; unrecognized GraphQL,
+cross-repo requests and GitHub mutations fail closed.
+
+**Live server evidence:** after installing pinned tested adapters,
+Cezar was restarted while no local runs were active to clear old
+null-checks. Its genuine `/api/v1/github/checks` endpoint returned
+`available:true`, with PR #612=`pending`,
+PR #684=`passing` and PR #685=`pending`. At that moment PR #612
+had a new head whose GitHub check-runs genuinely included queued
+jobs; the earlier all-green report was for a prior SHA. The **same**
+three check values were separately verified from the Windows laptop
+through the already established private loopback SSH tunnel at
+`http://127.0.0.1:14329/api/v1/github/checks`. The native panel
+continued returning newly opened PR rows and the active Cezar
+units remained healthy.
+
+This adapter only makes tests visible; it does not accept, merge or
+turn external PRs into Cezar-owned runs. Public API rate limits
+and the above cache may delay updates. The older PR-discovery bridge,
+the guarded agent-intake workflow and write-denial checks remain
+unchanged. `tests/test_cezar_public_ci_checks.py` checks fail-closed
+query parsing, SHA-change invalidation, private caching, success/
+pending/failure mapping and network budgeting; the source-controlled
+GitHub Actions workflow runs that suite on Python 3.11/3.12/3.13.
+
 ## Required release invariants
 
 1. Unique GitHub Issue/PR identity, deduplicated transitions and a

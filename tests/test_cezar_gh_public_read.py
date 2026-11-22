@@ -29,6 +29,17 @@ class CezarGhPublicReadTests(unittest.TestCase):
             "repo", "view", "--json", "nameWithOwner", "--jq",
             ".nameWithOwner"]), ("repo_plain", None, False))
 
+    def test_native_tab_exact_ci_graphql_is_routed_to_read_only_adapter(self):
+        from cezar_public_ci_checks import PRE, SUF
+        alias = ("    p0: pullRequest(number: 612) { commits(last: 1) { "
+                 "nodes { commit { statusCheckRollup { state } } } } }")
+        args = ["api", "graphql", "-f", "query=" + PRE + alias + SUF,
+                "-f", "owner=Garyu-tt", "-f", "name=mojum"]
+        mode, numbers, include = adapter.parse(args)
+        self.assertEqual(mode, "graphql_checks")
+        self.assertEqual(numbers, [612])
+        self.assertFalse(include)
+
     def test_native_tab_graphql_is_read_only_and_bounded(self):
         from cezar_public_github_tab import parse_graphql
         query = ("query ($owner: String!, $name: String!, $issuesLimit: Int!, $prsLimit: Int!) "

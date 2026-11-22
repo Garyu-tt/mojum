@@ -5,6 +5,8 @@ on:
     paths:
       - 'tools/cezar_gh_public_read.py'
       - 'tools/cezar_public_github_tab.py'
+      - 'tools/cezar_public_ci_checks.py'
+      - 'tests/test_cezar_public_ci_checks.py'
       - 'tests/test_cezar_public_github_tab.py'
       - 'tools/cezar_admission.py'
       - 'tests/test_cezar_admission.py'
@@ -44,6 +46,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_cezar_gh_public_read.py' -v
       - name: Verify native GitHub PR/Issue panel against read-only REST data
         run: python -m unittest discover -s tests -p 'test_cezar_public_github_tab.py' -v
+      - name: Verify bounded exact-head public CI checks and fail-closed status handling
+        run: python -m unittest discover -s tests -p 'test_cezar_public_ci_checks.py' -v
       - name: Verify bounded and paused GitHub automation templates
         run: python -m unittest discover -s tests -p 'test_cezar_github_automation_templates.py' -v
       - name: Verify private legacy task deduplication and no-replay guarantees
