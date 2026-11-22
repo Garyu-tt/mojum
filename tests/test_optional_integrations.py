@@ -32,6 +32,13 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
         data["default_enabled"] = True
         self.check_rejected(json.dumps(data).encode())
 
+    def test_cannot_promote_without_license_approval(self):
+        for status in ("contract", "experiment", "accepted"):
+            with self.subTest(status=status):
+                data = load_catalog()
+                data["entries"][0]["status"] = status
+                self.check_rejected(json.dumps(data).encode())
+
     def test_cannot_disable_optional_gate(self):
         data = load_catalog()
         data["entries"][0]["optional"] = False
