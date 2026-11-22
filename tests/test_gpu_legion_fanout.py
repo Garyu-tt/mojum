@@ -117,6 +117,20 @@ class FanoutContract(unittest.TestCase):
             with self.assertRaisesRegex(f.FanoutError, "invalid tasks JSON"):
                 f.load_tasks_file(path)
 
+    def test_tasks_input_rejects_duplicate_json_fields_before_admission(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tasks.json"
+            for raw in (
+                '[{"id":"x","agent_id":1,"prompt":"safe","prompt":"overridden"}]',
+                '[{"id":"x","agent_id":1,"agent_id":2,"prompt":"x"}]',
+                '[{"id":"x","agent_id":1,"prompt":"x","clones":1,"clones":2}]',
+                '[{"id":"x","agent_id":1,"prompt":"x","meta":{"a":1,"a":2}}]',
+            ):
+                with self.subTest(raw=raw):
+                    path.write_text(raw, encoding="utf-8")
+                    with self.assertRaisesRegex(f.FanoutError, "duplicate tasks JSON field"):
+                        f.load_tasks_file(path)
+
     @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
                          "POSIX FIFO support required")
     def test_fifo_tasks_path_is_rejected_without_blocking(self):
