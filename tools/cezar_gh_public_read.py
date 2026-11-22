@@ -8,6 +8,7 @@ tab list translation are allowed. All writes and unknown commands fail closed. T
 from __future__ import annotations
 
 from cezar_public_github_tab import parse_graphql, render_graphql, PublicTabDenied
+from cezar_public_ci_checks import parse_checks, render_checks
 
 import hashlib
 import json
@@ -47,9 +48,12 @@ def parse(args):
         return "repo_plain", None, False
     if args[:2] == ["api", "graphql"]:
         try:
-            return "graphql", parse_graphql(args), False
-        except PublicTabDenied as exc:
-            raise Refused("unsupported native tab GraphQL read") from exc
+            return "graphql_checks", parse_checks(args), False
+        except PublicTabDenied:
+            try:
+                return "graphql", parse_graphql(args), False
+            except PublicTabDenied as exc:
+                raise Refused("unsupported native tab GraphQL read") from exc
     if len(args) >= 4 and args[:3] == ["api", "--method", "GET"]:
         include = False
         path = args[3]
@@ -277,6 +281,8 @@ def main(args):
             sys.stdout.write(REPO + "\n")
         elif mode == "graphql":
             sys.stdout.write(render_graphql(target) + "\n")
+        elif mode == "graphql_checks":
+            sys.stdout.write(render_checks(target) + "\n")
         else:
             raw, link = read(*target)
             prefix = b""
