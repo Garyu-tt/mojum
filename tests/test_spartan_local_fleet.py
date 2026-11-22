@@ -112,7 +112,7 @@ class FleetTests(unittest.TestCase):
         exposed = self.root / "readable.sqlite3"
         exposed.touch()
         exposed.chmod(0o644)
-        with self.assertRaisesRegex(ValueError, "owner-only"):
+        with self.assertRaisesRegex(PermissionError, "owner-only"):
             sc.connect(str(exposed))
         self.assertEqual(exposed.stat().st_mode & 0o777, 0o644)
 
@@ -120,20 +120,20 @@ class FleetTests(unittest.TestCase):
         safe.touch(mode=0o600)
         linked = self.root / "alias.sqlite3"
         linked.symlink_to(safe)
-        with self.assertRaisesRegex(ValueError, "owner-only"):
+        with self.assertRaisesRegex(PermissionError, "owner-only"):
             sc.connect(str(linked))
 
         wal = self.root / "fresh.sqlite3-wal"
         wal.touch()
         wal.chmod(0o644)
-        with self.assertRaisesRegex(ValueError, "owner-only"):
+        with self.assertRaisesRegex(PermissionError, "owner-only"):
             sc.connect(str(self.root / "fresh.sqlite3"))
 
     def test_coordinator_rejects_untrusted_parent_directory(self):
         writable = self.root / "group-writable"
         writable.mkdir()
         writable.chmod(0o777)
-        with self.assertRaisesRegex(ValueError, "parent"):
+        with self.assertRaisesRegex(PermissionError, "parent"):
             sc.connect(str(writable / "tasks.sqlite3"))
         self.assertFalse((writable / "tasks.sqlite3").exists())
 
@@ -149,7 +149,7 @@ class FleetTests(unittest.TestCase):
         )
         proposed = self.root / "untrusted.sqlite3"
         with patch.object(sc.os, "lstat", return_value=parent):
-            with self.assertRaisesRegex(ValueError, "owner-controlled"):
+            with self.assertRaisesRegex(PermissionError, "parent directory"):
                 sc.connect(str(proposed))
         self.assertFalse(proposed.exists())
 
