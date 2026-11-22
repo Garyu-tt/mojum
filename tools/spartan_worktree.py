@@ -1,13 +1,15 @@
 """Prepare a task-specific Git worktree from a pinned commit.
 
-Only use with a trusted repository and trusted Git configuration. This does not
-sandbox Git filters, apply model patches, execute tests, or publish PRs.
+Only use with a trusted repository and trusted Git configuration, under an
+operator-owned private worktree root. This does not sandbox Git filters,
+apply model patches, execute tests, or publish PRs.
 """
 import argparse
 import os
 from pathlib import Path
 import re
 import subprocess
+import stat
 
 TASK = re.compile(r"[a-z0-9][a-z0-9-]{0,47}\Z", re.ASCII)
 SHA = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
@@ -15,6 +17,34 @@ SHA = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
 
 class IsolationError(RuntimeError):
     pass
+
+
+
+def _require_private_worktree_root(root: Path) -> None:
+    """Refuse writable/replaceable POSIX worktree roots before Git writes.
+
+    A worker can race a pathname preflight if a different local account can
+    replace its directory or an ancestor. Sticky ancestors such as /tmp are
+    permitted only when the root itself is owner-controlled and private.
+    Same-UID attackers and concurrent mutations are outside this preflight.
+    """
+    if os.name != "posix":
+        return
+    for depth, directory in enumerate((root, *root.parents)):
+        try:
+            info = os.lstat(directory)
+        except OSError as exc:
+            raise IsolationError("cannot inspect worktree root directory") from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise IsolationError("worktree root path contains a non-directory")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise IsolationError("worktree root directory chain is not owner-controlled")
 
 
 def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
@@ -31,6 +61,7 @@ def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
     root = Path(root).resolve(strict=True)
     if not root.is_dir():
         raise IsolationError("invalid worktree root")
+    _require_private_worktree_root(root)
     dest = root / task
     if dest.exists() or dest.is_symlink():
         raise IsolationError("destination already exists")
