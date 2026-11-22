@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import time
 import urllib.error
@@ -128,49 +129,101 @@ def bounded_int(value, minval, maxval):
     return result
 
 
+def _open_cache_dir():
+    """Pin every path component, then only operate relative to this descriptor."""
+    CACHE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not CACHE_DIR.is_absolute():
+        raise Refused("cache directory must be absolute")
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    fd = os.open(CACHE_DIR.anchor, flags)
+    try:
+        for part in CACHE_DIR.parts[1:]:
+            new_fd = os.open(part, flags | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = new_fd
+        info = os.fstat(fd)
+        if (not stat.S_ISDIR(info.st_mode) or
+                info.st_uid != os.geteuid() or info.st_mode & 0o077):
+            raise Refused("cache directory not owner-private")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def read(url, ttl):
     if not url.startswith(BASE + "/"):
         raise Refused("unexpected API origin")
-    CACHE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if CACHE_DIR.is_symlink() or CACHE_DIR.stat().st_mode & 0o077:
-        raise Refused("cache directory not owner-private")
-    token = hashlib.sha256(url.encode()).hexdigest()
-    p = CACHE_DIR / (token + ".json")
-    if p.is_file() and not p.is_symlink() and time.time() - p.stat().st_mtime < ttl:
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            return data["body"].encode("utf-8"), data["link"]
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "cezar-mojum-public-read-only/0.1",
-        "Accept": "application/vnd.github+json",
-    })
-    client = urllib.request.build_opener(urllib.request.ProxyHandler({}),
-                                        urllib.request.HTTPSHandler())
-    with client.open(req, timeout=14) as response:
-        if response.status != 200 or response.geturl() != url:
-            raise Refused("unexpected GitHub response or redirect")
-        raw = response.read(MAX_BODY + 1)
-        if len(raw) > MAX_BODY:
-            raise Refused("GitHub response too large")
-        link = response.headers.get("Link", "")[:3000]
-    # Reject unexpected payload shape early instead of caching HTML/errors.
-    json.loads(raw)
-    data = {"body": raw.decode("utf-8"), "link": link}
-    tmp = CACHE_DIR / (token + ".tmp." + str(os.getpid()))
-    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            json.dump(data, file)
-        os.replace(tmp, p)
-    finally:
+        cache_fd = _open_cache_dir()
+    except OSError as exc:
+        raise Refused("untrusted cache directory") from exc
+    try:
+        token = hashlib.sha256(url.encode()).hexdigest()
+        filename = token + ".json"
         try:
-            tmp.unlink()
+            entry_fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW,
+                               dir_fd=cache_fd)
         except FileNotFoundError:
-            pass
-    return raw, link
+            entry_fd = None
+        except OSError as exc:
+            raise Refused("untrusted cache entry") from exc
+        if entry_fd is not None:
+            with os.fdopen(entry_fd, "rb") as entry:
+                info = os.fstat(entry.fileno())
+                if (not stat.S_ISREG(info.st_mode) or
+                        info.st_uid != os.geteuid() or info.st_mode & 0o077):
+                    raise Refused("cache entry not owner-private and regular")
+                age = time.time() - info.st_mtime
+                if 0 <= age < ttl:
+                    limit = MAX_BODY * 6 + 10000
+                    serialized = entry.read(limit + 1)
+                    if len(serialized) > limit:
+                        raise Refused("cache entry exceeds safe limit")
+                    try:
+                        data = json.loads(serialized)
+                        body = data["body"]
+                        link = data["link"]
+                        if not isinstance(body, str) or not isinstance(link, str):
+                            raise ValueError("invalid cached response")
+                        raw = body.encode("utf-8")
+                        if len(raw) > MAX_BODY or len(link) > 3000:
+                            raise ValueError("cached response exceeds bounds")
+                        return raw, link
+                    except (ValueError, KeyError, TypeError, UnicodeError):
+                        pass  # Stale/corrupt cache: fetch fresh public data.
+
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "cezar-mojum-public-read-only/0.1",
+            "Accept": "application/vnd.github+json",
+        })
+        client = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                            urllib.request.HTTPSHandler())
+        with client.open(req, timeout=14) as response:
+            if response.status != 200 or response.geturl() != url:
+                raise Refused("unexpected GitHub response or redirect")
+            raw = response.read(MAX_BODY + 1)
+            if len(raw) > MAX_BODY:
+                raise Refused("GitHub response too large")
+            link = response.headers.get("Link", "")[:3000]
+        json.loads(raw)  # Reject non-JSON public responses.
+        data = {"body": raw.decode("utf-8"), "link": link}
+        tempname = token + ".tmp." + str(os.getpid())
+        tmp_fd = os.open(tempname, os.O_CREAT | os.O_EXCL | os.O_WRONLY |
+                         os.O_NOFOLLOW, 0o600, dir_fd=cache_fd)
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as out:
+                json.dump(data, out)
+            os.replace(tempname, filename, src_dir_fd=cache_fd,
+                       dst_dir_fd=cache_fd)
+        finally:
+            try:
+                os.unlink(tempname, dir_fd=cache_fd)
+            except FileNotFoundError:
+                pass
+        return raw, link
+    finally:
+        os.close(cache_fd)
 
 
 def main(args):
