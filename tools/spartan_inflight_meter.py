@@ -129,7 +129,8 @@ def heartbeat(db: sqlite3.Connection, worker_id: int, request_id: str,
         changed = db.execute("""
           UPDATE instrumented_calls SET lease_until_ms=?
           WHERE request_id=? AND worker_id=? AND state='active'
-        """, (now + ttl_ms, request_id, worker_id)).rowcount
+            AND started_ms <= ? AND lease_until_ms <= ?
+        """, (now + ttl_ms, request_id, worker_id, now, now + ttl_ms)).rowcount
         db.execute("COMMIT")
         return changed == 1
     except Exception:
@@ -157,8 +158,9 @@ def finish(db: sqlite3.Connection, worker_id: int, request_id: str,
           UPDATE instrumented_calls SET state=?, finished_ms=?,
           input_tokens=?, output_tokens=?, cost_microusd=?
           WHERE request_id=? AND worker_id=? AND state='active'
+            AND started_ms <= ?
         """, (state, now, input_tokens, output_tokens, cost_microusd,
-              request_id, worker_id)).rowcount
+              request_id, worker_id, now)).rowcount
         db.execute("COMMIT")
         return changed == 1
     except Exception:
