@@ -2,10 +2,24 @@
 import contextlib
 import importlib.util
 import io
+from pathlib import Path
 import unittest
 import xml.etree.ElementTree as ET
 
-from tools.cloth_flex_spike import GRID, _percentile_ms, _vertex_penetrations, main, make_mjcf
+# SQLite's 3.13 leak audit invokes the suite with PYTHONPATH=src and
+# sys.path[0]=tests, so repository-root 'tools' is not importable there.
+# Load this standalone opt-in script directly without global sys.path edits.
+_SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "cloth_flex_spike.py"
+_SPEC = importlib.util.spec_from_file_location("mojum_cloth_flex_spike_fixture", _SCRIPT)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError("cannot load cloth flex spike fixture")
+_module = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_module)
+GRID = _module.GRID
+_percentile_ms = _module._percentile_ms
+_vertex_penetrations = _module._vertex_penetrations
+main = _module.main
+make_mjcf = _module.make_mjcf
 
 
 class ClothFlexSpikeTests(unittest.TestCase):
