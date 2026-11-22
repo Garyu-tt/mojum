@@ -29,6 +29,7 @@ MAX_RESPONSE = 262144
 MAX_PROMPT = 8192
 BACKENDS = (
     (18182, "QwenCoder7B", "cpu", "coder"),
+    (18183, "QwenCoder30B", "cpu-moe", "coder"),
     (18180, "GPT20B", "gpu-0-3", "general"),
     (18181, "GPT20B", "gpu-4-6", "general"),
 )
