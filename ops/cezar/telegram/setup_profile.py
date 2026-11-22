@@ -29,6 +29,7 @@ commands=[
     {"command":"pr","description":"Карточка PR, например /pr 612"},
     {"command":"ci","description":"CI конкретного PR, например /ci 612"},
     {"command":"runs","description":"Запуски агентов в Cezar"},
+    {"command":"fleet","description":"Расписания, агенты и занятые модельные слоты"},
     {"command":"run","description":"Запуск по UUID"},
     {"command":"refresh","description":"Обновить список PR"},
     {"command":"alerts","description":"Вкл/выкл уведомления"},
