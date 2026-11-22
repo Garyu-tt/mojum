@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import time
+from threading import BoundedSemaphore
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -195,7 +196,8 @@ def save_private(folder: Path, task_id: str, attempt: int, artifact):
     return str(path)
 
 
-def single(db_path, worker_id, backend, folder, request=_http):
+def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
+           request=_http):
     db = coordinator.connect(str(db_path))
     try:
         coordinator.create_schema(db)
@@ -207,14 +209,29 @@ def single(db_path, worker_id, backend, folder, request=_http):
     attempt = task["attempts"]
     try:
         payload, prompt, role, clones, max_tokens = validate_task(task)
-        result = call_model(backend, prompt, role, max_tokens, request=request)
-        # A clone is an independent suggestion; one actual request per assigned
-        # model slot. Separate cross-model clone verification is future work.
+        targets = [backend]
+        if clones == 2:
+            alternatives = [b for b in others if b.port != backend.port and b.free > 0]
+            if not alternatives:
+                raise FleetError("two clones require distinct live physical models")
+            # Prefer a different model family for independent comparison.
+            alternatives.sort(key=lambda b: (b.model == backend.model, -b.ctx, b.port))
+            targets.append(alternatives[0])
+        results = []
+        for clone, target in enumerate(targets):
+            if locks is None:
+                results.append(call_model(target, prompt, role, max_tokens,
+                                          clone=clone, request=request))
+            else:
+                with locks[target.port]:
+                    results.append(call_model(target, prompt, role, max_tokens,
+                                              clone=clone, request=request))
         artifact = {"schema": "mojum.spartan.local-proposal.v1",
                     "task_id": task["id"], "scope": task["scope"],
                     "worker": worker_id, "attempt": attempt,
                     "reviewed": False, "patch_applied": False,
-                    "tests_run": False, "model_calls": [result]}
+                    "tests_run": False, "model_calls": results,
+                    "diverse_models": len({x["model"] for x in results}) == len(results)}
         saved = save_private(folder, task["id"], attempt, artifact)
         db = coordinator.connect(str(db_path))
         try:
@@ -272,9 +289,11 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
             raise FleetError("no observed live free inference slots")
         admitted = min(max_jobs, len(slots), max_agents)
         agents = list(range(1, admitted + 1))
+        locks = {b.port: BoundedSemaphore(b.free) for b in discovered if b.free}
         results = []
         with ThreadPoolExecutor(max_workers=admitted) as pool:
-            futures = [pool.submit(single, db_path, n, slots[i], folder)
+            futures = [pool.submit(single, db_path, n, slots[i], folder,
+                                   others=discovered, locks=locks)
                        for i, n in enumerate(agents)]
             for future in as_completed(futures):
                 results.append(future.result())
