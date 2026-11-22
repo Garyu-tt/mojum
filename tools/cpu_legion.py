@@ -207,6 +207,14 @@ def _write_private_patch(out, name, diff):
             except FileNotFoundError:
                 os.mkdir(part, mode=0o700, dir_fd=current_fd)
                 next_fd = os.open(part, flags, dir_fd=current_fd)
+                try:
+                    # Both the newly created directory inode and its parent's
+                    # directory entry must be durable before any review marker.
+                    os.fsync(next_fd)
+                    os.fsync(current_fd)
+                except BaseException:
+                    os.close(next_fd)
+                    raise
             os.close(current_fd)
             current_fd = next_fd
         target = os.fstat(current_fd)
