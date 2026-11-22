@@ -32,6 +32,30 @@ class CezarGhPublicReadTests(unittest.TestCase):
         self.assertIn("is%3Apr", request[0])
         self.assertFalse(include)
 
+    def test_rejects_search_boolean_scope_escape(self):
+        forbidden = [
+            "repo:Garyu-tt/mojum is:pr OR repo:another/repo is:pr",
+            "repo:Garyu-tt/mojum is:pr -repo:Garyu-tt/mojum",
+            "repo:Garyu-tt/mojum is:pr OR (is:issue)",
+            "repo:Garyu-tt/mojum is:pr user:another",
+            "repo:Garyu-tt/mojum is:pr org:another",
+            "repo:Garyu-tt/mojum is:pr is:issue",
+        ]
+        for query in forbidden:
+            with self.subTest(query=query), self.assertRaises(adapter.Refused):
+                adapter.parse(["api", "--method", "GET", "/search/issues",
+                               "-f", "q=" + query])
+
+    def test_allows_bounded_single_repo_filters(self):
+        query = ("repo:Garyu-tt/mojum is:issue state:open label:cezar-ready "
+                 "-label:cezar-hold updated:>=2026-11-20")
+        mode, request, include = adapter.parse(
+            ["api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+        self.assertEqual(mode, "api")
+        self.assertFalse(include)
+        from urllib.parse import parse_qs, urlsplit
+        self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
+
     def test_read_only_label_timeline_with_headers(self):
         mode, request, include = adapter.parse([
             "api", "--include", "--method", "GET",
