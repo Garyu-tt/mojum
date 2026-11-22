@@ -289,6 +289,25 @@ class FleetTests(unittest.TestCase):
             raise AssertionError
         self.assertEqual(fleet.discover(request=broken), [])
 
+    def test_relative_artifact_directory_persists_absolute_lease_reference(self):
+        self.add_task("relative-artifact-reference")
+        prior_cwd = Path.cwd()
+        try:
+            os.chdir(self.root)
+            result = fleet.single(self.db, 1, self.backends[0],
+                                  Path("artifacts"), request=fake_server)
+        finally:
+            os.chdir(prior_cwd)
+        self.assertEqual(result["state"], "proposal_for_independent_review")
+        artifact = Path(result["artifact"])
+        self.assertTrue(artifact.is_absolute())
+        self.assertEqual(artifact.parent, self.out)
+        self.assertTrue(artifact.is_file())
+        with closing(sc.connect(str(self.db))) as db:
+            row = db.execute("SELECT artifact FROM tasks WHERE id=?",
+                             ("relative-artifact-reference",)).fetchone()
+        self.assertEqual(row["artifact"], str(artifact))
+
     def test_private_review_artifact_and_exact_lease_completion(self):
         self.add_task("issue-123")
         result = fleet.single(self.db, 1, self.backends[0], self.out,
