@@ -62,12 +62,26 @@ def parse(args):
 
     if path == "/search/issues":
         q = params.get("q", "")
-        if not q.startswith("repo:" + REPO + " "):
-            raise Refused("unapproved repository scope")
-        if "is:issue" not in q and "is:pr" not in q:
-            raise Refused("missing issue or PR qualifier")
         if len(q) > 400:
             raise Refused("query too large")
+        # A prefix-only scope check is unsafe: GitHub search also supports
+        # OR/secondary repo qualifiers that can broaden the result set.
+        # Admit only individual, known-safe qualifiers after the pinned repo.
+        terms = q.split()
+        if not terms or terms[0] != "repo:" + REPO:
+            raise Refused("unapproved repository scope")
+        filters = terms[1:]
+        if ("is:issue" in filters) == ("is:pr" in filters):
+            raise Refused("exactly one issue or PR qualifier required")
+        for term in filters:
+            if not re.fullmatch(
+                r"(?:is:(?:issue|pr|open|closed|merged|unmerged)"
+                r"|state:(?:open|closed)"
+                r"|label:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+                r"|(?:created|updated):(?:[<>]=?|=)?[0-9]{4}-[0-9]{2}-[0-9]{2})",
+                term,
+            ):
+                raise Refused("unsupported search qualifier")
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
         if sort not in ("updated", "created") or order != "asc":
