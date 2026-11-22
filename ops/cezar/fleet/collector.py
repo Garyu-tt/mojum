@@ -444,7 +444,7 @@ def _qa_fleet():
     for i, x in enumerate(workers):
         if (type(x) is not dict or x.get("slot") != i
                 or x.get("port") not in (48081, 48082, 48083, 48084, 48085)
-                or x.get("state") not in ("queued", "fetching_patch", "inflight", "completed", "failed")):
+                or x.get("state") not in ("queued", "fetching_patch", "waiting_model", "inflight", "completed", "failed")):
             raise FleetError("bad QA worker")
         pr = x.get("pr")
         if pr is not None and (type(pr) is not int or not 1 <= pr <= 10000000):
