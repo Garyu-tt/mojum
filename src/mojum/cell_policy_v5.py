@@ -300,6 +300,15 @@ def summarize_transcript(transcript):
         intent, outcome = row
         if type(intent) is not dict or type(outcome) is not dict:
             raise CellV5Error("transcript rows must contain two mappings")
+        # A report is about one complete chronological policy run, not an
+        # arbitrary bag of receipts. Duplicate, skipped or reordered ticks
+        # can otherwise falsify idle streaks and cumulative probe totals.
+        tick = intent.get("tick")
+        if type(tick) is not int or tick != report["ticks"]:
+            raise CellV5Error("transcript ticks must be contiguous from zero")
+        if (type(outcome.get("total_updates")) is not int
+                or outcome["total_updates"] != tick + 1):
+            raise CellV5Error("transcript receipt clock mismatch")
         action = intent.get("action")
         if type(action) is not str or action not in ACTIONS:
             raise CellV5Error("unknown transcript action")
