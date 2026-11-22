@@ -65,6 +65,21 @@ class CezarGhPublicReadTests(unittest.TestCase):
         from urllib.parse import parse_qs, urlsplit
         self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
 
+    def test_created_pr_search_respects_explicit_closed_state(self):
+        from urllib.parse import parse_qs, urlsplit
+        explicit = (
+            "repo:Garyu-tt/mojum is:pr state:closed created:>=2026-11-20",
+            "repo:Garyu-tt/mojum is:pr is:closed created:>=2026-11-20",
+            "repo:Garyu-tt/mojum is:pr state:open created:>=2026-11-20",
+        )
+        for query in explicit:
+            with self.subTest(query=query):
+                mode, request, include = adapter.parse(
+                    ["api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+                self.assertEqual(mode, "api")
+                self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
+                self.assertFalse(include)
+
     def test_read_only_label_timeline_with_headers(self):
         mode, request, include = adapter.parse([
             "api", "--include", "--method", "GET",
