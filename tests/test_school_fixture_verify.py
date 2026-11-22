@@ -162,11 +162,6 @@ class SchoolColdVerifyTests(unittest.TestCase):
             self.assertTrue(switched)
             self.assertEqual(outside.read_bytes(), original_bytes)
 
-    @unittest.skipUnless(
-        os.name == "posix" and hasattr(os, "O_NOFOLLOW")
-        and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NONBLOCK"),
-        "POSIX nonblocking descriptor opens required",
-    )
     def test_pinned_read_rejects_missing_nonblock_capability(self):
         if os.name != "posix" or not all(
             hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")
@@ -189,6 +184,11 @@ class SchoolColdVerifyTests(unittest.TestCase):
             finally:
                 os.close(fd)
 
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NONBLOCK"),
+        "POSIX nonblocking descriptor opens required",
+    )
     def test_fifo_substituted_before_open_fails_without_blocking(self):
         with tempfile.TemporaryDirectory() as temp:
             target = self._create(temp)
