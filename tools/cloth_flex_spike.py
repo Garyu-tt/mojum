@@ -37,7 +37,15 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
     <geom name="floor" type="plane" size="2 2 .1" pos="0 0 {FLOOR_Z}"/>
     <geom name="collision_ball" type="sphere" size="{BALL_RADIUS}"
           pos="{BALL_CENTER[0]} {BALL_CENTER[1]} {BALL_CENTER[2]}"/>
-    <body name="cloth_anchor" mocap="true" pos="0 -.125 1.05">
+    <!-- Keep the externally moved mocap target separate from the elastic
+         flex attachment. MuJoCo >=3.15 rejects elastic flexes pinned
+         directly to mocap bodies (no velocity for elastic damping). -->
+    <body name="cloth_target" mocap="true" pos="0 -.125 1.05"/>
+    <body name="cloth_anchor" pos="0 -.125 1.05">
+      <joint name="cloth_anchor_x" type="slide" axis="1 0 0" damping="1"/>
+      <joint name="cloth_anchor_y" type="slide" axis="0 1 0" damping="1"/>
+      <joint name="cloth_anchor_z" type="slide" axis="0 0 1" damping="1"/>
+      <inertial pos="0 0 0" mass="1" diaginertia=".01 .01 .01"/>
       <flexcomp name="scarf" type="grid" dim="2" count="{GRID[0]} {GRID[1]} 1"
                 spacing=".05 .05 .05" mass=".14" radius="{VERTEX_RADIUS}">
         <pin gridrange="0 0 0 {GRID[1]-1}"/>
@@ -48,6 +56,12 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
       </flexcomp>
     </body>
   </worldbody>
+  <!-- Dynamic articulated anchor follows the mocap target through a
+       physical equality constraint, not an unsupported direct flex pin. -->
+  <equality>
+    <weld name="cloth_target_weld" body1="cloth_target" body2="cloth_anchor"
+          solref=".005 1"/>
+  </equality>
 </mujoco>
 '''
 
@@ -84,8 +98,11 @@ def benchmark(mjcf: str, *, steps: int, warmup: int) -> dict:
 
     model = mujoco.MjModel.from_xml_string(mjcf)
     data = mujoco.MjData(model)
-    if model.nmocap != 1 or model.nflex != 1:
-        raise RuntimeError("unexpected model topology: require one mocap anchor and one flex")
+    if model.nmocap != 1 or model.nflex != 1 or model.njnt < 3 or model.neq < 1:
+        raise RuntimeError(
+            "unexpected model topology: require one mocap target, "
+            "three articulated anchor sliders, one weld and one flex"
+        )
     timings = []
     max_floor = 0.0
     max_sphere = 0.0
