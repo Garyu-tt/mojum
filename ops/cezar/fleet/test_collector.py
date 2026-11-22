@@ -119,6 +119,31 @@ class FleetObserverTests(unittest.TestCase):
         self.assertNotIn("enabled",snap["schedules"])
         self.assertIsNone(snap["external_running_confirmed"])
 
+    def test_non_object_schedule_payload_never_crashes_collector(self):
+        # Well-formed JSON is not necessarily an object with expected keys.
+        for payload in ("[]", "null", "123", '"string"'):
+            with self.subTest(payload=payload):
+                self.schedules.write_text(payload,encoding="utf-8")
+                with patch.object(f,"_get",side_effect=self.fake_get):
+                    snap=f.collect(now=self.now)
+                self.assertFalse(snap["schedules"]["available"])
+                self.assertNotIn("enabled",snap["schedules"])
+                self.assertIsNone(snap["external_running_confirmed"])
+
+    def test_schedule_snapshot_is_read_through_pinned_bounded_descriptor(self):
+        # Avoid Path.read_bytes(): a size check after an unbounded read
+        # does not protect against a rapidly growing or replaced file.
+        with patch.object(Path,"read_bytes",
+                          side_effect=AssertionError("unsafe unbounded read")):
+            with patch.object(f,"_get",side_effect=self.fake_get):
+                snap=f.collect(now=self.now)
+        self.assertEqual(snap["schedules"]["enabled"],5)
+        self.schedules.write_bytes(b" "*(32768+1))
+        with patch.object(f,"_get",side_effect=self.fake_get):
+            oversized=f.collect(now=self.now)
+        self.assertFalse(oversized["schedules"]["available"])
+        self.assertNotIn("enabled",oversized["schedules"])
+
     def test_atomic_private_write_and_no_arbitrary_paths(self):
         out=self.private/"current.json"
         with patch.object(f,"PRIVATE",out):
