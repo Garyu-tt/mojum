@@ -76,6 +76,32 @@ def read_private_fleet():
         os.close(fd)
 
 
+def project_runs(raw):
+    """Expose only fields needed by the Cezar Telegram run-status UI.
+
+    The upstream /runs endpoint may add prompts, credentials, user input or
+    private execution metadata. Never forward its full objects to a second
+    process, even through a loopback-only SSH tunnel.
+    """
+    records = json.loads(raw)
+    if type(records) is not list or len(records) > 1000:
+        raise ValueError("invalid upstream Cezar run collection")
+    visible = []
+    for record in records:
+        if type(record) is not dict:
+            raise ValueError("invalid upstream Cezar run")
+        rid, status, pr = record.get("id"), record.get("status"), record.get("prNumber")
+        if (type(rid) is not str or not 1 <= len(rid) <= 80
+                or not rid.isascii() or not rid.isprintable()
+                or type(status) is not str or not 1 <= len(status) <= 40
+                or not status.isascii() or not status.isprintable()):
+            raise ValueError("invalid upstream Cezar run identifier or status")
+        if pr is not None and (type(pr) is not int or not 1 <= pr <= 9_999_999):
+            raise ValueError("invalid upstream Cezar PR reference")
+        visible.append({"id": rid, "status": status, "prNumber": pr})
+    return json.dumps(visible, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
 class ReadOnlyHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # No bot tokens or chat content ever appear in gateway logs.
@@ -99,6 +125,8 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
                     body = response.read(MAX_BYTES + 1)
                 if len(body) > MAX_BYTES or not isinstance(json.loads(body), (list,dict)):
                     raise ValueError("invalid upstream response")
+                if path == "/api/v1/runs":
+                    body = project_runs(body)
             self.send_response(200)
             self.send_header("Content-Type","application/json; charset=utf-8")
             self.send_header("Cache-Control","no-store")
