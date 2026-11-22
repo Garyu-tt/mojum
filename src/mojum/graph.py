@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 import json
+import math
 
 SCHEMA = "mechanicus.universal-graph/1"
 MAX_JSON_DEPTH = 256
@@ -60,13 +61,47 @@ def _check_json_depth(raw):
             depth -= 1
 
 
+def _require_lossless_json(graph):
+    """Fail before hashing when nested v1 data cannot survive a UTF-8 JSON wire.
+
+    Config and notes are intentionally extensible, but neither Python-only
+    values nor unpaired surrogates are valid persisted graph data. Merely
+    hashing with json.dumps could otherwise silently coerce tuples or map
+    keys, or leak a UnicodeEncodeError after structural validation.
+    """
+    try:
+        wire = json.dumps(graph, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"), allow_nan=False)
+        wire.encode("utf-8", errors="strict")
+        decoded = json.loads(wire)
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise GraphError("Graph requires lossless UTF-8 JSON values") from exc
+    if decoded != graph:
+        raise GraphError("Graph requires lossless UTF-8 JSON values")
+
+
+def _reject_json_constant(token):
+    raise GraphError(f"Noncanonical graph JSON numeric constant: {token}")
+
+
+def _parse_json_float(token):
+    number = float(token)
+    if not math.isfinite(number):
+        raise GraphError("Graph JSON number exceeds finite float range")
+    return number
+
+
 def load_graph(path):
     """Read UTF-8 graph JSON without collapsing duplicate keys."""
     try:
         raw = path.read_text(encoding="utf-8")
         _check_json_depth(raw)
-        return json.loads(raw, object_pairs_hook=_unique_json_object)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        return json.loads(raw, object_pairs_hook=_unique_json_object,
+                          parse_constant=_reject_json_constant,
+                          parse_float=_parse_json_float)
+    except GraphError:
+        raise
+    except (ValueError, RecursionError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
 
@@ -152,4 +187,7 @@ def validate(graph):
                 ready.sort()
     if len(order) != len(by_id):
         raise GraphError("Cycle detected: feedback requires explicit scheduler")
+    # The exact v1 shape is checked above; reject non-JSON nested content
+    # before callers record the graph revision or open a SQLite journal.
+    _require_lossless_json(graph)
     return by_id, incoming, order
