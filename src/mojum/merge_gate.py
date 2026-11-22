@@ -642,10 +642,21 @@ def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
     return payload
 
 
+def _unique_snapshot_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Refuse ambiguous fields even inside nested CI checks."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise SnapshotError("snapshot contains duplicate JSON key")
+        result[key] = value
+    return result
+
+
 def _decode_snapshot_bytes(data: bytes) -> object:
-    """Reject parser-depth exhaustion in bounded but deeply nested JSON."""
+    """Reject parser-depth exhaustion and ambiguous JSON object fields."""
     try:
-        return json.loads(data.decode("utf-8"))
+        return json.loads(data.decode("utf-8"),
+                          object_pairs_hook=_unique_snapshot_object)
     except RecursionError as exc:
         raise SnapshotError("snapshot JSON exceeds parser nesting limit") from exc
 
