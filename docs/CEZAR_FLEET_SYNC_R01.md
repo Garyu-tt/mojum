@@ -79,8 +79,8 @@ and 44 open GitHub PRs. As new PRs arrived, the live number rose to
 and returned the same breakdown; owner Telegram menu now has 11
 commands. POST to the gateway is still denied with HTTP 405.
 
-Twenty-seven hermetic tests passed for fleet collector, Telegram
-read-only bot and gateway. The tests cover no invented external
+Thirty-four hermetic tests passed for fleet collector, Telegram
+read-only bot, gateway and reversible overlay installer. The tests cover no invented external
 liveness, expected results for bad/stale inputs, source privilege
 isolation, honest unavailable model endpoints, private atomic
 snapshot output, non-owner command rejection and denial of mutation
@@ -111,6 +111,29 @@ model capacity. Preferred next work is a least-privilege,
 source-authenticated start/heartbeat/end registry with a TTL and
 independently verified source identity, not automatic merge or
 permission-sharing with the bot.
+
+## Reproducible read-only UI installation
+
+The source-controlled `ops/cezar/fleet/install_overlay.py` installs
+`overlay.js` into the existing private Cezar `web/dist/assets`
+directory and adds a single deferred script tag to its HTML shell.
+It preserves the pre-injection HTML in the 0600 backup and refuses
+symlinks, public writable locations, duplicate tags or an unrelated
+post-upgrade index with an old backup. On a clean authorized host,
+after separately reviewing the actual installed Cezar version:
+
+```sh
+# Run as the existing Cezar user mirbi, not as root.
+python3 -B ops/cezar/fleet/install_overlay.py
+```
+
+On the current production host the installer also passed an
+**idempotency** check against the already-installed overlay:
+`was_present=true`, original backup preserved. Seven
+`test_install_overlay.py` regression cases cover safe installation
+and safe refusal. The fleet collector, bot and gateway have separate
+reproducible source and tested systemd units in this PR. The bot
+and Cezar data remain on their existing private SSH loopbacks.
 
 ## Safety
 
