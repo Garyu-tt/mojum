@@ -314,6 +314,48 @@ class FleetTests(unittest.TestCase):
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["review"], 1)
 
+    def test_competing_two_clone_tasks_admit_complete_backend_pairs(self):
+        from threading import Barrier
+
+        prompts = (
+            "Implement and test a bounded CPU-first feature for alpha.",
+            "Implement and test a bounded CPU-first feature for beta.",
+        )
+        with closing(sc.connect(str(self.db))) as db:
+            for i, prompt in enumerate(prompts):
+                sc.enqueue(db, [{
+                    "id": f"clone-pair-{i}", "scope": f"pair.scope.{i}",
+                    "priority": 10,
+                    "payload": {"prompt": prompt, "role": "coder",
+                                "clones": 2, "max_tokens": 64},
+                }], 101)
+        pairs = {prompt: Barrier(2, timeout=4) for prompt in prompts}
+        calls = []
+
+        def paired_request(port, path, body=None, timeout=5):
+            self.assertEqual(path, "/v1/chat/completions")
+            prompt = body["messages"][1]["content"]
+            calls.append((prompt, port))
+            pairs[prompt].wait()  # each task's clones must truly overlap
+            return {"choices": [{"message": {"content": "Small tested proposal."}}],
+                    "usage": {"completion_tokens": 12}}
+
+        # Two physical models exposing exactly one admitted slot each;
+        # each worker's clone needs the other worker's primary backend.
+        with patch.object(fleet, "_http", side_effect=paired_request):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2,
+                               backends=(self.backends[0], self.backends[1]))
+        self.assertEqual(report["proposals"], 2, report["results"])
+        self.assertEqual(report["model_calls_completed"], 4)
+        self.assertEqual(report["model_invocation_attempts"], 4)
+        self.assertEqual(report["observed_peak_inflight_model_calls"], 2)
+        self.assertEqual(report["blocked"], 0)
+        self.assertEqual(report["retry_queued"], 0)
+        self.assertEqual(len(calls), 4)
+        for prompt in prompts:
+            self.assertEqual({port for text, port in calls if text == prompt},
+                             {self.backends[0].port, self.backends[1].port})
+
     def test_clone_fails_closed_without_second_backend(self):
         self.add_task("issue-123", clones=2)
         result = fleet.single(self.db, 1, self.backends[0], self.out,
