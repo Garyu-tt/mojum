@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.aquarium import Aquarium
 from mojum.aquarium_trace_export import export_private_trace
@@ -165,8 +166,21 @@ function loadViewer() {
 
 
 class OfflineViewerPlaybackQA(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node required in viewer CI")
+    def test_missing_node_fails_ci_but_skips_optional_local_run(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "true", "GITHUB_ACTIONS": ""}):
+                with self.assertRaisesRegex(AssertionError, "Node is required in CI"):
+                    self.test_play_pause_speed_seek_visibility_and_file_replace()
+            with mock.patch.dict(os.environ, {"CI": "", "GITHUB_ACTIONS": ""}):
+                with self.assertRaises(unittest.SkipTest):
+                    self.test_play_pause_speed_seek_visibility_and_file_replace()
+
     def test_play_pause_speed_seek_visibility_and_file_replace(self):
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+                self.fail("Node is required in CI for viewer playback acceptance")
+            self.skipTest("Node unavailable for optional local viewer test")
         with tempfile.TemporaryDirectory(prefix="mojum-viewer-controls-") as tmp:
             source = Path(tmp) / "synthetic.sqlite3"
             output = Path(tmp) / "synthetic.private.jsonl"
@@ -180,7 +194,7 @@ class OfflineViewerPlaybackQA(unittest.TestCase):
                 motor_mode="developmental_fixture", sensory_mode="toy_probe",
             )
             run = subprocess.run(
-                [shutil.which("node"), "-e", NODE_CONTROLS,
+                [node, "-e", NODE_CONTROLS,
                  str(VIEWER), str(output)],
                 cwd=ROOT, env=dict(os.environ), encoding="utf-8",
                 capture_output=True, check=False, timeout=30,
