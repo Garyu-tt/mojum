@@ -30,7 +30,16 @@ class CezarGhPublicReadTests(unittest.TestCase):
         self.assertEqual(request[1], 90)
         self.assertTrue(request[0].startswith("https://api.github.com/search/issues?"))
         self.assertIn("is%3Apr", request[0])
+        self.assertIn("is%3Aopen", request[0])  # no obsolete closed PR triage
         self.assertFalse(include)
+
+    def test_issue_label_updates_and_explicit_closed_events_are_unchanged(self):
+        for query in ("repo:Garyu-tt/mojum is:issue updated:>=2026-11-21",
+                      "repo:Garyu-tt/mojum is:pr closed:>=2026-11-21"):
+            _, request, _ = adapter.parse([
+                "api", "--method", "GET", "/search/issues", "-f", "q=" + query
+            ])
+            self.assertNotIn("is%3Aopen", request[0])
 
     def test_read_only_label_timeline_with_headers(self):
         mode, request, include = adapter.parse([
