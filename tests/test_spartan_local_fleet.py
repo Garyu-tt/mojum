@@ -111,7 +111,9 @@ class FleetTests(unittest.TestCase):
         self.assertFalse(called)
 
     def test_local_http_allowlist_prevents_external_destinations(self):
-        for port in (18183, 22, True, -1):
+        # 18183 is an allowlisted optional local backend. Never make a real
+        # network request in this hermetic rejection test.
+        for port in (18184, 22, True, -1):
             with self.assertRaises(fleet.FleetError):
                 fleet._http(port, "/health")
         with self.assertRaises(fleet.FleetError):
