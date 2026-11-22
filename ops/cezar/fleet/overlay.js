@@ -95,7 +95,8 @@
         const item=document.createElement("div");
         item.className="fleet-agent";
         item.appendChild(el("div",a.name||"неизвестный агент"));
-        item.appendChild(el("div","Последний запуск: "+clock(a.last_run)+" · Следующий: "+clock(a.next_run),
+        const lastLabel={completed:"завершён",in_progress:"выполнялся",failed:"ошибка",no_update:"нет результата"}[a.last_status]||"статус неизвестен";
+        item.appendChild(el("div","Последний запуск: "+clock(a.last_run)+" ("+lastLabel+") · Следующий: "+clock(a.next_run),
           "fleet-muted fleet-small"));
         panel.appendChild(item);
       }
