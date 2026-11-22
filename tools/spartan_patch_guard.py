@@ -187,6 +187,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Trusted exact repo-relative path; repeat for each grant")
     args = parser.parse_args(argv)
     try:
+        # A POSIX FIFO can block inside os.open before fstat if O_NONBLOCK
+        # is unavailable. Fail closed rather than silently removing the flag.
+        if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+            raise PatchGuardError("POSIX patch input requires O_NONBLOCK")
         # Reject special files before reading: a FIFO with no writer would
         # otherwise block this trusted preflight indefinitely.
         descriptor = -1

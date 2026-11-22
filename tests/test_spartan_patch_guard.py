@@ -8,6 +8,7 @@ from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[1] / "tools" / "spartan_patch_guard.py"
 _spec = importlib.util.spec_from_file_location("spartan_patch_guard", MODULE)
@@ -133,6 +134,19 @@ class PatchGuardTests(unittest.TestCase):
         test = EDIT.replace("@@ -1,2 +1,2 @@\n one\n-old\n+new\n", "@@ -1,1 +1,1 @@\n one\n")
         with self.assertRaises(guard.PatchGuardError):
             guard.validate_patch(test, [PATH])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX required")
+    def test_cli_missing_nonblock_fails_before_open(self):
+        with tempfile.TemporaryDirectory() as td:
+            input_path = Path(td) / "input.diff"
+            input_path.write_text(EDIT, encoding="utf-8")
+            with patch.object(guard.os, "O_NONBLOCK", 0, create=True), \
+                 patch.object(guard.os, "open", side_effect=AssertionError("unsafe blocking open")) as opened, \
+                 redirect_stderr(io.StringIO()) as err:
+                result = guard.main(["--patch", str(input_path), "--allow-path", PATH])
+            self.assertEqual(result, 2)
+            opened.assert_not_called()
+            self.assertIn("O_NONBLOCK", err.getvalue())
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "mkfifo")
                          and getattr(os, "O_NONBLOCK", 0),
