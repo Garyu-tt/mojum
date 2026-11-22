@@ -12,6 +12,7 @@ from pathlib import Path
 
 MAX_SLOTS = 300
 MAX_ATTEMPTS = 3
+MAX_ARTIFACT_PATH = 500
 VALID_STATES = ("queued", "running", "review", "blocked")
 
 
@@ -257,7 +258,7 @@ def finish(db: sqlite3.Connection, worker_id: int, task_id: str, result: str,
         raise ValueError("worker may only submit to review, block or requeue")
     if result == "review" and not artifact.strip():
         raise ValueError("review requires a PR or patch artifact")
-    if len(artifact) > 500:
+    if len(artifact) > MAX_ARTIFACT_PATH:
         raise ValueError("artifact too long")
     if type(attempt) is not int or attempt < 1:
         raise ValueError("attempt fencing token must be a positive integer")
@@ -324,7 +325,8 @@ def main() -> int:
                     help="fencing attempt number returned by claim")
     commands.add_parser("status")
     args = parser.parse_args()
-    Path(args.db).parent.mkdir(parents=True, exist_ok=True)
+    # State directories must exist before connect() validates ancestry.
+    # mkdir(parents=True) here can follow a symlink before that validation.
     db = connect(args.db)
     try:
         create_schema(db)
