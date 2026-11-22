@@ -132,6 +132,34 @@ class FleetTests(unittest.TestCase):
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["queued"], 2)
 
+    def test_transient_model_outage_requeues_until_attempt_budget(self):
+        self.add_task("transient-model")
+        def unavailable(*args, **kwargs):
+            raise fleet.TransientFleetError("synthetic endpoint outage")
+        for expected in ("retry_queued", "retry_queued", "blocked"):
+            result = fleet.single(self.db, 1, self.backends[0], self.out,
+                                  request=unavailable)
+            self.assertEqual(result["state"], expected)
+        with closing(sc.connect(str(self.db))) as db:
+            status = sc.status(db)
+            self.assertEqual(status["states"]["blocked"], 1)
+            self.assertEqual(status["states"]["queued"], 0)
+
+    def test_artifact_write_failure_is_retryable_not_permanently_blocked(self):
+        self.add_task("transient-artifact")
+        with patch.object(fleet, "save_private",
+                          side_effect=OSError("synthetic disk full")):
+            outcome = fleet.single(self.db, 1, self.backends[0], self.out,
+                                   request=fake_server)
+        self.assertEqual(outcome["state"], "retry_queued")
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["queued"], 1)
+        # The same task can be reclaimed, fenced to a new attempt, and
+        # reach review once its output store is available.
+        accepted = fleet.single(self.db, 1, self.backends[0], self.out,
+                                request=fake_server)
+        self.assertEqual(accepted["state"], "proposal_for_independent_review")
+
     def test_no_duplicate_artifact_overwrite(self):
         x = fleet.save_private(self.out, "task-one", 1, {"a": 1})
         with self.assertRaises(FileExistsError):

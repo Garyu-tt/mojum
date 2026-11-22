@@ -39,6 +39,10 @@ class FleetError(ValueError):
     pass
 
 
+class TransientFleetError(FleetError):
+    """Retryable local model or artifact I/O failure; never retry invalid input."""
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise FleetError("HTTP redirect prohibited")
@@ -73,7 +77,7 @@ def _http(port: int, path: str, body=None, timeout=5):
         return json.loads(raw, parse_constant=lambda s: (_ for _ in ()).throw(
             FleetError("nonfinite JSON value")))
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
-        raise FleetError("model API unavailable: " + type(exc).__name__) from exc
+        raise TransientFleetError("model API unavailable: " + type(exc).__name__) from exc
 
 
 @dataclass(frozen=True)
@@ -235,7 +239,12 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
                     "reviewed": False, "patch_applied": False,
                     "tests_run": False, "model_calls": results,
                     "diverse_models": len({x["model"] for x in results}) == len(results)}
-        saved = save_private(folder, task["id"], attempt, artifact)
+        try:
+            saved = save_private(folder, task["id"], attempt, artifact)
+        except OSError as exc:
+            # Full disk / temporary artifact-store failures must not silently
+            # consume otherwise valid task proposals on their first attempt.
+            raise TransientFleetError("private artifact store unavailable") from exc
         db = coordinator.connect(str(db_path))
         try:
             ok = coordinator.finish(db, worker_id, task["id"], "review",
@@ -249,16 +258,19 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
         return {"worker": worker_id, "state": "proposal_for_independent_review",
                 "artifact": saved, "port": backend.port}
     except Exception as exc:
+        retryable = (isinstance(exc, TransientFleetError)
+                     and attempt < coordinator.MAX_ATTEMPTS)
+        disposition = "queued" if retryable else "blocked"
         db = coordinator.connect(str(db_path))
         try:
-            try:
-                coordinator.finish(db, worker_id, task["id"], "blocked",
-                                   int(time.time()), attempt=attempt)
-            except ValueError:
-                pass
+            updated = coordinator.finish(db, worker_id, task["id"], disposition,
+                                         int(time.time()), attempt=attempt)
         finally:
             db.close()
-        return {"worker": worker_id, "state": "blocked",
+        if not updated:
+            return {"worker": worker_id, "state": "lease_expired"}
+        return {"worker": worker_id,
+                "state": "retry_queued" if retryable else "blocked",
                 "error": type(exc).__name__}
 
 
@@ -307,6 +319,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
                 "proposals": sum(r.get("state") == "proposal_for_independent_review"
                                  for r in results),
                 "blocked": sum(r.get("state") == "blocked" for r in results),
+                "retry_queued": sum(r.get("state") == "retry_queued"
+                                    for r in results),
                 "no_task": sum(r.get("state") == "no_task" for r in results),
                 "before": before, "results": results,
                 "auto_merge": False, "generated_code_executed": False}
