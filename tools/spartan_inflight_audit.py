@@ -210,8 +210,14 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         result = audit(args.input, args.target, args.max_events)
-    except (OSError, ValueError) as exc:
-        # Fail closed and do not echo raw event bodies, paths or secrets.
+    except OSError as exc:
+        # OSError.strerror may include an untrusted path (or secret-bearing
+        # filename); never echo it to stderr or CI logs.
+        print("spartan audit: source unavailable (" + type(exc).__name__ + ")",
+              file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        # AuditError messages contain positions/reasons, not raw JSON bodies.
         print("spartan audit: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True))
