@@ -668,5 +668,46 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 2)
         self.assertEqual(json.loads(output.getvalue()), report)
 
+
+    def test_cli_all_incomplete_worker_dispositions_fail_closed(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        # A failed task or expired lease must not report a green batch just
+        # because the worker future returned normally.
+        for state, counter in (
+            ("blocked", "blocked"),
+            ("retry_queued", "retry_queued"),
+            ("lease_expired", "lease_expired"),
+            ("claim_unavailable", "claim_unavailable"),
+            ("worker_failed", "worker_failures"),
+        ):
+            with self.subTest(state=state):
+                report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                          "proposals": 0, "results": [{"worker": 1, "state": state}],
+                          counter: 1}
+                output = StringIO()
+                with patch.object(fleet, "run", return_value=report), \
+                     patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                               "--output-dir", str(self.out)]), \
+                     redirect_stdout(output):
+                    with self.assertRaises(SystemExit) as stopped:
+                        fleet.main()
+                self.assertEqual(stopped.exception.code, 2)
+                self.assertEqual(json.loads(output.getvalue()), report)
+
+    def test_cli_idle_batch_stays_successful(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                  "proposals": 0, "no_task": 1,
+                  "results": [{"worker": 1, "state": "no_task"}]}
+        output = StringIO()
+        with patch.object(fleet, "run", return_value=report), \
+             patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                       "--output-dir", str(self.out)]), \
+             redirect_stdout(output):
+            fleet.main()
+        self.assertEqual(json.loads(output.getvalue()), report)
+
 if __name__ == "__main__":
     unittest.main()
