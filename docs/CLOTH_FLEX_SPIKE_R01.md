@@ -1,14 +1,18 @@
 # Opt-in CPU-first MuJoCo cloth spike R0.1 (#376)
 
-**Status:** experimental, headless, not yet exercised against a MuJoCo
-installation in CI. This is **not** an Aquarium component, a garment asset
+**Status:** experimental, headless, independent real-engine CI added by #588;
+first run exposed unsupported mocap-attached elasticity, which this QA follow-up
+replaces with an articulated anchor. Acceptance still depends on green reruns. This is **not** an Aquarium component, a garment asset
 importer, a GLB skin, a validated cloth-body contact model, or equip/unequip.
 It introduces no dependency to the default stdlib-only runtime.
 
 `tools/cloth_flex_spike.py` generates a self-contained MJCF with one `12 x 6`
-`flexcomp dim="2"` patch. The x=0 edge is pinned to a **mocap body in the same
-MuJoCo world**. During stepping, its x coordinate follows a deterministic,
-small sinusoidal motion. A floor and sphere provide collision geometries.
+`flexcomp dim="2"` patch. The x=0 edge is pinned to a **dynamic articulated body** (three slider
+joints), coupled by a MuJoCo equality weld to a separate mocap target.
+MuJoCo 3.15+ rejects elastic flexes pinned *directly* to mocap bodies because
+elastic damping requires attachment velocities. During stepping, the target's
+x coordinate follows a deterministic, small sinusoidal motion; the welded
+anchor's actual following accuracy must be measured, not assumed. A floor and sphere provide collision geometries.
 All simulations remain CPU-only and locally initiated; the script never writes
 Aquarium journals, agent state, private traces, or output files.
 
@@ -47,7 +51,7 @@ once MuJoCo is run**, with tolerances and CPU target-machine profiles.
 
 ## What remains before release
 
-- Independently compile and execute this MJCF in a pinned MuJoCo version;
+- Independently compile and execute the updated MJCF in the dedicated MuJoCo CI;
   record actual p50/p95, RSS, anchor drift, ground/body penetration and any
   compiler errors. Do not present numbers from missing or skipped engines.
 - Add the same rig movement and measured contact scenario for Jolt SoftBody
