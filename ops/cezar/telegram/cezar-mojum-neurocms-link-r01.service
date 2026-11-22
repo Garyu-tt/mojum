@@ -1,0 +1,26 @@
+[Unit]
+Description=Private Cezar read-only Telegram bridge to mk-neurocms
+Wants=network-online.target
+After=network-online.target cezar-mojum-telegram-readonly-r01.service
+Requires=cezar-mojum-telegram-readonly-r01.service
+
+[Service]
+Type=simple
+User=mirbi
+Group=mirbi
+ExecStart=/usr/bin/ssh -F /home/mirbi/.ssh/config -N -T -R 127.0.0.1:14331:127.0.0.1:4331 -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ConnectTimeout=8 -o ForwardAgent=no -o ForwardX11=no cms-pentagi-hop
+Restart=always
+RestartSec=12
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+MemoryMax=150M
+CPUQuota=35%
+TasksMax=48
+
+[Install]
+WantedBy=multi-user.target
