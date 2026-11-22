@@ -121,6 +121,22 @@ class SchoolCatalogWireGuardTests(unittest.TestCase):
         # Validation must not copy it into another giant encoded string.
         self.assertLess(peak, 16 * MAX_CATALOG_BYTES)
 
+    def test_json_compatible_subclasses_cannot_evade_string_preflight(self):
+        class StringSubclass(str):
+            pass
+
+        class DictSubclass(dict):
+            pass
+
+        for metadata in (
+            StringSubclass("x" * (100 * MAX_CATALOG_BYTES)),
+            DictSubclass({"huge": "x" * (100 * MAX_CATALOG_BYTES)}),
+        ):
+            catalog = copy.deepcopy(self.catalog)
+            catalog["metadata"] = metadata
+            with self.subTest(type=type(metadata).__name__), self.assertRaises(SchoolError):
+                validate_catalog(catalog)
+
     def test_nested_string_values_are_preflight_bounded(self):
         catalog = copy.deepcopy(self.catalog)
         catalog["metadata"] = {"shared": ["🎵" * MAX_CATALOG_BYTES]}
