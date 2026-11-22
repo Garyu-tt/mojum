@@ -67,6 +67,16 @@ class NeuralProposalWireTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_neural_proposal(packet)
 
+    def test_rejects_out_of_range_wire_clock_fields(self):
+        for field in ("tick", "observed_at_ns"):
+            with self.subTest(field=field):
+                packet = sample()
+                packet[field] = 2**63 - 1
+                self.assertEqual(validate_neural_proposal(packet)[field], 2**63 - 1)
+                packet[field] = 2**63
+                with self.assertRaises(ValueError):
+                    validate_neural_proposal(packet)
+
     def test_rejects_duplicates_and_bad_ports(self):
         packet = sample()
         packet["sensory"].append(dict(packet["sensory"][0]))
