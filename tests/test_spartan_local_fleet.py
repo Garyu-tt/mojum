@@ -663,6 +663,25 @@ class FleetTests(unittest.TestCase):
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["review"], 4)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX replaceable ancestors")
+    def test_artifact_store_rejects_nonsticky_writable_ancestor(self):
+        shared = self.root / "untrusted-output-parent"
+        private = shared / "private"
+        shared.mkdir(mode=0o700)
+        private.mkdir(mode=0o700)
+        shared.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(fleet.FleetError, "ancestor replaceable"):
+                fleet.save_private(private, "untrusted-parent", 1,
+                                   {"secret": "never persist"})
+            self.assertEqual(list(private.iterdir()), [])
+            # Batch admission must reject before any model request.
+            with self.assertRaisesRegex(fleet.FleetError, "ancestor replaceable"):
+                fleet.run(self.db, private, max_agents=1, max_jobs=1,
+                          backends=[])
+        finally:
+            shared.chmod(0o700)
+
     @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestry")
     def test_artifact_store_rejects_symlinked_ancestor_without_writing(self):
         real_parent = self.root / "real-artifact-parent"
