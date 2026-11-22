@@ -349,9 +349,16 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None):
         finally:
             db.close()
         discovered = discover() if backends is None else backends
+        # Spread the first few tasks across independent physical models.
+        # Filling a 4-slot CPU server first starved idle GPT GPUs and created
+        # CPU-only contention before any meaningful results were produced.
         slots = []
-        for backend in discovered:
-            slots.extend([backend] * backend.free)
+        remaining = {b.port: b.free for b in discovered if b.free}
+        while any(remaining.values()):
+            for backend in discovered:
+                if remaining.get(backend.port, 0):
+                    slots.append(backend)
+                    remaining[backend.port] -= 1
         if not slots:
             raise FleetError("no observed live free inference slots")
         admitted = min(max_jobs, len(slots), max_agents)
