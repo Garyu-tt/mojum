@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -269,6 +270,42 @@ class CezarGhPublicReadTests(unittest.TestCase):
             with patch.object(adapter, "CACHE_DIR", alias / "cache"):
                 with self.assertRaises((adapter.Refused, OSError)):
                     adapter.read(url, ttl=300)
+
+    def test_fifo_cache_entry_is_rejected_without_blocking_open(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("POSIX FIFO required")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            os.mkfifo(cache_dir / filename, mode=0o600)
+            actual_open = os.open
+
+            def checked_open(path, flags, *args, **kwargs):
+                if path == filename and not (flags & os.O_NONBLOCK):
+                    self.fail("cached entry must be opened O_NONBLOCK before fstat")
+                return actual_open(path, flags, *args, **kwargs)
+
+            with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
+                    adapter.os, "open", side_effect=checked_open):
+                with self.assertRaisesRegex(adapter.Refused, "regular"):
+                    adapter.read(url, ttl=300)
+
+    def test_symlink_ancestor_cannot_create_missing_cache_child(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "private"
+            target.mkdir(mode=0o700)
+            alias = root / "alias"
+            alias.symlink_to(target, target_is_directory=True)
+            child = target / "must-not-be-created"
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            with patch.object(adapter, "CACHE_DIR", alias / child.name):
+                with self.assertRaises((adapter.Refused, OSError)):
+                    adapter.read(url, ttl=300)
+            self.assertFalse(child.exists(),
+                             "unsafe mkdir followed a symlinked ancestor")
 
     def test_refused_cli_does_not_echo_sensitive_arguments(self):
         secret = "token_please_never_log_this"
