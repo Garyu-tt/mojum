@@ -33,6 +33,13 @@ MAX_API_BYTES = 320_000
 _SHA = re.compile(r"[a-f0-9]{40}\Z")
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects before urllib contacts a new destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise admission.AdmissionError("GitHub API redirect forbidden")
+
+
 def fetch_json(url: str, expected: type, *, opener=None):
     if not url.startswith(BASE + "/") and not url.startswith(BASE + "?"):
         raise admission.AdmissionError("unexpected public GitHub API path")
@@ -40,9 +47,7 @@ def fetch_json(url: str, expected: type, *, opener=None):
         "Accept": "application/vnd.github+json",
         "User-Agent": "cezar-mojum-bounded-label-intake/1.0",
     })
-    client = opener or urllib.request.build_opener(
-        urllib.request.ProxyHandler({}), admission.NoRedirect()
-    )
+    client = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with client.open(req, timeout=12) as response:
         if response.status != 200 or response.geturl() != url:
             raise admission.AdmissionError("unexpected GitHub origin/status")

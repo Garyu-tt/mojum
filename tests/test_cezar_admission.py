@@ -279,11 +279,9 @@ class AdmissionTests(unittest.TestCase):
                 {"Location": "http://example.invalid/other"},
                 "http://example.invalid/other",
             )
-
         def inspect_opener(*handlers):
             self.assertTrue(any(isinstance(h, m.NoRedirect) for h in handlers))
             raise RuntimeError("redirect-denying handler installed")
-
         with patch.object(m.urllib.request, "build_opener", side_effect=inspect_opener):
             with self.assertRaisesRegex(RuntimeError, "handler installed"):
                 m.dispatch(self.db, self.ident(), self.private_prompt())
