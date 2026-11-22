@@ -184,6 +184,62 @@ class AdmissionTests(unittest.TestCase):
             m.mark_submitted(self.db, row["id"], str(uuid.uuid4()))
         self.assertEqual(m.claim(self.db, self.ident())[0], False)
 
+    def test_manual_finish_releases_capacity_but_not_revision_identity(self):
+        ident = self.ident()
+        fresh, row = m.claim(self.db, ident, single_flight=True)
+        self.assertTrue(fresh)
+        run_id = str(uuid.uuid4())
+        m.mark_submitted(self.db, row["id"], run_id)
+        admitted, busy = m.claim(
+            self.db, self.ident(number=613), single_flight=True)
+        self.assertFalse(admitted)
+        self.assertEqual(busy["status"], "busy")
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, row["id"], str(uuid.uuid4()))
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM admission WHERE id=?", (row["id"],)
+        ).fetchone()[0], "submitted")
+        done = m.mark_finished(self.db, row["id"], run_id)
+        self.assertEqual(done["status"], "finished")
+        self.assertEqual(m.mark_finished(self.db, row["id"], run_id)["status"], "finished")
+        retry, old = m.claim(self.db, ident, single_flight=True)
+        self.assertFalse(retry)
+        self.assertEqual(old["status"], "finished")
+        admitted, other = m.claim(
+            self.db, self.ident(number=613), single_flight=True)
+        self.assertTrue(admitted)
+        self.assertEqual(other["status"], "claimed")
+
+    def test_manual_finish_rejects_unsubmitted_blocked_and_unknown(self):
+        _, row = m.claim(self.db, self.ident())
+        run_id = str(uuid.uuid4())
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, row["id"], run_id)
+        m.mark_submitted(self.db, row["id"], run_id)
+        m.mark_blocked(self.db, row["id"], run_id)
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, row["id"], run_id)
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, str(uuid.uuid4()), run_id)
+        with self.assertRaises(m.AdmissionError):
+            m.mark_finished(self.db, "not-a-uuid", run_id)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM admission WHERE id=?", (row["id"],)
+        ).fetchone()[0], "blocked")
+
+    def test_cli_manual_finish_is_explicit_not_automatic(self):
+        _, row = m.claim(self.db, self.ident())
+        run_id = str(uuid.uuid4())
+        m.mark_submitted(self.db, row["id"], run_id)
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            rc = m.main(["--db", str(self.db_path), "finish",
+                         "--admission-id", row["id"], "--run-id", run_id])
+        self.assertEqual(rc, 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "finished")
+        self.assertEqual(result["run_id"], run_id)
+
     def test_blocking_rejected_model_result_is_terminal_and_idempotent(self):
         ident = self.ident()
         _, row = m.claim(self.db, ident)

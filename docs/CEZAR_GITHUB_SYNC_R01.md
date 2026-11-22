@@ -244,7 +244,22 @@ python3 /var/lib/cezar/guarded-intake/cezar_admission.py \
 
 Only an authorized operator with access to the owner-private admission
 database should mark a failed task blocked; never automatically mark
-an unreviewed model answer `finished`. GitHub CLI on the server
+an unreviewed model answer `finished`. Once the exact Cezar run ID is
+independently confirmed complete and its output reviewed, the same operator
+may explicitly release the one-task admission ceiling without reopening the
+same revision:
+
+```sh
+python3 /var/lib/cezar/guarded-intake/cezar_admission.py \
+  --db /var/lib/cezar/home/admission/mojum.sqlite \
+  finish --admission-id '<admission-uuid>' --run-id '<cezar-run-uuid>'
+```
+
+The `finish` operation checks that the admission is `submitted` with
+the matching exact run UUID and is idempotent for that same `finished` run.
+It refuses never-submitted, already-blocked and mismatched runs. The timer,
+models and public GitHub metadata never invoke `finish`; manual independent
+review is still mandatory. GitHub CLI on the server
 still lacks write authorization. **The 300 Spartan names are logical
 identities, not 300 verified concurrent, useful local inference workers.**
 The QA gate remains separate from any eventual draft-PR publisher.
