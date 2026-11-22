@@ -367,6 +367,111 @@ def _github_closed_history(now):
     }
 
 
+REPORT_DIR = Path("/var/lib/cezar/home/fleet/agent-reports")
+REPORT_AGENTS = ("qa", "peer1", "peer2", "peer3", "peer4")
+REPORT_PHASES = {"observed", "started", "progress", "completed", "blocked", "failed"}
+REPORT_ACTIONS = {"build", "qa", "ship", "observe", "sync", "other"}
+
+def _agent_reports():
+    """A connector-observed receipt is evidence of a report, not of live work."""
+    dstat=os.lstat(REPORT_DIR)
+    if not stat.S_ISDIR(dstat.st_mode) or dstat.st_uid!=os.geteuid() or dstat.st_mode & 0o077:
+        raise FleetError("unsafe report directory")
+    agents=[]
+    for agent in REPORT_AGENTS:
+        path=REPORT_DIR/(agent+".json")
+        try:
+            fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|getattr(os,"O_CLOEXEC",0))
+        except FileNotFoundError:
+            continue
+        try:
+            st=os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.geteuid() or st.st_mode & 0o077 or st.st_nlink!=1 or st.st_size>2000:
+                raise FleetError("unsafe agent report")
+            with os.fdopen(fd,"rb") as inp:
+                fd=-1
+                raw=inp.read(2001)
+        finally:
+            if fd>=0:os.close(fd)
+        if len(raw)>2000:
+            raise FleetError("oversized agent report")
+        try: item=json.loads(raw)
+        except (ValueError,UnicodeError) as exc:raise FleetError("invalid agent report") from exc
+        if (type(item) is not dict or item.get("schema")!="cezar.agent-report.v1"
+                or item.get("agent")!=agent or item.get("phase") not in REPORT_PHASES
+                or item.get("action") not in REPORT_ACTIONS
+                or item.get("source") not in ("owner-observation","self-report")
+                or _parse_time(item.get("reported_at")) is None):
+            raise FleetError("invalid report schema")
+        note=item.get("note")
+        num=item.get("pr")
+        if (type(note) is not str or not 3<=len(note)<=240 or not note.isprintable()
+                or (num is not None and (type(num) is not int or not 1<=num<=10_000_000))):
+            raise FleetError("invalid report content")
+        agents.append({k:item[k] for k in ("agent","phase","action","note","pr","source","reported_at")})
+    agents.sort(key=lambda x:x["reported_at"],reverse=True)
+    return {"available":True,"source":"owner connector reports; NOT verified live execution",
+            "agents":agents,"total_reporting":len(agents),"live_confirmed":None}
+
+
+QA_STATE = Path("/var/lib/cezar/home/qa-fleet/current.json")
+def _qa_fleet():
+    """Actual localhost model inference requests, not independent acceptance."""
+    try:
+        fd = os.open(QA_STATE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
+                     getattr(os, "O_CLOEXEC", 0))
+    except FileNotFoundError:
+        return {"available": False, "reason": "not-started"}
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_nlink != 1 or st.st_mode & 0o077 or st.st_size > 150000):
+            raise FleetError("unsafe QA state")
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            data = f.read(150001)
+    finally:
+        if fd >= 0: os.close(fd)
+    if len(data) > 150000:
+        raise FleetError("oversized QA state")
+    value = json.loads(data)
+    if type(value) is not dict or value.get("schema") != "cezar.qa-fleet.v1":
+        raise FleetError("unknown QA snapshot")
+    workers = value.get("workers")
+    if not isinstance(workers, list) or len(workers) != 17:
+        raise FleetError("bad worker list")
+    rows = []
+    for i, x in enumerate(workers):
+        if (type(x) is not dict or x.get("slot") != i
+                or x.get("port") not in (48081, 48082, 48083, 48084, 48085)
+                or x.get("state") not in ("queued", "fetching_patch", "inflight", "completed", "failed")):
+            raise FleetError("bad QA worker")
+        pr = x.get("pr")
+        if pr is not None and (type(pr) is not int or not 1 <= pr <= 10000000):
+            raise FleetError("bad PR number")
+        summary = x.get("summary")
+        if summary is not None and not isinstance(summary, str):
+            raise FleetError("bad review summary")
+        rows.append({"slot": i, "port": x["port"], "state": x["state"],
+                     "pr": pr, "summary": summary[:350] if summary else None,
+                     "evidence": str(x.get("evidence") or "")[:40],
+                     "started_at": x.get("model_started_at"),
+                     "finished_at": x.get("finished_at")})
+    stamp = _parse_time(value.get("generated_at"))
+    if stamp is None:
+        raise FleetError("bad QA timestamp")
+    age = (NOW()-stamp).total_seconds()
+    fresh = 0 <= age <= 120
+    return {"available": True,
+            "source": "live local model requests; not verified final QA",
+            "generated_at": value["generated_at"], "snapshot_fresh": fresh,
+            "cycle": value.get("cycle"), "configured_capacity": 17,
+            "assigned": value.get("assigned"),
+            "active_requests": sum(x["state"] == "inflight" for x in rows) if fresh else None,
+            "completed_tasks": sum(x["state"] == "completed" for x in rows),
+            "failed_tasks": sum(x["state"] == "failed" for x in rows),
+            "workers": rows}
+
 def collect(now=None, *, include_history=False):
     if type(include_history) is not bool:
         raise FleetError("invalid GitHub history selector")
@@ -377,6 +482,8 @@ def collect(now=None, *, include_history=False):
         ("schedules",lambda:_schedule_list(now)),
         ("models",_models),
         ("github",lambda:_github(now)),
+        ("reports",_agent_reports),
+        ("qa_fleet",_qa_fleet),
     ]
     if include_history:
         sections.append(("github_history",lambda:_github_closed_history(now)))
