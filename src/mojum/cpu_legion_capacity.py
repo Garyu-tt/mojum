@@ -52,12 +52,10 @@ def _current_cgroup(root: Path, proc_cgroup: Path) -> Path:
         if not all((candidate / name).is_file() for name in required):
             raise CapacityError("current cgroup v2 resource files unavailable")
         return candidate
-    # A cgroup namespace may map an invisible member path to its mount root.
-    # This fallback is safe only when the member directory itself is absent
-    # and the visible root has every required resource metric.
-    if all((root / name).is_file() for name in required):
-        return root
-    raise CapacityError("current cgroup v2 resource files unavailable")
+    # A missing membership path cannot be verified against this visible
+    # mount. Treating the root as this process's scope might silently ignore
+    # a tighter per-process quota, inflating admission capacity.
+    raise CapacityError("current cgroup v2 membership path is not visible")
 
 
 def _scope_chain(current: Path, root: Path) -> list[Path]:

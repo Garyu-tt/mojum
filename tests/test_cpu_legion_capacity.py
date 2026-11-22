@@ -89,11 +89,11 @@ class ResourceFixture(unittest.TestCase):
                 finally:
                     (self.scope / missing).write_text(original)
 
-    def test_cgroup_namespace_mount_fallback(self):
+    def test_missing_membership_path_must_not_fallback_to_root(self):
         self.member.write_text("0::/path/not-visible-in-container\n")
-        s = self.detect()
-        self.assertEqual(s["cgroup_scopes_checked"], 1)
-        self.assertEqual(s["cpu_millicores"], 8000)
+        with self.assertRaisesRegex(
+                CapacityError, "membership path is not visible"):
+            self.detect()
 
     def test_rejects_invalid_quota_and_membership(self):
         (self.scope / "cpu.max").write_text("250000 0")
