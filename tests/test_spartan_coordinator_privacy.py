@@ -104,6 +104,25 @@ class SpartanPrivateDatabaseTests(unittest.TestCase):
                 coordinator.connect(str(path))
             self.assertFalse((private / "tasks.sqlite3").exists())
 
+    def test_symlink_dotdot_path_cannot_bypass_parent_preflight(self):
+        with tempfile.TemporaryDirectory() as folder:
+            safe = Path(folder) / "safe"
+            safe.mkdir(mode=0o700)
+            (safe / "target").mkdir(mode=0o700)
+            other = Path(folder) / "other"
+            other.mkdir(mode=0o700)
+            (other / "sub").mkdir(mode=0o700)
+            actual = other / "target"
+            actual.mkdir(mode=0o777)
+            (safe / "link").symlink_to(other / "sub", target_is_directory=True)
+            # abspath sees safe/target; the filesystem sees other/target.
+            disguised = safe / "link" / ".." / "target" / "tasks.sqlite3"
+            self.assertNotEqual(os.path.abspath(disguised),
+                                os.path.realpath(disguised))
+            with self.assertRaisesRegex(PermissionError, "parent directory"):
+                coordinator.connect(str(disguised))
+            self.assertFalse((actual / "tasks.sqlite3").exists())
+
     def test_symlink_does_not_redirect_private_database(self):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "target.sqlite3"
