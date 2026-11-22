@@ -557,5 +557,157 @@ class FleetTests(unittest.TestCase):
                           backends=self.backends)
 
 
+
+    def _assert_claim_failure_instance_isolated(self, failure):
+        self.add_task("failed-claim", scope="component.claim")
+        self.add_task("healthy-claim", scope="component.healthy")
+        original_claim = sc.claim
+
+        def claim_or_fail(db, worker_id, *args, **kwargs):
+            if worker_id == 1:
+                raise failure
+            return original_claim(db, worker_id, *args, **kwargs)
+
+        with patch.object(fleet.coordinator, "claim", side_effect=claim_or_fail), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2,
+                               backends=self.backends)
+        by_worker = {item["worker"]: item for item in report["results"]}
+        self.assertEqual(report["claim_unavailable"], 1)
+        self.assertEqual(report["worker_failures"], 0)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(by_worker[1]["state"], "claim_unavailable")
+        self.assertEqual(by_worker[1]["reason"], "coordinator_claim_failed")
+        self.assertEqual(by_worker[2]["state"], "proposal_for_independent_review")
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+        self.assertNotIn("SECRET", json.dumps(report))
+
+    def test_sqlite_database_claim_failure_isolated(self):
+        # A DatabaseError that is not OperationalError must not kill the batch.
+        self._assert_claim_failure_instance_isolated(
+            sqlite3.DatabaseError("SECRET SQLite schema or database content"))
+
+    def test_os_error_claim_failure_isolated(self):
+        self._assert_claim_failure_instance_isolated(
+            OSError("SECRET coordinator path or filesystem detail"))
+
+    def _assert_claim_failure_type_isolated(self, error_type):
+        # An untrusted SQLite/OS exception cannot abort other worker futures
+        # or leak a private coordinator diagnostic into the batch report.
+        self.add_task("failure-isolated-one", scope="component.one")
+        self.add_task("failure-isolated-two", scope="component.two")
+        real_claim = sc.claim
+
+        def fail_only_first_worker(db, worker_id, *args, **kwargs):
+            if worker_id == 1:
+                raise error_type("SECRET COORDINATOR PROMPT PATH")
+            return real_claim(db, worker_id, *args, **kwargs)
+
+        with patch.object(sc, "claim", side_effect=fail_only_first_worker), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2,
+                               backends=self.backends)
+        self.assertEqual(report["claim_unavailable"], 1)
+        self.assertEqual(report["worker_failures"], 0)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+        failures = [result for result in report["results"]
+                    if result["state"] == "claim_unavailable"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["worker"], 1)
+        self.assertEqual(failures[0]["error"], error_type.__name__)
+        self.assertEqual(failures[0]["reason"], "coordinator_claim_failed")
+        self.assertNotIn("SECRET", json.dumps(report))
+        self.assertNotIn("PROMPT PATH", json.dumps(report))
+        with closing(sc.connect(str(self.db))) as db:
+            states = sc.status(db)["states"]
+            self.assertEqual(states["review"], 1)
+            self.assertEqual(states["queued"], 1)
+
+    def test_claim_database_error_isolated_from_peer_results(self):
+        self._assert_claim_failure_type_isolated(sqlite3.DatabaseError)
+
+    def test_claim_oserror_isolated_from_peer_results(self):
+        self._assert_claim_failure_type_isolated(OSError)
+
+    def test_unexpected_worker_crash_retains_successful_proposals(self):
+        self.add_task("recover-first", scope="component.first")
+        self.add_task("recover-second", scope="component.second")
+        real_single = fleet.single
+
+        def crash_one(db_path, worker_id, backend, folder, **kwargs):
+            if worker_id == 1:
+                raise RuntimeError("SECRET EXCEPTION DETAILS")
+            return real_single(db_path, worker_id, backend, folder, **kwargs)
+
+        with patch.object(fleet, "single", side_effect=crash_one), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2,
+                               backends=self.backends)
+        self.assertEqual(report["worker_failures"], 1)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+        self.assertEqual(
+            next(x for x in report["results"] if x["worker"] == 1)["state"],
+            "worker_failed")
+        self.assertNotIn("SECRET", json.dumps(report))
+
+    def test_cli_partial_batch_reports_results_but_fails_closed(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                  "claim_unavailable": 1, "worker_failures": 0,
+                  "proposals": 1, "results": []}
+        output = StringIO()
+        with patch.object(fleet, "run", return_value=report), \
+             patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                       "--output-dir", str(self.out)]), \
+             redirect_stdout(output):
+            with self.assertRaises(SystemExit) as stopped:
+                fleet.main()
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertEqual(json.loads(output.getvalue()), report)
+
+
+    def test_cli_all_incomplete_worker_dispositions_fail_closed(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        # A failed task or expired lease must not report a green batch just
+        # because the worker future returned normally.
+        for state, counter in (
+            ("blocked", "blocked"),
+            ("retry_queued", "retry_queued"),
+            ("lease_expired", "lease_expired"),
+            ("claim_unavailable", "claim_unavailable"),
+            ("worker_failed", "worker_failures"),
+        ):
+            with self.subTest(state=state):
+                report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                          "proposals": 0, "results": [{"worker": 1, "state": state}],
+                          counter: 1}
+                output = StringIO()
+                with patch.object(fleet, "run", return_value=report), \
+                     patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                               "--output-dir", str(self.out)]), \
+                     redirect_stdout(output):
+                    with self.assertRaises(SystemExit) as stopped:
+                        fleet.main()
+                self.assertEqual(stopped.exception.code, 2)
+                self.assertEqual(json.loads(output.getvalue()), report)
+
+    def test_cli_idle_batch_stays_successful(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                  "proposals": 0, "no_task": 1,
+                  "results": [{"worker": 1, "state": "no_task"}]}
+        output = StringIO()
+        with patch.object(fleet, "run", return_value=report), \
+             patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                       "--output-dir", str(self.out)]), \
+             redirect_stdout(output):
+            fleet.main()
+        self.assertEqual(json.loads(output.getvalue()), report)
+
 if __name__ == "__main__":
     unittest.main()
