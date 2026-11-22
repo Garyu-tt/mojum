@@ -282,12 +282,22 @@ def main():
     if not count:
         return 2
     root = Path(args.repo).resolve(strict=True)
+    failed = False
     with ThreadPoolExecutor(max_workers=count) as pool:
         results = [pool.submit(run_one, args.db, i + 1, root, Path(args.out),
                                args.url, args.model, args.timeout) for i in range(count)]
-        for future in results:
-            print(json.dumps(future.result(), ensure_ascii=False), flush=True)
-    return 0
+        for worker_id, future in enumerate(results, start=1):
+            try:
+                result = future.result()
+            except Exception as exc:
+                # Preserve successful peers and fail the batch without exposing
+                # coordinator, filesystem or inference-service exception text.
+                result = {"worker": worker_id, "state": "worker_failed",
+                          "error": type(exc).__name__}
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+            if result.get("state") not in ("idle", "review"):
+                failed = True
+    return 1 if failed else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
