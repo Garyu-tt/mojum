@@ -29,7 +29,7 @@ REPO = "Garyu-tt/mojum"
 SHORT = 84
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z",re.I)
 PR_NUM = re.compile(r"[1-9][0-9]{0,6}\Z")
-SAFE_COMMANDS = frozenset({"start","help","status","prs","pr","ci","runs","run","alerts","mute","unmute","refresh"})
+SAFE_COMMANDS = frozenset({"start","help","status","prs","pr","ci","runs","run","fleet","agents","alerts","mute","unmute","refresh"})
 
 class BotFailure(Exception):
     pass
@@ -111,6 +111,7 @@ def keyboard():
     return {"inline_keyboard":[
         [{"text":"📊 Cezar","callback_data":"status"},{"text":"🔀 PR","callback_data":"prs"}],
         [{"text":"🧪 CI #612","callback_data":"ci 612"},{"text":"⚙️ Запуски","callback_data":"runs"}],
+        [{"text":"👥 Флот · расписания и слоты","callback_data":"fleet"}],
         [{"text":"🔕/🔔 Уведомления","callback_data":"alerts"}],
     ]}
 
@@ -138,6 +139,43 @@ def _runs():
     return data
 
 
+def _fleet():
+    data=cezar_get("/api/v1/fleet")
+    if not isinstance(data,dict) or data.get("schema")!="cezar.fleet.visibility.v1":
+        raise BotFailure("Cezar fleet source unavailable")
+    return data
+
+
+def fleet_text():
+    data=_fleet()
+    c=data.get("cezar") or {}
+    s=data.get("schedules") or {}
+    m=data.get("models") or {}
+    g=data.get("github") or {}
+    lines=["👥 Флот Mojum, наблюдение из Cezar",
+           "Задачи Cezar сейчас: "+str(c.get("active","неизвестно")),
+           "Расписаний Mojum: "+str(s.get("enabled","неизвестно"))+
+               " (разработчиков "+str(s.get("developers_enabled","?"))+
+               ", QA "+str(s.get("qa_enabled","?"))+")",
+           "Модели: "+str(m.get("inference_busy_known","?"))+
+               "/"+str(m.get("capacity_slots_known","?"))+" слотов занято",
+           "GitHub PR открыто: "+str(g.get("open_prs","?")),
+           "Внешние выполняются сейчас: неизвестно (heartbeat не подключён)."]
+    if not s.get("snapshot_fresh"):
+        lines.append("⚠️ Снимок расписаний устарел. Последние значения не являются текущими.")
+    from datetime import datetime
+    agents=s.get("agents")
+    if isinstance(agents,list):
+        lines.append("")
+        for agent in agents[:12]:
+            if not isinstance(agent,dict): continue
+            stamp=agent.get("last_run")
+            when=stamp[:16].replace("T"," ")+" UTC" if isinstance(stamp,str) else "неизвестно"
+            lines.append("• "+stable_text(agent.get("name","?"),52)+": "+when)
+    lines.append("Расписания, занятые слоты и PR не суммируются в «активных агентов».")
+    return "\n".join(lines)
+
+
 def status_text():
     health=cezar_get("/api/v1/health")
     git=_github()
@@ -148,11 +186,26 @@ def status_text():
             kind=str(run.get("status","unknown"))
             statuses[kind]=statuses.get(kind,0)+1
     active=sum(statuses.get(s,0) for s in ("running","queued","waiting","starting"))
-    return ("🤖 ClaudeFabric → Cezar\n"
+    try:
+        fleet=_fleet()
+        schedule=fleet.get("schedules") or {}
+        models=fleet.get("models") or {}
+        fleet_line=(f"Расписаний Mojum: {schedule.get('enabled','?')} "
+                    f"(разработчиков {schedule.get('developers_enabled','?')}, "
+                    f"QA {schedule.get('qa_enabled','?')}); "
+                    f"моделей занято {models.get('inference_busy_known','?')}/"
+                    f"{models.get('capacity_slots_known','?')}\n"
+                    "Внешние активны сейчас: неизвестно, нет heartbeat\n")
+        if not schedule.get("snapshot_fresh"):
+            fleet_line+="⚠️ Снимок расписаний устарел\n"
+    except BotFailure:
+        fleet_line="Флот: нет достоверной телеметрии\n"
+    return ("🤖 Cezar | Mojum\n"
             f"Сервер: {stable_text(str(health.get('version','unknown')),24)}\n"
             f"Репозиторий: {REPO}\n"
             f"PR открыто: {git.get('prsTotal','?')} | Issues: {git.get('issuesTotal','?')}\n"
-            f"Запусков Cezar: {len(runs)} | активных: {active}\n"
+            f"Запусков Cezar: {len(runs)} | активных ВНУТРИ Cezar: {active}\n"
+            f"{fleet_line}"
             f"Состояния: {', '.join(f'{k}={v}' for k,v in sorted(statuses.items())) or 'нет'}\n"
             "Источник: только API Cezar. Без независимых ALT-циклов и авто-merge.")
 
@@ -232,6 +285,7 @@ def help_text():
             "/pr 612 — карточка PR\n"
             "/ci 612 — проверки PR\n"
             "/runs — запуски Cezar\n"
+            "/fleet — разработчики, QA, модели и источники\n"
             "/run UUID — конкретный запуск\n"
             "/refresh — запросить обновление списка PR\n"
             "/alerts — вкл/выкл уведомления\n"
@@ -256,6 +310,8 @@ def command(text,state):
         return prs_text(),False
     if op=="runs":
         return runs_text(),False
+    if op in ("fleet","agents"):
+        return fleet_text(),False
     if op in ("pr","ci"):
         if not PR_NUM.fullmatch(arg):
             return "Укажи номер PR, например /ci 612",False
