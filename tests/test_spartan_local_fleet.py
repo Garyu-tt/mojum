@@ -558,7 +558,7 @@ class FleetTests(unittest.TestCase):
 
 
 
-    def _assert_claim_failure_isolated(self, failure):
+    def _assert_claim_failure_instance_isolated(self, failure):
         self.add_task("failed-claim", scope="component.claim")
         self.add_task("healthy-claim", scope="component.healthy")
         original_claim = sc.claim
@@ -584,11 +584,11 @@ class FleetTests(unittest.TestCase):
 
     def test_sqlite_database_claim_failure_isolated(self):
         # A DatabaseError that is not OperationalError must not kill the batch.
-        self._assert_claim_failure_isolated(
+        self._assert_claim_failure_instance_isolated(
             sqlite3.DatabaseError("SECRET SQLite schema or database content"))
 
     def test_os_error_claim_failure_isolated(self):
-        self._assert_claim_failure_isolated(
+        self._assert_claim_failure_instance_isolated(
             OSError("SECRET coordinator path or filesystem detail"))
 
     def _assert_claim_failure_isolated(self, error_type):
