@@ -91,8 +91,10 @@ def parse(args):
         }
         if len(states) > 1:
             raise Refused("conflicting GitHub search state filters")
-        if ("is:pr" in terms and any(term.startswith("created:") for term in terms)
-                and not states):
+        if ("is:pr" in terms
+                and any(term.startswith("created:>=") for term in terms)
+                and not states
+                and not any(term.startswith("closed:") for term in terms)):
             q += " is:open"
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
