@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 # The independent SQLite resource audit imports tests by absolute test path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -201,6 +201,51 @@ class FanoutContract(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
             with self.assertRaises(FileExistsError):
                 f.exclusive_json_output(path,{"overwritten":True})
+
+
+    def test_existing_output_refused_before_inference(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            tasks_path=directory/"tasks.json"
+            tasks_path.write_text(json.dumps(tasks(1)),encoding="utf-8")
+            output=directory/"existing.json"
+            output.write_text("KEEP",encoding="utf-8")
+            with patch.object(f,"discover_backend",
+                              side_effect=lambda port:f.Backend(port,1,1,2048)), \
+                 patch.object(f,"execute",side_effect=AssertionError("inference started")) as execute:
+                with self.assertRaises(FileExistsError):
+                    f.main(["--tasks",str(tasks_path),"--execute","--output",str(output)])
+                execute.assert_not_called()
+            self.assertEqual(output.read_text(encoding="utf-8"),"KEEP")
+
+    def test_failed_model_call_cleans_pre_reserved_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            tasks_path=directory/"tasks.json"
+            tasks_path.write_text(json.dumps(tasks(1)),encoding="utf-8")
+            output=directory/"failed.json"
+            with patch.object(f,"discover_backend",
+                              side_effect=lambda port:f.Backend(port,1,1,2048)), \
+                 patch.object(f,"execute",side_effect=RuntimeError("synthetic model failure")):
+                with self.assertRaisesRegex(RuntimeError,"synthetic model failure"):
+                    f.main(["--tasks",str(tasks_path),"--execute","--output",str(output)])
+            self.assertFalse(output.exists())
+
+    def test_successful_model_call_writes_private_pre_reserved_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            tasks_path=directory/"tasks.json"
+            tasks_path.write_text(json.dumps(tasks(1)),encoding="utf-8")
+            output=directory/"result.json"
+            with patch.object(f,"discover_backend",
+                              side_effect=lambda port:f.Backend(port,1,1,2048)), \
+                 patch.object(f,"execute",return_value=[{"task_id":"task-0","text":"proposal"}]):
+                self.assertEqual(
+                    f.main(["--tasks",str(tasks_path),"--execute","--output",str(output)]),0)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["results"][0]["text"],
+                             "proposal")
+            if os.name=="posix":
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode),0o600)
 
 
 if __name__=="__main__":
