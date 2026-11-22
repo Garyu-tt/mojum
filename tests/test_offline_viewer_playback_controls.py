@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.aquarium import Aquarium
 from mojum.aquarium_trace_export import export_private_trace
@@ -139,14 +140,47 @@ function loadViewer() {
  assert.equal(get("play").disabled,false);
  assert.equal(get("seek").max,"2");
  assert.ok(timer.stops>=5,"timers did not stop for every state change");
+
+ // Oversized replacement during active playback must cancel the timer before
+ // any file read, reject the new trace, and permit a clean later reload.
+ get("play").listeners.click();
+ assert.equal(timer.ms,200);
+ let oversizeRead=false;
+ input.files=[{name:"oversized.private.jsonl",size:24*1024*1024+1,
+   arrayBuffer:async()=>{oversizeRead=true;throw Error("oversize file was read");}}];
+ await input.listeners.change.call(input);
+ assert.equal(oversizeRead,false,"oversized import read bytes before rejection");
+ assert.equal(timer.callback,null,"oversized import left playback timer running");
+ assert.equal(get("play").disabled,true,"old playback remained enabled");
+ assert.equal(get("tick").textContent,"—","stale frame survived rejected import");
+ assert.match(get("status").textContent,/24 МиБ/);
+ input.files=[{name:"synthetic.private.jsonl",size:bytes.length,
+   arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];
+ await input.listeners.change.call(input);
+ assert.equal(get("play").disabled,false,"valid reload did not recover");
+ assert.equal(get("tick").textContent,"0");
+ assert.equal(timer.callback,null,"old timer survived valid recovery");
  process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
 
 class OfflineViewerPlaybackQA(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node required in viewer CI")
+    def test_missing_node_fails_ci_but_skips_optional_local_run(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "true", "GITHUB_ACTIONS": ""}):
+                with self.assertRaisesRegex(AssertionError, "Node is required in CI"):
+                    self.test_play_pause_speed_seek_visibility_and_file_replace()
+            with mock.patch.dict(os.environ, {"CI": "", "GITHUB_ACTIONS": ""}):
+                with self.assertRaises(unittest.SkipTest):
+                    self.test_play_pause_speed_seek_visibility_and_file_replace()
+
     def test_play_pause_speed_seek_visibility_and_file_replace(self):
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+                self.fail("Node is required in CI for viewer playback acceptance")
+            self.skipTest("Node unavailable for optional local viewer test")
         with tempfile.TemporaryDirectory(prefix="mojum-viewer-controls-") as tmp:
             source = Path(tmp) / "synthetic.sqlite3"
             output = Path(tmp) / "synthetic.private.jsonl"
@@ -160,7 +194,7 @@ class OfflineViewerPlaybackQA(unittest.TestCase):
                 motor_mode="developmental_fixture", sensory_mode="toy_probe",
             )
             run = subprocess.run(
-                [shutil.which("node"), "-e", NODE_CONTROLS,
+                [node, "-e", NODE_CONTROLS,
                  str(VIEWER), str(output)],
                 cwd=ROOT, env=dict(os.environ), encoding="utf-8",
                 capture_output=True, check=False, timeout=30,
