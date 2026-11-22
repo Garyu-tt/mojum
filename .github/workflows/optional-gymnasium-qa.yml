@@ -1,0 +1,67 @@
+name: Mojum optional Gymnasium installed-package QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/point_room_env.py"
+      - "src/mojum/gymnasium_adapter.py"
+      - "tests/test_point_room_env.py"
+      - "tests/test_gymnasium_adapter.py"
+      - ".github/workflows/optional-gymnasium-qa.yml"
+  push:
+    branches:
+      - "qa/gymnasium-real-package-smoke-*"
+      - main
+    paths:
+      - "src/mojum/point_room_env.py"
+      - "src/mojum/gymnasium_adapter.py"
+      - "tests/test_point_room_env.py"
+      - "tests/test_gymnasium_adapter.py"
+      - ".github/workflows/optional-gymnasium-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gymnasium-installed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    name: gymnasium-installed (${{ matrix.python-version }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install opt-in test dependencies only
+        run: python -m pip install --disable-pip-version-check --only-binary=:all: "gymnasium==1.4.0" "numpy==2.2.6"
+      - name: Require real installed Gymnasium and NumPy
+        run: |
+          python - <<'PY'
+          import gymnasium
+          import numpy
+          assert gymnasium.__version__ == "1.4.0", gymnasium.__version__
+          assert numpy.__version__ == "2.2.6", numpy.__version__
+          print("gymnasium", gymnasium.__version__, "numpy", numpy.__version__)
+          PY
+      - name: Run actual installed adapter and point-room regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_gymnasium_adapter tests.test_point_room_env -v
+      - name: Run Gymnasium's own Env contract checker
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          from gymnasium.utils.env_checker import check_env
+          from mojum.gymnasium_adapter import make_gymnasium_point_room
+          from mojum.world_room import Room
+          env = make_gymnasium_point_room(Room(4, 4), start=(1.0, 1.0), max_steps=8)
+          check_env(env, skip_render_check=True)
+          env.close()
+          print("Gymnasium Env contract checker passed")
+          PY
