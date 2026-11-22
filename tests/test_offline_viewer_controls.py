@@ -5,10 +5,12 @@ without network, browser automation, or a real PRIVATE journal. Exporter and
 SQLite integration are covered separately in test_private_trace_integrity.
 """
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -206,10 +208,30 @@ function tickState() {
 
 
 class OfflineViewerControlsQA(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node required for real viewer JS control QA")
+    def _require_node_for_ci(self):
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+                self.fail("Node required in CI for actual offline viewer playback QA")
+            self.skipTest("Node unavailable: optional local viewer QA")
+        return node
+
+    def test_missing_node_must_fail_ci(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "true", "GITHUB_ACTIONS": ""}):
+                with self.assertRaisesRegex(AssertionError, "Node required in CI"):
+                    self._require_node_for_ci()
+
+    def test_missing_node_may_skip_outside_ci(self):
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.dict(os.environ, {"CI": "", "GITHUB_ACTIONS": ""}):
+                with self.assertRaises(unittest.SkipTest):
+                    self._require_node_for_ci()
+
     def test_verified_file_play_pause_seek_speed_and_numeric_telemetry(self):
+        node = self._require_node_for_ci()
         run = subprocess.run(
-            [shutil.which("node"), "-e", NODE_HARNESS, str(VIEWER)],
+            [node, "-e", NODE_HARNESS, str(VIEWER)],
             cwd=ROOT, text=True, capture_output=True, timeout=20, check=False,
         )
         self.assertEqual(run.returncode, 0, run.stderr)
