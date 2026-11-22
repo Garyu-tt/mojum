@@ -41,7 +41,9 @@ def main() -> int:
         sys.path.insert(0, repo_root)
     with warnings.catch_warnings(record=True) as emitted:
         warnings.simplefilter("always", ResourceWarning)
-        suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
+        # Match ``python -m unittest discover -s tests`` exactly, including
+        # any future test module named ``testX.py`` without an underscore.
+        suite = unittest.defaultTestLoader.discover("tests", pattern="test*.py")
         outcome = unittest.TextTestRunner(verbosity=1, stream=sys.stdout).run(suite)
         # sqlite3.Connection warnings can appear during delayed GC, long after
         # the test that allocated the leaked handle has already finished.
