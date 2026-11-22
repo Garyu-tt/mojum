@@ -114,6 +114,7 @@ class SpartanPrivateDatabaseTests(unittest.TestCase):
             (other / "sub").mkdir(mode=0o700)
             actual = other / "target"
             actual.mkdir(mode=0o777)
+            os.chmod(actual, 0o777)
             (safe / "link").symlink_to(other / "sub", target_is_directory=True)
             # abspath sees safe/target; the filesystem sees other/target.
             disguised = safe / "link" / ".." / "target" / "tasks.sqlite3"
