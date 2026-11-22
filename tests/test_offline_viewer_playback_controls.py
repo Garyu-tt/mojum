@@ -162,7 +162,30 @@ function loadViewer() {
  assert.equal(get("play").disabled,false,"valid reload did not recover");
  assert.equal(get("tick").textContent,"0");
  assert.equal(timer.callback,null,"old timer survived valid recovery");
- process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
+
+ // A small malformed JSONL replacement must also cancel live playback.
+ // Unlike an oversize file, this payload reaches the actual verifier.
+ get("play").listeners.click();
+ assert.equal(timer.ms,200);
+ const malformed=Buffer.from("not-json\\n","utf8");
+ input.files=[{name:"malformed.private.jsonl",size:malformed.length,
+   arrayBuffer:async()=>Uint8Array.from(malformed).buffer}];
+ await input.listeners.change.call(input);
+ assert.equal(timer.callback,null,"malformed import left playback running");
+ assert.equal(get("play").disabled,true,"previous trace remained playable");
+ assert.equal(get("seek").disabled,true,"seek remained enabled after corrupt import");
+ assert.equal(get("seek").max,"0","invalid import retained old frame range");
+ assert.equal(get("tick").textContent,"—","stale frame survived malformed import");
+ assert.match(get("status").textContent,/Не удалось открыть/);
+ input.files=[{name:"synthetic.private.jsonl",size:bytes.length,
+   arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];
+ await input.listeners.change.call(input);
+ assert.equal(get("play").disabled,false,"verified reload did not recover");
+ assert.equal(get("seek").disabled,false,"seek remained disabled after valid reload");
+ assert.equal(get("seek").max,"2","valid reload did not restore seek range");
+ assert.equal(get("tick").textContent,"0");
+ assert.equal(timer.callback,null,"orphan timer survived recovery");
+ process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
