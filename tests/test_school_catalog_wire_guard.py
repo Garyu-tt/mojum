@@ -77,6 +77,30 @@ class SchoolCatalogWireGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(SchoolError, "byte budget"):
             validate_catalog(catalog)
 
+    def test_huge_single_string_fails_before_encoder_allocation(self):
+        # iterencode is incremental across tokens, not within a giant string.
+        # A 100x-oversized value must be refused before constructing that token.
+        import tracemalloc
+        from unittest import mock
+
+        catalog = copy.deepcopy(self.catalog)
+        catalog["extension"] = "x" * (100 * MAX_CATALOG_BYTES)
+        was_tracing = tracemalloc.is_tracing()
+        if not was_tracing:
+            tracemalloc.start()
+        try:
+            baseline, _ = tracemalloc.get_traced_memory()
+            tracemalloc.reset_peak()
+            with mock.patch.object(json.JSONEncoder, "iterencode",
+                                   side_effect=AssertionError("oversized fragment encoded")):
+                with self.assertRaisesRegex(SchoolError, "byte budget"):
+                    validate_catalog(catalog)
+            _, peak = tracemalloc.get_traced_memory()
+            self.assertLess(peak - baseline, 2 * 1024 * 1024)
+        finally:
+            if not was_tracing:
+                tracemalloc.stop()
+
     def test_budget_is_bytes_not_unicode_codepoints(self):
         catalog = copy.deepcopy(self.catalog)
         catalog["extension"] = ""
