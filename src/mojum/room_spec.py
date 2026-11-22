@@ -144,49 +144,56 @@ def _overlap(first, second):
     return ax <= bx + bw and bx <= ax + aw and ay <= by + bh and by <= ay + ah
 
 
-def _runtime_geometry_errors(width, height, obstacles, start):
-    """Re-check an exact-valid draft with the runtime's float comparisons.
+def _runtime_geometry_errors(document, start):
+    """Match native integer legacy rooms and float-only versioned drafts.
 
-    ``room_spec`` validates the *exact Decimal tokens*, but ``world_room.Room``
-    and ``initial_state`` operate on Python floats. A document can be exact-legal
-    and still round past a closed float edge (``0.1 + 0.2`` is
-    ``0.30000000000000004``), which the runtime then rejects. Report that as an
-    error so the offline validator never certifies geometry it cannot load.
+    A legacy unversioned Room preserves JSON integer geometry, while the
+    versioned room-draft loader converts all coordinates to float. Do not
+    falsely accept a versioned draft that will fail at bootstrap, or falsely
+    reject a valid unversioned native-integer room.
     """
+    # The versioned draft loader constructs an all-float Room. Legacy
+    # unversioned inputs can be loaded directly by world_room.Room, which
+    # preserves native JSON integer geometry. Validate each against its actual
+    # downstream numeric contract rather than conflating these two paths.
+    versioned_draft = document.get("schema") == DRAFT_SCHEMA
+
+    def runtime_number(token):
+        if versioned_draft or any(ch in token for ch in ".eE"):
+            return float(token)
+        return int(token)
+
     errors = []
-    width_f, height_f = float(width), float(height)
-    for index, (x, y, w, h) in enumerate(obstacles):
-        x_f, y_f, w_f, h_f = float(x), float(y), float(w), float(h)
-        if not (w_f > 0 and h_f > 0):
+    width, height = runtime_number(document["width"]), runtime_number(document["height"])
+    for index, rect in enumerate(document["obstacles"]):
+        x, y, w, h = (runtime_number(value) for value in rect)
+        if not (w > 0 and h > 0):
             errors.append(
                 "obstacles[%d] collapses to a non-positive size after runtime "
                 "float conversion" % (index,)
             )
             continue
-        if x_f < 0 or y_f < 0 or x_f + w_f > width_f or y_f + h_f > height_f:
+        if x < 0 or y < 0 or x + w > width or y + h > height:
             errors.append(
                 "obstacles[%d] lies outside the room after runtime float "
                 "conversion" % (index,)
             )
     if start is not None:
         x_f, y_f = float(start[0]), float(start[1])
-        if not (0 <= x_f <= width_f and 0 <= y_f <= height_f):
+        if not (0 <= x_f <= width and 0 <= y_f <= height):
             errors.append(
                 "start lies outside the room after runtime float conversion"
             )
         else:
-            for index, (x, y, w, h) in enumerate(obstacles):
-                left, bottom, right, top = (
-                    float(x), float(y), float(x) + float(w), float(y) + float(h)
-                )
-                if left <= x_f <= right and bottom <= y_f <= top:
+            for index, rect in enumerate(document["obstacles"]):
+                x, y, w, h = (runtime_number(value) for value in rect)
+                if x <= x_f <= x + w and y <= y_f <= y + h:
                     errors.append(
                         "start lies inside obstacles[%d] after runtime float "
                         "conversion (closed boundaries block)" % (index,)
                     )
                     break
     return errors
-
 
 def validate_room_document(document):
     """Validate a parsed room document. Returns a :class:`RoomReport`."""
@@ -267,7 +274,7 @@ def validate_room_document(document):
     # the runtime float room can load it. Only run this once the exact shape is
     # fully legal, so existing precise error messages stay first and stable.
     if not errors:
-        errors.extend(_runtime_geometry_errors(width, height, obstacles, start))
+        errors.extend(_runtime_geometry_errors(document, start))
 
     if len(obstacles) > MAX_OVERLAP_ANALYSIS_OBSTACLES:
         warnings.append(
