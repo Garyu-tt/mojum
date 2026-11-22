@@ -68,6 +68,8 @@ def load_catalog(path=DEFAULT_CATALOG):
             raise ValueError("invalid integration gates")
         if entry["status"] != "planned" and entry["license_review"] != "approved":
             raise ValueError("integration progress requires approved license review")
+        if entry["status"] == "accepted" and entry["license_review"] != "approved":
+            raise ValueError("accepted integration requires approved license review")
         packages = entry["packages"]
         if type(packages) is not list or not 1 <= len(packages) <= 16:
             raise ValueError("invalid package collection")
@@ -85,6 +87,9 @@ def load_catalog(path=DEFAULT_CATALOG):
             if (target.scheme != "https" or not target.netloc
                     or target.username or target.password or target.fragment):
                 raise ValueError("unsafe package reference")
+    # Schema /1 is the 14-issue acceptance map, not an arbitrary URL registry.
+    if seen_issues != set(range(689, 703)):
+        raise ValueError("incomplete or out-of-scope integration issue map")
     return data
 
 
