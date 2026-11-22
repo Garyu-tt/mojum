@@ -101,6 +101,32 @@ class SchoolCatalogWireGuardTests(unittest.TestCase):
             if not was_tracing:
                 tracemalloc.stop()
 
+    def test_huge_single_string_does_not_allocate_an_oversized_fragment(self):
+        # iterencode() emits a string as one token; the old implementation
+        # encoded a 100x-over-budget fragment before checking the limit.
+        import gc
+        import tracemalloc
+
+        catalog = copy.deepcopy(self.catalog)
+        catalog["extension"] = "x" * (100 * MAX_CATALOG_BYTES)
+        gc.collect()
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(SchoolError, "byte budget"):
+                validate_catalog(catalog)
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        # The original giant input was allocated before tracemalloc started.
+        # Validation must not copy it into another giant encoded string.
+        self.assertLess(peak, 16 * MAX_CATALOG_BYTES)
+
+    def test_nested_string_values_are_preflight_bounded(self):
+        catalog = copy.deepcopy(self.catalog)
+        catalog["metadata"] = {"shared": ["🎵" * MAX_CATALOG_BYTES]}
+        with self.assertRaisesRegex(SchoolError, "byte budget"):
+            validate_catalog(catalog)
+
     def test_budget_is_bytes_not_unicode_codepoints(self):
         catalog = copy.deepcopy(self.catalog)
         catalog["extension"] = ""
