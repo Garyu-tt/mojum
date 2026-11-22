@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from mojum.graph import MAX_JSON_DEPTH, SCHEMA as V1_SCHEMA, validate as validate_v1
 from mojum.graph_audit_cli import MAX_INPUT_BYTES, REPORT_SCHEMA, main
 from mojum.graph_v2 import V2_SCHEMA, upgrade_v1, validate_v2
 
@@ -108,9 +109,16 @@ class GraphAuditCliTests(unittest.TestCase):
                 self.rejects("upgrade", "--input", str(self.source), "--output", str(self.target))
                 self.assertFalse(self.target.exists())
 
+    def test_deeply_nested_json_rejected_before_recursive_decoder(self):
+        deep = ("[" * (MAX_JSON_DEPTH + 1)) + ("]" * (MAX_JSON_DEPTH + 1))
+        self.source.write_text(deep, encoding="utf-8")
+        self.rejects("audit", "--input", str(self.source))
+        self.rejects("upgrade", "--input", str(self.source), "--output", str(self.target))
+        self.assertFalse(self.target.exists())
+
     def test_duplicate_or_invalid_labels_fail_closed(self):
         labels = self.root / "labels.json"
-        for raw in (b'{"genome":"PUBLIC","genome":"PRIVATE"}', b'[]', b'{"foreign":"PUBLIC"}'):
+        for raw in (b'{"genome":"PUBLIC","genome":"PRIVATE"}', b"[]", b'{"foreign":"PUBLIC"}'):
             with self.subTest(raw=raw):
                 labels.write_bytes(raw)
                 self.rejects("upgrade", "--input", str(self.source), "--output", str(self.target), "--labels", str(labels))
@@ -126,6 +134,65 @@ class GraphAuditCliTests(unittest.TestCase):
         self.rejects("upgrade", "--input", str(self.source), "--output", str(self.target))
         self.assertEqual(victim.read_text(encoding="utf-8"), "do not edit")
         self.assertTrue(self.target.is_symlink())
+        self.assertEqual(list(self.root.glob(".mojum-graph-v2-*")), [])
+
+    def test_downgrade_creates_private_no_clobber_exact_v1_matching_origin(self):
+        v2 = upgrade_v1(FIXTURE)
+        checked = validate_v2(v2)
+        v2_source = self.root / "graph-v2.json"
+        v2_source.write_text(json.dumps(v2), encoding="utf-8")
+        v1_target = self.root / "restored-v1.json"
+        report = self.invoke("downgrade", "--input", str(v2_source), "--output", str(v1_target))
+        self.assertEqual(report["schema"], REPORT_SCHEMA)
+        self.assertEqual(report["input_schema"], V2_SCHEMA)
+        self.assertEqual(report["output_schema"], V1_SCHEMA)
+        self.assertEqual(report["input_sha256"], checked["graph_sha256"])
+        self.assertEqual(report["output_sha256"], checked["origin_sha256"])
+        self.assertEqual(report["node_count"], 6)
+        self.assertEqual(report["edge_count"], 6)
+        self.assertEqual(report["execution"], "NOT_PERFORMED")
+        restored = json.loads(v1_target.read_text(encoding="utf-8"))
+        self.assertEqual(restored, FIXTURE)
+        validate_v1(restored)
+        if os.name == "posix":
+            self.assertEqual(v1_target.stat().st_mode & 0o777, 0o600)
+        self.rejects("downgrade", "--input", str(v2_source), "--output", str(v1_target))
+        self.assertEqual(json.loads(v1_target.read_text(encoding="utf-8")), FIXTURE)
+        self.assertEqual(list(self.root.glob(".mojum-graph-v2-*")), [])
+
+    def test_downgrade_rejects_v1_tampered_v2_and_visibility_downgrade(self):
+        v1_target = self.root / "restored-v1.json"
+        self.rejects("downgrade", "--input", str(self.source), "--output", str(v1_target))
+        self.assertFalse(v1_target.exists())
+
+        tampered = upgrade_v1(FIXTURE)
+        tampered["nodes"][0]["config"]["bpm"] = 90
+        tampered_path = self.root / "tampered-v2.json"
+        tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+        self.rejects("downgrade", "--input", str(tampered_path), "--output", str(v1_target))
+        self.assertFalse(v1_target.exists())
+
+        forged = upgrade_v1(FIXTURE)
+        next(n for n in forged["nodes"] if n["id"] == "genome")["visibility"] = "RESTRICTED"
+        next(n for n in forged["nodes"] if n["id"] == "heart")["visibility"] = "PUBLIC"
+        forged_path = self.root / "forged-v2.json"
+        forged_path.write_text(json.dumps(forged), encoding="utf-8")
+        self.rejects("downgrade", "--input", str(forged_path), "--output", str(v1_target))
+        self.assertFalse(v1_target.exists())
+
+    def test_downgrade_existing_symlink_cannot_be_replaced(self):
+        v2_source = self.root / "graph-v2.json"
+        v2_source.write_text(json.dumps(upgrade_v1(FIXTURE)), encoding="utf-8")
+        victim = self.root / "victim.txt"
+        victim.write_text("do not edit", encoding="utf-8")
+        v1_target = self.root / "restored-v1.json"
+        try:
+            v1_target.symlink_to(victim)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unsupported on this platform")
+        self.rejects("downgrade", "--input", str(v2_source), "--output", str(v1_target))
+        self.assertEqual(victim.read_text(encoding="utf-8"), "do not edit")
+        self.assertTrue(v1_target.is_symlink())
         self.assertEqual(list(self.root.glob(".mojum-graph-v2-*")), [])
 
 

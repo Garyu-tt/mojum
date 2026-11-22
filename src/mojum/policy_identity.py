@@ -120,6 +120,8 @@ def validate_identities(identities):
     seen_ids, seen_config, seen_selectors, seen_contracts = (
         set(), set(), set(), set(),
     )
+    # Capture each validated declaration once: callers may supply a generator.
+    validated = []
     for item in identities:
         _check_fields(item)
         selectors = tuple(sorted(item.selector_dict.items()))
@@ -136,7 +138,8 @@ def validate_identities(identities):
         seen_selectors.add(selectors)
         if item.frame_contract is not None:
             seen_contracts.add(item.frame_contract)
-    return tuple(identities)
+        validated.append(item)
+    return tuple(validated)
 
 
 POLICIES = validate_identities((
@@ -250,9 +253,20 @@ def by_inspection_id(inspection_id):
 
 
 def by_selector(selectors):
-    """Return the single identity pinned by an extracted manifest selector set."""
+    """Return the single identity pinned by an extracted manifest selector set.
+
+    Comparison is type-exact. Python's ``==`` treats ``3.0`` and ``3`` (and
+    ``True`` and ``1``) as equal, so a manifest spelling a pinned integer as
+    a JSON float or boolean would otherwise borrow another policy's identity.
+    Those are different persisted wire values even when they compare equal,
+    and #116 requires unknown stored contracts to fail closed.
+    """
     if type(selectors) is not dict:
         raise PolicyIdentityError("ambiguous or unknown stored Aquarium policy")
+    for key, value in selectors.items():
+        if type(key) is not str or not key or type(value) not in (str, int):
+            raise PolicyIdentityError(
+                "policy selectors must be exact JSON strings or integers")
     matches = [item for item in POLICIES if item.selector_dict == selectors]
     if len(matches) != 1:
         raise PolicyIdentityError("ambiguous or unknown stored Aquarium policy")
