@@ -276,6 +276,35 @@ def execute(work, backends, *, caller=infer):
     return sorted(output,key=lambda x:(x["task_id"],x["clone"]))
 
 
+def _require_owner_controlled_output_parent(path: Path) -> None:
+    """Refuse replaceable POSIX output paths before expensive model calls.
+
+    0600 protects contents only while another local user cannot unlink the
+    file or swap a containing directory. This is a preflight, not an answer
+    to same-UID attacks or concurrent hostile mount changes.
+    """
+    if os.name != "posix":
+        return
+    if ".." in path.parts:
+        raise FanoutError("output parent traversal refused")
+    parent = Path(os.path.abspath(path)).parent
+    for depth, directory in enumerate((parent, *parent.parents)):
+        try:
+            info = os.lstat(directory)
+        except OSError as exc:
+            raise FanoutError("cannot inspect output directory chain") from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise FanoutError("output directory chain must not contain symlinks")
+        if depth == 0:
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+        else:
+            unsafe = (info.st_uid not in (0, os.geteuid())
+                      or (bool(info.st_mode & 0o022)
+                          and not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise FanoutError("output directory is not owner-controlled")
+
+
 @contextmanager
 def reserve_private_output(path):
     """Atomically claim the 0600 output before any paid/model inference.
@@ -286,6 +315,7 @@ def reserve_private_output(path):
     path=Path(path)
     if not path.parent.is_dir():
         raise FanoutError("output directory does not exist")
+    _require_owner_controlled_output_parent(path)
     flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
     if hasattr(os,"O_NOFOLLOW"):flags|=os.O_NOFOLLOW
     fd=os.open(path,flags,0o600)
