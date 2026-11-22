@@ -324,6 +324,10 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
            request=None, meter=None):
     folder = _absolute_artifact_dir(folder)
     _check_artifact_reference_length(folder)
+    # Direct single() callers must reject replaceable output ancestors before
+    # claiming a lease or spending a model call, just as run() already does.
+    private_fd = _private_output_fd(folder)
+    os.close(private_fd)
     # A transient SQLite claim failure affects this worker, not the other
     # model calls in this batch. Do not leak raw SQLite error messages.
     try:
