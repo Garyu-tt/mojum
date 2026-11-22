@@ -39,7 +39,11 @@ class ActualMuJoCoClothTests(unittest.TestCase):
         self.assertEqual(model.nflex, 1)
         self.assertEqual(model.nmocap, 0)
         self.assertEqual(model.nu, 1)
-        self.assertEqual(model.njnt, 1)
+        # flexcomp creates additional free joints for unpinned vertices.
+        # Only require the intended articulated anchor to exist.
+        slide_id = self.mujoco.mj_name2id(model, self.mujoco.mjtObj.mjOBJ_JOINT, "anchor_slide")
+        self.assertGreaterEqual(slide_id, 0)
+        self.assertEqual(model.jnt_type[slide_id], self.mujoco.mjtJoint.mjJNT_SLIDE)
         self.assertEqual(model.nflexvert, self.spike.GRID[0] * self.spike.GRID[1])
         self.assertAlmostEqual(model.opt.timestep, self.spike.DT)
 
