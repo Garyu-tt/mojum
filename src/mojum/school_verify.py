@@ -66,7 +66,11 @@ def _read_regular_bounded(path: Path, limit: int, *, directory_fd: int | None = 
             # O_NOFOLLOW prevents swapping the entry to a symlink after a
             # directory listing. O_NONBLOCK prevents a substituted FIFO from
             # stalling the verifier before fstat can reject it.
-            flags = (os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+            if not hasattr(os, "O_NONBLOCK"):
+                raise SchoolContractError(
+                    "nonblocking file opens required for pinned fixture verification"
+                )
+            flags = (os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
                      | getattr(os, "O_CLOEXEC", 0))
             with os.fdopen(os.open(path.name, flags, dir_fd=directory_fd), "rb") as source:
                 if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
