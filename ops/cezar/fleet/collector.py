@@ -91,10 +91,16 @@ def _schedule_list(now):
             raise FleetError("invalid enabled state")
         last=_parse_time(record.get("last_run"))
         nxt=_parse_time(record.get("next_run"))
+        reported_status=record.get("last_status")
+        if reported_status not in (None,"completed","in_progress","failed","no_update"):
+            raise FleetError("unexpected automation run state")
+        finished=_parse_time(record.get("last_completed"))
         items.append({
             "name":title,"role":role,"enabled":record["enabled"],
             "last_run":last.isoformat() if last else None,
             "next_run":nxt.isoformat() if nxt else None,
+            "last_status":reported_status,
+            "last_completed":finished.isoformat() if finished else None,
             "last_90m":bool(last and timedelta(0)<=now-last<=timedelta(minutes=90)),
         })
     recent=timestamp is not None and timedelta(0)<=now-timestamp<=timedelta(seconds=FRESHNESS_SECONDS)
