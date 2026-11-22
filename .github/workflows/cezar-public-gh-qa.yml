@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'tools/cezar_gh_public_read.py'
+      - 'tools/cezar_legacy_history_index.py'
+      - 'tests/test_cezar_legacy_history_index.py'
       - 'tests/test_cezar_gh_public_read.py'
       - 'tests/test_cezar_github_automation_templates.py'
       - 'ops/cezar/automations/**'
@@ -33,3 +35,5 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_cezar_gh_public_read.py' -v
       - name: Verify bounded and paused GitHub automation templates
         run: python -m unittest discover -s tests -p 'test_cezar_github_automation_templates.py' -v
+      - name: Verify private legacy task deduplication and no-replay guarantees
+        run: python -m unittest discover -s tests -p 'test_cezar_legacy_history_index.py' -v
