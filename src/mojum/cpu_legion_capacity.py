@@ -44,9 +44,14 @@ def _current_cgroup(root: Path, proc_cgroup: Path) -> Path:
     if not path.startswith("/") or any(p in (".", "..") for p in path.split("/")):
         raise CapacityError("invalid process cgroup path")
     candidate = root.joinpath(*[p for p in path.split("/") if p])
-    if candidate.is_dir() and (candidate / "cpu.max").is_file():
+    if candidate.is_dir():
+        # An existing member scope with missing metrics is incomplete:
+        # treating the mount root as the member would overstate capacity.
+        if not (candidate / "cpu.max").is_file():
+            raise CapacityError("current cgroup scope resource files unavailable")
         return candidate
     # Some cgroup namespaces mount the current process's scope as /.
+    # Fallback only when the membership path is not visible in this mount.
     if (root / "cpu.max").is_file():
         return root
     raise CapacityError("current cgroup v2 resource files unavailable")
