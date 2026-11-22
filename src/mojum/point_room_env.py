@@ -49,6 +49,8 @@ class PointRoomEnv:
         self.room = room
         self.start = (start[0], start[1])
         self.max_steps = max_steps
+        # Keep the constructor's episode budget as a hard upper bound.
+        self._configured_max_steps = max_steps
         self.max_step_m = max_step_m
         self._state = None
         self._steps = 0
@@ -80,6 +82,9 @@ class PointRoomEnv:
     def step(self, action: tuple[float, float]) -> tuple[dict, float, bool, bool, dict]:
         if self._state is None:
             raise RuntimeError("reset required before step")
+        if (type(self.max_steps) is not int
+                or not 1 <= self.max_steps <= self._configured_max_steps):
+            raise ValueError("episode step budget cannot exceed configured limit")
         if self._steps >= self.max_steps:
             raise RuntimeError("reset required after truncation")
         if type(action) not in (tuple, list) or len(action) != 2:
