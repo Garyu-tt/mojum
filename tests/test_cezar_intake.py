@@ -131,6 +131,32 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(r["deferred"],1)
         self.assertEqual(r["dispatched"],0)
 
+    def test_racing_poller_defers_without_orphan_prompt(self):
+        # Both pollers saw zero pending before one acquired the SQLite lock.
+        # Recreate the winner between one_poll's preflight and dispatch().
+        original = m.admission.dispatch
+        def racing_dispatch(db, ident, prompt):
+            other = m.admission.connect(self.db_path)
+            try:
+                competing = m.admission.identity(
+                    "Garyu-tt/mojum", "issue", 799,
+                    "2026-11-22T19:13:00Z", "review", "cezar/review/issue/799")
+                self.assertTrue(m.admission.claim(
+                    other, competing, limit_unresolved=True)[0])
+            finally:
+                other.close()
+            return original(db, ident, prompt)
+
+        with patch.object(m.admission, "dispatch", side_effect=racing_dispatch):
+            result = m.one_poll(self.db, self.prompts, execute=True,
+                                opener=self.fake([self.issue(478)]))
+        self.assertEqual(result["dispatched"], 0)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(result["duplicates"], 0)
+        self.assertEqual(list(self.prompts.iterdir()), [])
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission").fetchone()[0], 1)
+
     def test_blocked_previous_work_allows_distinct_revision(self):
         record=m.discover(opener=self.fake([self.issue(478)]))[0]["identity"]
         fresh,row=m.admission.claim(self.db,record)
