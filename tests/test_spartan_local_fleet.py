@@ -323,10 +323,31 @@ class FleetTests(unittest.TestCase):
         # safer than 4 simultaneous CPU model calls that deliver no patches.
         self.assertEqual(outcome["per_backend_admission"],
                          {18182: 1, 18180: 1, 18181: 1})
-        self.assertEqual(outcome["admitted_concurrent_model_calls"], 3)
+        self.assertEqual(outcome["scheduled_primary_workers"], 3)
         self.assertEqual(outcome["proposals"], 3)
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["queued"], 5)
+
+    def test_clone_inflight_metrics_count_two_calls_for_one_worker(self):
+        from threading import Barrier
+        self.add_task("meter-clone", clones=2)
+        both = Barrier(2, timeout=4)
+
+        def simultaneous(port, path, body=None, timeout=5):
+            self.assertEqual(path, "/v1/chat/completions")
+            both.wait()
+            return {"choices": [{"message": {"content": "proposal"}}],
+                    "usage": {"completion_tokens": 5}}
+
+        with patch.object(fleet, "discover", return_value=self.backends), \
+             patch.object(fleet, "_http", side_effect=simultaneous):
+            result = fleet.run(self.db, self.out, max_agents=300, max_jobs=1)
+        self.assertEqual(result["scheduled_primary_workers"], 1)
+        self.assertEqual(result["configured_physical_call_limit"], 3)
+        self.assertEqual(result["model_invocation_attempts"], 2)
+        self.assertEqual(result["observed_peak_inflight_model_calls"], 2)
+        self.assertEqual(result["model_calls_completed"], 2)
+        self.assertEqual(result["proposals"], 1)
 
     def test_cpu_admission_can_be_raised_only_explicitly(self):
         for i in range(10):
@@ -336,7 +357,7 @@ class FleetTests(unittest.TestCase):
             result = fleet.run(self.db, self.out, max_agents=300, max_jobs=32,
                                max_cpu_inflight=2)
         self.assertEqual(result["per_backend_admission"][18182], 2)
-        self.assertEqual(result["admitted_concurrent_model_calls"], 4)
+        self.assertEqual(result["scheduled_primary_workers"], 4)
         self.assertEqual(result["proposals"], 4)
 
     def test_invalid_cpu_admission_rejected_before_running(self):
@@ -396,8 +417,8 @@ class FleetTests(unittest.TestCase):
             second = fleet.run(self.db, self.out, max_agents=300, max_jobs=2)
         self.assertEqual({r["worker"] for r in first["results"]}, {1, 2})
         self.assertEqual({r["worker"] for r in second["results"]}, {3, 4})
-        self.assertEqual(first["admitted_concurrent_model_calls"], 2)
-        self.assertEqual(second["admitted_concurrent_model_calls"], 2)
+        self.assertEqual(first["scheduled_primary_workers"], 2)
+        self.assertEqual(second["scheduled_primary_workers"], 2)
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["review"], 4)
 

@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 import sqlite3
 import time
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -209,8 +209,28 @@ def save_private(folder: Path, task_id: str, attempt: int, artifact):
     return str(path)
 
 
+class ModelCallMeter:
+    """Live overlap accounting, including clones; NOT 300 physical processes."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self.invocations = 0
+        self.inflight = 0
+        self.peak = 0
+
+    def begin(self):
+        with self._lock:
+            self.invocations += 1
+            self.inflight += 1
+            self.peak = max(self.peak, self.inflight)
+
+    def end(self):
+        with self._lock:
+            self.inflight -= 1
+
+
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
-           request=None):
+           request=None, meter=None):
     db = coordinator.connect(str(db_path))
     try:
         coordinator.create_schema(db)
@@ -231,17 +251,24 @@ def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
             alternatives.sort(key=lambda b: (b.model == backend.model, -b.ctx, b.port))
             targets.append(alternatives[0])
         def invoke(clone, target):
+            def measured():
+                if meter is not None:
+                    meter.begin()
+                try:
+                    return call_model(target, prompt, role, max_tokens,
+                                      clone=clone, request=request)
+                finally:
+                    if meter is not None:
+                        meter.end()
+
             if locks is None:
-                return call_model(target, prompt, role, max_tokens,
-                                  clone=clone, request=request)
-            # All requests, including clones, share their physical backend
-            # semaphore; a clone never circumvents CPU or GPU admission.
+                return measured()
+            # Primary and cloned calls share per-physical-backend admission.
             lock = locks[target.port]
             if not lock.acquire(timeout=MODEL_SLOT_WAIT_SECONDS):
                 raise TransientFleetError("model slot remained busy")
             try:
-                return call_model(target, prompt, role, max_tokens,
-                                  clone=clone, request=request)
+                return measured()
             finally:
                 lock.release()
 
@@ -404,10 +431,11 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
         admitted = min(max_jobs, len(slots), max_agents)
         agents = rotate_worker_ids(db_path, max_agents, admitted)
         locks = {p: BoundedSemaphore(cap) for p, cap in admitted_by_port.items()}
+        meter = ModelCallMeter()
         results = []
         with ThreadPoolExecutor(max_workers=admitted) as pool:
             futures = [pool.submit(single, db_path, n, slots[i], folder,
-                                   others=discovered, locks=locks)
+                                   others=discovered, locks=locks, meter=meter)
                        for i, n in enumerate(agents)]
             for future in as_completed(futures):
                 results.append(future.result())
@@ -417,7 +445,10 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                 "live_free_model_slots": sum(b.free for b in discovered),
                 "per_backend_admission": admitted_by_port,
                 "cpu_max_inflight_per_model": max_cpu_inflight,
-                "admitted_concurrent_model_calls": admitted,
+                "scheduled_primary_workers": admitted,
+                "configured_physical_call_limit": sum(admitted_by_port.values()),
+                "model_invocation_attempts": meter.invocations,
+                "observed_peak_inflight_model_calls": meter.peak,
                 "proposals": sum(r.get("state") == "proposal_for_independent_review"
                                  for r in results),
                 "model_calls_completed": sum(r.get("model_calls_completed", 0)

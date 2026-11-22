@@ -112,7 +112,8 @@ not two accepted patches.
 - Atomic 300-agent SQLite task claims with attempt fencing,
   TTL and global coordination lock. No network-shared live SQLite.
 - Concurrency capped by observed free slots, **not** 300 claims;
-  command-level max-jobs has an independent 32-call ceiling.
+  command-level max-jobs caps 32 primary worker tasks; clone calls also
+  share the observed physical backend semaphores.
 - Per-task model max_tokens 32..1024, bounded prompt and response sizes.
 - Models never execute generated code, invoke shell, push branches,
   merge PRs or access arbitrary host files.
@@ -141,3 +142,7 @@ not two accepted patches.
    occupied RAM.
 5. Report real active model processes, slots, in-flight requests,
    queue depth, tokens/sec, tests passing and accepted PRs separately.
+
+## Instrumented concurrency accounting
+
+`scheduled_primary_workers` is the number of worker tasks submitted and is **not** actual concurrent model calls. `configured_physical_call_limit` is the sum of admitted per-backend slots. `model_invocation_attempts` counts `call_model()` attempts, including clones and failures. `observed_peak_inflight_model_calls` measures overlapping application-layer calls **after** physical semaphore admission. These are measured separately from proposals, completed model responses and the 300 registered identities. They are not proof of 300 simultaneous models or distinct provider processes.
