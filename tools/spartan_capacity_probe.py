@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(result, sort_keys=True))
                 if result["peak_simultaneous_successful_workers"] < args.min_simultaneous_successful_workers:
                     return 2
-    except (ValueError, RuntimeError, sqlite3.Error) as exc:
+    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         print(f"spartan_capacity_probe: {exc}", file=sys.stderr)
         return 1
     return 0
