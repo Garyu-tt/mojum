@@ -130,7 +130,7 @@ def identity(repo: str, kind: str, number: int, revision: str,
     }
 
 
-def claim(db, ident: dict) -> tuple[bool, dict]:
+def claim(db, ident: dict, *, single_flight: bool = False) -> tuple[bool, dict]:
     db.execute("BEGIN IMMEDIATE")
     try:
         row = db.execute("SELECT * FROM admission WHERE key=?", (ident["key"],)).fetchone()
@@ -139,6 +139,13 @@ def claim(db, ident: dict) -> tuple[bool, dict]:
                 raise AdmissionError("same source revision claimed with conflicting scope")
             db.execute("COMMIT")
             return False, dict(row)
+        # Check the global capacity inside the same write transaction as the
+        # insert. A separate pending() preflight races across pollers.
+        if single_flight and db.execute(
+            "SELECT 1 FROM admission WHERE status IN ('claimed','submitted') LIMIT 1"
+        ).fetchone() is not None:
+            db.execute("COMMIT")
+            return False, {"id": None, "status": "busy"}
         admission_id = str(uuid.uuid4())
         db.execute("""
             INSERT INTO admission(id,key,repo,kind,number,revision,phase,scope_sha256,status)
@@ -209,7 +216,8 @@ def mark_blocked(db, admission_id: str, run_id: str) -> dict:
         raise
 
 
-def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8) -> dict:
+def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
+             single_flight=True) -> dict:
     if url != _LOCAL_CEZAR:
         raise AdmissionError("only pinned loopback cockpit may receive dispatch")
     _validate_dir(prompt_file.parent)
@@ -227,9 +235,10 @@ def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8) -> di
         raise AdmissionError("prompt not UTF-8") from exc
     if not prompt.strip():
         raise AdmissionError("empty prompt")
-    created, row = claim(db, ident)
+    created, row = claim(db, ident, single_flight=single_flight)
     if not created:
-        return {"admitted": False, "reason": "already-claimed",
+        return {"admitted": False,
+                "reason": "capacity-busy" if row["status"] == "busy" else "already-claimed",
                 "admission_id": row["id"], "status": row["status"]}
     # No retries: a failure after POST may have launched a Cezar run.
     # A claimed row remains claimed for *manual reconciliation*.
