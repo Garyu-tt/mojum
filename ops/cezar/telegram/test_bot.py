@@ -20,6 +20,16 @@ def fake_cezar(path):
                         "author":{"login":"agent"},"comments":0},
                        {"number":699,"title":"Fix Cezar viewer","isDraft":False,
                         "author":{"login":"agent"},"comments":1}]}
+    if path=="/api/v1/fleet":
+        return {"schema":"cezar.fleet.visibility.v1",
+                "cezar":{"active":0},
+                "schedules":{"enabled":5,"developers_enabled":4,"qa_enabled":1,
+                             "snapshot_fresh":True,
+                             "agents":[{"name":"Кубик D3 mojum — peer 1/5",
+                                        "last_run":"2026-11-22T20:00:00+00:00"}]},
+                "models":{"inference_busy_known":0,"capacity_slots_known":17},
+                "github":{"open_prs":44},
+                "external_running_confirmed":None}
     if path=="/api/v1/health":
         return {"version":"0.20.0","repoRoot":"/var/lib/cezar/projects/mojum"}
     if path=="/api/v1/runs":
@@ -48,6 +58,17 @@ class CezarTelegramTests(unittest.TestCase):
         self.assertIn("running=1",value)
         self.assertIn("cancelled=1",value)
         self.assertNotIn("лимит API GitHub",value)
+
+    def test_fleet_distinguishes_schedules_models_from_active_runs(self):
+        report=bot.fleet_text()
+        self.assertIn("Расписаний Mojum: 5",report)
+        self.assertIn("разработчиков 4, QA 1",report)
+        self.assertIn("0/17",report)
+        self.assertIn("неизвестно",report)
+        self.assertIn("не суммируются",report)
+        status=bot.status_text()
+        self.assertIn("активных ВНУТРИ Cezar: 1",status)
+        self.assertIn("Расписаний Mojum: 5",status)
 
     def test_pr_and_ci_do_not_invent_results(self):
         self.assertIn("#700",bot.prs_text())
