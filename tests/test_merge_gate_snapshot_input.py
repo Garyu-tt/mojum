@@ -47,6 +47,19 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertFalse(verdict["merge_performed"])
             self.assertNotIn(str(path), output.getvalue())
 
+    def test_missing_secure_open_flags_fail_closed_before_read(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "pr.json"
+            path.write_text('{"safe":true}', encoding="utf-8")
+            for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"):
+                with self.subTest(flag=flag), mock.patch.object(
+                    os, flag, 0, create=True,
+                ):
+                    with self.assertRaisesRegex(
+                        SnapshotError, "secure snapshot file reads unavailable"
+                    ):
+                        _load_snapshot(str(path))
+
     def test_large_file_is_rejected_before_json_parsing(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "oversized.json"
