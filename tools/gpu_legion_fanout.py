@@ -277,6 +277,37 @@ def execute(work, backends, *, caller=infer):
 
 
 @contextmanager
+def _require_private_output_parent(path):
+    """Reject replaceable output directory chains before model inference.
+
+    The output file itself uses O_EXCL and 0600, but a separate local user
+    can unlink or replace it when its containing directory is writable.
+    This is a POSIX preflight, not a sandbox against same-UID mutation.
+    """
+    if ".." in Path(path).parts:
+        raise FanoutError("output path traversal refused")
+    parent=Path(os.path.abspath(path)).parent
+    if os.name != "posix":
+        if not parent.is_dir():
+            raise FanoutError("output directory does not exist")
+        return
+    for depth, directory in enumerate((parent, *parent.parents)):
+        try:
+            info=os.lstat(directory)
+        except OSError as exc:
+            raise FanoutError("cannot inspect output directory chain") from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise FanoutError("output directory chain contains a symlink or non-directory")
+        if depth == 0:
+            unsafe=(info.st_uid != os.geteuid() or bool(info.st_mode & 0o022))
+        else:
+            unsafe=(info.st_uid not in (0, os.geteuid()) or
+                    (bool(info.st_mode & 0o022) and
+                     not bool(info.st_mode & stat.S_ISVTX)))
+        if unsafe:
+            raise FanoutError("output directory chain is not owner-controlled")
+
+
 def reserve_private_output(path):
     """Atomically claim the 0600 output before any paid/model inference.
 
@@ -284,8 +315,7 @@ def reserve_private_output(path):
     reservation; a failing inference run cannot leave an empty artifact.
     """
     path=Path(path)
-    if not path.parent.is_dir():
-        raise FanoutError("output directory does not exist")
+    _require_private_output_parent(path)
     flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
     if hasattr(os,"O_NOFOLLOW"):flags|=os.O_NOFOLLOW
     fd=os.open(path,flags,0o600)
