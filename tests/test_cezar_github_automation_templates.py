@@ -42,5 +42,13 @@ class CezarGithubTemplateTests(unittest.TestCase):
         self.assertIn("merge", prompt)
 
 
+    def test_dedicated_ci_covers_template_changes(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github" /
+                    "workflows" / "cezar-public-gh-qa.yml").read_text(encoding="utf-8")
+        self.assertIn("'ops/cezar/automations/**'", workflow)
+        self.assertIn("'tests/test_cezar_github_automation_templates.py'", workflow)
+        self.assertIn("python -m unittest discover -s tests -p 'test_cezar_github_automation_templates.py' -v", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
