@@ -3,6 +3,7 @@ import json
 from contextlib import closing
 import os
 import sqlite3
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -565,6 +566,53 @@ class FleetTests(unittest.TestCase):
             self.assertEqual(sc.status(db)["states"]["queued"], 1)
             self.assertEqual(sc.status(db)["states"]["blocked"], 0)
         self.assertEqual(list(long_folder.iterdir()), [])
+
+    def test_artifact_sync_precedes_review_lease(self):
+        self.add_task("durable-artifact")
+        synced = []
+        real_sync = os.fsync
+
+        def record_sync(fd):
+            mode = os.fstat(fd).st_mode
+            synced.append("file" if stat.S_ISREG(mode) else
+                          "directory" if stat.S_ISDIR(mode) else "other")
+            return real_sync(fd)
+
+        with patch.object(fleet.os, "fsync", side_effect=record_sync):
+            result = fleet.single(self.db, 1, self.backends[0], self.out,
+                                  request=fake_server)
+        self.assertEqual(result["state"], "proposal_for_independent_review")
+        self.assertEqual(synced, ["file", "directory"])
+        self.assertTrue(Path(result["artifact"]).is_file())
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["review"], 1)
+
+    def test_file_sync_error_removes_artifact_and_requeues(self):
+        self.add_task("file-fsync-failure")
+        with patch.object(fleet.os, "fsync", side_effect=OSError("disk sync failure")):
+            result = fleet.single(self.db, 1, self.backends[0], self.out,
+                                  request=fake_server)
+        self.assertEqual(result["state"], "retry_queued")
+        self.assertEqual(list(self.out.glob("*.json")), [])
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["queued"], 1)
+
+    def test_directory_sync_error_removes_artifact_and_requeues(self):
+        self.add_task("directory-fsync-failure")
+        real_sync = os.fsync
+
+        def fail_dir_sync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError("directory sync failure")
+            return real_sync(fd)
+
+        with patch.object(fleet.os, "fsync", side_effect=fail_dir_sync):
+            result = fleet.single(self.db, 1, self.backends[0], self.out,
+                                  request=fake_server)
+        self.assertEqual(result["state"], "retry_queued")
+        self.assertEqual(list(self.out.glob("*.json")), [])
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["queued"], 1)
 
     def test_artifact_write_failure_is_retryable_not_permanently_blocked(self):
         self.add_task("transient-artifact")
