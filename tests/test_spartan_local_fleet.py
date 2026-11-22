@@ -75,6 +75,21 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / ":memory:").exists())
 
+    def test_memory_sqlite_does_not_create_a_literal_database_file(self):
+        # sqlite3 treats :memory: specially; the security preflight must not
+        # accidentally turn it into a real file before SQLite opens it.
+        previous_cwd = os.getcwd()
+        try:
+            os.chdir(self.root)
+            with closing(sc.connect(":memory:")) as db:
+                sc.create_schema(db)
+                self.assertEqual(sc.init(db, 2, 100)["slots"], 2)
+                self.assertEqual(db.execute("PRAGMA database_list").fetchone()[2], "")
+            for suffix in ("", "-wal", "-shm"):
+                self.assertFalse((self.root / (":memory:" + suffix)).exists())
+        finally:
+            os.chdir(previous_cwd)
+
     def test_coordinator_creates_owner_only_sqlite_with_permissive_umask(self):
         # Task payloads contain model prompts. Protect DB and WAL/SHM too,
         # not only the generated proposal artifacts.
