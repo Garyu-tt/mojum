@@ -498,6 +498,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                 "retry_queued": sum(r.get("state") == "retry_queued"
                                     for r in results),
                 "no_task": sum(r.get("state") == "no_task" for r in results),
+                "claim_unavailable": sum(r.get("state") == "claim_unavailable"
+                                         for r in results),
                 "before": before, "results": results,
                 "auto_merge": False, "generated_code_executed": False}
     finally:
@@ -521,6 +523,14 @@ def main():
         db_path = Path(args.db)
         if not db_path.is_file() or db_path.is_symlink():
             raise FleetError("coordinator database missing or unsafe")
+        # Read-only is not the same as private: reject a legacy 0644 database
+        # or a replaceable/symlinked ancestor before reading any task prompts.
+        # This check must not create or migrate any SQLite state.
+        try:
+            coordinator._check_private_parent(str(db_path))
+            coordinator._check_private_file(str(db_path))
+        except (OSError, ValueError) as exc:
+            raise FleetError("coordinator database or directory unsafe") from exc
         try:
             db = sqlite3.connect(db_path.absolute().as_uri() + "?mode=ro",
                                  uri=True, timeout=30, isolation_level=None)
