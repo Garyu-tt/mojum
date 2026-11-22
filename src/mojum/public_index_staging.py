@@ -30,7 +30,7 @@ def stage_public_index(dataset: object, *, max_records: int = 1024) -> dict:
         raise ValueError("invalid staging record budget")
     if type(dataset) is not dict or set(dataset) != {"schema", "records", "sha256"}:
         raise ValueError("expected a PUBLIC dataset projection")
-    if dataset["schema"] != _SCHEMA:
+    if type(dataset["schema"]) is not str or dataset["schema"] != _SCHEMA:
         raise ValueError("unsupported PUBLIC dataset schema")
     expected_sha = dataset["sha256"]
     if (type(expected_sha) is not str or len(expected_sha) != 64
