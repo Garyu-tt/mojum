@@ -557,5 +557,44 @@ class FleetTests(unittest.TestCase):
                           backends=self.backends)
 
 
+
+    def test_unexpected_worker_crash_retains_successful_proposals(self):
+        self.add_task("recover-first", scope="component.first")
+        self.add_task("recover-second", scope="component.second")
+        real_single = fleet.single
+
+        def crash_one(db_path, worker_id, backend, folder, **kwargs):
+            if worker_id == 1:
+                raise RuntimeError("SECRET EXCEPTION DETAILS")
+            return real_single(db_path, worker_id, backend, folder, **kwargs)
+
+        with patch.object(fleet, "single", side_effect=crash_one), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2,
+                               backends=self.backends)
+        self.assertEqual(report["worker_failures"], 1)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+        self.assertEqual(
+            next(x for x in report["results"] if x["worker"] == 1)["state"],
+            "worker_failed")
+        self.assertNotIn("SECRET", json.dumps(report))
+
+    def test_cli_partial_batch_reports_results_but_fails_closed(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                  "claim_unavailable": 1, "worker_failures": 0,
+                  "proposals": 1, "results": []}
+        output = StringIO()
+        with patch.object(fleet, "run", return_value=report), \
+             patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                       "--output-dir", str(self.out)]), \
+             redirect_stdout(output):
+            with self.assertRaises(SystemExit) as stopped:
+                fleet.main()
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertEqual(json.loads(output.getvalue()), report)
+
 if __name__ == "__main__":
     unittest.main()
