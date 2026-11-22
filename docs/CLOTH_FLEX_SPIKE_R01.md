@@ -1,14 +1,15 @@
 # Opt-in CPU-first MuJoCo cloth spike R0.1 (#376)
 
-**Status:** experimental, headless, not yet exercised against a MuJoCo
+**Status:** experimental, headless, pending successful execution against an actual MuJoCo
 installation in CI. This is **not** an Aquarium component, a garment asset
 importer, a GLB skin, a validated cloth-body contact model, or equip/unequip.
 It introduces no dependency to the default stdlib-only runtime.
 
 `tools/cloth_flex_spike.py` generates a self-contained MJCF with one `12 x 6`
-`flexcomp dim="2"` patch. The x=0 edge is pinned to a **mocap body in the same
-MuJoCo world**. During stepping, its x coordinate follows a deterministic,
-small sinusoidal motion. A floor and sphere provide collision geometries.
+`flexcomp dim="2"` patch. The x=0 edge is pinned to a **jointed physical body driven by a bounded
+position servo**. Elastic flexes with damping cannot attach directly to
+mocap bodies in MuJoCo 3.17.0. During stepping, the servo target follows a
+deterministic sinusoid; actual motion may lag the target. A floor and sphere provide collision geometries.
 All simulations remain CPU-only and locally initiated; the script never writes
 Aquarium journals, agent state, private traces, or output files.
 
