@@ -147,5 +147,18 @@ class SpartanInflightAuditTests(unittest.TestCase):
             self.assertEqual(main(['--input', str(self.path), '--target', '301']), 2)
 
 
+    def test_cli_does_not_expose_secret_bearing_missing_path(self):
+        # OSError normally embeds the filename in str(exc); this must not
+        # leak sensitive input paths into CI logs or audit stderr.
+        private_name = 'PRIVATE_access-token-do-not-log.jsonl'
+        missing = self.path.parent / private_name
+        error_output = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(error_output):
+            self.assertEqual(main(['--input', str(missing)]), 2)
+        self.assertNotIn(private_name, error_output.getvalue())
+        self.assertNotIn(str(missing), error_output.getvalue())
+        self.assertIn('source unavailable', error_output.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()
