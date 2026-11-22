@@ -189,45 +189,44 @@ def call_model(backend, prompt, role, max_tokens, clone=0, request=None):
             "proposal": text}
 
 
-def save_private(folder: Path, task_id: str, attempt: int, artifact):
-    if not folder.is_dir() or folder.is_symlink():
-        raise FleetError("output directory missing or symlink")
-    digest = hashlib.sha256(task_id.encode()).hexdigest()[:24]
-    path = folder / f"{digest}-attempt-{attempt}.json"
-    blob = (json.dumps(artifact, sort_keys=True, ensure_ascii=False, indent=2,
-                       allow_nan=False) + "\n").encode()
-    flags = os.O_WRONLY | os.O_EXCL | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o600)
+def _private_output_fd(folder: Path) -> int:
+    """Pin an owner-private artifact directory before creating any proposal."""
+    flags = (os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+             | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_CLOEXEC", 0))
     try:
-        with os.fdopen(fd, "wb") as fp:
-            fp.write(blob)
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    return str(path)
+        fd = os.open(folder, flags)
+        info = os.fstat(fd)
+    except OSError as exc:
+        raise FleetError("output directory missing or unsafe") from exc
+    if (not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) & 0o077):
+        os.close(fd)
+        raise FleetError("output directory must be owner-private (0700)")
+    return fd
 
 
-class ModelCallMeter:
-    """Live overlap accounting, including clones; NOT 300 physical processes."""
-
-    def __init__(self):
-        self._lock = Lock()
-        self.invocations = 0
-        self.inflight = 0
-        self.peak = 0
-
-    def begin(self):
-        with self._lock:
-            self.invocations += 1
-            self.inflight += 1
-            self.peak = max(self.peak, self.inflight)
-
-    def end(self):
-        with self._lock:
-            self.inflight -= 1
-
+def save_private(folder: Path, task_id: str, attempt: int, artifact):
+    folder = Path(folder)
+    dir_fd = _private_output_fd(folder)
+    try:
+        digest = hashlib.sha256(task_id.encode()).hexdigest()[:24]
+        filename = f"{digest}-attempt-{attempt}.json"
+        blob = (json.dumps(artifact, sort_keys=True, ensure_ascii=False, indent=2,
+                           allow_nan=False) + "\n").encode()
+        flags = (os.O_WRONLY | os.O_EXCL | os.O_CREAT
+                 | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(filename, flags, 0o600, dir_fd=dir_fd)
+        try:
+            with os.fdopen(fd, "wb") as fp:
+                fp.write(blob)
+        except BaseException:
+            os.unlink(filename, dir_fd=dir_fd)
+            raise
+        return str(folder / filename)
+    finally:
+        os.close(dir_fd)
 
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
            request=None, meter=None):
@@ -371,8 +370,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
     if type(max_cpu_inflight) is not int or not 1 <= max_cpu_inflight <= 4:
         raise FleetError("CPU concurrent admission must be 1..4")
     folder = Path(folder)
-    if not folder.is_dir() or folder.is_symlink():
-        raise FleetError("private artifact folder required")
+    private_fd = _private_output_fd(folder)
+    os.close(private_fd)
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # Validate the database/parent *before* opening the adjacent lock. A
