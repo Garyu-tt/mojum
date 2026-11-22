@@ -167,7 +167,7 @@ function loadViewer() {
  // Unlike an oversize file, this payload reaches the actual verifier.
  get("play").listeners.click();
  assert.equal(timer.ms,200);
- const malformed=Buffer.from("not-json\\n","utf8");
+ const malformed=Buffer.from("not-json\n","utf8");
  input.files=[{name:"malformed.private.jsonl",size:malformed.length,
    arrayBuffer:async()=>Uint8Array.from(malformed).buffer}];
  await input.listeners.change.call(input);
@@ -185,7 +185,7 @@ function loadViewer() {
  assert.equal(get("seek").max,"2","valid reload did not restore seek range");
  assert.equal(get("tick").textContent,"0");
  assert.equal(timer.callback,null,"orphan timer survived recovery");
- process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\\n");
+ process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
 
