@@ -29,6 +29,8 @@ jobs:
       - name: Compile all Python modules
         run: python -m compileall -q src tests
       - name: Run full graph, GENESIS, world, Noosphere and neural regression
+        # On 3.13, the full suite runs once in the resource-warning audit below.
+        if: matrix.python-version != '3.13'
         env:
           PYTHONPATH: src
           MOJUM_EPOCH_V4_STRESS: '1'
@@ -37,6 +39,7 @@ jobs:
         if: matrix.python-version == '3.13'
         env:
           PYTHONPATH: src
+          MOJUM_EPOCH_V4_STRESS: '1'
           PYTHONTRACEMALLOC: '1'
         run: python tests/audit_sqlite_resource_warnings.py
       - name: Offline habitat smoke and restart
