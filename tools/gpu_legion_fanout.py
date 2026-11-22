@@ -79,9 +79,15 @@ def _request_json(port: int, path: str, *, body=None, timeout=5, opener=None):
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
         raise FanoutError(f"loopback endpoint unavailable: {type(exc).__name__}") from exc
     try:
-        return json.loads(data, parse_constant=lambda x: (_ for _ in ()).throw(
-            FanoutError("nonfinite JSON")))
-    except (ValueError, UnicodeError) as exc:
+        return json.loads(
+            data,
+            object_pairs_hook=lambda pairs: _unique_json_object(pairs, origin="backend"),
+            parse_constant=lambda x: (_ for _ in ()).throw(
+                FanoutError("nonfinite JSON")),
+        )
+    except FanoutError:
+        raise
+    except (ValueError, UnicodeError, RecursionError) as exc:
         raise FanoutError("invalid JSON response") from exc
 
 
@@ -127,12 +133,12 @@ def discover_backend(port, *, request=_request_json):
     return Backend(port, len(slots), free, min(contexts))
 
 
-def _unique_json_object(pairs):
-    """Reject conflicting or repeated task fields before task admission."""
+def _unique_json_object(pairs, *, origin="tasks"):
+    """Reject repeated object keys before task admission or backend parsing."""
     result = {}
     for key, value in pairs:
         if key in result:
-            raise FanoutError("duplicate tasks JSON field")
+            raise FanoutError(f"duplicate {origin} JSON field")
         result[key] = value
     return result
 
