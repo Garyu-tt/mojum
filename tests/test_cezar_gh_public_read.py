@@ -41,6 +41,28 @@ class CezarGhPublicReadTests(unittest.TestCase):
             ])
             self.assertNotIn("is%3Aopen", request[0])
 
+    def test_explicit_closed_pr_created_query_remains_closed(self):
+        # PRs created in the time window may have closed since; these are
+        # historical queries, not new-open-PR intake.
+        from urllib.parse import parse_qs, urlsplit
+        for state in ("is:closed", "state:closed"):
+            query = ("repo:Garyu-tt/mojum is:pr " + state
+                     + " created:>=2026-11-20")
+            with self.subTest(state=state):
+                _, request, _ = adapter.parse([
+                    "api", "--method", "GET", "/search/issues",
+                    "-f", "q=" + query])
+                result_q = parse_qs(urlsplit(request[0]).query)["q"][0]
+                self.assertEqual(result_q, query)
+                self.assertNotIn("is:open", result_q)
+
+    def test_conflicting_pr_states_fail_closed(self):
+        query = ("repo:Garyu-tt/mojum is:pr is:closed "
+                 "state:open created:>=2026-11-20")
+        with self.assertRaisesRegex(adapter.Refused, "conflicting"):
+            adapter.parse(["api", "--method", "GET", "/search/issues",
+                           "-f", "q=" + query])
+
     def test_rejects_search_boolean_scope_escape(self):
         forbidden = [
             "repo:Garyu-tt/mojum is:pr OR repo:another/repo is:pr",
