@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from mojum.merge_gate import MAX_INPUT_BYTES, SnapshotError, _load_snapshot, _run_gh_json, main
+from mojum.merge_gate import MAX_INPUT_BYTES, FetchError, SnapshotError, _load_snapshot, _run_gh_json, main
 
 
 class SnapshotFileInputTests(unittest.TestCase):
@@ -86,6 +86,33 @@ class SnapshotFileInputTests(unittest.TestCase):
                 verdict = json.loads(output.getvalue())
                 self.assertEqual(verdict["code"], "INVALID_INPUT")
                 self.assertFalse(verdict["merge_performed"])
+
+    def test_non_utf8_snapshot_and_gh_output_fail_closed(self):
+        payload = b'{"isDraft":\xff}'
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "invalid-encoding.json"
+            path.write_bytes(payload)
+            with self.assertRaisesRegex(SnapshotError, "valid UTF-8"):
+                _load_snapshot(str(path))
+            with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(payload))):
+                with self.assertRaisesRegex(SnapshotError, "valid UTF-8"):
+                    _load_snapshot("-")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main([
+                    "--input", str(path),
+                    "--expected-head-sha", "a" * 40,
+                    "--expected-base-sha", "b" * 40,
+                ])
+            self.assertEqual(code, 1)
+            verdict = json.loads(output.getvalue())
+            self.assertEqual(verdict["code"], "INVALID_INPUT")
+            self.assertFalse(verdict["merge_performed"])
+            self.assertNotIn(str(path), output.getvalue())
+        bad_text = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start")
+        with mock.patch("mojum.merge_gate.subprocess.run", side_effect=bad_text):
+            with self.assertRaisesRegex(FetchError, "undecodable UTF-8"):
+                _run_gh_json(["gh", "pr", "view", "123"], label="gh pr view")
 
     def test_distinct_nested_snapshot_fields_are_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
