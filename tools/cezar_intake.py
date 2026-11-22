@@ -8,6 +8,7 @@ cezar_admission's atomic cross-rule key, maximum one unresolved task.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -181,7 +182,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     old = os.umask(0o077)
     try:
-        with admission.connect(args.db) as db:
+        with closing(admission.connect(args.db)) as db:
             summary = one_poll(db, args.prompts_dir, execute=args.execute)
     except (admission.AdmissionError, OSError, sqlite3.DatabaseError) as exc:
         ap.exit(2, "intake refused: " + type(exc).__name__ + "\n")
