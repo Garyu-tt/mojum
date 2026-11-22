@@ -57,6 +57,46 @@ class RoomDraftRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(RoomSpecError, "cannot read room draft"):
             load_runtime_room(self.dir / "absent.json")
 
+    def test_missing_nonblock_fails_before_open(self):
+        from unittest.mock import patch
+
+        with patch("mojum.room_draft_runtime.os.O_NONBLOCK", 0, create=True), \
+             patch("mojum.room_draft_runtime.os.open") as mocked_open, \
+             patch("mojum.room_draft_runtime.os.name", "posix"):
+            with self.assertRaisesRegex(RoomSpecError, "without O_NONBLOCK"):
+                load_runtime_room(self.path)
+            mocked_open.assert_not_called()
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX FIFO support required")
+    def test_named_pipe_is_rejected_without_blocking(self):
+        # A normal Path.open('rb') hangs here waiting for a FIFO writer.
+        # Keep the regression in a child process with a hard timeout so that
+        # a future regression fails this test rather than wedging the CI job.
+        fifo = self.dir / "room.fifo"
+        os.mkfifo(fifo)
+        root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(root / "src") + (
+            os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        command = [
+            sys.executable, "-c",
+            "import sys; from mojum.room_draft_runtime import load_runtime_room; "
+            "load_runtime_room(sys.argv[1])", str(fifo),
+        ]
+        run = subprocess.run(command, cwd=root, env=env, text=True,
+                             capture_output=True, check=False, timeout=5)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("room draft must be a regular file", run.stderr)
+
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0),
+                         "platform has no O_NOFOLLOW")
+    def test_room_file_symlink_is_rejected(self):
+        linked = self.dir / "room-link.json"
+        linked.symlink_to(self.path)
+        with self.assertRaisesRegex(RoomSpecError, "cannot read room draft"):
+            load_runtime_room(linked)
+
     def _cli(self, db, *, room_file=True, ticks=1):
         root = Path(__file__).resolve().parents[1]
         env = dict(os.environ)
