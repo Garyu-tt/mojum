@@ -80,7 +80,10 @@ does **not** authorize activating the 300-worker fleet.
 The budget gate **fails closed on non-POSIX hosts and relative paths** pending a
 platform-specific secure-store implementation. On Linux, use an absolute file
 path inside a dedicated directory owned by the worker UID with mode 0700.
-The directory must not be a symlink; writable non-sticky ancestors are rejected.
+The directory must not be a symlink; writable non-sticky ancestors are rejected. Every ancestor must also
+be owned by root or the worker UID, including sticky directories. A foreign
+owner may chmod an otherwise read-only directory or replace entries within a
+sticky directory they own, so the sticky bit alone is not a trust boundary.
 Existing DB, WAL and SHM paths must be regular files owned by that UID, with
 one link and no group/world permission bits. New files are precreated with
 O_EXCL/O_NOFOLLOW and mode 0600 before SQLite connects, without changing the
