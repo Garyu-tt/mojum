@@ -125,6 +125,10 @@ class BudgetLedger:
                 if ancestor == parent:
                     if (info.st_uid != os.getuid() or info.st_mode & 0o077):
                         raise BudgetDenied("ledger directory must be owned and mode 0700")
+                elif info.st_uid not in (0, os.getuid()):
+                    # A foreign directory owner can chmod even a 0755 path,
+                    # and can replace entries in an owner-controlled sticky dir.
+                    raise BudgetDenied("ledger directory has an untrusted ancestor owner")
                 elif info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX:
                     raise BudgetDenied("ledger directory has a replaceable ancestor")
 
