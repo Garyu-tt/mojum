@@ -79,6 +79,31 @@ class SpartanPrivateDatabaseTests(unittest.TestCase):
                 coordinator.connect(str(path))
             self.assertFalse((actual / "tasks.sqlite3").exists())
 
+    def test_writable_ancestor_rejected_even_with_private_immediate_parent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            shared = Path(folder) / "untrusted"
+            shared.mkdir()
+            os.chmod(shared, 0o777)
+            private = shared / "private"
+            private.mkdir(mode=0o700)
+            path = private / "tasks.sqlite3"
+            with self.assertRaisesRegex(PermissionError, "parent directory"):
+                coordinator.connect(str(path))
+            self.assertFalse(path.exists())
+
+    def test_symlinked_ancestor_rejected_even_if_immediate_parent_is_regular(self):
+        with tempfile.TemporaryDirectory() as folder:
+            real = Path(folder) / "real"
+            real.mkdir(mode=0o700)
+            private = real / "private"
+            private.mkdir(mode=0o700)
+            alias = Path(folder) / "alias"
+            alias.symlink_to(real, target_is_directory=True)
+            path = alias / "private" / "tasks.sqlite3"
+            with self.assertRaisesRegex(PermissionError, "parent directory"):
+                coordinator.connect(str(path))
+            self.assertFalse((private / "tasks.sqlite3").exists())
+
     def test_symlink_does_not_redirect_private_database(self):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "target.sqlite3"
