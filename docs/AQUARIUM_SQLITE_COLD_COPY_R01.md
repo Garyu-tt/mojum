@@ -42,11 +42,16 @@ PYTHONPATH=src python -m mojum.aquarium_cold_copy verify \
   --expected-tick 30
 ```
 
-Both devices must have **the same trusted GENESIS seed, graph, room definition,
-clock and neural mode**. By default this uses `examples/genesis_seed.json`
-and `examples/first_loop.json`. Use `--genome`, `--graph` and
-`--neural-mode` if your fixture differs. Only the default room configuration
-is exposed by this CLI; custom rooms are supported by the Python API.
+Export and verification use the same trusted GENESIS seed, graph, room,
+clock and modes as the original run. The CLI defaults to the packaged seed
+and graph, the default room and scripted movement. The journal owner defaults
+to the selected seed's `genome_id`. For an opt-in v4 journal
+with numeric toy contact, pass `--motor-mode local_cell_v4 --sensory-mode toy_probe_v2`
+to both commands. The same rule applies to `--brain-mode`, `--temporal-mode`,
+`--neural-mode`, `--genome` and `--graph` when those settings differ. The CLI
+uses the supplied seed's `genome_id` as the journal owner unless you pass
+`--agent-id` explicitly. Use the Python API to pass a custom room, clock or
+toy scene.
 
 A verified copy can be reopened as an **independent forked local simulation**
 using `mojum.aquarium --db ...` with matching settings. That is *not*
@@ -61,9 +66,9 @@ coordinated replication: writing to two forks creates divergent histories.
   then checks its deterministic Aquarium checkpoint against that recorded head.
   Concurrent source commits may be included in the consistent backup; the
   output identifies that exact snapshot by head, tick and SHA-256.
-- Verifies the standalone `.sqlite3` has no required WAL sidecar, computes a
-  SHA-256 of the final file and fsyncs the data file. Publishes via hard link
-  to a **new** filename only, never replacing an existing path.
+- Finalizes the standalone `.sqlite3` in SQLite's rollback journal mode so
+  read-only inspection leaves the file ready for verification. Computes a
+  SHA-256 of the final file, fsyncs it, and publishes via hard link to a new path.
 - Import verification requires an expected journal head and owning organism ID;
   expected byte SHA and virtual tick are recommended additional gates.
 - Source file must exist and be a regular non-symlink file; database pages are

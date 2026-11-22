@@ -13,6 +13,10 @@ MAX_ATTEMPTS = 3
 VALID_STATES = ("queued", "running", "review", "blocked")
 
 
+def _reject_nonfinite_constant(value: str):
+    raise ValueError(f"non-finite JSON constant not allowed: {value}")
+
+
 def connect(path: str) -> sqlite3.Connection:
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
     db.row_factory = sqlite3.Row
@@ -68,20 +72,32 @@ def enqueue(db: sqlite3.Connection, items: list[dict], now: int) -> dict:
         if task_id in seen:
             raise ValueError("duplicate id in batch")
         seen.add(task_id)
-        if not isinstance(item.get("priority", 0), int):
+        # bool is a subclass of int, but a boolean is not a task priority.
+        # SQLite converts True to 1, confusing immutable enqueue identity.
+        if type(item.get("priority", 0)) is not int:
             raise ValueError("priority must be an integer")
-        if len(json.dumps(item.get("payload", {}))) > 8192:
+        if len(json.dumps(item.get("payload", {}), sort_keys=True, allow_nan=False)) > 8192:
             raise ValueError("payload is too large")
     db.execute("BEGIN IMMEDIATE")
     try:
         before = db.total_changes
         for item in items:
-            db.execute(
+            priority = item.get("priority", 0)
+            payload = json.dumps(item.get("payload", {}), sort_keys=True, allow_nan=False)
+            inserted = db.execute(
                 "INSERT OR IGNORE INTO tasks(id, scope, priority, payload, updated_at) "
                 "VALUES(?, ?, ?, ?, ?)",
-                (item["id"], item["scope"], item.get("priority", 0),
-                 json.dumps(item.get("payload", {}), sort_keys=True), now),
-            )
+                (item["id"], item["scope"], priority, payload, now),
+            ).rowcount
+            if not inserted:
+                existing = db.execute(
+                    "SELECT scope, priority, payload FROM tasks WHERE id=?",
+                    (item["id"],),
+                ).fetchone()
+                if existing is None or (
+                    existing["scope"], existing["priority"], existing["payload"]
+                ) != (item["scope"], priority, payload):
+                    raise ValueError("task id reused with different scope, priority or payload")
         added = db.total_changes - before
         db.execute("COMMIT")
         return {"added": added, "existing": len(items) - added}
@@ -95,6 +111,14 @@ def expire(db: sqlite3.Connection, now: int) -> None:
         "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
         "updated_at=? WHERE state='running' AND lease_until<=? AND attempts>=?",
         (now, now, MAX_ATTEMPTS),
+    )
+    # Reconcile ledgers written by older coordinator versions as well as any
+    # externally imported state.  An exhausted queued row must never receive
+    # a fourth lease merely because it was not left in ``running`` state.
+    db.execute(
+        "UPDATE tasks SET state='blocked', worker_id=NULL, lease_until=NULL, "
+        "updated_at=? WHERE state='queued' AND attempts>=?",
+        (now, MAX_ATTEMPTS),
     )
     db.execute(
         "UPDATE tasks SET state='queued', worker_id=NULL, lease_until=NULL, "
@@ -119,12 +143,13 @@ def claim(db: sqlite3.Connection, worker_id: int, now: int, ttl: int = 900) -> d
             row = db.execute("""
                 SELECT t.* FROM tasks AS t
                 WHERE t.state='queued'
+                  AND t.attempts < ?
                   AND NOT EXISTS (
                     SELECT 1 FROM tasks AS active
                     WHERE active.scope=t.scope AND active.state='running'
                   )
                 ORDER BY t.priority DESC, t.updated_at ASC, t.id ASC LIMIT 1
-            """).fetchone()
+            """, (MAX_ATTEMPTS,)).fetchone()
             if row:
                 db.execute(
                     "UPDATE tasks SET state='running', worker_id=?, lease_until=?, "
@@ -139,15 +164,19 @@ def claim(db: sqlite3.Connection, worker_id: int, now: int, ttl: int = 900) -> d
         raise
 
 
-def heartbeat(db: sqlite3.Connection, worker_id: int, task_id: str, now: int, ttl: int = 900) -> bool:
+def heartbeat(db: sqlite3.Connection, worker_id: int, task_id: str, now: int,
+              ttl: int = 900, *, attempt: int) -> bool:
     if ttl < 30 or ttl > 86400:
         raise ValueError("ttl must be 30..86400 seconds")
+    if type(attempt) is not int or attempt < 1:
+        raise ValueError("attempt fencing token must be a positive integer")
     db.execute("BEGIN IMMEDIATE")
     try:
         changed = db.execute(
             "UPDATE tasks SET lease_until=?, updated_at=? "
-            "WHERE id=? AND worker_id=? AND state='running' AND lease_until>?",
-            (now + ttl, now, task_id, worker_id, now),
+            "WHERE id=? AND worker_id=? AND attempts=? "
+            "AND state='running' AND lease_until>?",
+            (now + ttl, now, task_id, worker_id, attempt, now),
         ).rowcount
         db.execute("COMMIT")
         return changed == 1
@@ -157,20 +186,30 @@ def heartbeat(db: sqlite3.Connection, worker_id: int, task_id: str, now: int, tt
 
 
 def finish(db: sqlite3.Connection, worker_id: int, task_id: str, result: str,
-           now: int, artifact: str = "") -> bool:
+           now: int, artifact: str = "", *, attempt: int) -> bool:
     if result not in ("review", "blocked", "queued"):
         raise ValueError("worker may only submit to review, block or requeue")
     if result == "review" and not artifact.strip():
         raise ValueError("review requires a PR or patch artifact")
     if len(artifact) > 500:
         raise ValueError("artifact too long")
+    if type(attempt) is not int or attempt < 1:
+        raise ValueError("attempt fencing token must be a positive integer")
     db.execute("BEGIN IMMEDIATE")
     try:
+        if result == "queued":
+            running = db.execute(
+                "SELECT attempts FROM tasks WHERE id=? AND worker_id=? "
+                "AND attempts=? AND state='running' AND lease_until>?",
+                (task_id, worker_id, attempt, now),
+            ).fetchone()
+            if running is not None and running["attempts"] >= MAX_ATTEMPTS:
+                raise ValueError("retry budget exhausted; finish as blocked")
         changed = db.execute(
             "UPDATE tasks SET state=?, worker_id=NULL, lease_until=NULL, "
-            "artifact=?, updated_at=? WHERE id=? AND worker_id=? "
+            "artifact=?, updated_at=? WHERE id=? AND worker_id=? AND attempts=? "
             "AND state='running' AND lease_until>?",
-            (result, artifact or None, now, task_id, worker_id, now),
+            (result, artifact or None, now, task_id, worker_id, attempt, now),
         ).rowcount
         db.execute("COMMIT")
         return changed == 1
@@ -208,36 +247,45 @@ def main() -> int:
     hb.add_argument("--worker", type=int, required=True)
     hb.add_argument("--task", required=True)
     hb.add_argument("--ttl", type=int, default=900)
+    hb.add_argument("--attempt", type=int, required=True,
+                    help="fencing attempt number returned by claim")
     fi = commands.add_parser("finish")
     fi.add_argument("--worker", type=int, required=True)
     fi.add_argument("--task", required=True)
     fi.add_argument("--result", choices=("review", "blocked", "queued"), required=True)
     fi.add_argument("--artifact", default="")
+    fi.add_argument("--attempt", type=int, required=True,
+                    help="fencing attempt number returned by claim")
     commands.add_parser("status")
     args = parser.parse_args()
     Path(args.db).parent.mkdir(parents=True, exist_ok=True)
     db = connect(args.db)
-    create_schema(db)
-    now = int(time.time())
-    if args.action == "init":
-        result = init(db, args.slots, now)
-    elif args.action == "enqueue":
-        with open(args.json, encoding="utf-8") as stream:
-            items = json.load(stream)
-        if not isinstance(items, list):
-            raise ValueError("enqueue input must be an array")
-        result = enqueue(db, items, now)
-    elif args.action == "claim":
-        result = claim(db, args.worker, now, args.ttl)
-    elif args.action == "heartbeat":
-        result = {"renewed": heartbeat(db, args.worker, args.task, now, args.ttl)}
-    elif args.action == "finish":
-        result = {"updated": finish(db, args.worker, args.task, args.result, now, args.artifact)}
-    else:
-        result = status(db)
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    try:
+        create_schema(db)
+        now = int(time.time())
+        if args.action == "init":
+            result = init(db, args.slots, now)
+        elif args.action == "enqueue":
+            with open(args.json, encoding="utf-8") as stream:
+                items = json.load(stream, parse_constant=_reject_nonfinite_constant)
+            if not isinstance(items, list):
+                raise ValueError("enqueue input must be an array")
+            result = enqueue(db, items, now)
+        elif args.action == "claim":
+            result = claim(db, args.worker, now, args.ttl)
+        elif args.action == "heartbeat":
+            result = {"renewed": heartbeat(db, args.worker, args.task, now, args.ttl,
+                                           attempt=args.attempt)}
+        elif args.action == "finish":
+            result = {"updated": finish(db, args.worker, args.task, args.result, now,
+                                        args.artifact, attempt=args.attempt)}
+        else:
+            result = status(db)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
 
+    finally:
+        db.close()
 
 if __name__ == "__main__":
     raise SystemExit(main())

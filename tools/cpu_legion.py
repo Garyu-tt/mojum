@@ -10,14 +10,14 @@ import re
 import subprocess
 import time
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from tools import spartan_coordinator as queue
 
 PATH_RE = re.compile(r"^(src|tests|tools)/[A-Za-z0-9_./-]+\.py$")
 
 def local_url(url):
     u = urlparse(url)
-    if (u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost", "::1")
+    if (u.scheme != "http" or u.hostname not in ("127.0.0.1", "::1")
             or u.path != "/v1/chat/completions" or not u.port or
             u.username or u.password or u.query or u.fragment):
         raise ValueError("local loopback OpenAI-compatible URL required")
@@ -65,7 +65,15 @@ def task_context(root, task):
         raise ValueError("context too large")
     return instruction + "\n\n" + body, paths
 
+class _NoRedirect(HTTPRedirectHandler):
+    """Never allow a loopback model endpoint to redirect a request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def generate(url, model, text, timeout):
+    local_url(url)  # Also protect callers that bypass the CLI entrypoint.
     req = Request(url, data=json.dumps({
         "model": model, "max_tokens": 2048, "temperature": 0.1,
         "messages": [
@@ -73,7 +81,9 @@ def generate(url, model, text, timeout):
             {"role": "user", "content": text},
         ],
     }).encode(), headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=timeout) as response:
+    # No environment-provided proxy and no HTTP redirect off loopback.
+    opener = build_opener(ProxyHandler({}), _NoRedirect())
+    with opener.open(req, timeout=timeout) as response:
         result = response.read(200001)
     if len(result) > 200000:
         raise ValueError("model response too large")
