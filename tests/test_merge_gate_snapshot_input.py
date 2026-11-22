@@ -145,6 +145,27 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertNotIn(secret, stdout.getvalue())
             self.assertEqual(result["error"], "snapshot source unavailable")
 
+    def test_deeply_nested_json_fails_closed_without_uncaught_traceback(self):
+        # Bytes are bounded, but JSON can still exceed decoder recursion depth.
+        # The CLI must emit a machine-readable rejection, not a traceback.
+        nested = ("[" * 12000 + "0" + "]" * 12000).encode("ascii")
+        self.assertLess(len(nested), MAX_INPUT_BYTES)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "deep.json"
+            path.write_bytes(nested)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main([
+                    "--input", str(path),
+                    "--expected-head-sha", "a" * 40,
+                    "--expected-base-sha", "b" * 40,
+                ])
+            self.assertEqual(code, 1)
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["verdict"], "reject")
+            self.assertEqual(result["code"], "INVALID_INPUT")
+            self.assertFalse(result["merge_performed"])
+
     @unittest.skipUnless(
         sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
         "Linux process fd inventory required",
