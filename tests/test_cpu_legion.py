@@ -310,6 +310,7 @@ sys.exit(1)
                          "POSIX pinned output directory writes required")
     def test_patch_artifact_fsyncs_file_then_directory(self):
         out = self.root / "private-sync" / "patches"
+        out.mkdir(parents=True, mode=0o700)
         original = os.fsync
         calls = []
 
@@ -328,8 +329,33 @@ sys.exit(1)
                          and os.open in os.supports_dir_fd
                          and os.mkdir in os.supports_dir_fd,
                          "POSIX pinned output directory writes required")
+    def test_new_directory_chain_is_synced_before_patch_artifact(self):
+        out = self.root / "private-new-dir" / "patches"
+        original_fsync = os.fsync
+        synced_inodes = []
+
+        def record(fd):
+            synced_inodes.append(os.fstat(fd).st_ino)
+            return original_fsync(fd)
+
+        with patch.object(legion.os, "fsync", side_effect=record):
+            legion._write_private_patch(out, "candidate.patch", "durable diff\\n")
+
+        # Each mkdir requires both new directory metadata and its parent's
+        # new child entry to reach stable storage, before the patch is durable.
+        self.assertEqual(synced_inodes, [
+            out.parent.stat().st_ino, self.root.stat().st_ino,
+            out.stat().st_ino, out.parent.stat().st_ino,
+            (out / "candidate.patch").stat().st_ino, out.stat().st_ino,
+        ])
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
     def test_patch_artifact_file_sync_failure_unlinks_partial(self):
         out = self.root / "private-file-sync" / "patches"
+        out.mkdir(parents=True, mode=0o700)
         with patch.object(legion.os, "fsync", side_effect=OSError("sync failure")):
             with self.assertRaisesRegex(ValueError, "persist"):
                 legion._write_private_patch(out, "candidate.patch", "incomplete")
@@ -341,6 +367,7 @@ sys.exit(1)
                          "POSIX pinned output directory writes required")
     def test_patch_artifact_directory_sync_failure_unlinks_partial(self):
         out = self.root / "private-dir-sync" / "patches"
+        out.mkdir(parents=True, mode=0o700)
         original = os.fsync
 
         def fail_directory(fd):
