@@ -398,7 +398,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
     # Validate the database/parent *before* opening the adjacent lock. A
     # group-writable directory could otherwise plant a symlink lock target.
     try:
-        coordinator._check_private_sqlite_path(str(db_path))
+        coordinator._check_private_parent(str(db_path))
+        coordinator._check_private_file(str(db_path))
     except (OSError, ValueError) as exc:
         raise FleetError("unsafe private coordinator directory/database") from exc
     lock = db_path.with_suffix(db_path.suffix + ".fleet.lock")
