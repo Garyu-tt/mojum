@@ -110,16 +110,24 @@ class SchoolCatalogWireGuardTests(unittest.TestCase):
         catalog = copy.deepcopy(self.catalog)
         catalog["extension"] = "x" * (100 * MAX_CATALOG_BYTES)
         gc.collect()
-        tracemalloc.start()
+        # The complete-suite SQLite leak audit already enables tracemalloc.
+        # Comparing an absolute process peak conflates earlier tests with
+        # this call's allocation, and restarting an active tracer is a no-op.
+        was_tracing = tracemalloc.is_tracing()
+        if not was_tracing:
+            tracemalloc.start()
         try:
+            baseline, _ = tracemalloc.get_traced_memory()
+            tracemalloc.reset_peak()
             with self.assertRaisesRegex(SchoolError, "byte budget"):
                 validate_catalog(catalog)
-            _current, peak = tracemalloc.get_traced_memory()
+            _, peak = tracemalloc.get_traced_memory()
         finally:
-            tracemalloc.stop()
-        # The original giant input was allocated before tracemalloc started.
-        # Validation must not copy it into another giant encoded string.
-        self.assertLess(peak, 16 * MAX_CATALOG_BYTES)
+            if not was_tracing:
+                tracemalloc.stop()
+        # The huge input existed before the measured validation. Only count
+        # additional peak allocations attributable to the validation call.
+        self.assertLess(peak - baseline, 16 * MAX_CATALOG_BYTES)
 
     def test_json_compatible_subclasses_cannot_evade_string_preflight(self):
         class StringSubclass(str):
