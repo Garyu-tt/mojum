@@ -104,7 +104,7 @@ def connect(path: Path):
 
 def identity(repo: str, kind: str, number: int, revision: str,
              phase: str, scope: str) -> dict:
-    if repo.lower() != REPO:
+    if not isinstance(repo, str) or repo.lower() != REPO:
         raise AdmissionError("repository not allowlisted")
     if kind not in KINDS or phase not in PHASES:
         raise AdmissionError("unsupported source kind or phase")
