@@ -12,6 +12,7 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 | four 5 cm rays, fallback 10 cm range, numeric contact probe/deflection/prediction | same (rendered DOM telemetry over three modern-format synthetic frames) |
 | tick gap rejected | `test_private_trace_integrity.py` (`gap` in the Node harness) |
 | oversize file rejected without reading | same (`oversized`, 25 MiB) |
+| oversize replacement while playing cancels timer and disables controls without reading bytes | `test_offline_viewer_controls.py` (actual modern-format viewer JS and virtual timers) |
 | stale async file-selection race | same (`race`) |
 | HTML-looking payload stays literal text | same (`safe`) and `test_markup_remains_local_only_and_uses_safe_text_rendering` (no `innerHTML`) |
 | genuine committed SQLite rows, same tick order | `test_aquarium_trace_export.py::test_replays_real_private_frames_in_same_tick_order` |
