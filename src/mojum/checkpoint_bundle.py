@@ -44,13 +44,26 @@ def unpack(bundle, *, expected_revision=None, expected_organism_id=None):
         raise ValueError("invalid bundle shape")
     if bundle["schema"] != SCHEMA or type(bundle["payloads"]) is not dict or set(bundle["payloads"]) != set(NAMES):
         raise ValueError("unsupported schema or components")
-    payloads = {name: _decode(bundle["payloads"][name]) for name in NAMES}
-    verify_manifest(bundle["manifest"], payloads, expected_revision=expected_revision)
-    # A valid digest/revision does not establish the intended organism identity.
+    manifest = bundle["manifest"]
+    # Optional caller-supplied identity gates are cheap preconditions. Reject
+    # a known mismatch before allocating up to five decoded 4 MiB buffers.
+    # These checks never establish trust: verify_manifest still checks
+    # the complete manifest-to-payload digest relationship below.
+    if expected_revision is not None and (
+            type(expected_revision) is not int
+            or not isinstance(manifest, dict)
+            or type(manifest.get("revision")) is not int
+            or manifest["revision"] != expected_revision):
+        raise ValueError("stale checkpoint revision")
     if expected_organism_id is not None and (
             type(expected_organism_id) is not str
-            or bundle["manifest"]["organism_id"] != expected_organism_id):
+            or not isinstance(manifest, dict)
+            or not isinstance(manifest.get("organism_id"), str)
+            or manifest["organism_id"] != expected_organism_id):
         raise ValueError("checkpoint organism identity mismatch")
+
+    payloads = {name: _decode(bundle["payloads"][name]) for name in NAMES}
+    verify_manifest(manifest, payloads, expected_revision=expected_revision)
     return payloads
 
 
@@ -77,6 +90,10 @@ def loads(wire, *, expected_revision=None, expected_organism_id=None):
         raise ValueError("invalid bundle JSON") from exc
     unpack(bundle, expected_revision=expected_revision,
            expected_organism_id=expected_organism_id)
-    if dumps(bundle) != wire:
+    # unpack() already decoded and verified all five components. Re-running
+    # dumps() here would decode/rehash them a second time on every load.
+    canonical = json.dumps(bundle, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True, allow_nan=False)
+    if canonical != wire:
         raise ValueError("noncanonical bundle JSON")
     return bundle
