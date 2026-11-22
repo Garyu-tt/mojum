@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -264,6 +267,31 @@ class GitHubLifecycleTests(unittest.TestCase):
             with self.subTest(broken=str(broken)[:100]):
                 with self.assertRaises(f.FleetError):
                     f._closed_from_response(broken)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and os.name == "posix",
+                         "POSIX named pipes required")
+    def test_fifo_cache_is_refused_without_waiting_for_writer(self):
+        # Run in a subprocess so a future regression fails fast rather than
+        # hanging the entire CI worker waiting for a nonexistent FIFO writer.
+        os.mkfifo(self.cache, 0o600)
+        code = (
+            "import importlib.util,sys\n"
+            "from pathlib import Path\n"
+            "spec=importlib.util.spec_from_file_location('cezar_cache_check',sys.argv[1])\n"
+            "module=importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "module.CLOSED_CACHE=Path(sys.argv[2])\n"
+            "try:\n"
+            "    module._load_closed_cache()\n"
+            "except module.FleetError:\n"
+            "    sys.exit(0)\n"
+            "sys.exit(3)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(SRC), str(self.cache)],
+            capture_output=True, text=True, timeout=3,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_symlink_or_untrusted_history_cache_is_not_read(self):
         secret = self.parent / "secret.json"
