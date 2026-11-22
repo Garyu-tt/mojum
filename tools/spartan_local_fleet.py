@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import time
 from threading import BoundedSemaphore, Lock
 from urllib.error import HTTPError, URLError
