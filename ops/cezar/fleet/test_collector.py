@@ -122,18 +122,18 @@ class FleetObserverTests(unittest.TestCase):
         self.schedules.unlink()
         os.mkfifo(self.schedules, 0o600)
         code = (
-            "import importlib.util,sys\\n"
-            "from pathlib import Path\\n"
-            "from datetime import datetime,timezone\\n"
-            "spec=importlib.util.spec_from_file_location('cezar_schedule_check',sys.argv[1])\\n"
-            "module=importlib.util.module_from_spec(spec)\\n"
-            "spec.loader.exec_module(module)\\n"
-            "module.SCHEDULES=Path(sys.argv[2])\\n"
-            "try:\\n"
-            "    module._schedule_list(datetime.now(timezone.utc))\\n"
-            "except module.FleetError:\\n"
-            "    sys.exit(0)\\n"
-            "sys.exit(3)\\n"
+            "import importlib.util,sys\n"
+            "from pathlib import Path\n"
+            "from datetime import datetime,timezone\n"
+            "spec=importlib.util.spec_from_file_location('cezar_schedule_check',sys.argv[1])\n"
+            "module=importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "module.SCHEDULES=Path(sys.argv[2])\n"
+            "try:\n"
+            "    module._schedule_list(datetime.now(timezone.utc))\n"
+            "except module.FleetError:\n"
+            "    sys.exit(0)\n"
+            "sys.exit(3)\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", code, str(SRC), str(self.schedules)],
