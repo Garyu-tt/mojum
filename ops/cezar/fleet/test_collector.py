@@ -28,10 +28,14 @@ class FleetObserverTests(unittest.TestCase):
             {"title":f"Кубик D3 mojum — peer {i}/5","enabled":True,
              "last_run":"2026-11-22T20:30:00+00:00",
              "next_run":"2026-11-22T21:30:00+00:00",
+             "last_status":"completed",
+             "last_completed":"2026-11-22T20:35:00+00:00",
              "id":"PRIVATE_AUTOMATION_ID"} for i in range(1,5)]
         rows.append({"title":"Mojum — независимая приёмка","enabled":True,
                      "last_run":"2026-11-22T20:40:00+00:00",
                      "next_run":"2026-11-22T21:40:00+00:00",
+                     "last_status":"completed",
+                     "last_completed":"2026-11-22T20:41:00+00:00",
                      "id":"ANOTHER_PRIVATE_ID"})
         blob={"schema":"cezar.external-automations.v1",
               "observed_at":"2026-11-22T20:55:00+00:00","agents":rows}
@@ -61,6 +65,8 @@ class FleetObserverTests(unittest.TestCase):
         self.assertEqual(snap["schedules"]["qa_enabled"],1)
         self.assertEqual(snap["schedules"]["ran_last_90m"],5)
         self.assertTrue(snap["schedules"]["snapshot_fresh"])
+        self.assertEqual(snap["schedules"]["agents"][0]["last_status"],"completed")
+        self.assertIsNotNone(snap["schedules"]["agents"][0]["last_completed"])
         self.assertEqual(snap["cezar"]["active"],1)
         self.assertEqual(snap["models"]["capacity_slots_known"],10)
         self.assertEqual(snap["models"]["inference_busy_known"],5)
