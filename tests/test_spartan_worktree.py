@@ -93,6 +93,18 @@ class WorktreeTests(unittest.TestCase):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, self.repo, "task", self.sha)
 
+    def test_rejects_root_inside_actual_git_toplevel_from_subdirectory(self):
+        # Passing a repository subdirectory must not weaken the containment
+        # check: Git -C walks up to the real repository root.
+        subdir = self.repo / "nested"
+        subdir.mkdir()
+        unsafe_root = self.repo / "worktrees"
+        unsafe_root.mkdir()
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(subdir, unsafe_root, "task", self.sha)
+        self.assertFalse((unsafe_root / "task").exists())
+        self.assertFalse((self.repo / ".git" / "worktrees").exists())
+
     def test_rejects_symlinked_root_ancestor(self):
         actual_parent = self.base / "actual-parent"
         actual_parent.mkdir()
