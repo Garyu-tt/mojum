@@ -57,6 +57,46 @@ class RoomDraftRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(RoomSpecError, "cannot read room draft"):
             load_runtime_room(self.dir / "absent.json")
 
+    def test_missing_nonblock_fails_before_open(self):
+        from unittest.mock import patch
+
+        with patch("mojum.room_draft_runtime.os.O_NONBLOCK", 0, create=True), \
+             patch("mojum.room_draft_runtime.os.open") as mocked_open, \
+             patch("mojum.room_draft_runtime.os.name", "posix"):
+            with self.assertRaisesRegex(RoomSpecError, "without O_NONBLOCK"):
+                load_runtime_room(self.path)
+            mocked_open.assert_not_called()
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and getattr(os, "O_NONBLOCK", 0),
+                         "POSIX FIFO support required")
+    def test_named_pipe_is_rejected_without_blocking(self):
+        # A normal Path.open('rb') hangs here waiting for a FIFO writer.
+        # Keep the regression in a child process with a hard timeout so that
+        # a future regression fails this test rather than wedging the CI job.
+        fifo = self.dir / "room.fifo"
+        os.mkfifo(fifo)
+        root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(root / "src") + (
+            os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        command = [
+            sys.executable, "-c",
+            "import sys; from mojum.room_draft_runtime import load_runtime_room; "
+            "load_runtime_room(sys.argv[1])", str(fifo),
+        ]
+        run = subprocess.run(command, cwd=root, env=env, text=True,
+                             capture_output=True, check=False, timeout=5)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("room draft must be a regular file", run.stderr)
+
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0),
+                         "platform has no O_NOFOLLOW")
+    def test_room_file_symlink_is_rejected(self):
+        linked = self.dir / "room-link.json"
+        linked.symlink_to(self.path)
+        with self.assertRaisesRegex(RoomSpecError, "cannot read room draft"):
+            load_runtime_room(linked)
+
     def _cli(self, db, *, room_file=True, ticks=1):
         root = Path(__file__).resolve().parents[1]
         env = dict(os.environ)
@@ -101,6 +141,30 @@ class RoomDraftRuntimeTests(unittest.TestCase):
         result = self._cli(db)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(db.exists())
+
+
+    def test_valid_draft_over_noosphere_event_cap_fails_before_sqlite_birth(self):
+        # A 256 KiB-valid room can produce a bootstrap event beyond the
+        # Noosphere 128,000-byte limit after the room is materialized.
+        from mojum.room_spec import validate_room_bytes
+
+        doc = json.loads(VALID)
+        doc.update(width=10, height=10, start=[0, 0],
+                   obstacles=[[2.123456789, 1.123456789,
+                               0.0123456789, 0.0123456789]] * 3000)
+        raw = json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertLess(len(raw), MAX_INPUT_BYTES)
+        self.assertTrue(validate_room_bytes(raw).valid)
+        self.path.write_bytes(raw)
+        room, start = load_runtime_room(self.path)
+        self.assertEqual(len(room.obstacles), 3000)
+        self.assertEqual(start, (0.0, 0.0))
+
+        db = self.dir / "oversized_bootstrap_PRIVATE.sqlite3"
+        result = self._cli(db)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("event exceeds maximum size", result.stderr)
+        self.assertFalse(db.exists(), "failed bootstrap must not leave a journal")
 
 
 if __name__ == "__main__":

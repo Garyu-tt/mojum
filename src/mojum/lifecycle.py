@@ -170,13 +170,27 @@ class DevelopmentClock:
                 raise LifecycleError(f"invalid {region} state")
             for field in STATE_FIELDS:
                 _integer(s[field], f"{region}.{field}")
+            # Every tick deterministically births up to birth_per_tick.
+            # Maturation only moves cells between pools, never removes them.
+            expected_population = min(
+                p["target_mature"],
+                p["initial_mature"] + p["initial_immature"]
+                + snapshot["tick"] * p["birth_per_tick"],
+            )
+            # All cells matured since initialization must have consumed
+            # evidence before the post-maturity observation phase. Remaining
+            # credit consumes evidence too; lost/saturated credit cannot
+            # justify a larger mature population.
+            required_evidence = (
+                (s["mature"] - p["initial_mature"]) * p["signals_per_maturation"]
+                + s["evidence_credit"]
+            )
             if (not p["initial_mature"] <= s["mature"] <= p["target_mature"]
-                    or not p["initial_mature"] + p["initial_immature"]
-                    <= s["mature"] + s["immature"] <= p["target_mature"]
+                    or s["mature"] + s["immature"] != expected_population
                     or s["mature"] > p["initial_mature"] + snapshot["tick"] * p["mature_per_tick"]
-                    or s["mature"] + s["immature"] > p["initial_mature"] + p["initial_immature"] + snapshot["tick"] * p["birth_per_tick"]
                     or s["observations_total"] > snapshot["tick"] * MAX_SIGNALS_PER_TICK
                     or s["evidence_credit"] > s["observations_total"]
+                    or s["observations_total"] - s["post_maturity_observations"] < required_evidence
                     or s["evidence_credit"] > p["target_mature"] * p["signals_per_maturation"]
                     or s["post_maturity_observations"] > s["observations_total"]
                     or (s["mature"] < p["target_mature"] and
