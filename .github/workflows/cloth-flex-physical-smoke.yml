@@ -1,0 +1,26 @@
+name: Mojum opt-in MuJoCo cloth physics smoke
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cloth_flex_spike.py'
+      - 'tests/smoke_cloth_flex_mujoco.py'
+      - '.github/workflows/cloth-flex-physical-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloth-real-mujoco:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned opt-in physics engine
+        run: python -m pip install --disable-pip-version-check 'mujoco==4.0.1'
+      - name: Compile MJCF and execute headless cloth steps
+        run: python tests/smoke_cloth_flex_mujoco.py
