@@ -20,7 +20,8 @@ class WorktreeTests(unittest.TestCase):
         self.repo = self.base / "repo"
         self.root = self.base / "worktrees"
         self.repo.mkdir()
-        self.root.mkdir()
+        # Worktrees may contain task-specific private code and artifacts.
+        self.root.mkdir(mode=0o700)
 
         def git(*args):
             return subprocess.check_output(
@@ -133,6 +134,14 @@ class WorktreeTests(unittest.TestCase):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, tricky_root, "task", self.sha)
         self.assertFalse((self.root / "task").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX worktree confidentiality gate")
+    def test_rejects_world_readable_worktree_root(self):
+        # 0755 is owner-controlled but leaks task files to other local users.
+        self.root.chmod(0o755)
+        with self.assertRaisesRegex(mod.IsolationError, "owner-controlled"):
+            mod.prepare(self.repo, self.root, "task-readable", self.sha)
+        self.assertFalse((self.root / "task-readable").exists())
 
     @unittest.skipUnless(os.name == "posix", "POSIX directory owner/mode gate")
     def test_rejects_world_writable_worktree_root(self):
