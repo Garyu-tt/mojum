@@ -46,7 +46,7 @@ def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
         git("rev-parse", "--is-inside-work-tree")
         git("cat-file", "-e", f"{base_sha}^{{commit}}")
         git("worktree", "add", "--no-checkout", "-b", branch, str(dest), base_sha)
-        git("-C", str(dest), "checkout", "--force", base_sha)
+        git("-C", str(dest), "checkout", "--force", branch)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise IsolationError("git worktree preparation failed; inspect partial worktree") from exc
     return dest
