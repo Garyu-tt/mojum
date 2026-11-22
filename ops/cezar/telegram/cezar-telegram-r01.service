@@ -1,0 +1,40 @@
+[Unit]
+Description=ClaudeFabric Cezar-only owner Telegram interface (no ALT automation)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/cezar-telegram/telegram.env
+ConditionPathExists=/opt/cezar-telegram/bot.py
+
+[Service]
+Type=simple
+User=cezar-telegram
+Group=cezar-telegram
+WorkingDirectory=/var/lib/cezar-telegram
+EnvironmentFile=/etc/cezar-telegram/telegram.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -B /opt/cezar-telegram/bot.py
+Restart=always
+RestartSec=15
+TimeoutStartSec=35
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cezar-telegram
+InaccessiblePaths=/var/lib/claude-factory /var/lib/alt-github-agent /etc/claude-factory /opt/claude-factory
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+UMask=0077
+MemoryMax=180M
+CPUQuota=40%
+TasksMax=30
+LimitNOFILE=512
+
+[Install]
+WantedBy=multi-user.target
