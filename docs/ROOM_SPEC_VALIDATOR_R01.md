@@ -23,23 +23,29 @@ therefore keeps every number token verbatim (`0.1`, `0.10000000000000001`,
 
 ## Accepted document
 
-Exactly these four keys, no more and no fewer:
+The four geometry keys, plus the optional draft `schema` key that the offline
+designer always writes:
 
 ```json
-{"width": 4, "height": 4, "obstacles": [[2, 1, 0.1, 2]], "start": [1.0, 2.0]}
+{"schema": "mojum.world.point-room-draft/1", "width": 4, "height": 4, "obstacles": [[2, 1, 0.1, 2]], "start": [1.0, 2.0]}
 ```
 
+- `schema` — optional. When present it must be exactly
+  `mojum.world.point-room-draft/1`; any other value is rejected. The key is
+  metadata, not geometry, and is never echoed into the report summary.
 - `width`, `height` — finite JSON numbers greater than zero.
 - Every geometry number token is limited to 128 characters and must be representable as a finite non-underflowing Python float, matching the point-room runtime's numeric domain. The report preserves original token spelling, including `start` coordinates.
+- After the exact Decimal checks pass, the draft is re-checked with the runtime's float comparisons: a rectangle or `start` that rounds past a closed float boundary is rejected with a `... after runtime float conversion` error, so the validator never certifies geometry that `mojum.world_room.Room` cannot load.
 - `obstacles` — list of at most 4096 rectangles, each exactly four finite
   JSON numbers `[x, y, w, h]` with `w > 0`, `h > 0`, inside the room.
 - `start` — exactly two finite numbers inside `[0, width] × [0, height]`, and
   not on or inside any obstacle. Obstacle boundaries are **closed** because the
   runtime's point-room also blocks a point that touches a wall.
 
-Rejected without partial acceptance: non-object roots, missing/unexpected keys,
+Rejected without partial acceptance: non-object roots, missing/unknown keys,
 duplicate JSON keys at any depth, `NaN`/`Infinity`, invalid UTF-8, invalid JSON,
-documents larger than 256 KiB, booleans/strings/null used as geometry.
+documents larger than 256 KiB, booleans/strings/null used as geometry, and an
+unsupported `schema` value.
 
 ## Warnings (still valid)
 

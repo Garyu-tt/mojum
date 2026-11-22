@@ -53,12 +53,43 @@ a single local snapshot. The optional independently pinned expected
 final hash detects whole-log rollback **only** when the anchor
 remains independently trusted.
 
-Physical **single SQLite file**, not several separate files and
-not fault-tolerant replicas. An attacker who can rewrite the entire
-database and external anchor can still forge a new chain. HMAC
-snapshot authentication and journal integrity are distinct. This
-project does **not** promise crash-proof hardware storage or
-cryptographic non-repudiation.
+The writable journal lives in one SQLite file. A sealed prefix can
+also be stored as separate archive files and restored offline.
+
+## Archive and restore a sealed prefix
+
+The archive contains plaintext event envelopes. Use directories under
+the operator's control. On POSIX, the tool requires owner-only
+directory and file permissions. The filesystem must support hard links
+for no-overwrite publication.
+
+```bash
+PYTHONPATH=src python -m mojum.segment_archive_cli export \
+  --db "$SOURCE_DB" --agent-id "$AGENT" --segment-size "$SEGMENT_SIZE" \
+  --archive-dir "$ARCHIVE_DIR" --expected-source-head "$SOURCE_HEAD" --include-private
+PYTHONPATH=src python -m mojum.segment_archive_cli verify \
+  --archive-dir "$ARCHIVE_DIR" --expected-sealed-head "$SEALED_HEAD"
+PYTHONPATH=src python -m mojum.segment_archive_cli restore \
+  --archive-dir "$ARCHIVE_DIR" --expected-sealed-head "$SEALED_HEAD" --new-db "$NEW_DB"
+```
+
+Export reads one SQLite snapshot and copies its complete segments into
+versioned manifest and JSONL pairs. A read-only open can still create
+SQLite `-wal` and `-shm` sidecars beside a WAL-mode source. The export
+summary reports how many unsealed events were present in that snapshot.
+Retain the verified sealed head separately from the archive. It can differ
+from the full source head.
+Verification and restore use that independent anchor without opening the
+source. Restore publishes a new SQLite file after checking the full
+reconstructed chain. Choose a destination without existing SQLite
+sidecars and wait for restore to finish before opening the destination.
+A no-clobber `NEW_DB.mojum-restore.lock` marker (0600 on POSIX) fences Mojum
+readers and writers during publication. If a sidecar or post-link failure
+races publication, the lock remains as a quarantine marker and Mojum refuses
+to open that destination; preserve it for diagnosis instead of deleting it
+blindly.
+An interrupted export can leave an orphan member. Preserve it for
+diagnosis and retry into a fresh archive directory.
 
 ## Boundary and actual-load QA
 
@@ -97,10 +128,9 @@ is intentionally NOT automatically injected into Aquarium.
 2. Extend the **typed** absolute epoch/sensor/association time
    budgets under another versioned contract, and test >100k
    actual canonical Aquarium frames, not just the journal.
-3. Durable independent anchor receipts, a reviewed physical
-   multi-file/archive manifest and >=2 independently stored
-   replicas with real crash/recovery tests. All historic segments
-   must stay inspectable; a snapshot does not replace history.
+3. Durable independent anchor receipts, recovery of the unsealed
+   tail, and replicas on at least two independent devices with real
+   crash/recovery tests.
 4. Real Termux/Android CPU storage/suspend checks and independent
    review of failure, concurrency and security semantics.
 
