@@ -91,7 +91,7 @@ python3 tools/gpu_legion_fanout.py --tasks tasks-300.json \
 
 Agent outputs may contain sensitive task content, so they are not
 printed to stdout in execution mode. This prototype writes local
-output with exclusive-create semantics, retains no persistent chat
+output with exclusive-create semantics under a POSIX owner-controlled directory (rejecting symlink ancestors, non-sticky writable parent chains, and shared writable output parents), retains no persistent chat
 history, and does not give models shell or tool privileges.
 For durable agent memory, attach the agent-specific Noosphere context
 through a separately permissioned application.
