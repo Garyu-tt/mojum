@@ -1,5 +1,6 @@
 """Offline tests for local 300-identity / bounded physical model Spartan fleet."""
 import json
+from contextlib import closing
 import os
 from pathlib import Path
 import sys
@@ -37,7 +38,7 @@ class FleetTests(unittest.TestCase):
         self.db = self.root / "db.sqlite3"
         self.out = self.root / "artifacts"
         self.out.mkdir(mode=0o700)
-        with sc.connect(str(self.db)) as db:
+        with closing(sc.connect(str(self.db))) as db:
             sc.create_schema(db)
             sc.init(db, 300, 100)
         self.backends = fleet.discover(request=fake_server)
@@ -45,7 +46,7 @@ class FleetTests(unittest.TestCase):
     def add_task(self, task_id, scope="module.one", *, clones=1):
         payload = {"prompt": "Implement a narrowly scoped test for one function.",
                    "role": "coder", "max_tokens": 64, "clones": clones}
-        with sc.connect(str(self.db)) as db:
+        with closing(sc.connect(str(self.db))) as db:
             sc.enqueue(db, [{"id": task_id, "scope": scope,
                              "priority": 10, "payload": payload}], 101)
 
@@ -76,7 +77,7 @@ class FleetTests(unittest.TestCase):
         self.assertFalse(obj["tests_run"])
         self.assertFalse(obj["reviewed"])
         self.assertEqual(obj["model_calls"][0]["model"], "QwenCoder7B")
-        with sc.connect(str(self.db)) as db:
+        with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["review"], 1)
 
     def test_independent_clone_prefers_different_model_family(self):
@@ -98,7 +99,7 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(result["state"], "blocked")
 
     def test_bad_task_never_requests_untrusted_model(self):
-        with sc.connect(str(self.db)) as db:
+        with closing(sc.connect(str(self.db))) as db:
             sc.enqueue(db, [{"id": "bad", "scope": "a",
                              "payload": {"prompt": "tiny"}}], 101)
         called = []
@@ -128,7 +129,7 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(outcome["admitted_concurrent_model_calls"], 6)
         # No claims for extra nonexistent physical slots.
         self.assertEqual(outcome["proposals"], 6)
-        with sc.connect(str(self.db)) as db:
+        with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["queued"], 2)
 
     def test_no_duplicate_artifact_overwrite(self):
