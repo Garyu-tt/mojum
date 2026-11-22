@@ -95,6 +95,43 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(LifecycleError, "inconsistent"):
             DevelopmentClock.from_snapshot(impossible)
 
+    def test_rehashed_snapshot_cannot_drop_deterministic_births(self):
+        clock = self.new_clock()
+        no_evidence = {region: 0 for region in REGIONS}
+        for _ in range(3):
+            clock.advance(no_evidence)
+        original = clock.snapshot()
+        bad = copy.deepcopy(original)
+        # Cortex starts with four total cells and must gain exactly two per
+        # tick until target, even if no evidence permits maturation.
+        self.assertEqual(bad["regions"]["cortex"]["mature"], 2)
+        self.assertEqual(bad["regions"]["cortex"]["immature"], 8)
+        bad["regions"]["cortex"]["immature"] -= 1
+        bad["sha256"] = _digest({k: v for k, v in bad.items() if k != "sha256"})
+        with self.assertRaisesRegex(LifecycleError, "inconsistent cortex"):
+            DevelopmentClock.from_snapshot(bad)
+        self.assertEqual(clock.snapshot(), original)
+
+    def test_rehashed_snapshot_cannot_claim_maturation_without_evidence(self):
+        clock = self.new_clock()
+        for _ in range(3):
+            clock.advance(EVIDENCE)
+        original = clock.snapshot()
+        bad = copy.deepcopy(original)
+        state = bad["regions"]["cortex"]
+        profile = bad["profile"]["cortex"]
+        required = ((state["mature"] - profile["initial_mature"])
+                    * profile["signals_per_maturation"] + state["evidence_credit"])
+        self.assertGreater(required, state["evidence_credit"])
+        self.assertGreater(state["observations_total"], required)
+        # The old bounds admitted this: credit <= observations <= tick*10000.
+        # But the total could not have paid for all matured cells and credit.
+        state["observations_total"] = required - 1
+        bad["sha256"] = _digest({k: v for k, v in bad.items() if k != "sha256"})
+        with self.assertRaisesRegex(LifecycleError, "inconsistent cortex"):
+            DevelopmentClock.from_snapshot(bad)
+        self.assertEqual(clock.snapshot(), original)
+
     def test_forged_post_maturity_count_before_maturity_rejected(self):
         clock = self.new_clock()
         clock.advance(EVIDENCE)
