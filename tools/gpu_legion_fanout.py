@@ -127,6 +127,16 @@ def discover_backend(port, *, request=_request_json):
     return Backend(port, len(slots), free, min(contexts))
 
 
+def _unique_json_object(pairs):
+    """Reject conflicting or repeated task fields before task admission."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise FanoutError("duplicate tasks JSON field")
+        result[key] = value
+    return result
+
+
 def load_tasks_file(path):
     """Read a bounded regular JSON file, never a blocking FIFO or device.
 
@@ -153,6 +163,7 @@ def load_tasks_file(path):
         raise FanoutError("tasks file byte limit exceeded")
     try:
         return json.loads(raw.decode("utf-8"),
+                          object_pairs_hook=_unique_json_object,
                           parse_constant=lambda value: (_ for _ in ()).throw(
                               FanoutError("nonfinite task JSON")))
     except FanoutError:
