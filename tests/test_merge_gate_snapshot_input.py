@@ -22,19 +22,6 @@ class SnapshotFileInputTests(unittest.TestCase):
             with mock.patch.object(Path, "read_text", side_effect=AssertionError("unbounded path read")):
                 self.assertEqual(_load_snapshot(str(path)), {"headRefOid": "abc"})
 
-    def test_missing_secure_open_flags_fail_closed_before_read(self):
-        with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "pr.json"
-            path.write_text('{"safe":true}', encoding="utf-8")
-            for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC"):
-                with self.subTest(flag=flag), mock.patch.object(
-                    os, flag, 0, create=True,
-                ):
-                    with self.assertRaisesRegex(
-                        SnapshotError, "secure snapshot file reads unavailable"
-                    ):
-                        _load_snapshot(str(path))
-
     def test_large_file_is_rejected_before_json_parsing(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "oversized.json"
@@ -74,6 +61,38 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertNotEqual(run.returncode, 0)
             self.assertIn("snapshot source must be a regular file", run.stderr)
 
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(getattr(os, f, 0) for f in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")),
+        "POSIX pinned parent directory support required",
+    )
+    def test_symlinked_snapshot_ancestor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            actual = root / "actual"
+            actual.mkdir()
+            source = actual / "snapshot.json"
+            source.write_text('{"safe":true}', encoding="utf-8")
+            alias = root / "alias"
+            alias.symlink_to(actual, target_is_directory=True)
+            with self.assertRaisesRegex(SnapshotError, "source unavailable"):
+                _load_snapshot(str(alias / "snapshot.json"))
+            self.assertEqual(_load_snapshot(str(source)), {"safe": True})
+
+    @unittest.skipUnless(os.name == "posix", "POSIX secure file mode")
+    def test_parent_traversal_and_unavailable_nofollow_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            actual = root / "actual"
+            actual.mkdir()
+            source = actual / "snapshot.json"
+            source.write_text('{"safe":true}', encoding="utf-8")
+            with self.assertRaisesRegex(SnapshotError, "parent traversal"):
+                _load_snapshot(str(actual / ".." / "actual" / "snapshot.json"))
+            with mock.patch("mojum.merge_gate.os.O_NOFOLLOW", 0):
+                with self.assertRaisesRegex(SnapshotError, "reads unavailable"):
+                    _load_snapshot(str(source))
+
     def test_error_does_not_expose_sensitive_input_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             secret = "PRIVATE-access-token-NOT-FOR-LOGS.json"
@@ -88,24 +107,32 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertNotIn(secret, stdout.getvalue())
             self.assertEqual(result["error"], "snapshot source unavailable")
 
-    def test_open_descriptor_is_closed_on_invalid_json(self):
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "Linux process fd inventory required",
+    )
+    def test_all_descriptors_are_closed_on_invalid_json(self):
+        # Patching os.open now masks the real function in os.supports_dir_fd,
+        # making the secure-open preflight fail before JSON is ever parsed.
+        # Compare live file descriptors instead, including opened ancestors.
+        def live_fds():
+            result = set()
+            for item in os.listdir("/proc/self/fd"):
+                try:
+                    fd = int(item)
+                    os.fstat(fd)
+                except (ValueError, OSError):
+                    continue  # os.listdir's own transient directory handle
+                result.add(fd)
+            return result
+
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "broken.json"
             path.write_bytes(b"{bad}")
-            real_open = os.open
-            fds = []
-
-            def capture_open(*args, **kwargs):
-                fd = real_open(*args, **kwargs)
-                fds.append(fd)
-                return fd
-
-            with mock.patch("mojum.merge_gate.os.open", side_effect=capture_open):
-                with self.assertRaises(json.JSONDecodeError):
-                    _load_snapshot(str(path))
-            self.assertEqual(len(fds), 1)
-            with self.assertRaises(OSError):
-                os.fstat(fds[0])
+            before = live_fds()
+            with self.assertRaises(json.JSONDecodeError):
+                _load_snapshot(str(path))
+            self.assertEqual(live_fds(), before)
 
 
 if __name__ == "__main__":
