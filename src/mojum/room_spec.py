@@ -30,6 +30,10 @@ MAX_NUMBER_TOKEN_CHARS = 128
 # turn validation into quadratic work on a CPU-first fixture.
 MAX_OVERLAP_ANALYSIS_OBSTACLES = 256
 REQUIRED_KEYS = frozenset(("width", "height", "obstacles", "start"))
+# The offline room designer always stamps its draft with this schema key
+# (``tools/room_designer_core.js``). It is not geometry, so accept exactly this
+# value in addition to the four required keys; anything else stays unexpected.
+DRAFT_SCHEMA = "mojum.world.point-room-draft/1"
 
 _NUMBER = re.compile(
     r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\Z", re.ASCII
@@ -140,6 +144,57 @@ def _overlap(first, second):
     return ax <= bx + bw and bx <= ax + aw and ay <= by + bh and by <= ay + ah
 
 
+def _runtime_geometry_errors(document, start):
+    """Match native integer legacy rooms and float-only versioned drafts.
+
+    A legacy unversioned Room preserves JSON integer geometry, while the
+    versioned room-draft loader converts all coordinates to float. Do not
+    falsely accept a versioned draft that will fail at bootstrap, or falsely
+    reject a valid unversioned native-integer room.
+    """
+    # The versioned draft loader constructs an all-float Room. Legacy
+    # unversioned inputs can be loaded directly by world_room.Room, which
+    # preserves native JSON integer geometry. Validate each against its actual
+    # downstream numeric contract rather than conflating these two paths.
+    versioned_draft = document.get("schema") == DRAFT_SCHEMA
+
+    def runtime_number(token):
+        if versioned_draft or any(ch in token for ch in ".eE"):
+            return float(token)
+        return int(token)
+
+    errors = []
+    width, height = runtime_number(document["width"]), runtime_number(document["height"])
+    for index, rect in enumerate(document["obstacles"]):
+        x, y, w, h = (runtime_number(value) for value in rect)
+        if not (w > 0 and h > 0):
+            errors.append(
+                "obstacles[%d] collapses to a non-positive size after runtime "
+                "float conversion" % (index,)
+            )
+            continue
+        if x < 0 or y < 0 or x + w > width or y + h > height:
+            errors.append(
+                "obstacles[%d] lies outside the room after runtime float "
+                "conversion" % (index,)
+            )
+    if start is not None:
+        x_f, y_f = float(start[0]), float(start[1])
+        if not (0 <= x_f <= width and 0 <= y_f <= height):
+            errors.append(
+                "start lies outside the room after runtime float conversion"
+            )
+        else:
+            for index, rect in enumerate(document["obstacles"]):
+                x, y, w, h = (runtime_number(value) for value in rect)
+                if x <= x_f <= x + w and y <= y_f <= y + h:
+                    errors.append(
+                        "start lies inside obstacles[%d] after runtime float "
+                        "conversion (closed boundaries block)" % (index,)
+                    )
+                    break
+    return errors
+
 def validate_room_document(document):
     """Validate a parsed room document. Returns a :class:`RoomReport`."""
     errors = []
@@ -150,11 +205,13 @@ def validate_room_document(document):
 
     keys = set(document)
     missing = sorted(REQUIRED_KEYS - keys)
-    unexpected = sorted(keys - REQUIRED_KEYS)
+    unexpected = sorted(keys - REQUIRED_KEYS - {"schema"})
     if missing:
         errors.append("missing room key(s): %s" % (", ".join(missing),))
     if unexpected:
         errors.append("unexpected room key(s): %s" % (", ".join(unexpected),))
+    if "schema" in document and document["schema"] != DRAFT_SCHEMA:
+        errors.append("unsupported room schema: %r" % (document["schema"],))
     if errors:
         return RoomReport(tuple(errors), (), None)
 
@@ -212,6 +269,12 @@ def validate_room_document(document):
                 )
                 start = None
                 break
+
+    # Exact tokens are authoritative for replay, but a draft is only usable if
+    # the runtime float room can load it. Only run this once the exact shape is
+    # fully legal, so existing precise error messages stay first and stable.
+    if not errors:
+        errors.extend(_runtime_geometry_errors(document, start))
 
     if len(obstacles) > MAX_OVERLAP_ANALYSIS_OBSTACLES:
         warnings.append(

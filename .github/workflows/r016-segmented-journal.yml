@@ -5,13 +5,23 @@ on:
     paths:
       - ".github/workflows/r016-segmented-journal.yml"
       - "src/mojum/segmented_noosphere.py"
+      - "src/mojum/segment_archive*.py"
       - "tests/test_segmented_noosphere.py"
       - "tests/test_segmented_noosphere_100k_stress.py"
+      - "tests/test_physical_segment_archive*.py"
       - "docs/R016_SEGMENTED_JOURNAL_R01.md"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  # Deduplicate first attempts for a PR while keeping retries and other events independent.
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.run_attempt == '1'
+      && format('pr-{0}', github.event.pull_request.number)
+      || format('run-{0}-attempt-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == '1' }}
 
 jobs:
   atomic-segment-cas:
@@ -34,6 +44,10 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p test_noosphere.py -v
+      - name: Verify standalone sealed archive and restore
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_physical_segment_archive.py -v
 
   actual-100k-history:
     runs-on: ubuntu-24.04
@@ -48,3 +62,17 @@ jobs:
           PYTHONPATH: src
           MOJUM_SEGMENTED_100K_STRESS: "1"
         run: python -m unittest discover -s tests -p test_segmented_noosphere_100k_stress.py -v
+
+  physical-archive-102400:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Reconstruct 102400 events without source SQLite
+        env:
+          PYTHONPATH: src
+          MOJUM_PHYSICAL_ARCHIVE_100K_STRESS: "1"
+        run: python -m unittest discover -s tests -p test_physical_segment_archive_100k.py -v

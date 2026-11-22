@@ -88,11 +88,38 @@ class AtomicSegmentQA(unittest.TestCase):
             before = self.db.read_bytes()
             with self.assertRaisesRegex(NoosphereError, "owner-only"):
                 self.open()
+            with self.assertRaisesRegex(NoosphereError, "owner-only"):
+                SegmentedNoosphere(self.db, OWNER, segment_size=64, read_only=True)
             self.assertEqual(self.db.read_bytes(), before)
         finally:
             self.db.chmod(0o600)
         with self.open() as source:
             self.assertEqual(source.verify_chain()["head"], head)
+
+    def test_read_only_reopen_verifies_without_writable_setup(self):
+        with self.assertRaisesRegex(NoosphereError, "must already exist"):
+            SegmentedNoosphere(self.db, OWNER, segment_size=64, read_only=True)
+        self.assertFalse(self.db.exists())
+        with self.open() as source:
+            head = source.append(record(0), expected_head=ZERO)
+
+        before = self.db.read_bytes()
+        real_connect = sqlite3.connect
+
+        def readonly_connect(source, *args, **kwargs):
+            self.assertTrue(kwargs["uri"])
+            self.assertTrue(source.endswith("?mode=ro"))
+            return real_connect(source, *args, **kwargs)
+
+        with patch("mojum.segmented_noosphere.sqlite3.connect",
+                   side_effect=readonly_connect) as connect:
+            with SegmentedNoosphere(self.db, OWNER, segment_size=64, read_only=True) as source:
+                self.assertEqual(source.verify_chain(external_expected_head=head)["count"], 1)
+                self.assertEqual(source.event_at(1)["event"], record(0))
+                with self.assertRaisesRegex(NoosphereError, "read-only"):
+                    source.append_many([record(1)], expected_head=head)
+            connect.assert_called_once()
+        self.assertEqual(self.db.read_bytes(), before)
 
     def test_195_real_events_split_four_immutable_linked_boundaries(self):
         with self.open() as q:
@@ -145,6 +172,49 @@ class AtomicSegmentQA(unittest.TestCase):
             self.assertEqual(
                 replay.verify_chain(external_expected_head=final)["segments"], 4,
             )
+
+    def test_receipts_exclude_segment_appended_after_verification(self):
+        with self.open() as reader, self.open() as writer:
+            prefix_head = self.fill(writer, 0, 64)
+            verify = reader.verify_chain
+
+            def verify_then_roll_over(*, external_expected_head):
+                proven = verify(external_expected_head=external_expected_head)
+                writer.append(record(64), expected_head=prefix_head)
+                return proven
+
+            with (
+                patch.object(reader, "verify_chain", side_effect=verify_then_roll_over),
+                closing(reader.iter_segment_receipts(external_expected_head=prefix_head)) as receipts,
+            ):
+                receipt = next(receipts)
+                self.assertEqual(receipt["events"], 64)
+                self.assertEqual(receipt["segment_head"], prefix_head)
+                with self.assertRaisesRegex(
+                    NoosphereError, "advanced during receipt generation"
+                ):
+                    next(receipts)
+
+            self.assertEqual(writer.verify_chain()["segments"], 2)
+
+    def test_receipts_keep_verified_tail_when_writer_appends_mid_stream(self):
+        with self.open() as reader, self.open() as writer:
+            prefix_head = self.fill(writer, 0, 65)
+            with closing(reader.iter_segment_receipts(
+                external_expected_head=prefix_head,
+            )) as receipts:
+                self.assertEqual(next(receipts)["last_seq"], 64)
+                writer.append(record(65), expected_head=prefix_head)
+                tail = next(receipts)
+                self.assertEqual(
+                    (tail["first_seq"], tail["last_seq"], tail["events"]),
+                    (65, 65, 1),
+                )
+                self.assertEqual(tail["segment_head"], prefix_head)
+                with self.assertRaisesRegex(
+                    NoosphereError, "advanced during receipt generation"
+                ):
+                    next(receipts)
 
     def test_batch_rollback_crosses_segment_boundary_with_duplicate(self):
         with self.open() as q:

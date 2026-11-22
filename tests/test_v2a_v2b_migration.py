@@ -20,7 +20,8 @@ from unittest.mock import patch
 from mojum.aquarium import Aquarium, AquariumError, V2A_ARCHIVE_MODE, V2B_MODE, V2B_WIRE_MODE
 from mojum.aquarium_trace_export import export_private_trace
 from mojum.archived_policy_v2a import LocalCellExplorer
-from mojum.cell_policy_v2 import CellExplorer
+from mojum.cell_policy_v2 import CellExplorer, LocalCellError
+from mojum.local_cell_sense import Proprioception
 from mojum.migration_v2a_v2b import (
     SCHEMA, TransferError, transfer_v2a_to_v2b,
 )
@@ -56,6 +57,49 @@ class LocalCellSnapshotTests(unittest.TestCase):
                     snapshot.update(last_tick=1, updates=2, records={"0:0": {action: counters}})
                     with self.assertRaisesRegex(ValueError, "impossible blocked motor history"):
                         policy.from_snapshot(snapshot)
+
+
+class LocalCellEvidenceAdmissionTests(unittest.TestCase):
+    """A live policy must never record evidence its own from_snapshot rejects."""
+
+    def _sense(self, tick, pulse=False):
+        return Proprioception(tick=tick, revision="a" * 64, x=0.0, y=0.0,
+                              pulse=pulse)
+
+    def test_observe_refuses_blocked_rest_in_canonical_policy(self):
+        policy = CellExplorer()
+        # Every cardinal move already blocked in this cell: decide() can only
+        # fall back to rest, which the point room can never report blocked.
+        policy.records = {"0:0": {
+            action: [1, 1] for action in ("x+", "y+", "x-", "y-")
+        }}
+        sense = self._sense(0)
+        intent = policy.decide(sense)
+        self.assertEqual(intent["action"], "rest")
+        with self.assertRaisesRegex(LocalCellError, "impossible blocked motor history"):
+            policy.observe(sense, intent, True)
+        self.assertEqual(policy.records["0:0"].get("rest"), None)
+        self.assertEqual(policy.updates, 0)
+
+    def test_observe_refuses_reblocking_an_inhibited_action(self):
+        policy = CellExplorer()
+        policy.records = {"0:0": {"x+": [1, 1]}}
+        sense = self._sense(0)
+        intent = policy.decide(sense)
+        self.assertNotEqual(intent["action"], "x+")
+        forged = dict(intent, action="x+", dx=0.04, dy=0.0)
+        # decide() would never return this intent; observe must still refuse to
+        # inflate an already-blocked action twice instead of trusting callers.
+        with self.assertRaisesRegex(LocalCellError, "stale or fabricated"):
+            policy.observe(sense, forged, True)
+
+    def test_observe_still_records_ordinary_measured_outcomes(self):
+        policy = CellExplorer()
+        sense = self._sense(0)
+        intent = policy.decide(sense)
+        outcome = policy.observe(sense, intent, intent["action"] != "rest")
+        self.assertEqual(outcome["total_updates"], 1)
+        CellExplorer.from_snapshot(policy.snapshot())
 
 
 @unittest.skipUnless(SOURCE112 is not None,

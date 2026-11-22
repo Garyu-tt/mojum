@@ -254,6 +254,100 @@ class ShapeErrorTests(unittest.TestCase):
         ))
 
 
+class RuntimeParityTests(unittest.TestCase):
+    """An offline-VALID draft must also construct the runtime point-room.
+
+    ``room_spec`` compares exact Decimal tokens; the runtime ``Room`` compares
+    Python floats. A draft whose exact bounds are legal can still round past a
+    float room edge and be rejected at runtime, so the validator must fail
+    closed instead of declaring geometry usable that cannot be loaded.
+    """
+
+    @staticmethod
+    def _runtime_accepts(raw):
+        from mojum.world_room import Room, initial_state
+
+        document = json.loads(raw)
+        room = Room(
+            width=document["width"],
+            height=document["height"],
+            obstacles=[tuple(rect) for rect in document["obstacles"]],
+        )
+        initial_state(room, *document["start"])
+
+    def test_positive_float_rounding_outside_room_is_rejected(self):
+        # 0.1 + 0.2 == 0.30000000000000004 as float, beyond width 0.3.
+        raw = (b'{"width":0.3,"height":1,"obstacles":[[0.1,0,0.2,0.5]],'
+               b'"start":[0,0.5]}')
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float", report.errors[0])
+        with self.assertRaises(ValueError):
+            self._runtime_accepts(raw)
+
+    def test_start_rounding_onto_closed_obstacle_edge_is_rejected(self):
+        # Exact start 0.30000000000000004 > exact right edge 0.3, but both
+        # become the same float and the runtime blocks the closed boundary.
+        raw = (b'{"width":1,"height":1,"obstacles":[[0.1,0,0.2,0.5]],'
+               b'"start":[0.30000000000000004,0.25]}')
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float", report.errors[0])
+        with self.assertRaises(ValueError):
+            self._runtime_accepts(raw)
+
+    def test_rounding_safe_geometry_stays_valid(self):
+        raw = (b'{"width":1,"height":1,"obstacles":[[0.1,0,0.2,0.5]],'
+               b'"start":[0.31,0.25]}')
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self._runtime_accepts(raw)
+
+    def test_accepted_documents_always_construct_the_runtime_room(self):
+        documents = [
+            CANONICAL,
+            {"width": 4, "height": 4, "obstacles": [], "start": [0, 0]},
+            {"width": 4, "height": 4, "obstacles": [[0, 0, 1, 1]], "start": [4, 4]},
+            {"width": 1.5, "height": 2.5, "obstacles": [[0.5, 0.5, 1, 1]], "start": [0, 0]},
+            {"width": 0.7, "height": 0.7, "obstacles": [[0.2, 0.2, 0.3, 0.3]], "start": [0.6, 0.6]},
+        ]
+        for document in documents:
+            with self.subTest(document=document):
+                raw = encode(document)
+                report = validate_room_bytes(raw)
+                self.assertTrue(report.valid, report.errors)
+                self._runtime_accepts(raw)
+
+
+class DesignerDraftSchemaTests(unittest.TestCase):
+    """The offline designer always writes its draft schema key."""
+
+    DRAFT_SCHEMA = "mojum.world.point-room-draft/1"
+
+    def test_designer_schema_key_is_accepted(self):
+        report = validate_room_bytes(encode({**CANONICAL, "schema": self.DRAFT_SCHEMA}))
+        self.assertTrue(report.valid, report.errors)
+
+    def test_wrong_schema_value_is_rejected(self):
+        report = validate_room_bytes(encode({**CANONICAL, "schema": "other/1"}))
+        self.assertFalse(report.valid)
+        self.assertIn("unsupported room schema", report.errors[0])
+
+    def test_non_string_schema_value_is_rejected(self):
+        report = validate_room_bytes(encode({**CANONICAL, "schema": 1}))
+        self.assertFalse(report.valid)
+        self.assertIn("unsupported room schema", report.errors[0])
+
+    def test_other_unexpected_keys_still_rejected_with_schema(self):
+        raw = encode({**CANONICAL, "schema": self.DRAFT_SCHEMA, "color": "red"})
+        self.assertEqual(errors_of(raw), ("unexpected room key(s): color",))
+
+    def test_repository_designer_example_validates(self):
+        example = Path(__file__).resolve().parent.parent / "examples" / "room_simple_mixed.json"
+        report = validate_room_bytes(example.read_bytes())
+        self.assertTrue(report.valid, report.errors)
+
+
 class ReportShapeTests(unittest.TestCase):
     def test_json_report_schema_and_validity(self):
         report = validate_room_bytes(encode(CANONICAL))
@@ -382,6 +476,60 @@ class NumericWireRegressionTests(unittest.TestCase):
         report = validate_room_bytes(raw)
         self.assertTrue(report.valid, report.errors)
         self.assertEqual(report.summary["start"], ["1e-2", "2.0"])
+
+
+class NativeIntegerRuntimeParityTests(unittest.TestCase):
+    """Offline validator agrees with native JSON int/float room geometry."""
+
+    def test_large_integer_obstacle_does_not_round_onto_valid_start(self):
+        from mojum.world_room import Room, initial_state
+
+        boundary = 2**53
+        raw = (
+            '{"width":%d,"height":1,"obstacles":[[%d,0,1,1]],'
+            '"start":[%d,0.5]}' % (boundary + 4, boundary + 1, boundary)
+        ).encode("ascii")
+        initial_state(Room(boundary + 4, 1, ((boundary + 1, 0, 1, 1),)),
+                      float(boundary), 0.5)
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+
+    def test_versioned_draft_keeps_all_float_runtime_contract(self):
+        from mojum.room_draft_runtime import load_runtime_room
+        from mojum.room_spec import RoomSpecError
+
+        boundary = 2**53
+        raw = (
+            '{"schema":"mojum.world.point-room-draft/1","width":%d,'
+            '"height":1,"obstacles":[[%d,0,1,1]],"start":[%d,0.5]}'
+            % (boundary + 4, boundary + 1, boundary)
+        ).encode("ascii")
+        # Unlike a direct native-integer Room, the versioned draft loader
+        # converts obstacle coordinates to float before bootstrap.
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float", report.errors[0])
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / "draft.json"
+            file.write_bytes(raw)
+            with self.assertRaisesRegex(RoomSpecError, "invalid room draft"):
+                load_runtime_room(file)
+
+    def test_explicit_float_token_still_collides_after_rounding(self):
+        from mojum.world_room import Room, initial_state
+
+        boundary = 2**53
+        raw = (
+            '{"width":%d,"height":1,"obstacles":[[%d.0,0,1,1]],'
+            '"start":[%d,0.5]}' % (boundary + 4, boundary + 1, boundary)
+        ).encode("ascii")
+        with self.assertRaisesRegex(ValueError, "invalid initial position"):
+            initial_state(Room(boundary + 4, 1,
+                               ((float(boundary + 1), 0, 1, 1),)),
+                          float(boundary), 0.5)
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float", report.errors[0])
 
 
 if __name__ == "__main__":
