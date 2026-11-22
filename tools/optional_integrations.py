@@ -35,7 +35,7 @@ def load_catalog(path=DEFAULT_CATALOG):
         raise ValueError("oversized integration registry")
     try:
         data = json.loads(blob, object_pairs_hook=_reject_duplicates)
-    except (UnicodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("invalid integration JSON") from exc
     if type(data) is not dict or set(data) != {
         "schema", "default_enabled", "cpu_baseline", "entries",
