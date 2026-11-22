@@ -11,8 +11,10 @@ import csv
 from functools import lru_cache
 import itertools
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 
@@ -113,7 +115,28 @@ def validate_inventory(data):
 
 
 def load_inventory(path):
-    raw = Path(path).read_bytes()
+    """Read at most 64 KiB from a verified regular descriptor, never a FIFO.
+
+    Path.read_bytes() performs an unbounded read before the old limit check.
+    The size preflight and bounded descriptor read protect both memory and
+    blocking device/FIFO paths, including a file that grows after fstat.
+    """
+    if not all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")):
+        raise InventoryError("secure local inventory file reads unavailable")
+    descriptor = os.open(os.fspath(path),
+                         os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise InventoryError("GPU inventory must be a regular file")
+        if info.st_size > MAX_INPUT_BYTES:
+            raise InventoryError("GPU inventory exceeds 64 KiB")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            raw = source.read(MAX_INPUT_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if len(raw) > MAX_INPUT_BYTES:
         raise InventoryError("GPU inventory exceeds 64 KiB")
     data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
