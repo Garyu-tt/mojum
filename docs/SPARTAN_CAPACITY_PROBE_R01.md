@@ -61,7 +61,14 @@ included separately. Report is capped at 200,000 spans per run; rotate files.
 
 - This probe records no prompts, responses, API keys or bearer tokens. Do not
   place secrets in operation IDs, worker IDs or model identifiers. The PRIVATE
-  local SQLite file still exposes worker/activity metadata: protect it.
+  local SQLite file still exposes worker/activity metadata and is therefore
+  protected on POSIX: new databases, WAL and SHM are owner-only (0600) even
+  with umask 022. Existing group/world-accessible files, symlinked DBs,
+  writable/replaceable directory chains and SQLite memory/URI pseudo-paths
+  fail closed before opening. Use an operator-owned, non-group/world-writable
+  directory (e.g. a private subdirectory of /tmp). This does not silently
+  chmod existing records or defend against same-UID/root attackers. Inspect
+  and secure existing unsafe files deliberately before retrying.
 - The Linux boot ID is pinned at initialization. Reusing a database across a
   reboot is blocked because monotonic timestamps are not comparable. A fresh
   run must use a fresh database.
