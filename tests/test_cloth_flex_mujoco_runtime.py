@@ -47,6 +47,19 @@ class ActualMuJoCoClothTests(unittest.TestCase):
         self.assertEqual(model.nflexvert, self.spike.GRID[0] * self.spike.GRID[1])
         self.assertAlmostEqual(model.opt.timestep, self.spike.DT)
 
+    def test_servo_actually_moves_pinned_edge(self):
+        # Compilation alone cannot demonstrate a moving physical attachment.
+        model = self.mujoco.MjModel.from_xml_string(self.spike.make_mjcf())
+        data = self.mujoco.MjData(model)
+        self.mujoco.mj_forward(model, data)
+        edge_x_before = float(data.flexvert_xpos[0, 0])
+        data.ctrl[0] = .04
+        for _ in range(75):
+            self.mujoco.mj_step(model, data)
+        edge_x_after = float(data.flexvert_xpos[0, 0])
+        self.assertTrue(math.isfinite(edge_x_after))
+        self.assertGreater(edge_x_after - edge_x_before, .001)
+
     def test_short_headless_step_and_report_are_finite(self):
         for passive in (True, False):
             for selfcollide in ("auto", "none"):
