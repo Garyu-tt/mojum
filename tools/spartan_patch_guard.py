@@ -72,7 +72,9 @@ def validate_patch(patch: str, allowed_paths: list[str] | tuple[str, ...]) -> di
     if len(set(grants)) != len(grants):
         raise PatchGuardError("duplicate path grants")
     allowed = set(grants)
-    lines = patch.splitlines()
+    # Git diffs are LF-delimited: str.splitlines() also splits Unicode NEL,
+    # LS and PS, letting one physical patch line impersonate multiple lines.
+    lines = patch[:-1].split("\n")
     files = []
     additions = deletions = hunks = 0
     i = 0
