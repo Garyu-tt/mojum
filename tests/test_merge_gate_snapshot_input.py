@@ -61,6 +61,38 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertNotEqual(run.returncode, 0)
             self.assertIn("snapshot source must be a regular file", run.stderr)
 
+    @unittest.skipUnless(
+        os.name == "posix" and
+        all(getattr(os, f, 0) for f in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")),
+        "POSIX pinned parent directory support required",
+    )
+    def test_symlinked_snapshot_ancestor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            actual = root / "actual"
+            actual.mkdir()
+            source = actual / "snapshot.json"
+            source.write_text('{"safe":true}', encoding="utf-8")
+            alias = root / "alias"
+            alias.symlink_to(actual, target_is_directory=True)
+            with self.assertRaisesRegex(SnapshotError, "source unavailable"):
+                _load_snapshot(str(alias / "snapshot.json"))
+            self.assertEqual(_load_snapshot(str(source)), {"safe": True})
+
+    @unittest.skipUnless(os.name == "posix", "POSIX secure file mode")
+    def test_parent_traversal_and_unavailable_nofollow_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            actual = root / "actual"
+            actual.mkdir()
+            source = actual / "snapshot.json"
+            source.write_text('{"safe":true}', encoding="utf-8")
+            with self.assertRaisesRegex(SnapshotError, "parent traversal"):
+                _load_snapshot(str(actual / ".." / "actual" / "snapshot.json"))
+            with mock.patch("mojum.merge_gate.os.O_NOFOLLOW", 0):
+                with self.assertRaisesRegex(SnapshotError, "reads unavailable"):
+                    _load_snapshot(str(source))
+
     def test_error_does_not_expose_sensitive_input_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             secret = "PRIVATE-access-token-NOT-FOR-LOGS.json"
