@@ -129,7 +129,7 @@ class GatewayTests(unittest.TestCase):
                 "status": "running", "prNumber": 688}
         invalid = [
             {}, {"runs": [base]}, [7], [{"id": 5, "status": "running"}],
-            [{**base, "status": "running\\nSECRET"}],
+            [{**base, "status": "running\nSECRET"}],
             [{**base, "prNumber": True}],
             [{**base, "prNumber": -1}],
             [base] * 1001,
