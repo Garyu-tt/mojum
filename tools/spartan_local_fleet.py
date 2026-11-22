@@ -228,6 +228,14 @@ def _private_output_fd(folder: Path) -> int:
         for component in parts:
             if component == ".":
                 continue
+            # A non-sticky writable parent could replace the private leaf.
+            # Validate the pinned ancestor before traversing the next entry.
+            ancestor = os.fstat(fd)
+            if (not stat.S_ISDIR(ancestor.st_mode)
+                    or ancestor.st_uid not in (0, os.geteuid())
+                    or ((ancestor.st_mode & 0o022)
+                        and not (ancestor.st_mode & stat.S_ISVTX))):
+                raise FleetError("output directory ancestor replaceable")
             next_fd = os.open(component, flags, dir_fd=fd)
             os.close(fd)
             fd = next_fd
@@ -246,6 +254,16 @@ def _private_output_fd(folder: Path) -> int:
             os.close(fd)
 
 
+def _absolute_artifact_dir(folder: Path) -> Path:
+    """Persist stable absolute artifact paths without trusting symlink aliases."""
+    folder = Path(folder)
+    if ".." in folder.parts:
+        raise FleetError("artifact directory parent traversal forbidden")
+    # Lexical normalization only: _private_output_fd still rejects symlinks
+    # in every ancestor before writing the artifact.
+    return Path(os.path.abspath(folder))
+
+
 def _check_artifact_reference_length(folder: Path) -> None:
     """Avoid generating proposals whose full path cannot fit the lease ledger."""
     # The artifact basename always has 24 digest hex chars and attempt 1..3.
@@ -255,7 +273,7 @@ def _check_artifact_reference_length(folder: Path) -> None:
 
 
 def save_private(folder: Path, task_id: str, attempt: int, artifact):
-    folder = Path(folder)
+    folder = _absolute_artifact_dir(folder)
     _check_artifact_reference_length(folder)
     dir_fd = _private_output_fd(folder)
     try:
@@ -304,7 +322,12 @@ class ModelCallMeter:
 
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
            request=None, meter=None):
+    folder = _absolute_artifact_dir(folder)
     _check_artifact_reference_length(folder)
+    # Direct single() callers must reject replaceable output ancestors before
+    # claiming a lease or spending a model call, just as run() already does.
+    private_fd = _private_output_fd(folder)
+    os.close(private_fd)
     # A transient SQLite claim failure affects this worker, not the other
     # model calls in this batch. Do not leak raw SQLite error messages.
     try:
@@ -457,7 +480,7 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
         raise FleetError("invalid fleet bounds")
     if type(max_cpu_inflight) is not int or not 1 <= max_cpu_inflight <= 4:
         raise FleetError("CPU concurrent admission must be 1..4")
-    folder = Path(folder)
+    folder = _absolute_artifact_dir(folder)
     _check_artifact_reference_length(folder)
     private_fd = _private_output_fd(folder)
     os.close(private_fd)
