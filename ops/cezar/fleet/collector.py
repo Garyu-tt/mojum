@@ -20,6 +20,10 @@ WEB = Path("/var/lib/cezar/runtime/node_modules/@open-mercato/cezar/web/dist/ass
 PRIVATE = Path("/var/lib/cezar/home/fleet/current.json")
 CEZAR = "http://127.0.0.1:4329/api/v1"
 MODEL_PORTS = (48081,48082,48083,48084,48085)
+CLOSED_CACHE = Path("/var/lib/cezar/home/fleet/github-closed-cache.json")
+CLOSED_URL = ("https://api.github.com/repos/Garyu-tt/mojum/pulls?"
+              "state=closed&sort=updated&direction=desc&per_page=20")
+CLOSED_TTL_SECONDS = 900
 MAX_BYTES = 500_000
 FRESHNESS_SECONDS = 7200
 ACTIVE = frozenset(("running","queued","starting","waiting"))
@@ -172,26 +176,184 @@ def _cezar():
             "statuses":counts}
 
 
+def _public_summary(items, *, max_items, kind):
+    if not isinstance(items, list):
+        raise FleetError("invalid GitHub list")
+    out = []
+    for item in items[:max_items]:
+        if not isinstance(item, dict):
+            raise FleetError("invalid GitHub item")
+        number = item.get("number")
+        title = item.get("title")
+        if type(number) is not int or not 1 <= number <= 2**31 - 1:
+            raise FleetError("invalid GitHub number")
+        if type(title) is not str:
+            raise FleetError("invalid GitHub title")
+        # Titles are untrusted public content. Keep presentation short,
+        # printable, and always use textContent in the viewer.
+        clean = "".join(c if c.isprintable() else " " for c in title)[:160]
+        out.append({
+            "kind": kind,
+            "number": number,
+            "title": clean,
+            "created_at": item.get("createdAt") if _parse_time(item.get("createdAt")) else None,
+            "draft": item.get("isDraft") is True if kind == "pr" else False,
+        })
+    return out
+
+
 def _github(now):
-    # Native Cezar GitHub adapter, not an independent GitHub client.
-    data=_get(CEZAR+"/github?limit=50")
-    if not isinstance(data,dict) or data.get("available") is not True or data.get("repo")!="Garyu-tt/mojum":
+    # Existing Cezar read-only GitHub adapter. Historical Cezar runs
+    # are NOT equivalent to current GitHub Issues/PRs.
+    data = _get(CEZAR + "/github?limit=50")
+    if (not isinstance(data, dict) or data.get("available") is not True
+            or data.get("repo") != "Garyu-tt/mojum"):
         raise FleetError("Cezar GitHub tab unavailable")
-    prs=data.get("prs")
-    if not isinstance(prs,list):
+    prs = data.get("prs")
+    if not isinstance(prs, list):
         raise FleetError("invalid PR listing")
-    recent=0
+    recent = 0
     for item in prs:
-        if not isinstance(item,dict):
+        if not isinstance(item, dict):
             continue
-        created=_parse_time(item.get("createdAt"))
-        if created and timedelta(0)<=now-created<=timedelta(minutes=90):
-            recent+=1
+        created = _parse_time(item.get("createdAt"))
+        if created and timedelta(0) <= now-created <= timedelta(minutes=90):
+            recent += 1
+    count_prs, count_issues = data.get("prsTotal"), data.get("issuesTotal")
+    if (type(count_prs) is not int or count_prs < 0
+            or type(count_issues) is not int or count_issues < 0):
+        raise FleetError("invalid GitHub counts")
     return {
-        "repo":"Garyu-tt/mojum","open_prs":data.get("prsTotal"),
-        "open_issues":data.get("issuesTotal"),
-        "new_prs_last_90m_visible":recent,
-        "visibility":"open PR artifacts; NOT live agent executions",
+        "repo": "Garyu-tt/mojum",
+        "open_prs": count_prs,
+        "open_issues": count_issues,
+        "new_prs_last_90m_visible": recent,
+        "latest_open_prs": _public_summary(prs, max_items=12, kind="pr"),
+        "latest_open_issues": _public_summary(data.get("issues"), max_items=8, kind="issue"),
+        "visibility": "public open GitHub artifacts, NOT live agent executions",
+    }
+
+
+def _closed_from_response(raw):
+    if not isinstance(raw, list) or len(raw) > 20:
+        raise FleetError("unexpected closed PR response")
+    out = []
+    for item in raw:
+        if not isinstance(item, dict) or item.get("state") != "closed":
+            raise FleetError("nonclosed PR in historical snapshot")
+        number, title = item.get("number"), item.get("title")
+        if (type(number) is not int or not 1 <= number <= 2**31 - 1
+                or type(title) is not str):
+            raise FleetError("invalid PR history item")
+        changed = item.get("updated_at")
+        if _parse_time(changed) is None:
+            raise FleetError("invalid PR updated time")
+        merged = item.get("merged_at")
+        if merged is not None and _parse_time(merged) is None:
+            raise FleetError("invalid PR merge time")
+        clean = "".join(c if c.isprintable() else " " for c in title)[:160]
+        out.append({
+            "number": number, "title": clean,
+            "outcome": "merged" if merged else "closed-unmerged",
+            "updated_at": changed, "merged_at": merged,
+        })
+    if len({x["number"] for x in out}) != len(out):
+        raise FleetError("duplicate historical PR")
+    return out
+
+
+def _fetch_closed_rest():
+    # One uncredentialed read-only GET to pinned public GitHub per 15 min.
+    # Never use Cezar/GitHub credentials or accept redirects.
+    req = Request(CLOSED_URL, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "mojum-cezar-fleet-observer/2",
+    })
+    client = build_opener(ProxyHandler({}), NoRedirect())
+    with client.open(req, timeout=6) as response:
+        if response.status != 200 or response.geturl() != CLOSED_URL:
+            raise FleetError("unexpected GitHub history response")
+        data = response.read(1_500_001)
+    if len(data) > 1_500_000:
+        raise FleetError("oversized GitHub history")
+    return _closed_from_response(json.loads(data))
+
+
+def _load_closed_cache():
+    try:
+        fd = os.open(CLOSED_CACHE, os.O_RDONLY | os.O_NOFOLLOW |
+                     getattr(os, "O_CLOEXEC", 0))
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise FleetError("closed PR cache cannot be opened") from exc
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_nlink != 1 or st.st_mode & 0o077
+                or st.st_size > 30_000):
+            raise FleetError("unsafe closed PR cache")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            data = handle.read(30_001)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(data) > 30_000:
+        raise FleetError("oversized closed PR cache")
+    parsed = json.loads(data)
+    if (type(parsed) is not dict
+            or set(parsed) != {"schema", "observed_at", "recent"}
+            or parsed["schema"] != "cezar.github-closed-cache/1"):
+        raise FleetError("unknown closed PR cache schema")
+    stamp = _parse_time(parsed["observed_at"])
+    recent = parsed["recent"]
+    if stamp is None or type(recent) is not list or len(recent) > 20:
+        raise FleetError("invalid cached PR list")
+    if len(json.dumps(recent)) > 20_000:
+        raise FleetError("oversized cached PR list")
+    for item in recent:
+        if (type(item) is not dict
+                or set(item) != {"number", "title", "outcome", "updated_at", "merged_at"}
+                or type(item["number"]) is not int
+                or not 1 <= item["number"] <= 2**31 - 1
+                or type(item["title"]) is not str or len(item["title"]) > 160
+                or item["outcome"] not in ("merged", "closed-unmerged")
+                or _parse_time(item["updated_at"]) is None
+                or (item["merged_at"] is not None and
+                    _parse_time(item["merged_at"]) is None)):
+            raise FleetError("unsafe cached PR item")
+    return parsed
+
+
+def _github_closed_history(now):
+    cache = _load_closed_cache()
+    stamp = _parse_time(cache["observed_at"]) if cache else None
+    age = (now - stamp).total_seconds() if stamp else None
+    fresh = age is not None and 0 <= age < CLOSED_TTL_SECONDS
+    if not fresh:
+        try:
+            rows = _fetch_closed_rest()
+            cache = {
+                "schema": "cezar.github-closed-cache/1",
+                "observed_at": now.isoformat(),
+                "recent": rows,
+            }
+            save(cache, CLOSED_CACHE)
+            fresh = True
+        except (OSError, ValueError, TypeError, TimeoutError, json.JSONDecodeError):
+            if cache is None:
+                raise FleetError("GitHub history unavailable without cache")
+    recent = cache["recent"]
+    return {
+        "available": True,
+        "source": "GitHub public REST; only last 20 recently updated closed PRs",
+        "observed_at": cache["observed_at"],
+        "snapshot_fresh": fresh,
+        "recent": recent,
+        "merged_in_visible_sample": sum(x["outcome"] == "merged" for x in recent),
+        "closed_unmerged_in_visible_sample": sum(x["outcome"] == "closed-unmerged" for x in recent),
+        "not_a_live_worker_count": True,
     }
 
 
@@ -203,6 +365,7 @@ def collect(now=None):
         ("schedules",lambda:_schedule_list(now)),
         ("models",_models),
         ("github",lambda:_github(now)),
+        ("github_history",lambda:_github_closed_history(now)),
     ]
     # A temporary failure in one source is explicit, never silently zero.
     for name,run in sections:
@@ -228,7 +391,7 @@ def _owner_dir(path):
 
 
 def save(data,path):
-    if path not in (WEB,PRIVATE):
+    if path not in (WEB,PRIVATE,CLOSED_CACHE):
         raise FleetError("unsupported output path")
     _owner_dir(path.parent)
     blob=(json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n").encode("utf-8")
