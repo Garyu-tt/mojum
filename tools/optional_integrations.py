@@ -70,6 +70,8 @@ def load_catalog(path=DEFAULT_CATALOG):
             raise ValueError("integration progress requires approved license review")
         if entry["status"] == "accepted" and entry["license_review"] != "approved":
             raise ValueError("accepted integration requires approved license review")
+        if entry["status"] != "planned" and entry["license_review"] != "approved":
+            raise ValueError("non-planned integration requires approved license review")
         packages = entry["packages"]
         if type(packages) is not list or not 1 <= len(packages) <= 16:
             raise ValueError("invalid package collection")
