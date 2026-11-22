@@ -242,7 +242,7 @@ def main(argv=None):
             p.add_argument("--prompt-file", type=Path, required=True)
     sub.add_parser("stats")
     args = parser.parse_args(argv)
-    os.umask(0o077)
+    prior_umask = os.umask(0o077)
     try:
         with connect(args.db) as db:
             if args.command == "stats":
@@ -259,6 +259,8 @@ def main(argv=None):
                     result = dispatch(db, ident, args.prompt_file)
     except (AdmissionError, OSError, sqlite3.DatabaseError) as exc:
         parser.exit(2, "admission refused: " + type(exc).__name__ + "\n")
+    finally:
+        os.umask(prior_umask)
     print(json.dumps(result, sort_keys=True))
     return 0
 
