@@ -111,6 +111,85 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(sum(a for a, _ in ids), 1)
         self.assertEqual(len({rid for _, rid in ids}), 1)
 
+    def test_second_distinct_dispatch_waits_for_unresolved_run(self):
+        # The CLI/manual claim API can record independent intent, but POST
+        # dispatch has one global unresolved slot even across revisions.
+        prompt = self.private_prompt()
+        class Response:
+            status = 201
+            def geturl(self): return m._LOCAL_CEZAR
+            def read(self, n): return json.dumps({"id": str(uuid.uuid4())}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+        class Client:
+            calls = 0
+            def open(self, request, timeout=8):
+                self.calls += 1
+                return Response()
+        client = Client()
+        with patch.object(m.urllib.request, "build_opener", return_value=client):
+            first = m.dispatch(self.db, self.ident(), prompt)
+            with self.assertRaisesRegex(m.AdmissionError, "unresolved"):
+                m.dispatch(self.db, self.ident(number=613), prompt)
+            self.assertEqual(client.calls, 1)
+            self.assertEqual(self.db.execute(
+                "SELECT count(*) FROM admission").fetchone()[0], 1)
+            m.mark_blocked(self.db, first["admission_id"], first["run_id"])
+            second = m.dispatch(self.db, self.ident(number=613), prompt)
+        self.assertTrue(second["admitted"])
+        self.assertEqual(client.calls, 2)
+
+    def test_two_distinct_dispatchers_racing_admit_only_one_http_post(self):
+        # Both callers pass the old pending() preflight, proving that the
+        # capacity decision must be made inside claim's BEGIN IMMEDIATE.
+        prompt = self.private_prompt()
+        barrier = threading.Barrier(2)
+        lock = threading.Lock()
+        reports = []
+        errors = []
+        class Response:
+            status = 201
+            def geturl(self): return m._LOCAL_CEZAR
+            def read(self, n): return json.dumps({"id": str(uuid.uuid4())}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+        class Client:
+            calls = 0
+            def open(self, request, timeout=8):
+                with lock:
+                    self.calls += 1
+                return Response()
+        client = Client()
+        def worker(number):
+            try:
+                db = m.connect(self.db_path)
+                try:
+                    barrier.wait(timeout=8)
+                    try:
+                        result = m.dispatch(db, self.ident(number=number), prompt)
+                        with lock:
+                            reports.append(result["admitted"])
+                    except m.AdmissionError as exc:
+                        with lock:
+                            errors.append(str(exc))
+                finally:
+                    db.close()
+            except Exception as exc:
+                with lock:
+                    errors.append(repr(exc))
+        with patch.object(m.urllib.request, "build_opener", return_value=client):
+            threads = [threading.Thread(target=worker, args=(n,)) for n in (612, 613)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join(timeout=12)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(reports, [True])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("unresolved Cezar task", errors[0])
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission WHERE status IN ('claimed','submitted')"
+        ).fetchone()[0], 1)
+
     def test_private_state_permissions_and_symlink_refusal(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
         pub = Path(self.tmp.name) / "public"
