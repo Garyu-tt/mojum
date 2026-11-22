@@ -153,6 +153,15 @@ class FleetTests(unittest.TestCase):
                 sc.connect(str(proposed))
         self.assertFalse(proposed.exists())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX private-directory modes")
+    def test_fleet_refuses_public_artifact_directory_before_model_calls(self):
+        self.out.chmod(0o777)
+        self.add_task("private-artifact-guard")
+        with self.assertRaisesRegex(fleet.FleetError, "owner-private"):
+            fleet.run(self.db, self.out, max_agents=300, max_jobs=1,
+                      backends=self.backends)
+        self.assertFalse(list(self.out.iterdir()))
+
     def test_status_never_creates_missing_sqlite_and_reads_existing(self):
         from contextlib import redirect_stdout
         from io import StringIO
