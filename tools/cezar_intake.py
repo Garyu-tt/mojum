@@ -40,7 +40,9 @@ def fetch_json(url: str, expected: type, *, opener=None):
         "Accept": "application/vnd.github+json",
         "User-Agent": "cezar-mojum-bounded-label-intake/1.0",
     })
-    client = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    client = opener or urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), admission.NoRedirect()
+    )
     with client.open(req, timeout=12) as response:
         if response.status != 200 or response.geturl() != url:
             raise admission.AdmissionError("unexpected GitHub origin/status")
