@@ -14,6 +14,25 @@ from mojum.merge_gate import MAX_INPUT_BYTES, SnapshotError, _load_snapshot, mai
 
 
 class SnapshotFileInputTests(unittest.TestCase):
+    def test_overdeep_snapshot_json_fails_closed_for_file_and_stdin(self):
+        nested = "[" * 15000 + "0" + "]" * 15000
+        self.assertLess(len(nested.encode("utf-8")), MAX_INPUT_BYTES)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "overdeep.json"
+            path.write_text(nested, encoding="utf-8")
+            with self.assertRaisesRegex(SnapshotError, "nesting limit exceeded"):
+                _load_snapshot(str(path))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main(["--input", str(path), "--expected-head-sha", "a" * 40,
+                             "--expected-base-sha", "b" * 40])
+            self.assertEqual(code, 1)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["code"], "INVALID_INPUT")
+        with mock.patch.object(sys, "stdin", io.StringIO(nested)):
+            with self.assertRaisesRegex(SnapshotError, "nesting limit exceeded"):
+                _load_snapshot("-")
+
     def test_regular_json_is_read_and_path_read_text_is_not_used(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "pr.json"
