@@ -1,0 +1,62 @@
+"""Offline worktree tests, using a temporary trusted Git repository."""
+import importlib.util
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+MODULE = Path(__file__).resolve().parents[1] / "tools" / "spartan_worktree.py"
+spec = importlib.util.spec_from_file_location("spartan_worktree", MODULE)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+
+class WorktreeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.repo = self.base / "repo"
+        self.root = self.base / "worktrees"
+        self.repo.mkdir()
+        self.root.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-C", str(self.repo), *args], text=True).strip()
+
+        git("init", "-q")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-q", "--allow-empty", "-m", "initial")
+        self.sha = git("rev-parse", "HEAD")
+
+    def test_creates_isolated_checkout(self):
+        dest = mod.prepare(self.repo, self.root, "issue-478-worker-2", self.sha)
+        self.assertEqual(dest, self.root / "issue-478-worker-2")
+        head = subprocess.check_output(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], text=True).strip()
+        self.assertEqual(head, self.sha)
+
+    def test_rejects_duplicate(self):
+        mod.prepare(self.repo, self.root, "task-1", self.sha)
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, self.root, "task-1", self.sha)
+
+    def test_rejects_invalid_identifiers(self):
+        for task in ("../escape", "UPPER", "a/b", "-bad", "x" * 49):
+            with self.subTest(task=task), self.assertRaises(mod.IsolationError):
+                mod.prepare(self.repo, self.root, task, self.sha)
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, self.root, "task", "main")
+
+    def test_rejects_nested_root(self):
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, self.repo, "task", self.sha)
+
+    def test_rejects_unknown_commit(self):
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, self.root, "task", "f" * 40)
+
+
+if __name__ == "__main__":
+    unittest.main()
