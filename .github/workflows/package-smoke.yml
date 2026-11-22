@@ -7,6 +7,8 @@ on:
       - 'src/mojum/**'
       - 'tests/offline_package_smoke.sh'
       - 'tests/test_installable_package.py'
+      - 'tests/test_point_room_env.py'
+      - 'tests/test_gymnasium_adapter.py'
       - '.github/workflows/package-smoke.yml'
 
 permissions:
