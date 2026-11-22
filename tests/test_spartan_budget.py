@@ -1,6 +1,8 @@
 """Credential-free acceptance tests for bounded Spartan model spending."""
 
 from contextlib import closing
+import os
+import stat
 import sqlite3
 import tempfile
 import threading
@@ -17,6 +19,73 @@ class BudgetLedgerTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "budget.sqlite3"
         self.caps = BudgetCaps(2, 100, 300)
         self.ledger = BudgetLedger(self.path, self.caps)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem ownership/modes")
+    def test_new_ledger_and_wal_shm_are_owner_only_under_umask_022(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "private-budget.sqlite3"
+            previous = os.umask(0o022)
+            try:
+                ledger = BudgetLedger(path, self.caps)
+                with closing(ledger._connect()) as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    for suffix in ("", "-wal", "-shm"):
+                        item = Path(str(path) + suffix)
+                        self.assertTrue(item.exists(), suffix)
+                        self.assertEqual(stat.S_IMODE(item.stat().st_mode), 0o600)
+                    db.rollback()
+                self.assertEqual(os.umask(0o022), 0o022)
+            finally:
+                os.umask(previous)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem ownership/modes")
+    def test_unsafe_existing_ledger_and_sidecar_fail_closed(self):
+        os.chmod(self.path, 0o644)
+        with self.assertRaisesRegex(BudgetDenied, "owner-only"):
+            self.ledger.reserve("unsafe-db", "m", 1, 1, now_s=1)
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o644)
+        os.chmod(self.path, 0o600)
+        sidecar = Path(str(self.path) + "-wal")
+        sidecar.write_bytes(b"untrusted")
+        os.chmod(sidecar, 0o644)
+        with self.assertRaisesRegex(BudgetDenied, "owner-only"):
+            self.ledger.reserve("unsafe-wal", "m", 1, 1, now_s=1)
+        self.assertEqual(sidecar.read_bytes(), b"untrusted")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem ownership/modes")
+    def test_symlink_ledger_or_parent_is_rejected(self):
+        actual = self.path.with_name("actual.sqlite3")
+        self.path.replace(actual)
+        self.path.symlink_to(actual)
+        with self.assertRaisesRegex(BudgetDenied, "owner-only"):
+            self.ledger.reserve("symlink-db", "m", 1, 1, now_s=1)
+        self.path.unlink()
+        actual.replace(self.path)
+        alias = Path(self.tmp.name) / "alias"
+        real = Path(self.tmp.name) / "real"
+        real.mkdir(mode=0o700)
+        alias.symlink_to(real, target_is_directory=True)
+        with self.assertRaisesRegex(BudgetDenied, "directory chain"):
+            BudgetLedger(alias / "budget.sqlite3", self.caps)
+        self.assertFalse((real / "budget.sqlite3").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem ownership/modes")
+    def test_writable_parent_and_ancestor_refuse_file_creation(self):
+        shared = Path(self.tmp.name) / "shared"
+        shared.mkdir()
+        os.chmod(shared, 0o777)
+        with self.assertRaisesRegex(BudgetDenied, "directory chain"):
+            BudgetLedger(shared / "budget.sqlite3", self.caps)
+        private = shared / "private"
+        private.mkdir(mode=0o700)
+        with self.assertRaisesRegex(BudgetDenied, "directory chain"):
+            BudgetLedger(private / "budget.sqlite3", self.caps)
+        self.assertFalse((private / "budget.sqlite3").exists())
+
+    def test_memory_or_uri_ledger_path_is_refused(self):
+        for bad in (":memory:", "file:budget.sqlite3", ""):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                BudgetLedger(bad, self.caps)
 
     def test_atomic_rate_token_and_daily_caps(self):
         self.ledger.reserve("a", "local-20b", 50, 100, now_s=1000)
