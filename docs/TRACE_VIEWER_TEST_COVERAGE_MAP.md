@@ -13,6 +13,8 @@ assertions are missing. Mapping of the #74 cases to current regression tests
 | tick gap rejected | `test_private_trace_integrity.py` (`gap` in the Node harness) |
 | oversize file rejected without reading | same (`oversized`, 25 MiB) |
 | oversized replacement during active playback cancels timer without reading and valid export reload recovers | `test_offline_viewer_playback_controls.py` (verified SQLite trace and Node VM timers) |
+
+The two maintained Node VM suites in this map must **fail in CI when Node.js is missing** rather than silently skip playback coverage; an optional local environment may skip when Node is not installed.
 | stale async file-selection race | same (`race`) |
 | HTML-looking payload stays literal text | same (`safe`) and `test_markup_remains_local_only_and_uses_safe_text_rendering` (no `innerHTML`) |
 | genuine committed SQLite rows, same tick order | `test_aquarium_trace_export.py::test_replays_real_private_frames_in_same_tick_order` |
