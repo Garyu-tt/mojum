@@ -20,7 +20,7 @@ class WorktreeTests(unittest.TestCase):
         self.repo = self.base / "repo"
         self.root = self.base / "worktrees"
         self.repo.mkdir()
-        self.root.mkdir()
+        self.root.mkdir(mode=0o700)
 
         def git(*args):
             return subprocess.check_output(
@@ -133,6 +133,16 @@ class WorktreeTests(unittest.TestCase):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, tricky_root, "task", self.sha)
         self.assertFalse((self.root / "task").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory owner/mode gate")
+    def test_rejects_readable_or_searchable_worktree_root(self):
+        # A root that others cannot write can still disclose private source.
+        for mode in (0o755, 0o750, 0o701):
+            with self.subTest(mode=oct(mode)):
+                self.root.chmod(mode)
+                with self.assertRaisesRegex(mod.IsolationError, "owner-controlled"):
+                    mod.prepare(self.repo, self.root, "task-leak", self.sha)
+                self.assertFalse((self.root / "task-leak").exists())
 
     @unittest.skipUnless(os.name == "posix", "POSIX directory owner/mode gate")
     def test_rejects_world_writable_worktree_root(self):
