@@ -23,7 +23,16 @@ stronger model evaluation and independent QA still gate enabling them.
   15 minutes. Its first snapshot had **18 open issues and 89 open PRs**.
   This is a **read-only snapshot**, not native Cezar task ingest or a PR publisher.
 - The native `gh` CLI is present but **not authorized** on this host.
-  Cezar's GitHub polling therefore reports `gh auth login` required.
+  A deliberately restricted **public-read `gh` adapter**
+  (`tools/cezar_gh_public_read.py`) is available in the Cezar service's
+  private `PATH`. It can only read the pinned public Mojum repository via
+  approved `gh repo view --json nameWithOwner` and `gh api GET`
+  search/timeline calls. It does not authenticate, handle other repositories,
+  execute GitHub writes, or grant PR publishing privileges.
+- Native Cezar `automation check` now works through that adapter: 0
+  `cezar-ready` Issue label events and 5 recent PR open candidates
+  (truncated at the configured cap). **Both automations remain paused**.
+  The user-facing real `gh auth status` still says unauthenticated.
   The ChatGPT GitHub connector cannot inject credentials into an unrelated
   host's CLI. Never put PATs, cookies, passwords or tokens into issue content.
 - The dedicated Cezar CPU model has a larger 8192-token context. Real
@@ -53,19 +62,36 @@ stronger model evaluation and independent QA still gate enabling them.
 Templates intentionally do **not** include provider credentials, `enabled`
 flags, host-specific paths or a pending job backlog.
 
-## Activation gate
+## Read-only adapter deployment and release gates
 
-On the Cezar host, after the operator independently authorizes `gh` for
-**only the necessary Mojum permissions** (prefer a short-lived, fine-grained
-token scoped to the specific repository, entered on the host, not in chat),
-verify:
+For a dedicated Cezar systemd service, place the version-controlled
+`tools/cezar_gh_public_read.py` into a **private owner-owned executable**
+path such as `/var/lib/cezar/readonly-bin/gh`, ahead of `/usr/bin`
+in **only that service's** `PATH`. Do not modify the system GitHub CLI.
+The adapter's cache must be owner-private; all network requests are
+fixed to `https://api.github.com`, use no token, and reject unexpected
+commands, headers, repos, HTTP methods, input sizes, and redirects.
+The service must itself remain bound to loopback; it has **no built-in auth**.
+
+Read-only event previews are possible before GitHub login:
 
 ```sh
-gh auth status
-gh repo view Garyu-tt/mojum --json nameWithOwner
 cez automation check <imported-issue-automation-id>
 cez automation check <imported-pr-automation-id>
 ```
+
+The tests in `tests/test_cezar_gh_public_read.py` exercise the
+API allowlist, fail-closed write denial and bounded cache without network.
+This adapter is intentionally **not** `gh auth login`; genuine GitHub
+PR publishing and any other write operations still require separate
+operator authorization of the actual `gh` CLI and narrow write grants.
+Never add tokens to Cezar's model-running environment.
+
+Both native Cezar event automations remain **paused** until the operator
+also verifies a useful local model answer (not a tool-call hallucination),
+an isolated worktree, test execution and independent exact-head QA.
+Only then enable one automation at a time, measure actual quality, and
+ensure the provider stays within verified inference capacity.
 
 Cezar's `automation import ... --apply` imports these templates **paused**.
 The operator then enables **one** rule at a time only after a genuine
