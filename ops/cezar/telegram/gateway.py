@@ -6,11 +6,15 @@ Exposed only through a pinned SSH loopback reverse tunnel to mk-neurocms.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
+from pathlib import Path
+import stat
 import re
 import urllib.parse
 import urllib.request
 
 UPSTREAM = "http://127.0.0.1:4329"
+FLEET_FILE=Path("/var/lib/cezar/home/fleet/current.json")
 BOUND = ("127.0.0.1", 4331)
 MAX_BYTES = 900_000
 CHECK = re.compile(r"^[1-9][0-9]{0,6}(?:,[1-9][0-9]{0,6}){0,7}$")
@@ -27,7 +31,7 @@ def route(path):
     if parsed.scheme or parsed.netloc or parsed.fragment:
         return None
     pairs = urllib.parse.parse_qs(parsed.query, strict_parsing=True)
-    if parsed.path in ("/api/v1/health", "/api/v1/runs") and not pairs:
+    if parsed.path in ("/api/v1/health", "/api/v1/runs", "/api/v1/fleet") and not pairs:
         return parsed.path
     if parsed.path == "/api/v1/github":
         if set(pairs) - {"limit", "refresh"} or any(len(v) != 1 for v in pairs.values()):
@@ -57,15 +61,25 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
             self.send_error(404, "route not available")
             return
         try:
-            request = urllib.request.Request(UPSTREAM + path, headers={
-                "Accept":"application/json", "User-Agent":"cezar-bot-readonly-proxy/1.0"
-            })
-            with NO_REDIRECT.open(request,timeout=16) as response:
-                if response.status != 200 or response.geturl() != UPSTREAM + path:
-                    raise ValueError("unexpected upstream")
-                body = response.read(MAX_BYTES + 1)
-            if len(body) > MAX_BYTES or not isinstance(json.loads(body), (list,dict)):
-                raise ValueError("invalid upstream response")
+            if path=="/api/v1/fleet":
+                info=os.lstat(FLEET_FILE)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid()
+                        or info.st_nlink!=1 or info.st_mode & 0o077 or info.st_size>MAX_BYTES):
+                    raise ValueError("unsafe local fleet telemetry")
+                body=FLEET_FILE.read_bytes()
+                obj=json.loads(body)
+                if not isinstance(obj,dict) or obj.get("schema")!="cezar.fleet.visibility.v1":
+                    raise ValueError("untrusted fleet telemetry schema")
+            else:
+                request = urllib.request.Request(UPSTREAM + path, headers={
+                    "Accept":"application/json", "User-Agent":"cezar-bot-readonly-proxy/1.0"
+                })
+                with NO_REDIRECT.open(request,timeout=16) as response:
+                    if response.status != 200 or response.geturl() != UPSTREAM + path:
+                        raise ValueError("unexpected upstream")
+                    body = response.read(MAX_BYTES + 1)
+                if len(body) > MAX_BYTES or not isinstance(json.loads(body), (list,dict)):
+                    raise ValueError("invalid upstream response")
             self.send_response(200)
             self.send_header("Content-Type","application/json; charset=utf-8")
             self.send_header("Cache-Control","no-store")
