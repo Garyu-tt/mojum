@@ -61,8 +61,6 @@ class BudgetLedgerTests(unittest.TestCase):
         self.ledger.reserve("a", "m", 40, 100, now_s=100)
         self.ledger.record_usage("a", 20, 3)
         self.ledger.record_usage("a", 20, 3)
-        with self.assertRaises(BudgetDenied):
-            self.ledger.record_usage("a", 19, 3)
         self.ledger.reserve("b", "m", 40, 100, now_s=101)
         with self.assertRaises(BudgetDenied):
             self.ledger.record_usage("b", 41, 101)
@@ -70,6 +68,22 @@ class BudgetLedgerTests(unittest.TestCase):
             BudgetLedger(self.path, self.caps).reserve("c", "m", 1, 1, now_s=102)
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT frozen FROM budget_settings").fetchone(), (1,))
+
+    def test_conflicting_receipt_persistently_freezes_admission(self):
+        self.ledger.reserve("first", "m", 40, 100, now_s=100)
+        self.ledger.record_usage("first", 20, 3)
+        self.ledger.record_usage("first", 20, 3)  # Same receipt is idempotent.
+        with self.assertRaisesRegex(BudgetDenied, "conflicting provider usage"):
+            self.ledger.record_usage("first", 21, 3)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(
+                db.execute("SELECT frozen FROM budget_settings").fetchone(), (1,)
+            )
+        reopened = BudgetLedger(self.path, self.caps)
+        with self.assertRaisesRegex(BudgetDenied, "frozen"):
+            reopened.reserve("second", "m", 1, 1, now_s=101)
+        with self.assertRaisesRegex(BudgetDenied, "frozen"):
+            reopened.reserve("first", "m", 40, 100, now_s=101)
 
     def test_parallel_same_minute_never_oversubscribes(self):
         errors = []
