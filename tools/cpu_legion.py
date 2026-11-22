@@ -206,6 +206,10 @@ def _write_private_patch(out, name, diff):
                 next_fd = os.open(part, flags, dir_fd=current_fd)
             except FileNotFoundError:
                 os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                # A crash after the task enters SQLite review must not lose
+                # an ancestor created for its patch artifact. Sync each new
+                # child directory entry in the still-pinned parent first.
+                os.fsync(current_fd)
                 next_fd = os.open(part, flags, dir_fd=current_fd)
             os.close(current_fd)
             current_fd = next_fd
