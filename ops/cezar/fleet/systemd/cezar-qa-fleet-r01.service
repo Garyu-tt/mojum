@@ -1,0 +1,20 @@
+[Unit]
+Description=Cezar Mojum 17-slot bounded QA model fleet (public read-only)
+Wants=network-online.target cezar-mojum-r01.service
+After=network-online.target cezar-mojum-r01.service
+ConditionPathExists=/var/lib/cezar/home/qa-fleet-r01.py
+
+[Service]
+Type=oneshot
+User=mirbi
+Group=mirbi
+WorkingDirectory=/var/lib/cezar/projects/mojum
+ExecStart=/usr/bin/python3 -B /var/lib/cezar/home/qa-fleet-r01.py --max-workers 17
+TimeoutStartSec=900
+MemoryMax=805306368
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cezar/home/qa-fleet
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
