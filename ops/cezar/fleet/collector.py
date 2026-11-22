@@ -280,9 +280,14 @@ def _fetch_closed_rest():
 
 
 def _load_closed_cache():
+    # A FIFO can block inside open() before fstat gets to reject it.
+    # Require nonblocking open; regular files retain normal read semantics.
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nonblock is None:
+        raise FleetError("nonblocking cache validation unavailable")
     try:
         fd = os.open(CLOSED_CACHE, os.O_RDONLY | os.O_NOFOLLOW |
-                     getattr(os, "O_CLOEXEC", 0))
+                     getattr(os, "O_CLOEXEC", 0) | nonblock)
     except FileNotFoundError:
         return None
     except OSError as exc:
