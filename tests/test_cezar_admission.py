@@ -227,6 +227,24 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(client.body["runner"], "opencode")
         self.assertEqual(client.asserted_url, "http://127.0.0.1:4329/api/v1/runs")
 
+    def test_dispatch_denies_redirect_before_following(self):
+        with self.assertRaisesRegex(m.AdmissionError, "redirect forbidden"):
+            m.NoRedirect().redirect_request(
+                None, None, 302, "Found",
+                {"Location": "http://example.invalid/other"},
+                "http://example.invalid/other",
+            )
+
+        def inspect_opener(*handlers):
+            self.assertTrue(any(isinstance(h, m.NoRedirect) for h in handlers))
+            raise RuntimeError("redirect-denying handler installed")
+
+        with patch.object(m.urllib.request, "build_opener", side_effect=inspect_opener):
+            with self.assertRaisesRegex(RuntimeError, "handler installed"):
+                m.dispatch(self.db, self.ident(), self.private_prompt())
+        # Once a POST might have started, a claim is deliberately not retried.
+        self.assertEqual(self.db.execute("SELECT status FROM admission").fetchone()[0], "claimed")
+
     def test_uncertain_dispatch_keeps_claim_without_retry(self):
         p = self.private_prompt()
         class Client:
