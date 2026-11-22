@@ -7,11 +7,11 @@
   const style = document.createElement("style");
   style.textContent = `
     #${id} { position: fixed; z-index: 2147480000; bottom: 16px; right: 16px;
-      color: #eef3fa; font: 13px/1.45 system-ui,-apple-system,sans-serif; max-width: min(355px,calc(100vw - 24px)); }
+      color: #eef3fa; font: 13px/1.45 system-ui,-apple-system,sans-serif; max-width: min(440px,calc(100vw - 24px)); }
     #${id} button { border:1px solid #465877; background:#182234; color:#ecf3fb; border-radius:11px;
-      cursor:pointer; padding:9px 12px; font: inherit; box-shadow:0 2px 14px #0007; }
+      cursor:pointer; padding:11px 15px; font: inherit; font-weight:650; box-shadow:0 2px 14px #0007; }
     #${id} button:focus-visible {outline:2px solid #75baff;outline-offset:2px;}
-    #${id} .fleet-panel {width:min(345px,calc(100vw - 28px));max-height:min(75vh,550px);overflow:auto;
+    #${id} .fleet-panel {width:min(420px,calc(100vw - 28px));max-height:min(75vh,650px);overflow:auto;
       border:1px solid #43536c;background:#111b2b;border-radius:13px;padding:14px;
       box-shadow:0 12px 36px #000b;margin-bottom:7px;}
     #${id} .fleet-row {display:flex;gap:10px;justify-content:space-between;margin:6px 0;align-items:center;}
@@ -19,7 +19,9 @@
     #${id} .fleet-muted {color:#a8b7cf;font-size:12px;}
     #${id} .fleet-sub {border-top:1px solid #35445a;padding-top:8px;margin-top:10px;}
     #${id} .fleet-title {font-size:15px;font-weight:650;margin-bottom:6px;}
-    #${id} .fleet-agent {padding:4px 0;border-bottom:1px dotted #394960;}
+    #${id} .fleet-agent {padding:6px 0;border-bottom:1px dotted #394960;}
+    #${id} a {color:#afd1ff;text-decoration:underline;text-underline-offset:2px;}
+    #${id} a:focus-visible{outline:2px solid #75baff;}
     #${id} .fleet-warn {color:#f2c078;}
     #${id} .fleet-good {color:#91dbbb;}
     #${id} .fleet-small {font-size:11px;}
@@ -35,7 +37,7 @@
   panel.setAttribute("role", "region");
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.textContent = "Флот Cezar · загрузка";
+  toggle.textContent = "Mojum · синхронизация: загрузка";
   toggle.setAttribute("aria-expanded", "false");
   toggle.setAttribute("aria-controls", "cezar-fleet-r01-body");
   panel.id = "cezar-fleet-r01-body";
@@ -71,23 +73,62 @@
       panel.appendChild(el("p","Нет подтверждённой телеметрии; показатели не приравниваются к нулю.","fleet-warn"));
       return;
     }
-    const s=d.schedules || {}, m=d.models || {}, c=d.cezar || {}, g=d.github || {};
+    const s=d.schedules || {}, m=d.models || {}, c=d.cezar || {}, g=d.github || {}, h=d.github_history || {};
     const exists = typeof s.enabled === "number", ready = s.snapshot_fresh === true;
     const configured=exists?s.enabled:"?";
-    toggle.textContent="Флот · "+configured+" расписаний · "+(typeof m.inference_busy_known==="number"?m.inference_busy_known:"?")+" занято";
-    panel.appendChild(el("div","Флот Mojum / Cezar","fleet-title"));
+    toggle.textContent="Mojum · "+configured+" расписаний · "+(typeof g.open_prs==="number"?g.open_prs:"?")+" PR · "+(typeof c.active==="number"?c.active:"?")+" задач Cezar активны";
+    panel.appendChild(el("div","Mojum: единая сводка источников","fleet-title"));
     panel.appendChild(el("p","Раздельный учёт. «Активных: 0» в Cezar означает только его собственные задачи.","fleet-muted"));
     row("Cezar выполняет", typeof c.active==="number"?c.active:"неизвестно");
+    row("История Cezar (не весь Mojum)",typeof c.total==="number"?c.total:"неизвестно");
     row("Расписания ChatGPT",exists?configured:"неизвестно",ready?"fleet-good":"fleet-warn");
     if (exists) row("Разработчики / QA",s.developers_enabled+" / "+s.qa_enabled);
     row("Запускались за 90 мин",typeof s.ran_last_90m==="number"?s.ran_last_90m:"нет данных");
     row("Модели заняты",typeof m.capacity_slots_known==="number"
       ?m.inference_busy_known+" / "+m.capacity_slots_known+(m.capacity_complete?"":" (частично)"):"неизвестно");
     row("Открытые PR GitHub",typeof g.open_prs==="number"?g.open_prs:"неизвестно");
+    row("Открытые Issues GitHub",typeof g.open_issues==="number"?g.open_issues:"неизвестно");
+    row("Merged в последних закрытых PR",typeof h.merged_in_visible_sample==="number"?h.merged_in_visible_sample:"неизвестно",h.snapshot_fresh===false?"fleet-warn":"");
     row("Внешние прямо сейчас","неизвестно","fleet-warn");
     panel.appendChild(el("p",
       "Для подсчёта выполняющихся внешних агентов нужен heartbeat от их исполнителей. Расписания и PR не являются таким подтверждением.",
       "fleet-muted fleet-sub"));
+    // GitHub is the repository's task/artifact source of truth. These are
+    // links to real records, never synthetic Cezar runs or confirmed workers.
+    function publicRecords(label, records, kind, dateField) {
+      if (!Array.isArray(records) || !records.length) return;
+      panel.appendChild(el("div",label,"fleet-title fleet-sub"));
+      for (const entry of records.slice(0,12)) {
+        if (!entry || !Number.isSafeInteger(entry.number) || entry.number < 1) continue;
+        const item=document.createElement("div");
+        item.className="fleet-agent";
+        const link=document.createElement("a");
+        link.href="https://github.com/Garyu-tt/mojum/"+(kind==="issue"?"issues/":"pull/")+entry.number;
+        link.target="_blank";
+        link.rel="noopener noreferrer";
+        link.textContent="#"+entry.number+" "+String(entry.title||"").slice(0,160);
+        item.appendChild(link);
+        const stage=kind==="issue"?"Issue":"PR";
+        const state=entry.outcome==="merged"?" · слит":
+          entry.outcome==="closed-unmerged"?" · закрыт без слияния":
+          entry.draft===true?" · черновик":" · открыт";
+        item.appendChild(el("div",stage+state+" · "+clock(entry[dateField]),
+          "fleet-muted fleet-small"));
+        panel.appendChild(item);
+      }
+    }
+    publicRecords("Новые открытые PR (GitHub)",g.latest_open_prs,"pr","created_at");
+    publicRecords("Открытые Issues (GitHub)",g.latest_open_issues,"issue","created_at");
+    if(h.available===true) {
+      publicRecords("Недавние закрытые / слитые PR (GitHub)",h.recent,"pr","updated_at");
+      panel.appendChild(el("p","История: "+clock(h.observed_at)+
+        (h.snapshot_fresh===true?"":" · кеш устарел")+
+        "; только последние 20 закрытых PR, не вся история задач.",
+        "fleet-muted"));
+    } else {
+      panel.appendChild(el("p","История слияний GitHub недоступна; это не ноль выполненных задач.",
+        "fleet-warn fleet-sub"));
+    }
     const agents=Array.isArray(s.agents)?s.agents:[];
     if(agents.length) {
       panel.appendChild(el("div","Зарегистрированные агенты","fleet-title fleet-sub"));
