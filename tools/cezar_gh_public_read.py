@@ -31,6 +31,13 @@ class Refused(ValueError):
     pass
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Reject API redirects before urllib can contact an unapproved origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise Refused("GitHub API redirect forbidden")
+
+
 def parse(args):
     if args == ["repo", "view", "--json", "nameWithOwner"]:
         return "repo", None, False
@@ -212,7 +219,8 @@ def read(url, ttl):
             "Accept": "application/vnd.github+json",
         })
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}),
-                                            urllib.request.HTTPSHandler())
+                                            urllib.request.HTTPSHandler(),
+                                            NoRedirect())
         with client.open(req, timeout=14) as response:
             if response.status != 200 or response.geturl() != url:
                 raise Refused("unexpected GitHub response or redirect")
