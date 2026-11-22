@@ -42,8 +42,8 @@ class PointRoomEnv:
             raise ValueError("start must be an (x, y) pair")
         if type(max_steps) is not int or not 1 <= max_steps <= 100_000:
             raise ValueError("max_steps must be 1..100000")
-        if not _finite_number(max_step_m) or not 0 < max_step_m <= 1:
-            raise ValueError("max_step_m must be finite and within (0, 1]")
+        if not _finite_number(max_step_m) or not 0 < max_step_m <= 0.25:
+            raise ValueError("max_step_m must be finite and within (0, 0.25]")
         # Validate once, pin the geometry and do not mutate the caller's room.
         initial_state(room, start[0], start[1])
         self.room = room
@@ -87,6 +87,10 @@ class PointRoomEnv:
         dx, dy = action
         if not _finite_number(dx) or not _finite_number(dy):
             raise ValueError("action coordinates must be finite non-bool numbers")
+        # Recheck the public configuration and the hard ceiling at every step.
+        # Caller mutation must not let an experimental policy exceed 0.25 m.
+        if not _finite_number(self.max_step_m) or not 0 < self.max_step_m <= 0.25:
+            raise ValueError("invalid per-tick displacement budget")
         if math.hypot(dx, dy) > self.max_step_m:
             raise ValueError("action exceeds per-tick displacement budget")
         next_state, observed = advance(
