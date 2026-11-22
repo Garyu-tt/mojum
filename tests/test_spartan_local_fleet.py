@@ -391,9 +391,42 @@ class FleetTests(unittest.TestCase):
             fleet.save_private(self.out, "task-one", 1, {"a": 2})
         self.assertEqual(json.loads(Path(x).read_text()), {"a": 1})
 
+    @unittest.skipUnless(getattr(os, "O_NOFOLLOW", 0),
+                         "platform cannot refuse lock symlinks")
+    def test_fleet_lock_refuses_symlink_before_model_calls(self):
+        target = self.root / "unrelated-private-file"
+        target.write_bytes(b"unchanged")
+        target.chmod(0o600)
+        lock = Path(str(self.db) + ".fleet.lock")
+        lock.symlink_to(target)
+        with self.assertRaisesRegex(fleet.FleetError, "fleet lock"):
+            fleet.run(self.db, self.out, max_agents=10, max_jobs=2,
+                      backends=self.backends)
+        self.assertEqual(target.read_bytes(), b"unchanged")
+
+    def test_fleet_lock_refuses_legacy_world_readable_mode(self):
+        lock = Path(str(self.db) + ".fleet.lock")
+        lock.touch(mode=0o600)
+        lock.chmod(0o644)
+        with self.assertRaisesRegex(fleet.FleetError, "owner-only"):
+            fleet.run(self.db, self.out, max_agents=10, max_jobs=2,
+                      backends=self.backends)
+        self.assertEqual(lock.stat().st_mode & 0o777, 0o644)
+
+    def test_fleet_refuses_unsafe_parent_before_lock_creation(self):
+        unsafe = self.root / "shared-state"
+        unsafe.mkdir()
+        unsafe.chmod(0o777)
+        db_path = unsafe / "state.sqlite3"
+        with self.assertRaisesRegex(fleet.FleetError, "directory/database"):
+            fleet.run(db_path, self.out, max_agents=10, max_jobs=2,
+                      backends=self.backends)
+        self.assertFalse(Path(str(db_path) + ".fleet.lock").exists())
+
     def test_fail_if_another_worker_owns_lock(self):
         import fcntl
         lock = Path(str(self.db) + ".fleet.lock")
+        lock.touch(mode=0o600)
         with open(lock, "a+") as fp:
             fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(fleet.FleetError):
