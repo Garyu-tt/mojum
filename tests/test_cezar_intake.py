@@ -131,6 +131,34 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(r["deferred"],1)
         self.assertEqual(r["dispatched"],0)
 
+    def test_capacity_taken_after_preflight_is_deferred_without_post(self):
+        """A competing poller can claim after pending() returns zero."""
+        previous_pending = m.pending
+
+        def preflight_race(db):
+            observed = previous_pending(db)
+            self.assertEqual(observed, 0)
+            competitor = m.discover(
+                opener=self.fake([self.issue(478)]))[0]["identity"]
+            fresh, _ = m.admission.claim(db, competitor)
+            self.assertTrue(fresh)
+            return observed
+
+        with patch.object(m, "pending", side_effect=preflight_race), \
+             patch.object(m.admission.urllib.request, "build_opener",
+                          side_effect=AssertionError("unexpected second POST")):
+            result = m.one_poll(
+                self.db, self.prompts, execute=True,
+                opener=self.fake([self.issue(479)]))
+
+        self.assertEqual(result["dispatched"], 0)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(result["duplicates"], 0)
+        self.assertEqual(list(self.prompts.iterdir()), [])
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM admission WHERE status IN ('claimed','submitted')"
+        ).fetchone()[0], 1)
+
     def test_blocked_previous_work_allows_distinct_revision(self):
         record=m.discover(opener=self.fake([self.issue(478)]))[0]["identity"]
         fresh,row=m.admission.claim(self.db,record)
@@ -185,6 +213,28 @@ class IntakeTests(unittest.TestCase):
         issues[0]["number"]="478"
         with self.assertRaises(m.admission.AdmissionError):
             m.discover(opener=self.fake(issues))
+
+    def test_systemd_unit_does_not_expose_host_or_secrets(self):
+        root = MODULE.parent.parent / "ops" / "cezar" / "systemd"
+        service = (root / "cezar-mojum-admission-r01.service").read_text()
+        self.assertIn("User=mirbi", service)
+        self.assertIn("ProtectSystem=strict", service)
+        self.assertIn("ProtectHome=true", service)
+        self.assertIn("NoNewPrivileges=true", service)
+        self.assertIn("ReadWritePaths=/var/lib/cezar/home/admission /var/lib/cezar/home/admission-prompts", service)
+        self.assertIn("InaccessiblePaths=/srv/mirbi", service)
+        self.assertIn("cezar_intake.py", service)
+        self.assertIn("--execute", service)
+        self.assertNotIn("GITHUB_TOKEN", service)
+        self.assertNotIn("GH_TOKEN", service)
+        self.assertNotIn("0.0.0.0", service)
+
+    def test_intake_timer_bounded_cadence(self):
+        root = MODULE.parent.parent / "ops" / "cezar" / "systemd"
+        timer = (root / "cezar-mojum-admission-r01.timer").read_text()
+        self.assertIn("OnUnitInactiveSec=15min", timer)
+        self.assertIn("Unit=cezar-mojum-admission-r01.service", timer)
+        self.assertIn("Persistent=true", timer)
 
     def test_pending_claimed_after_dispatch_uncertainty_is_durable(self):
         r=m.discover(opener=self.fake([self.issue()]))[0]

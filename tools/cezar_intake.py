@@ -33,6 +33,13 @@ MAX_API_BYTES = 320_000
 _SHA = re.compile(r"[a-f0-9]{40}\Z")
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects before urllib contacts a new destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise admission.AdmissionError("GitHub API redirect forbidden")
+
+
 def fetch_json(url: str, expected: type, *, opener=None):
     if not url.startswith(BASE + "/") and not url.startswith(BASE + "?"):
         raise admission.AdmissionError("unexpected public GitHub API path")
@@ -40,7 +47,7 @@ def fetch_json(url: str, expected: type, *, opener=None):
         "Accept": "application/vnd.github+json",
         "User-Agent": "cezar-mojum-bounded-label-intake/1.0",
     })
-    client = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    client = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with client.open(req, timeout=12) as response:
         if response.status != 200 or response.geturl() != url:
             raise admission.AdmissionError("unexpected GitHub origin/status")
@@ -155,7 +162,13 @@ def one_poll(db, prompts_dir: Path, *, execute=False, opener=None):
             raise admission.AdmissionError("prompt exceeds admitted budget")
         filename = ident["key"] + ".txt"
         p = prompts_dir / filename
-        fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            # Another poller may have already prepared this same revision.
+            # Never overwrite its prompt or mistake a local file for a new run.
+            summary["deferred"] += 1
+            continue
         try:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(raw)
@@ -168,7 +181,13 @@ def one_poll(db, prompts_dir: Path, *, execute=False, opener=None):
         if dispatched["admitted"]:
             summary["dispatched"] += 1
         else:
-            summary["duplicates"] += 1
+            # A concurrent poller won the atomic single-flight claim, or the
+            # revision was already claimed. Do not retain an unused prompt.
+            p.unlink(missing_ok=True)
+            if dispatched.get("reason") == "capacity-busy":
+                summary["deferred"] += 1
+            else:
+                summary["duplicates"] += 1
         break
     return summary
 

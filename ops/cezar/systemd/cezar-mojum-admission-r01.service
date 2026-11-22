@@ -1,0 +1,32 @@
+[Unit]
+Description=Mojum Cezar single GitHub intake through atomic admission (cezar-ready only)
+After=network-online.target cezar-mojum-r01.service
+Wants=network-online.target
+Requires=cezar-mojum-r01.service
+ConditionPathExists=/var/lib/cezar/guarded-intake/cezar_intake.py
+ConditionPathExists=/var/lib/cezar/home/admission/mojum.sqlite
+
+[Service]
+Type=oneshot
+User=mirbi
+Group=mirbi
+WorkingDirectory=/var/lib/cezar/guarded-intake
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /var/lib/cezar/guarded-intake/cezar_intake.py --db /var/lib/cezar/home/admission/mojum.sqlite --prompts-dir /var/lib/cezar/home/admission-prompts --execute
+TimeoutStartSec=75
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cezar/home/admission /var/lib/cezar/home/admission-prompts
+ProtectHome=true
+InaccessiblePaths=/srv/mirbi /var/lib/cezar/config /var/lib/cezar/migrations /var/lib/cezar/home/legacy-index
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+MemoryMax=250M
+CPUQuota=75%
+TasksMax=30
+LimitNOFILE=512
