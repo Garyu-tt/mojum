@@ -10,8 +10,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 MAX_PATCH_BYTES = 256 * 1024
@@ -185,8 +187,23 @@ def main(argv: list[str] | None = None) -> int:
                         help="Trusted exact repo-relative path; repeat for each grant")
     args = parser.parse_args(argv)
     try:
-        with args.patch.open("rb") as stream:
-            data = stream.read(MAX_PATCH_BYTES + 1)
+        # Reject special files before reading: a FIFO with no writer would
+        # otherwise block this trusted preflight indefinitely.
+        descriptor = -1
+        try:
+            flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_BINARY", 0))
+            descriptor = os.open(args.patch, flags)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise PatchGuardError("patch input must be a regular file")
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                data = stream.read(MAX_PATCH_BYTES + 1)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
         if len(data) > MAX_PATCH_BYTES:
             raise PatchGuardError("patch exceeds byte budget")
         report = validate_patch(data.decode("utf-8"), args.allow_path)
