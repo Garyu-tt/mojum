@@ -254,6 +254,30 @@ class FleetTests(unittest.TestCase):
                          "coder", 128, request=capture)
         self.assertNotIn("reasoning_effort", seen[0])
 
+    def test_optional_usage_is_not_a_false_fleet_blocker(self):
+        # Valid completions from local providers may omit usage or report null.
+        for response in (
+            {"choices": [{"message": {"content": "One valid local proposal."}}]},
+            {"choices": [{"message": {"content": "One valid local proposal."}}],
+             "usage": None},
+        ):
+            with self.subTest(response=response):
+                result = fleet.call_model(
+                    self.backends[0], "Propose a bounded unit test change.",
+                    "coder", 128,
+                    request=lambda port, path, body=None, timeout=5: response,
+                )
+                self.assertEqual(result["proposal"], "One valid local proposal.")
+                self.assertIsNone(result["reported_completion_tokens"])
+        invalid = {"choices": [{"message": {"content": "Valid text."}}],
+                   "usage": []}
+        with self.assertRaisesRegex(fleet.FleetError, "usage metadata"):
+            fleet.call_model(
+                self.backends[0], "Propose a bounded unit test change.",
+                "coder", 128,
+                request=lambda port, path, body=None, timeout=5: invalid,
+            )
+
     def test_reject_slot_metadata_that_could_overcommit(self):
         def broken(port, path, body=None, timeout=5):
             if path == "/health":
