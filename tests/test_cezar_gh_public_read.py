@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from contextlib import redirect_stderr
 
 MODULE = Path(__file__).resolve().parents[1] / "tools" / "cezar_gh_public_read.py"
+sys.path.insert(0, str(MODULE.parent))
 spec = importlib.util.spec_from_file_location("cezar_gh_public_read", MODULE)
 adapter = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(adapter)
@@ -21,6 +23,31 @@ class CezarGhPublicReadTests(unittest.TestCase):
         self.assertEqual(
             adapter.parse(["repo", "view", "--json", "nameWithOwner"]),
             ("repo", None, False))
+
+    def test_native_tab_repo_handle_with_jq_is_supported(self):
+        self.assertEqual(adapter.parse([
+            "repo", "view", "--json", "nameWithOwner", "--jq",
+            ".nameWithOwner"]), ("repo_plain", None, False))
+
+    def test_native_tab_graphql_is_read_only_and_bounded(self):
+        from cezar_public_github_tab import parse_graphql
+        query = ("query ($owner: String!, $name: String!, $issuesLimit: Int!, $prsLimit: Int!) "
+                 "{ repository { issues(first: $issuesLimit, after: $issuesCursor, states: OPEN, "
+                 "orderBy: {field: CREATED_AT, direction: DESC}) {totalCount pageInfo} "
+                 "pullRequests(first: $prsLimit, after: $prsCursor, states: OPEN, "
+                 "orderBy: {field: CREATED_AT, direction: DESC}) {isDraft totalCount pageInfo} } }")
+        args = ["api", "graphql", "-f", "query=" + query,
+                "-f", "owner=Garyu-tt", "-f", "name=mojum",
+                "-F", "issuesLimit=12", "-F", "prsLimit=50"]
+        mode, parsed, include = adapter.parse(args)
+        self.assertEqual(mode, "graphql")
+        self.assertEqual(parsed["prsLimit"], 50)
+        self.assertFalse(include)
+        with self.assertRaises(adapter.Refused):
+            adapter.parse(["api", "graphql", "-f",
+                           "query=mutation { deleteRepository(input: {}) }",
+                           "-f", "owner=Garyu-tt", "-f", "name=mojum",
+                           "-F", "issuesLimit=1", "-F", "prsLimit=1"])
 
     def test_search_for_public_mojum_prs_is_allowed(self):
         mode, request, include = adapter.parse([

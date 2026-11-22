@@ -140,11 +140,24 @@ def connect(path: Path):
         pass
     finally:
         if fd is not None:
-            os.close(fd)
+            try:
+                # The new database inode must be durable before SQLite can
+                # publish a deduplication claim that survives a power cut.
+                os.fsync(fd)
+            finally:
+                os.close(fd)
     st = os.lstat(path)
     if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
             or stat.S_IMODE(st.st_mode) & 0o077 or st.st_nlink != 1):
         raise AdmissionError("unsafe admission database inode")
+    # SQLite FULL synchronizes committed database content, not necessarily
+    # the *directory entry* of a newly-created database. Sync the private
+    # parent even when reopening: this also recovers a previous failed sync.
+    parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
     db = sqlite3.connect(str(path), timeout=20, isolation_level=None)
     try:
         db.row_factory = sqlite3.Row

@@ -2,10 +2,12 @@
 """Cezar-only, public and READ-ONLY GitHub CLI subset for one pinned repository.
 
 Never authenticates, writes, pushes, approves, merges or prints credentials.
-Only supported gh repo view and gh api GET patterns are allowed. Other gh
-commands fail closed. This is NOT the actual authenticated GitHub CLI.
+Only bounded gh repo view, public GET and the native OPEN-only GitHub
+tab list translation are allowed. All writes and unknown commands fail closed. This is NOT the actual authenticated GitHub CLI.
 """
 from __future__ import annotations
+
+from cezar_public_github_tab import parse_graphql, render_graphql, PublicTabDenied
 
 import hashlib
 import json
@@ -41,6 +43,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def parse(args):
     if args == ["repo", "view", "--json", "nameWithOwner"]:
         return "repo", None, False
+    if args == ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]:
+        return "repo_plain", None, False
+    if args[:2] == ["api", "graphql"]:
+        try:
+            return "graphql", parse_graphql(args), False
+        except PublicTabDenied as exc:
+            raise Refused("unsupported native tab GraphQL read") from exc
     if len(args) >= 4 and args[:3] == ["api", "--method", "GET"]:
         include = False
         path = args[3]
@@ -264,6 +273,10 @@ def main(args):
         mode, target, include = parse(args)
         if mode == "repo":
             sys.stdout.write(json.dumps({"nameWithOwner": REPO}) + "\n")
+        elif mode == "repo_plain":
+            sys.stdout.write(REPO + "\n")
+        elif mode == "graphql":
+            sys.stdout.write(render_graphql(target) + "\n")
         else:
             raw, link = read(*target)
             prefix = b""
@@ -274,7 +287,7 @@ def main(args):
                 prefix = (header + "\n").encode("utf-8")
             sys.stdout.buffer.write(prefix + raw + b"\n")
         return 0
-    except (Refused, OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
+    except (Refused, PublicTabDenied, OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
         print("Cezar public GitHub read denied/unavailable: "
               + type(exc).__name__, file=sys.stderr)
         return 2
