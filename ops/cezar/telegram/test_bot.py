@@ -208,6 +208,27 @@ class CezarTelegramTests(unittest.TestCase):
         self.assertEqual(synced, ["file", "directory"])
         self.assertEqual(bot._state()["schema"], 1)
 
+    def test_telegram_response_is_bounded_before_json_decode(self):
+        class HugeResponse:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, maximum):
+                self_limit = bot.TELEGRAM_MAX_BYTES + 1
+                self_expected = bot.TELEGRAM_MAX_BYTES + 1
+                assert maximum == self_expected
+                return b"x" * self_limit
+
+        class Opener:
+            def open(self, request, *, timeout):
+                return HugeResponse()
+
+        with patch.object(bot.urllib.request, "build_opener", return_value=Opener()):
+            with self.assertRaisesRegex(bot.BotFailure, "byte budget"):
+                bot.telegram("redacted", "getMe", {}, timeout=1)
+
     def test_http_redirects_are_denied(self):
         with self.assertRaises(bot.BotFailure):
             bot.NoRedirect().redirect_request(
