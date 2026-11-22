@@ -51,8 +51,12 @@ class FleetObserverTests(unittest.TestCase):
         if "/github?" in url:
             return {"available":True,"repo":"Garyu-tt/mojum","prsTotal":45,
                     "issuesTotal":33,
-                    "prs":[{"createdAt":"2026-11-22T20:50:00Z"},
-                           {"createdAt":"2026-11-21T18:00:00Z"}]}
+                    "prs":[{"number":712,"title":"feat: <new> & safe",
+                            "isDraft":True,"createdAt":"2026-11-22T20:50:00Z"},
+                           {"number":700,"title":"old PR",
+                            "isDraft":False,"createdAt":"2026-11-21T18:00:00Z"}],
+                    "issues":[{"number":689,"title":"MuJoCo issue",
+                               "createdAt":"2026-11-22T20:15:00Z"}]}
         if url.startswith("http://127.0.0.1:480") and url.endswith("/slots"):
             return [{"is_processing":True},{"is_processing":False}]
         raise AssertionError("unexpected URL "+url)
@@ -169,6 +173,116 @@ class FleetObserverTests(unittest.TestCase):
         self.assertFalse(snap["cezar"]["available"])
         self.assertFalse(snap["github"]["available"])
         self.assertIsNone(snap["external_running_confirmed"])
+
+
+class GitHubLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.parent = Path(temp.name) / "private"
+        self.parent.mkdir(mode=0o700)
+        self.cache = self.parent / "recent-closed.json"
+        self.now = datetime(2026, 11, 22, 21, 10, tzinfo=timezone.utc)
+        patcher = patch.object(f, "CLOSED_CACHE", self.cache)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _closed(self):
+        return [{
+            "number": 710, "state": "closed", "title": "accepted",
+            "merged_at": "2026-11-22T21:09:00Z",
+            "updated_at": "2026-11-22T21:09:01Z",
+        }, {
+            "number": 711, "state": "closed", "title": "withdrawn",
+            "merged_at": None, "updated_at": "2026-11-22T21:09:04Z",
+        }]
+
+    def test_correct_merge_vs_closed_status_and_owner_only_cache(self):
+        with patch.object(f, "_fetch_closed_rest",
+                          return_value=f._closed_from_response(self._closed())) as fetch:
+            first = f._github_closed_history(self.now)
+            again = f._github_closed_history(self.now + timedelta(minutes=10))
+        self.assertEqual(fetch.call_count, 1)
+        self.assertTrue(first["snapshot_fresh"])
+        self.assertTrue(again["snapshot_fresh"])
+        self.assertEqual(first["merged_in_visible_sample"], 1)
+        self.assertEqual(first["closed_unmerged_in_visible_sample"], 1)
+        self.assertEqual([x["outcome"] for x in first["recent"]],
+                         ["merged", "closed-unmerged"])
+        self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
+
+    def test_stale_cache_is_labelled_stale_on_public_api_failure(self):
+        with patch.object(f, "_fetch_closed_rest",
+                          return_value=f._closed_from_response(self._closed())):
+            f._github_closed_history(self.now)
+        with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
+            status = f._github_closed_history(self.now + timedelta(minutes=17))
+        self.assertFalse(status["snapshot_fresh"])
+        self.assertEqual(status["merged_in_visible_sample"], 1)
+
+    def test_absent_cache_and_network_failure_is_unavailable(self):
+        with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
+            with self.assertRaises(f.FleetError):
+                f._github_closed_history(self.now)
+
+    def test_public_rest_strictly_requires_closed_and_real_numbers(self):
+        for broken in (
+            [{"number": True, "state": "closed", "title": "x",
+              "merged_at": None, "updated_at": "2026-11-22T21:09:00Z"}],
+            [{**self._closed()[0], "state": "open"}],
+            [{**self._closed()[0], "merged_at": "not-a-date"}],
+            self._closed() + [dict(self._closed()[0])],
+        ):
+            with self.subTest(broken=str(broken)[:100]):
+                with self.assertRaises(f.FleetError):
+                    f._closed_from_response(broken)
+
+    def test_symlink_or_untrusted_history_cache_is_not_read(self):
+        secret = self.parent / "secret.json"
+        secret.write_text('{"password":"stay private"}')
+        self.cache.symlink_to(secret)
+        with self.assertRaises(f.FleetError):
+            f._github_closed_history(self.now)
+        self.cache.unlink()
+        self.cache.write_text("{}")
+        self.cache.chmod(0o644)
+        with self.assertRaises(f.FleetError):
+            f._github_closed_history(self.now)
+
+    def test_live_source_separation_is_enforced(self):
+        with patch.object(f, "_get", side_effect=lambda url:
+                          [{"status":"cancelled"}] if url.endswith("/runs")
+                          else {"available": True, "repo":"Garyu-tt/mojum",
+                                "prsTotal": 12, "issuesTotal": 3,
+                                "prs":[{"number":712,"title":"new",
+                                        "createdAt":"2026-11-22T21:00:00Z"}],
+                                "issues":[]}):
+            with patch.object(f, "_models", return_value={"capacity_slots_known":17,
+                                                            "inference_busy_known":0}):
+                with patch.object(f, "_schedule_list", return_value={
+                    "enabled":5, "running":None}):
+                    with patch.object(f, "_github_closed_history",
+                                      return_value={"available":True,
+                                                    "recent":[]}) as hist:
+                        default = f.collect(self.now)
+                        self.assertFalse(default["github_history"]["available"])
+                        self.assertEqual(hist.call_count, 0)
+                        live = f.collect(self.now, include_history=True)
+                        self.assertTrue(live["github_history"]["available"])
+                        self.assertEqual(hist.call_count, 1)
+                        self.assertEqual(live["cezar"]["total"], 1)
+                        self.assertEqual(live["github"]["open_prs"], 12)
+                        self.assertEqual(len(live["github"]["latest_open_prs"]), 1)
+                        self.assertIsNone(live["external_running_confirmed"])
+
+    def test_malicious_title_is_renderable_text_only(self):
+        rows = f._public_summary([
+            {"number": 712, "title": "<script>alert(1)</script>\u0000",
+             "createdAt":"2026-11-22T20:50:00Z"}
+        ], max_items=5, kind="pr")
+        self.assertEqual(rows[0]["number"], 712)
+        self.assertNotIn("\u0000", rows[0]["title"])
+        self.assertEqual(rows[0]["title"], "<script>alert(1)</script> ")
 
 
 if __name__=="__main__":
