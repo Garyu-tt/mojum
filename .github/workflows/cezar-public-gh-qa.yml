@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'tools/cezar_gh_public_read.py'
+      - 'tools/cezar_admission.py'
+      - 'tests/test_cezar_admission.py'
       - 'tools/cezar_legacy_history_index.py'
       - 'tests/test_cezar_legacy_history_index.py'
       - 'tests/test_cezar_gh_public_read.py'
@@ -37,3 +39,5 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_cezar_github_automation_templates.py' -v
       - name: Verify private legacy task deduplication and no-replay guarantees
         run: python -m unittest discover -s tests -p 'test_cezar_legacy_history_index.py' -v
+      - name: Verify cross-rule atomic admission and one-shot guarded Cezar dispatch
+        run: python -m unittest discover -s tests -p 'test_cezar_admission.py' -v
