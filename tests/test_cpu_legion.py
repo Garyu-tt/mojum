@@ -409,6 +409,48 @@ sys.exit(1)
 
 
 
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd,
+                         "POSIX private output directory required")
+    def test_relative_patch_output_records_absolute_reviewer_reference(self):
+        from unittest.mock import Mock
+        task = {"id": "relative-output", "attempts": 1, "payload": "{}"}
+        connection = Mock()
+        diff = "diff --git a/src/test.py b/src/test.py\\n"
+        previous = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with (
+                patch.object(legion.queue, "connect", return_value=connection),
+                patch.object(legion.queue, "claim", return_value=task),
+                patch.object(legion.queue, "finish", return_value=True) as finish,
+                patch.object(legion.subprocess, "run",
+                             return_value=Mock(returncode=0, stdout=b"")),
+                patch.object(legion.subprocess, "check_output", return_value="a" * 40),
+                patch.object(legion, "task_context",
+                             return_value=("prompt", ["src/test.py"])),
+                patch.object(legion, "generate", return_value=diff),
+                patch.object(legion, "verify", return_value=diff),
+            ):
+                result = legion.run_one(
+                    "unused.sqlite3", 1, self.root, Path("relative-private") / "patches",
+                    "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5,
+                )
+        finally:
+            os.chdir(previous)
+        self.assertEqual(result["state"], "review")
+        persisted = Path(result["patch"])
+        self.assertTrue(persisted.is_absolute())
+        self.assertTrue(persisted.is_file())
+        self.assertEqual(persisted.parent, self.root / "relative-private" / "patches")
+        self.assertEqual(finish.call_args.args[5], str(persisted))
+        connection.close.assert_called_once()
+
+    def test_relative_patch_output_rejects_traversal_before_claim(self):
+        with self.assertRaisesRegex(ValueError, "traversal"):
+            legion.run_one("unused.sqlite3", 1, self.root, Path("../unsafe"),
+                           "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5)
+
     def test_expired_review_lease_discards_unreferenced_patch(self):
         # A stale attempt must not leak disk space through orphan proposals.
         from unittest.mock import Mock
