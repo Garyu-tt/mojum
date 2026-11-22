@@ -264,6 +264,53 @@ still lacks write authorization. **The 300 Spartan names are logical
 identities, not 300 verified concurrent, useful local inference workers.**
 The QA gate remains separate from any eventual draft-PR publisher.
 
+## Native Cezar GitHub panel now shows open PRs (2026-11-22)
+
+A user-visible bug was reproduced: the actual server endpoint
+`GET /api/v1/github?refresh=1&limit=10` returned
+`available:false, reason:"repository handle unavailable"`, despite
+the public Issue/PR metadata mirror being active. **The Cezar GitHub tab
+is not the same as its agent-run list**: it invokes `gh repo view --jq`
+followed by a bounded **GraphQL OPEN-list** query. The earlier read-only
+`gh` adapter supported neither. No GitHub event automation alone
+could populate that native tab.
+
+The tested repair, `tools/cezar_public_github_tab.py`, is deployed
+alongside `tools/cezar_gh_public_read.py` in the service-only
+`/var/lib/cezar/readonly-bin`. It accepts the exact pinned
+`Garyu-tt/mojum` repository handle and a bounded list-only request,
+then translates it into **actual public REST open-Issue and open-PR
+records** with real titles, authors, creation times, labels, comments,
+Draft status and counts. It does not execute untrusted GraphQL text or
+invent unavailable code-change counts. Cross-repo, arbitrary queries,
+writes, authentication, approvals and merges still fail closed.
+
+The translation uses up to four paginated public REST list pages,
+owner-only snapshot files, no HTTP redirects, and a three-minute local
+cache to keep unauthenticated API usage bounded. Cezar itself also
+caches the normal tab list briefly. A manual refresh may therefore
+still show a recently cached view rather than a millisecond-live feed.
+
+**Observed from the running Cezar endpoint after deployment:**
+`available:true`, repo `Garyu-tt/mojum`, **19 open Issues
+and 39 open PRs**. The first-page sample returned Draft PRs #685,
+#684 and #682, matching public GitHub metadata. The live server was
+not restarted, and the original Cezar/task automations were not
+enabled or changed. Source digests matched the installed adapter.
+
+To see the results, open the laptop's existing private SSH tunnel link
+`http://127.0.0.1:14329/p/mojum/` and select **GitHub**, then
+refresh the tab. **Runs / Tasks** remains the separate list of work
+actually launched under Cezar: external agents' PRs do *not* become
+Cezar runs automatically. The public tab shows open PRs only; closed
+and merged history, status checks and PR publishing require separate
+read capabilities or authorized host-side GitHub integration.
+
+The panel's public listing deliberately grants **read-only visibility,
+not full bidirectional synchronization**. The real server `gh auth
+status` remains unauthenticated. Independent QA and GitHub's exact
+HEAD/BASE release gate still control acceptance and merge.
+
 ## Required release invariants
 
 1. Unique GitHub Issue/PR identity, deduplicated transitions and a
