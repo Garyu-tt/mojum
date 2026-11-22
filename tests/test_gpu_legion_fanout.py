@@ -67,6 +67,11 @@ class FanoutContract(unittest.TestCase):
             self.assertEqual({w.target_port for w in plan if w.task_id==task},
                              {18180,18181})
 
+    def test_duplicate_backend_entries_cannot_fake_distinct_replicas(self):
+        backend = f.Backend(18180, 1, 1, 2048)
+        with self.assertRaisesRegex(f.FanoutError, "duplicate physical backend"):
+            f.plan(f.validate_tasks(tasks(1, 2)), [backend, backend])
+
     def test_no_silent_duplicate_if_one_gpu_replica_down(self):
         with self.assertRaises(f.FanoutError):
             f.plan(f.validate_tasks(tasks(1,2)),
