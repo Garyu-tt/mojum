@@ -81,9 +81,18 @@ def parse(args):
             if re.fullmatch(r"-?label:[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", term):
                 continue
             raise Refused("unsupported GitHub search qualifier")
-        # Preserve the PR-opened triage filter without altering explicit
-        # historical closed/merged event queries.
-        if "is:pr" in terms and "created:>=" in q and "is:open" not in terms:
+        # The creation-date PR triage defaults to open PRs only when
+        # the caller did not explicitly select a state. Never silently add
+        # is:open to a historical closed-PR search.
+        states = {
+            "open" if term in ("is:open", "state:open") else "closed"
+            for term in terms
+            if term in ("is:open", "state:open", "is:closed", "state:closed")
+        }
+        if len(states) > 1:
+            raise Refused("conflicting GitHub search state filters")
+        if ("is:pr" in terms and any(term.startswith("created:") for term in terms)
+                and not states):
             q += " is:open"
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
