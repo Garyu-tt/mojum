@@ -642,6 +642,14 @@ def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
     return payload
 
 
+def _decode_snapshot_json(data: bytes) -> object:
+    """Turn overdeep bounded JSON into a controlled input rejection."""
+    try:
+        return json.loads(data.decode("utf-8"))
+    except RecursionError as exc:
+        raise SnapshotError("snapshot JSON nesting limit exceeded") from exc
+
+
 def _load_snapshot(path: str) -> object:
     if path == "-":
         stream = getattr(sys.stdin, "buffer", sys.stdin)
@@ -650,7 +658,7 @@ def _load_snapshot(path: str) -> object:
             data = data.encode("utf-8")
         if len(data) > MAX_INPUT_BYTES:
             raise SnapshotError(f"stdin exceeds {MAX_INPUT_BYTES} bytes")
-        return json.loads(data.decode("utf-8"))
+        return _decode_snapshot_json(data)
 
     # Open each ancestor once via pinned dir descriptors: O_NOFOLLOW on
     # the final file alone does not reject symlinked parent directories.
@@ -691,7 +699,7 @@ def _load_snapshot(path: str) -> object:
             os.close(parent_fd)
     if len(data) > MAX_INPUT_BYTES:
         raise SnapshotError(f"snapshot exceeds {MAX_INPUT_BYTES} bytes")
-    return json.loads(data.decode("utf-8"))
+    return _decode_snapshot_json(data)
 
 
 class _Parser(argparse.ArgumentParser):
