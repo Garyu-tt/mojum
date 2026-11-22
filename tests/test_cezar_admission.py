@@ -78,7 +78,7 @@ class AdmissionTests(unittest.TestCase):
 
     def test_invalid_identity_fails_closed(self):
         bad = [
-            {"repo": "other/repo"}, {"kind": "unknown"}, {"number": 0},
+            {"repo": "other/repo"}, {"repo": None}, {"repo": 123}, {"kind": "unknown"}, {"number": 0},
             {"number": True}, {"number": -1}, {"phase": "admin"},
             {"scope": "../traversal"}, {"scope": ""},
             {"revision": "abc"}, {"revision": "z" * 40},
