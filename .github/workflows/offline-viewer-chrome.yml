@@ -50,3 +50,8 @@ jobs:
       - name: Real local SQLite to PRIVATE JSONL to Chrome DOM and canvas
         run: |
           python tests/smoke_real_chromium_viewer.py
+      - name: Offline viewer playback controls (Node VM against real SQLite export)
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p 'test_offline_viewer_playback_controls.py' -v
