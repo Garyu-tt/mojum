@@ -130,6 +130,29 @@ not two accepted patches.
   be implemented in the broker with per-process memory guard, not by
   bypassing the exclusive lease.
 
+## Partial-batch failure isolation (QA repair)
+
+An SQLite connect/schema/claim failure for one worker returns a sanitized
+`claim_unavailable` record; it does not claim that a lease was acquired,
+requeued or blocked. An unexpected failure from a worker future returns a
+sanitized `worker_failed` record; the lease state is unknown and must be
+reconciled through normal coordinator TTL/recovery before retrying. Neither
+record includes SQL diagnostics, prompts, model text or exception messages.
+
+The fleet retains completed peers' proposal files and produces its ordinary
+JSON summary, with separate `coordinator_failures` and `worker_failures`
+counters. CLI partial batches emit the summary but exit with status **2**
+instead of claiming a successful complete batch. The caller should inspect
+the counters, review saved proposals independently and resolve uncertain
+leases before a follow-up batch. No automatic re-issuance or duplicate model
+spend is implied.
+
+CPU-only regression command:
+
+~~~sh
+PYTHONPATH=src:. python3 -m unittest discover -s tests -p 'test_spartan_local_fleet.py' -v
+~~~
+
 ## Next gates
 
 1. Prove the Qwen CPU endpoint loads and returns valid completions.
