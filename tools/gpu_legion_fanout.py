@@ -276,7 +276,6 @@ def execute(work, backends, *, caller=infer):
     return sorted(output,key=lambda x:(x["task_id"],x["clone"]))
 
 
-@contextmanager
 def _require_private_output_parent(path):
     """Reject replaceable output directory chains before model inference.
 
@@ -308,6 +307,7 @@ def _require_private_output_parent(path):
             raise FanoutError("output directory chain is not owner-controlled")
 
 
+@contextmanager
 def reserve_private_output(path):
     """Atomically claim the 0600 output before any paid/model inference.
 
