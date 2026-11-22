@@ -1,5 +1,6 @@
 """Cezar cross-rule admission: concurrent claims, fail-closed dispatch, no replay."""
 from __future__ import annotations
+from contextlib import closing
 import importlib.util
 import io
 import json
@@ -187,14 +188,14 @@ class AdmissionTests(unittest.TestCase):
             return original(fd)
 
         with patch.object(m.os, "fsync", side_effect=record):
-            with m.connect(path) as db:
+            with closing(m.connect(path)) as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
         self.assertEqual(calls, ["file", "directory"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
         calls.clear()
         with patch.object(m.os, "fsync", side_effect=record):
-            with m.connect(path):
+            with closing(m.connect(path)):
                 pass
         self.assertEqual(calls, ["directory"])
 
