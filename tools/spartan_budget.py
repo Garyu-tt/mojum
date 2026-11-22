@@ -271,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         db = connect(args.db)
     except BudgetError as exc:
-        parser.exit(2, f"budget denied: {exc}\\n")
+        parser.exit(2, f"budget denied: {exc}\n")
     try:
         schema(db)
         if args.command == "init":
