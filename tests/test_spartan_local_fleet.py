@@ -682,6 +682,25 @@ class FleetTests(unittest.TestCase):
         finally:
             shared.chmod(0o700)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX replaceable ancestors")
+    def test_single_checks_unsafe_ancestor_before_claim_or_model_call(self):
+        self.add_task("unsafe-single-output")
+        shared = self.root / "unsafe-single-parent"
+        private = shared / "private"
+        shared.mkdir(mode=0o700)
+        private.mkdir(mode=0o700)
+        shared.chmod(0o777)
+        def should_not_invoke(*args, **kwargs):
+            self.fail("model called before private artifact preflight")
+        try:
+            with self.assertRaisesRegex(fleet.FleetError, "ancestor replaceable"):
+                fleet.single(self.db, 1, self.backends[0], private,
+                             request=should_not_invoke)
+            with closing(sc.connect(str(self.db))) as db:
+                self.assertEqual(sc.status(db)["states"]["queued"], 1)
+        finally:
+            shared.chmod(0o700)
+
     @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestry")
     def test_artifact_store_rejects_symlinked_ancestor_without_writing(self):
         real_parent = self.root / "real-artifact-parent"
