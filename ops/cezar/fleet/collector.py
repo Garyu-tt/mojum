@@ -206,7 +206,7 @@ def _public_summary(items, *, max_items, kind):
     return out
 
 
-def _github(now):
+def _github_live(now):
     # Existing Cezar read-only GitHub adapter. Historical Cezar runs
     # are NOT equivalent to current GitHub Issues/PRs.
     data = _get(CEZAR + "/github?limit=50")
@@ -237,6 +237,73 @@ def _github(now):
         "visibility": "public open GitHub artifacts, NOT live agent executions",
     }
 
+
+MIRROR_FILE = Path("/var/lib/cezar/home/github-mirror/mojum.json")
+def _github_mirror(now):
+    """Read cached public PR metadata only when live read-only adapter is unavailable."""
+    fd=os.open(MIRROR_FILE,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|
+               getattr(os,"O_CLOEXEC",0))
+    try:
+        st=os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid!=os.geteuid() or
+                st.st_nlink!=1 or st.st_mode&0o077 or st.st_size>250000):
+            raise FleetError("unsafe public GitHub mirror")
+        with os.fdopen(fd,"rb") as f:
+            fd=-1
+            raw=f.read(250001)
+    finally:
+        if fd>=0:os.close(fd)
+    if len(raw)>250000:
+        raise FleetError("GitHub mirror too large")
+    data=json.loads(raw)
+    if (type(data) is not dict or
+            data.get("schema")!="mojum.cezar.github-public-mirror.v1" or
+            data.get("repository")!="Garyu-tt/mojum" or
+            data.get("possibly_truncated") is not False):
+        raise FleetError("invalid GitHub mirror")
+    observed=_parse_time(data.get("fetched_at_utc"))
+    if observed is None or not timedelta(0)<=now-observed<=timedelta(hours=3):
+        raise FleetError("stale GitHub mirror")
+    items=data.get("items")
+    if type(items) is not list or len(items)>400:
+        raise FleetError("invalid mirror inventory")
+    prs,issues=[],[]
+    seen=set()
+    for item in items:
+        if type(item) is not dict:raise FleetError("invalid GitHub item")
+        n=item.get("number")
+        kind=item.get("kind")
+        if type(n) is not int or n<1 or n>10000000 or n in seen:
+            raise FleetError("invalid GitHub id")
+        seen.add(n)
+        if kind not in ("pull_request","issue"):raise FleetError("invalid GitHub type")
+        url="https://github.com/Garyu-tt/mojum/"+("pull/" if kind=="pull_request" else "issues/")+str(n)
+        if item.get("url")!=url:raise FleetError("unexpected GitHub path")
+        title=item.get("title")
+        if type(title) is not str:raise FleetError("invalid title")
+        clean="".join(c if c.isprintable() else " " for c in title)[:160]
+        upd=item.get("updated_at")
+        row={"kind":"pr" if kind=="pull_request" else "issue",
+             "number":n,"title":clean,"created_at":None,
+             "updated_at":upd if _parse_time(upd) else None,"draft":None}
+        (prs if kind=="pull_request" else issues).append(row)
+    if len(prs)!=data.get("pull_requests_open") or len(issues)!=data.get("issues_open"):
+        raise FleetError("GitHub mirror count mismatch")
+    prs.sort(key=lambda x:x.get("updated_at") or "",reverse=True)
+    issues.sort(key=lambda x:x.get("updated_at") or "",reverse=True)
+    return {"repo":"Garyu-tt/mojum","open_prs":len(prs),"open_issues":len(issues),
+            "new_prs_last_90m_visible":None,
+            "latest_open_prs":prs[:12],"latest_open_issues":issues[:8],
+            "source":"read-only cached public GitHub mirror",
+            "observed_at":observed.isoformat(),"snapshot_fresh":True,
+            "fallback":True,
+            "visibility":"Last known public GitHub PRs; not live worker activity"}
+
+def _github(now):
+    try:
+        return _github_live(now)
+    except (OSError, ValueError, TypeError, TimeoutError, json.JSONDecodeError):
+        return _github_mirror(now)
 
 def _closed_from_response(raw):
     if not isinstance(raw, list) or len(raw) > 20:
