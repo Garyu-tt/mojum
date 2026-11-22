@@ -143,3 +143,52 @@ Do not bind them to `0.0.0.0`. Protect the source registry
 No deployment credential is part of this repository. Actual Cezar
 agent launch/admission, independent QA, exact HEAD/BASE CI and merge
 remain separate and are **not** bypassed by visibility code.
+
+
+## R02: do not confuse historical Cezar runs with GitHub task lifecycle
+
+The native Cezar 0.20.0 *Runs/Tasks* view only includes tasks submitted to its
+own /api/v1/runs. The currently configured resources.maxParallel=2 limits
+those native runs; it does **not** enumerate five external ChatGPT schedules,
+all independent GitHub PR authors or five llama.cpp servers with 17 physical
+inference slots. Increasing this number is not a substitute for real provider
+adapters and authenticated executor heartbeats.
+
+The read-only fleet observer now provides separate, linked GitHub sources:
+- Native /api/v1/github?limit=50 open Issue/PR counts and up to 12 latest
+  open PRs plus 8 open Issues, with public GitHub record links.
+- A separately pinned, no-proxy, no-redirect public REST GET to only
+  /repos/Garyu-tt/mojum/pulls?state=closed&sort=updated&direction=desc&per_page=20.
+  An owner-only 0600 cache throttles it to one request per 15 minutes. Each
+  returned PR is reported merged only when merged_at exists; otherwise
+  it is closed-unmerged. This is the latest 20 records, not all completed
+  tasks or total throughput. On API outage stale cache is **explicitly**
+  shown as stale; if unavailable it is not called zero.
+- New-source fields are additive inside cezar.fleet.visibility.v1; consumers
+  using the older schema keep the existing independent fields. Private
+  agent names remain only in owner-local telemetry, with no private prompts,
+  tokens or journal data. The overlay renders all titles through DOM
+  textContent, and GitHub URLs are constructed only from checked integer IDs.
+- The pinned, visible Mojum fleet control explicitly shows external schedule
+  count, open PR count, and **Cezar-only active** count. Expanding it exposes
+  recently opened and recently merged/closed PRs, open Issues, scheduled
+  developers/QA and observed inference slot occupancy. It does NOT write
+  ghost tasks into Cezar to make its native run count look larger.
+
+**Outstanding limit:** actual live ChatGPT/external worker concurrency remains
+unknown until independently authenticated start/heartbeat/end events are
+delivered, with expiry and per-executor identity fencing. The existing
+scheduled-task inventory is a timestamped snapshot, not such a source.
+The GitHub evidence proves work artifacts and merges, never live agent
+processes. The native OpenCode model/backend must be independently load-tested
+and routed before resources.maxParallel is safely raised.
+
+Run observer tests via:
+
+python3 -m unittest discover -s ops/cezar/fleet -p test_*.py -v
+
+On an operator-approved existing host, first check installed script hashes,
+owner and service units. Reinstall the read-only overlay using the existing
+idempotent installer and roll back to the saved original index on mismatch.
+Do not touch the Cezar native run ledger, unpause the automation templates,
+expose the loopback service publicly, or deploy a new scheduling authority.
