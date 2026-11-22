@@ -253,10 +253,21 @@ def execute(work, backends, *, caller=infer):
     for w in work:
         groups[w.target_port].append(w)
     output = []
+    def safe_call(job):
+        try:
+            return caller(job)
+        except Exception as exc:
+            # A failed model request may already have spent tokens. Persist
+            # its identity without leaking prompt, response or error details.
+            # Never automatically retry an uncertain request.
+            return {"task_id": job.task_id, "agent_id": job.agent_id,
+                    "clone": job.clone, "port": job.target_port,
+                    "failed": True, "error_type": type(exc).__name__}
+
     def run_group(port, jobs):
         capacity = next(b.free_slots for b in backends if b.port==port)
         with ThreadPoolExecutor(max_workers=capacity) as executor:
-            futures = [executor.submit(caller,j) for j in jobs]
+            futures = [executor.submit(safe_call,j) for j in jobs]
             return [future.result() for future in futures]
     with ThreadPoolExecutor(max_workers=len(groups)) as executor:
         futures = [executor.submit(run_group,p,jobs) for p,jobs in groups.items() if jobs]
@@ -335,15 +346,20 @@ def main(argv=None):
     # Refuse an occupied/unwritable artifact path BEFORE launching model calls.
     with reserve_private_output(args.output) as stream:
         results=execute(work,backends)
+        failures=sum(result.get("failed") is True for result in results)
         report={"schema":"mojum.gpu-legion-fanout.v1",
                 "physical_models":len(backends),
                 "observed_total_slots":sum(b.total_slots for b in backends),
-                "inference_requests_completed":len(results),"results":results}
+                "inference_requests_completed":len(results)-failures,
+                "inference_requests_failed":failures,
+                "partial_batch":failures != 0,
+                "results":results}
         stream.write((json.dumps(report,ensure_ascii=False,
                                  sort_keys=True,indent=2)+"\n").encode())
-    print(json.dumps({"completed":len(results),"saved_to":str(args.output),
+    print(json.dumps({"completed":len(results)-failures,
+                      "failed":failures,"saved_to":str(args.output),
                       "content_printed":False},sort_keys=True))
-    return 0
+    return 2 if failures else 0
 
 
 if __name__=="__main__":
