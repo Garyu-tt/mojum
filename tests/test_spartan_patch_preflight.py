@@ -68,6 +68,20 @@ class PatchPreflightTests(unittest.TestCase):
     def test_reversed_hunks(self):
         self.rejects(patch(body="@@ -10 +10 @@\n-a\n+b\n@@ -1 +1 @@\n-c\n+d\n"))
 
+    def test_oversized_and_unicode_hunk_numbers_fail_closed(self):
+        # Untrusted \\d+ used to match 5000 digits before int() raised a
+        # bare ValueError, bypassing the CLI's PatchRejected handler.
+        for value in ("9" * 5000, "9" * 13, "\u0661"):
+            with self.subTest(number=value[:20]):
+                self.rejects(patch(body=f"@@ -{value} +1 @@\n-old\n+new\n"))
+        bad = patch(body=f"@@ -{'9' * 5000} +1 @@\n-old\n+new\n")
+        completed = subprocess.run(
+            [sys.executable, str(MODULE), "--allow", "src/mojum/"],
+            input=bad, capture_output=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertNotIn(b"Traceback", completed.stderr)
+
     def test_empty_hunk_and_no_hunks(self):
         self.rejects(patch(body="@@ -0,0 +0,0 @@\n"))
         self.rejects(patch(body=""))

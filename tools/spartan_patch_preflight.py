@@ -19,7 +19,8 @@ MAX_FILES = 16
 MAX_HUNKS_PER_FILE = 32
 MAX_CHANGED_LINES = 400
 _PATH = re.compile(r"[A-Za-z0-9_./-]+\Z")
-_HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: [^\r\n]*)?\Z")
+# ASCII-only, bounded coordinates prevent int() exceptions on hostile hunks.
+_HUNK = re.compile(r"@@ -([0-9]{1,12})(?:,([0-9]{1,12}))? \+([0-9]{1,12})(?:,([0-9]{1,12}))? @@(?: [^\r\n]*)?\Z")
 _INDEX = re.compile(r"index [0-9a-f]{7,64}\.\.[0-9a-f]{7,64}(?: 100644)?\Z")
 
 
