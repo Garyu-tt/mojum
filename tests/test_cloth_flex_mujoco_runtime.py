@@ -39,7 +39,14 @@ class ActualMuJoCoClothTests(unittest.TestCase):
         self.assertEqual(model.nflex, 1)
         self.assertEqual(model.nmocap, 1)
         self.assertEqual(model.neq, 1)
-        self.assertEqual(model.njnt, 3)
+        # The unpinned flex vertices create additional MuJoCo joints;
+        # assert the three named anchor sliders rather than total joint count.
+        for axis in ("x", "y", "z"):
+            joint_id = self.mujoco.mj_name2id(
+                model, self.mujoco.mjtObj.mjOBJ_JOINT, "cloth_anchor_" + axis,
+            )
+            self.assertGreaterEqual(joint_id, 0)
+            self.assertEqual(model.jnt_type[joint_id], self.mujoco.mjtJoint.mjJNT_SLIDE)
         self.assertNotEqual(
             self.mujoco.mj_name2id(model, self.mujoco.mjtObj.mjOBJ_BODY, "cloth_target"),
             self.mujoco.mj_name2id(model, self.mujoco.mjtObj.mjOBJ_BODY, "cloth_anchor"),
