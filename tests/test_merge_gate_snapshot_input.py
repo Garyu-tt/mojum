@@ -107,24 +107,32 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertNotIn(secret, stdout.getvalue())
             self.assertEqual(result["error"], "snapshot source unavailable")
 
-    def test_open_descriptor_is_closed_on_invalid_json(self):
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "Linux process fd inventory required",
+    )
+    def test_all_descriptors_are_closed_on_invalid_json(self):
+        # Patching os.open now masks the real function in os.supports_dir_fd,
+        # making the secure-open preflight fail before JSON is ever parsed.
+        # Compare live file descriptors instead, including opened ancestors.
+        def live_fds():
+            result = set()
+            for item in os.listdir("/proc/self/fd"):
+                try:
+                    fd = int(item)
+                    os.fstat(fd)
+                except (ValueError, OSError):
+                    continue  # os.listdir's own transient directory handle
+                result.add(fd)
+            return result
+
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "broken.json"
             path.write_bytes(b"{bad}")
-            real_open = os.open
-            fds = []
-
-            def capture_open(*args, **kwargs):
-                fd = real_open(*args, **kwargs)
-                fds.append(fd)
-                return fd
-
-            with mock.patch("mojum.merge_gate.os.open", side_effect=capture_open):
-                with self.assertRaises(json.JSONDecodeError):
-                    _load_snapshot(str(path))
-            self.assertEqual(len(fds), 1)
-            with self.assertRaises(OSError):
-                os.fstat(fds[0])
+            before = live_fds()
+            with self.assertRaises(json.JSONDecodeError):
+                _load_snapshot(str(path))
+            self.assertEqual(live_fds(), before)
 
 
 if __name__ == "__main__":
