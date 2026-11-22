@@ -653,6 +653,9 @@ def _load_snapshot(path: str) -> object:
 
     # Open once and bound reads before parsing. Path.stat + read_text
     # races a replacement with an oversized file or blocking FIFO.
+    # Missing descriptor protections must fail closed on unsupported platforms.
+    if not all(getattr(os, flag, 0) for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC")):
+        raise SnapshotError("secure snapshot file reads unavailable")
     descriptor = -1
     try:
         flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
