@@ -67,6 +67,18 @@ class NeuralProposalWireTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_neural_proposal(packet)
 
+    def test_non_string_schema_spoof_rejected(self):
+        # Integer subclasses can compare equal to a schema string while
+        # serializing as JSON numbers.
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other == "mojum.neural-proposal/1"
+
+        packet = sample()
+        packet["schema"] = PretendInt(1)
+        with self.assertRaises(ValueError):
+            validate_neural_proposal(packet)
+
     def test_rejects_out_of_range_wire_clock_fields(self):
         for field in ("tick", "observed_at_ns"):
             with self.subTest(field=field):
