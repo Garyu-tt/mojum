@@ -231,11 +231,12 @@ class GitHubLifecycleTests(unittest.TestCase):
         self.assertFalse(status["snapshot_fresh"])
         self.assertEqual(status["merged_in_visible_sample"], 1)
 
-    def test_recursive_private_cache_does_not_take_down_other_sources(self):
-        # This owner-private file is valid on disk but not valid bounded JSON.
-        self.cache.write_text("[" * 1500 + "]" * 1500, encoding="utf-8")
-        self.cache.chmod(0o600)
-        with (patch.object(f, "_cezar", return_value={"active": 1}),
+    def test_recursive_private_cache_decode_does_not_take_down_other_sources(self):
+        # Decoder recursion thresholds vary across CPython versions; explicitly
+        # simulate json.loads rejecting an over-deep local cache payload.
+        with (patch.object(f, "_load_closed_cache",
+                           side_effect=RecursionError("deep private JSON")),
+              patch.object(f, "_cezar", return_value={"active": 1}),
               patch.object(f, "_schedule_list", return_value={"enabled": 5}),
               patch.object(f, "_models", return_value={"inference_busy_known": 0}),
               patch.object(f, "_github", return_value={"open_prs": 12})):
