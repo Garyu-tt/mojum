@@ -47,6 +47,30 @@ class ActualMuJoCoClothTests(unittest.TestCase):
         self.assertEqual(model.nflexvert, self.spike.GRID[0] * self.spike.GRID[1])
         self.assertAlmostEqual(model.opt.timestep, self.spike.DT)
 
+    def test_servo_moves_pinned_flex_edge_within_joint_limits(self):
+        """Real physics must move the anchor and its pinned cloth vertex."""
+        model = self.mujoco.MjModel.from_xml_string(self.spike.make_mjcf())
+        data = self.mujoco.MjData(model)
+        joint_id = self.mujoco.mj_name2id(
+            model, self.mujoco.mjtObj.mjOBJ_JOINT, "anchor_slide"
+        )
+        self.assertGreaterEqual(joint_id, 0)
+        qindex = int(model.jnt_qposadr[joint_id])
+        vindex = int(model.jnt_dofadr[joint_id])
+        self.mujoco.mj_forward(model, data)
+        start_x = float(data.flexvert_xpos[0][0])
+        data.ctrl[0] = 0.04
+        for _ in range(80):
+            self.mujoco.mj_step(model, data)
+        x = float(data.qpos[qindex])
+        vx = float(data.qvel[vindex])
+        edge_x = float(data.flexvert_xpos[0][0])
+        self.assertTrue(all(math.isfinite(v) for v in (x, vx, edge_x)))
+        self.assertGreater(x, 0.001, "the actuated anchor must move")
+        self.assertLessEqual(abs(x), 0.0601, "anchor joint must remain bounded")
+        self.assertGreater(edge_x - start_x, 0.001,
+                           "the pinned flex vertex must follow its anchor")
+
     def test_short_headless_step_and_report_are_finite(self):
         for passive in (True, False):
             for selfcollide in ("auto", "none"):
