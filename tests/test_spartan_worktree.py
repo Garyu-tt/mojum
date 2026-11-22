@@ -36,6 +36,21 @@ class WorktreeTests(unittest.TestCase):
         head = subprocess.check_output(
             ["git", "-C", str(dest), "rev-parse", "HEAD"], text=True).strip()
         self.assertEqual(head, self.sha)
+        attached = subprocess.check_output(
+            ["git", "-C", str(dest), "symbolic-ref", "--short", "HEAD"],
+            text=True).strip()
+        self.assertEqual(attached, "spartan/issue-478-worker-2")
+        subprocess.check_call(
+            ["git", "-C", str(dest), "-c", "user.name=Test",
+             "-c", "user.email=test@example.invalid",
+             "commit", "-q", "--allow-empty", "-m", "worker change"])
+        branch_sha = subprocess.check_output(
+            ["git", "-C", str(self.repo), "rev-parse",
+             "refs/heads/spartan/issue-478-worker-2"], text=True).strip()
+        worker_sha = subprocess.check_output(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], text=True).strip()
+        self.assertEqual(branch_sha, worker_sha)
+        self.assertNotEqual(worker_sha, self.sha)
 
     def test_rejects_duplicate(self):
         mod.prepare(self.repo, self.root, "task-1", self.sha)
