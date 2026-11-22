@@ -10,7 +10,9 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 import hashlib
+import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -101,10 +103,60 @@ class BudgetLedger:
                 db.rollback()
                 raise
 
+    def _secure_storage_files(self) -> None:
+        """Require a private, nonreplaceable POSIX ledger path and sidecars.
+
+        Called before each SQLite connection. Existing insecure evidence is
+        rejected rather than silently chmodded or overwritten. A private
+        directory is essential because SQLite opens by pathname and may
+        unlink/recreate WAL/SHM between connections.
+        """
+        if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+            raise BudgetDenied("private POSIX ledger storage is required")
+        target = Path(self.path)
+        if not target.is_absolute():
+            raise BudgetDenied("ledger path must be absolute and durable")
+        parent = target.parent
+        try:
+            for ancestor in (parent, *parent.parents):
+                info = ancestor.lstat()
+                if not stat.S_ISDIR(info.st_mode):
+                    raise BudgetDenied("ledger directory has a symlink ancestor")
+                if ancestor == parent:
+                    if (info.st_uid != os.getuid() or info.st_mode & 0o077):
+                        raise BudgetDenied("ledger directory must be owned and mode 0700")
+                elif info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX:
+                    raise BudgetDenied("ledger directory has a replaceable ancestor")
+
+            for path in (target, Path(str(target) + "-wal"),
+                         Path(str(target) + "-shm")):
+                try:
+                    descriptor = os.open(
+                        path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                        0o600,
+                    )
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+                info = path.lstat()
+                if (not stat.S_ISREG(info.st_mode)
+                        or info.st_uid != os.getuid()
+                        or info.st_mode & 0o077
+                        or info.st_nlink != 1):
+                    raise BudgetDenied("ledger file or sidecar is not private")
+        except OSError as exc:
+            raise BudgetDenied("cannot safely open ledger storage") from exc
+
     def _connect(self) -> sqlite3.Connection:
+        self._secure_storage_files()
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        db.execute("PRAGMA busy_timeout=5000")
-        db.execute("PRAGMA journal_mode=WAL")
+        try:
+            db.execute("PRAGMA busy_timeout=5000")
+            db.execute("PRAGMA journal_mode=WAL")
+        except BaseException:
+            db.close()
+            raise
         return db
 
     @staticmethod
