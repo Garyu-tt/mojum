@@ -6,9 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import os
-import subprocess
-import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -301,58 +298,37 @@ class GitHubLifecycleTests(unittest.TestCase):
     @unittest.skipUnless(hasattr(os, "mkfifo") and os.name == "posix",
                          "POSIX named pipes required")
     def test_fifo_cache_is_refused_without_waiting_for_writer(self):
-        # Run in a subprocess so a future regression fails fast rather than
-        # hanging the entire CI worker waiting for a nonexistent FIFO writer.
+        # The subprocess timeout ensures a regression cannot hang the CI worker.
+        # Exercise collect(), not only the low-level cache reader: failure must
+        # affect GitHub history alone, never healthy Cezar/agent sources.
         os.mkfifo(self.cache, 0o600)
         code = (
             "import importlib.util,sys\n"
+            "from datetime import datetime,timezone\n"
             "from pathlib import Path\n"
+            "from unittest.mock import patch\n"
             "spec=importlib.util.spec_from_file_location('cezar_cache_check',sys.argv[1])\n"
             "module=importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(module)\n"
             "module.CLOSED_CACHE=Path(sys.argv[2])\n"
-            "try:\n"
-            "    module._load_closed_cache()\n"
-            "except module.FleetError:\n"
-            "    sys.exit(0)\n"
-            "sys.exit(3)\n"
+            "with (patch.object(module,'_cezar',return_value={'active':1}),\n"
+            "      patch.object(module,'_schedule_list',return_value={'enabled':5}),\n"
+            "      patch.object(module,'_models',return_value={'capacity_slots_known':17}),\n"
+            "      patch.object(module,'_github',return_value={'open_prs':12})):\n"
+            "    snap=module.collect(datetime(2026,11,22,21,10,tzinfo=timezone.utc),\n"
+            "                        include_history=True)\n"
+            "assert snap['github_history']=={'available':False,'reason':'FleetError'},snap\n"
+            "assert snap['cezar']['active']==1,snap\n"
+            "assert snap['schedules']['enabled']==5,snap\n"
+            "assert snap['models']['capacity_slots_known']==17,snap\n"
+            "assert snap['github']['open_prs']==12,snap\n"
+            "assert snap['external_running_confirmed'] is None,snap\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", code, str(SRC), str(self.cache)],
             capture_output=True, text=True, timeout=3,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_fifo_history_cache_never_blocks_observer(self):
-        # A FIFO must not hang before fstat() can reject the non-regular file.
-        # Use a child process so an accidental blocking open is always killed.
-        if not hasattr(os, "mkfifo"):
-            self.skipTest("FIFO creation is unavailable on this platform")
-        os.mkfifo(self.cache, 0o600)
-        script = """
-import importlib.util, json, pathlib, sys
-spec = importlib.util.spec_from_file_location("fleet_fifo_test", sys.argv[1])
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-mod.CLOSED_CACHE = pathlib.Path(sys.argv[2])
-mod._cezar = lambda: {"active": 1}
-mod._schedule_list = lambda now: {"enabled": 5}
-mod._models = lambda: {"capacity_slots_known": 0}
-mod._github = lambda now: {"open_prs": 1}
-mod._fetch_closed_rest = lambda: (_ for _ in ()).throw(AssertionError("network must not be used"))
-print(json.dumps(mod.collect(include_history=True)))
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script, str(SRC), str(self.cache)],
-            check=True, capture_output=True, text=True, timeout=3,
-        )
-        snap = json.loads(result.stdout)
-        self.assertEqual(snap["cezar"]["active"], 1)
-        self.assertEqual(snap["schedules"]["enabled"], 5)
-        self.assertEqual(snap["models"]["capacity_slots_known"], 0)
-        self.assertEqual(snap["github"]["open_prs"], 1)
-        self.assertEqual(snap["github_history"],
-                         {"available": False, "reason": "FleetError"})
 
     def test_symlink_or_untrusted_history_cache_is_not_read(self):
         secret = self.parent / "secret.json"
