@@ -251,12 +251,20 @@ class ModelCallMeter:
 
 def single(db_path, worker_id, backend, folder, *, others=(), locks=None,
            request=None, meter=None):
-    db = coordinator.connect(str(db_path))
+    # A transient SQLite claim failure affects this worker, not the other
+    # model calls in this batch. Do not leak raw SQLite error messages.
     try:
-        coordinator.create_schema(db)
-        task = coordinator.claim(db, worker_id, int(time.time()), ttl=240)
-    finally:
-        db.close()
+        db = coordinator.connect(str(db_path))
+        try:
+            coordinator.create_schema(db)
+            task = coordinator.claim(db, worker_id, int(time.time()), ttl=240)
+        finally:
+            db.close()
+    except sqlite3.OperationalError:
+        # The coordinator rolls back an unsuccessful claim. An ambiguous
+        # post-commit failure leaves a fenced lease that expires normally.
+        return {"worker": worker_id, "state": "claim_unavailable",
+                "error": "OperationalError"}
     if task is None:
         return {"worker": worker_id, "state": "no_task"}
     attempt = task["attempts"]
@@ -478,6 +486,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                 "retry_queued": sum(r.get("state") == "retry_queued"
                                     for r in results),
                 "no_task": sum(r.get("state") == "no_task" for r in results),
+                "claim_unavailable": sum(r.get("state") == "claim_unavailable"
+                                         for r in results),
                 "before": before, "results": results,
                 "auto_merge": False, "generated_code_executed": False}
     finally:

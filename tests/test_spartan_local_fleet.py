@@ -2,6 +2,7 @@
 import json
 from contextlib import closing
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -349,6 +350,34 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(outcome["proposals"], 3)
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["queued"], 5)
+
+    def test_transient_sqlite_claim_failure_does_not_abort_other_workers(self):
+        # A lock timeout for one identity must not hide another successful
+        # model proposal or leave its aggregate batch report unwritten.
+        self.add_task("claim-fault-a", scope="claim.fault.a")
+        self.add_task("claim-fault-b", scope="claim.fault.b")
+        original_claim = sc.claim
+
+        def one_failed_claim(db, worker_id, *args, **kwargs):
+            if worker_id == 1:
+                raise sqlite3.OperationalError("synthetic database lock timeout")
+            return original_claim(db, worker_id, *args, **kwargs)
+
+        with patch.object(fleet, "discover", return_value=self.backends), \
+             patch.object(fleet, "_http", side_effect=fake_server), \
+             patch.object(sc, "claim", side_effect=one_failed_claim):
+            report = fleet.run(self.db, self.out, max_agents=2, max_jobs=2)
+
+        self.assertEqual(report["claim_unavailable"], 1)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(report["scheduled_primary_workers"], 2)
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+        self.assertEqual({x["state"] for x in report["results"]},
+                         {"claim_unavailable", "proposal_for_independent_review"})
+        with closing(sc.connect(str(self.db))) as db:
+            state = sc.status(db)["states"]
+        self.assertEqual(state["queued"], 1)
+        self.assertEqual(state["review"], 1)
 
     def test_clone_inflight_metrics_count_two_calls_for_one_worker(self):
         from threading import Barrier
