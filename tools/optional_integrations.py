@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "src" / "mojum" / "data" / "optional_integrations.json"
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,63}\Z", re.ASCII)
+_DOMAIN_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z", re.ASCII)
 
 
 def _reject_duplicates(pairs):
@@ -85,9 +86,24 @@ def load_catalog(path=DEFAULT_CATALOG):
             seen_packages.add(name)
             if type(url) is not str or len(url) > 2048:
                 raise ValueError("invalid package reference")
-            target = urlsplit(url)
-            if (target.scheme != "https" or not target.netloc
-                    or target.username or target.password or target.fragment):
+            # This is only a static URL catalog, but malformed HTTPS strings
+            # must not be accepted as legitimate upstream package origins.
+            if any(ord(ch) < 33 or ord(ch) > 126 for ch in url):
+                raise ValueError("unsafe package reference")
+            try:
+                target = urlsplit(url)
+                hostname = target.hostname
+                # Accessing .port also rejects malformed numeric port syntax.
+                port = target.port
+            except ValueError as exc:
+                raise ValueError("malformed package reference") from exc
+            labels = hostname.split(".") if hostname else []
+            if (target.scheme != "https" or not hostname
+                    or len(hostname) > 253 or len(labels) < 2
+                    or target.netloc != hostname or port is not None
+                    or target.username is not None or target.password is not None
+                    or target.fragment
+                    or any(_DOMAIN_LABEL.fullmatch(label) is None for label in labels)):
                 raise ValueError("unsafe package reference")
     # Schema /1 is the 14-issue acceptance map, not an arbitrary URL registry.
     if seen_issues != set(range(689, 703)):
