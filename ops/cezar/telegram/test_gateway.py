@@ -17,6 +17,7 @@ class GatewayTests(unittest.TestCase):
         expected=(
             "/api/v1/health",
             "/api/v1/runs",
+            "/api/v1/fleet",
             "/api/v1/github?limit=50&refresh=1",
             "/api/v1/github/checks?prs=612,684",
         )
@@ -32,6 +33,7 @@ class GatewayTests(unittest.TestCase):
             "/api/v1/github/asset",
             "/api/v1/github/search?kind=pr&q=abc",
             "/api/v1/runs?all=true",
+            "/api/v1/fleet?refresh=1",
             "/api/v1/github?limit=999",
             "/api/v1/github?limit=0",
             "/api/v1/github?refresh=invalid",
