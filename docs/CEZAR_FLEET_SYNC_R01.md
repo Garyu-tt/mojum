@@ -30,12 +30,15 @@ external executor start/end heartbeats.
   `/slots` at ports 48081..48085, and a trusted owner-private
   minimal ChatGPT Automations inventory at
   `/var/lib/cezar/home/fleet/automations.json`.
-- Inventory is a **separately captured snapshot** of ChatGPT
-  automation metadata, *not* a continuous direct API connection.
-  It contains labels, enabled flags, last and next scheduled run
-  times, but no prompts, credentials, run output or model data.
-  It is mode 0600; the public fleet output removes automation IDs.
-  A source inventory older than 2 hours is visibly marked stale.
+- Inventory is a **timestamped ChatGPT Automations snapshot**, not
+  a continuously authenticated live executor feed. It contains labels,
+  enabled flags, last and next scheduled runs, and the recorded status
+  (e.g. completed) of the last run. It contains no prompts, credentials,
+  run result content or model data. It is mode 0600; the public fleet
+  output removes automation IDs. A snapshot older than two hours is
+  visibly marked stale. The initial five detailed run statuses were
+  independently queried through Automations.peek and were all
+  `completed` at observation time, not `in_progress`.
 - Produces owner-only atomic JSON at
   `/var/lib/cezar/home/fleet/current.json` and a public-within-
   loopback Cezar static view at
@@ -87,13 +90,23 @@ paths. Tests require no bot token and make no network calls.
 
 **Full live cross-platform worker synchronization still requires an
 explicit heartbeat from each ChatGPT/external task executor.**
-ChatGPT's schedule metadata has no running-task lease here, and the
-Cezar UI **must** display `external_running_confirmed:null` (unknown)
-until this is available. The collector is continuous for host
-model slots, Cezar runs and public GitHub view, but not for the
-independent ChatGPT Automations registry, which currently has a
-timestamped source snapshot. Do not treat a scheduled or recent
-run as live. Do not infer running workers from PRs or available
+ChatGPT's schedule metadata has no live lease that our server
+can directly subscribe to. Cezar therefore **must** display
+`external_running_confirmed:null` (unknown) until a verified
+executor heartbeat exists. The collector runs every minute for local
+model slots, Cezar runs and the public GitHub view.
+
+A separately requested new hourly ChatGPT sync automation could not be
+created: the account's five-task scheduling limit was already in use.
+Instead, the existing **peer 1/5** automation was updated, preserving
+all original BUILD/QA/SHIP instructions, to **attempt** a best-effort
+update of the owner-private ChatGPT schedule snapshot through the
+authorized JediControl/YodaBR host. This is not proof that the scheduled
+worker has the necessary tool access until a later successful refresh
+is observed. The UI intentionally marks stale source data rather than
+pretending to have full synchronization.
+
+Do not treat a scheduled or recent run as live. Do not infer running workers from PRs or available
 model capacity. Preferred next work is a least-privilege,
 source-authenticated start/heartbeat/end registry with a TTL and
 independently verified source identity, not automatic merge or
