@@ -72,15 +72,45 @@ def _read_regular_bounded(path: Path, limit: int, *, directory_fd: int | None = 
                 )
             flags = (os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
                      | getattr(os, "O_CLOEXEC", 0))
+            # The directory fd pins ancestry, but a concurrent writer may
+            # still replace a regular entry with another regular inode.
+            # Fail closed even when the replacement carries identical bytes.
+            before = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode):
+                raise SchoolContractError("school fixture contains a nonregular file")
             with os.fdopen(os.open(path.name, flags, dir_fd=directory_fd), "rb") as source:
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                opened = os.fstat(source.fileno())
+                if not stat.S_ISREG(opened.st_mode):
                     raise SchoolContractError("school fixture contains a nonregular file")
+                if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise SchoolContractError("school fixture file changed while opening")
                 payload = source.read(limit + 1)
         else:
-            if not stat.S_ISREG(path.lstat().st_mode):
+            # On platforms without a pinnable directory descriptor, bind the
+            # checked pathname to the inode that is actually read. This is a
+            # narrower fallback than POSIX dir_fd isolation, but rejects a
+            # swapped regular file, symlink or FIFO before reading its bytes.
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode):
                 raise SchoolContractError("school fixture contains a nonregular file")
-            with path.open("rb") as source:
-                payload = source.read(limit + 1)
+            flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+            descriptor = os.open(path, flags)
+            try:
+                opened = os.fstat(descriptor)
+                if (not stat.S_ISREG(opened.st_mode)
+                        or (opened.st_dev, opened.st_ino)
+                           != (before.st_dev, before.st_ino)):
+                    raise SchoolContractError(
+                        "school fixture file changed while opening")
+                with os.fdopen(descriptor, "rb") as source:
+                    descriptor = -1  # Ownership transferred to the file object.
+                    payload = source.read(limit + 1)
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
     except OSError as error:
         if error.errno == errno.ELOOP:
             raise SchoolContractError("school fixture contains a nonregular file") from error

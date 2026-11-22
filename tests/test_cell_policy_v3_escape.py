@@ -211,6 +211,83 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         ):
             CellExplorerV3Escape.from_snapshot(forged)
 
+    def test_snapshot_rejects_jointly_impossible_cell_timestamps(self):
+        policy = CellExplorerV3Escape()
+        # Visit the final cell first so dictionary order differs from tick order.
+        for tick, cell in enumerate((2, 0, 0, 1, 1, 2)):
+            sense = Proprioception(tick, "0" * 64, cell * STEP_METERS, 1.0, False)
+            policy.observe(sense, policy.decide(sense), False)
+        snapshot = policy.snapshot()
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot)
+
+        # Both early cells have two outcomes. Together they cannot finish
+        # by tick two, although each count fits its individual deadline.
+        snapshot["last_seen_at"].update({"0:25": 1, "1:25": 2})
+        with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
+    def test_snapshot_refuses_impossible_tick_and_retention_history(self):
+        # These passed the old escape snapshot envelope even though a single
+        # agent can observe only one cell per tick. Re-probes do not change it.
+        common = {
+            "schema": SCHEMA,
+            "cell_size_m": STEP_METERS,
+            "consecutive_rests": 0,
+            "consecutive_blocked_probes": 0,
+        }
+        forged = {
+            "two_cells_stamped_same_tick": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {"0:0": {"x+": [1, 0]},
+                            "1:0": {"x+": [1, 0]}},
+                "last_seen_at": {"0:0": 1, "1:0": 1},
+                "evictions": 0, "forgotten_observations": 0,
+            },
+            "stale_newest_tick": {
+                # Other guards pass: per-cell 51 <= 51 and 49 <= 99,
+                # distinct last-seen ticks, no eviction, global 100 updates.
+                # Only the final retained stamp is stale (98 vs tick 99).
+                **common, "last_tick": 99, "updates": 100,
+                "records": {"0:0": {"x+": [51, 0]},
+                            "1:0": {"x+": [49, 0]}},
+                "last_seen_at": {"0:0": 50, "1:0": 98},
+                "evictions": 0, "forgotten_observations": 0,
+            },
+            "observed_more_times_than_cell_tick": {
+                **common, "last_tick": 99, "updates": 100,
+                "records": {"0:0": {"x+": [5, 0]},
+                            "1:0": {"x+": [95, 0]}},
+                "last_seen_at": {"0:0": 0, "1:0": 99},
+                "evictions": 0, "forgotten_observations": 0,
+            },
+            "premature_eviction": {
+                **common, "last_tick": 1, "updates": 2,
+                "records": {"0:0": {"x+": [1, 0]}},
+                "last_seen_at": {"0:0": 1},
+                "evictions": 1, "forgotten_observations": 1,
+            },
+            "all_cells_evicted": {
+                **common, "last_tick": 0, "updates": 1,
+                "records": {}, "last_seen_at": {},
+                "evictions": 1, "forgotten_observations": 1,
+            },
+            "shrunk_full_table_after_eviction": {
+                **common, "last_tick": 512, "updates": 513,
+                "records": {"0:0": {"x+": [1, 0]}},
+                "last_seen_at": {"0:0": 512},
+                "evictions": 1, "forgotten_observations": 512,
+            },
+        }
+        for name, snapshot in forged.items():
+            with self.subTest(name=name), self.assertRaises(CellV3EscapeError):
+                CellExplorerV3Escape.from_snapshot(snapshot)
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "latest escape cell observation does not match tick"
+        ):
+            CellExplorerV3Escape.from_snapshot(forged["stale_newest_tick"])
+        empty = CellExplorerV3Escape().snapshot()
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(empty).snapshot(), empty)
+
     def test_tampered_escape_snapshot_is_rejected(self):
         room, start = sealed_cell()
         policy = CellExplorerV3Escape()
@@ -372,7 +449,14 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             + snapshot["forgotten_observations"],
             snapshot["updates"],
         )
-        CellExplorerV3Escape.from_snapshot(snapshot)
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot)
+        # A forged last_seen stamp cannot make evicted observations occur
+        # after the earliest retained cell's deadline.
+        stamps = snapshot["last_seen_at"]
+        earliest_cell = min(stamps, key=stamps.__getitem__)
+        stamps[earliest_cell] = 0
+        with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
 
 
 class ComparisonTests(unittest.TestCase):
