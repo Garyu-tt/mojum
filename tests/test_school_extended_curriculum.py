@@ -8,7 +8,8 @@ from mojum.school_activity import validate_catalog as validate_activity_catalog
 
 CATALOG = Path(__file__).resolve().parents[1] / "examples" / "school_catalog_r01.json"
 CORE = {"architecture", "sculpture", "logistics", "urban_planning",
-        "structural_engineering", "design", "craft_making"}
+        "structural_engineering", "design", "craft_making",
+        "game_based_learning"}
 LEVELS = {"foundation": 0, "intermediate": 1, "advanced": 2}
 
 
@@ -60,9 +61,44 @@ class SchoolExtendedCurriculumTests(unittest.TestCase):
         self.assertEqual(ids, {
             "logistics.route_01", "logistics.inventory_02",
             "logistics.scheduling_03", "logistics.disruption_04",
-            "logistics.resilience_05"})
+            "logistics.resilience_05", "logistics.factory_06"})
         self.assertIn("logistics", self.subjects["architecture"]["cross_subject_ids"])
         self.assertIn("architecture", self.subjects["logistics"]["cross_subject_ids"])
+
+
+    def test_game_reference_cases_are_optional_and_cross_subject(self):
+        games = self.subjects["game_based_learning"]
+        cases = games["reference_games"]
+        names = {case["title"] for case in cases}
+        self.assertIn("Factorio", names)
+        self.assertIn("Minecraft", names)
+        self.assertEqual(len(names), len(cases))
+        self.assertEqual(len(games["lessons"]), 6)
+        for case in cases:
+            with self.subTest(game=case["title"]):
+                self.assertEqual(case["access"], "OPTIONAL_LICENSED_GAME_OR_ORIGINAL_SIM")
+                self.assertTrue(case["learning_focus"].strip())
+                self.assertTrue(set(case["subject_ids"]) <= self.subjects.keys())
+        for sid in ("logistics", "architecture", "design", "sculpture", "music"):
+            self.assertIn("game_based_learning", self.subjects[sid]["cross_subject_ids"])
+        self.assertIn("no_mandatory_proprietary_games_or_online_services",
+                      self.catalog["principles"])
+        self.assertIn("play_without_compulsory_assessment",
+                      self.catalog["principles"])
+        self.assertIn("no_coercive_retention_or_reward_pressure",
+                      self.catalog["principles"])
+
+    def test_factorio_lab_is_curriculum_only(self):
+        logistics = self.subjects["logistics"]
+        labs = [lesson for lesson in logistics["lessons"]
+                if lesson["id"] == "logistics.factory_06"]
+        self.assertEqual(len(labs), 1)
+        self.assertIn("Factorio", labs[0]["title"])
+        self.assertIn("виртуальную минуту", labs[0]["evidence"])
+        games = self.subjects["game_based_learning"]
+        self.assertTrue(any(l["id"] == "game_based_learning.factory_03"
+                            for l in games["lessons"]))
+        self.assertEqual(games["implementation_status"], "PLANNED")
 
     def test_core_does_not_claim_executable_lessons(self):
         for subject_id in CORE:
