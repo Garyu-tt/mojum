@@ -3,9 +3,11 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.spartan_inflight_audit import AuditError, audit, main
 
 
