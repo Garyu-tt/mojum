@@ -183,6 +183,29 @@ class FleetTests(unittest.TestCase):
         self.assertNotEqual(obj["model_calls"][0]["port"],
                             obj["model_calls"][1]["port"])
 
+    def test_clone_invocations_are_truly_parallel_and_bounded(self):
+        from threading import Barrier, BoundedSemaphore
+        self.add_task("parallel-clone", clones=2)
+        # A sequential implementation would time out at the barrier,
+        # proving model replicas were not actually called concurrently.
+        both_entered = Barrier(2, timeout=3)
+        called_ports = []
+        def simultaneous(port, path, body=None, timeout=5):
+            self.assertEqual(path, "/v1/chat/completions")
+            called_ports.append(port)
+            both_entered.wait()
+            return {"choices": [{"message": {"content": "Independent proposal."}}],
+                    "usage": {"completion_tokens": 16}}
+        locks = {b.port: BoundedSemaphore(1) for b in self.backends}
+        result = fleet.single(self.db, 1, self.backends[0], self.out,
+                              others=self.backends, locks=locks,
+                              request=simultaneous)
+        self.assertEqual(result["state"], "proposal_for_independent_review")
+        self.assertEqual(result["model_calls_completed"], 2)
+        self.assertEqual(len(set(called_ports)), 2)
+        with closing(sc.connect(str(self.db))) as db:
+            self.assertEqual(sc.status(db)["states"]["review"], 1)
+
     def test_clone_fails_closed_without_second_backend(self):
         self.add_task("issue-123", clones=2)
         result = fleet.single(self.db, 1, self.backends[0], self.out,
