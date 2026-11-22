@@ -7,6 +7,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import spartan_coordinator as coordinator
@@ -123,6 +124,14 @@ class SpartanPrivateDatabaseTests(unittest.TestCase):
             with self.assertRaisesRegex(PermissionError, "parent directory"):
                 coordinator.connect(str(disguised))
             self.assertFalse((actual / "tasks.sqlite3").exists())
+
+    def test_pathlike_memory_keeps_sqlite_in_memory(self):
+        # sqlite3 accepts Path(":memory:") as an in-memory database, too.
+        # POSIX precreation must not create a literal ":memory:" disk file.
+        with patch.object(coordinator.os, "open", side_effect=AssertionError("unexpected disk file")):
+            with closing(coordinator.connect(Path(":memory:"))) as db:
+                coordinator.create_schema(db)
+                self.assertEqual(db.execute("PRAGMA database_list").fetchone()["file"], "")
 
     def test_symlink_does_not_redirect_private_database(self):
         with tempfile.TemporaryDirectory() as folder:
