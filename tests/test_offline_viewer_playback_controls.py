@@ -178,11 +178,13 @@ function loadViewer() {
  assert.equal(get("seek").disabled,true,"old seek enabled after parse error");
  assert.equal(get("seek").max,"0","malformed trace retained stale seek range");
  assert.equal(get("tick").textContent,"—","malformed trace retained stale frame");
+ assert.match(get("status").textContent,/Не удалось открыть/,"malformed trace did not show an open error");
  input.files=[{name:"synthetic.private.jsonl",size:bytes.length,
    arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];
  await input.listeners.change.call(input);
  assert.equal(get("play").disabled,false,"valid reload after malformed file rejected");
  assert.equal(get("seek").disabled,false,"seek not restored after valid reload");
+ assert.equal(get("seek").max,"2","valid reload did not restore seek range");
  assert.equal(get("tick").textContent,"0");
  assert.equal(timer.callback,null,"stale timer survived malformed-file recovery");
  process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
