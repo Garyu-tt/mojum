@@ -37,7 +37,10 @@ def make_mjcf(*, selfcollide: str = "auto", passive: bool = True) -> str:
     <geom name="floor" type="plane" size="2 2 .1" pos="0 0 {FLOOR_Z}"/>
     <geom name="collision_ball" type="sphere" size="{BALL_RADIUS}"
           pos="{BALL_CENTER[0]} {BALL_CENTER[1]} {BALL_CENTER[2]}"/>
-    <body name="cloth_anchor" mocap="true" pos="0 -.125 1.05">
+    <body name="cloth_anchor" pos="0 -.125 1.05">
+      <joint name="cloth_anchor_x" type="slide" axis="1 0 0"/>
+      <geom name="anchor_inertia" type="sphere" size=".006" mass=".01"
+            contype="0" conaffinity="0" rgba="0 0 0 0"/>
       <flexcomp name="scarf" type="grid" dim="2" count="{GRID[0]} {GRID[1]} 1"
                 spacing=".05 .05 .05" mass=".14" radius="{VERTEX_RADIUS}">
         <pin gridrange="0 0 0 {GRID[1]-1}"/>
@@ -84,15 +87,22 @@ def benchmark(mjcf: str, *, steps: int, warmup: int) -> dict:
 
     model = mujoco.MjModel.from_xml_string(mjcf)
     data = mujoco.MjData(model)
-    if model.nmocap != 1 or model.nflex != 1:
-        raise RuntimeError("unexpected model topology: require one mocap anchor and one flex")
+    if model.nmocap != 0 or model.nflex != 1:
+        raise RuntimeError("unexpected model topology: require one articulated anchor and one flex")
+    anchor = model.joint("cloth_anchor_x")
+    anchor_qpos = int(model.jnt_qposadr[anchor.id])
+    anchor_dof = int(model.jnt_dofadr[anchor.id])
     timings = []
     max_floor = 0.0
     max_sphere = 0.0
     measured = True
     for i in range(warmup + steps):
         # Deterministic, bounded movement of the pinned edge in the same world.
-        data.mocap_pos[0, 0] = .045 * math.sin(2 * math.pi * i / 160)
+        phase = 2 * math.pi * i / 160
+        # Prescribed slide motion, including velocity for elastic damping.
+        # Mocap attachments are unsupported for 2D continuum elasticity.
+        data.qpos[anchor_qpos] = .045 * math.sin(phase)
+        data.qvel[anchor_dof] = (.045 * 2 * math.pi / (160 * DT)) * math.cos(phase)
         start = time.perf_counter_ns()
         mujoco.mj_step(model, data)
         elapsed = time.perf_counter_ns() - start
