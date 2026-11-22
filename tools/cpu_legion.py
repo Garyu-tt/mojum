@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import time
 from urllib.parse import urlparse
@@ -51,6 +52,52 @@ def safe_file(root, name):
         raise ValueError("untracked context file")
     return path
 
+
+def _read_context_file(root, name):
+    """Pin trusted directory chain and read at most 16001 bytes from one inode.
+
+    Reject symlink substitutions, FIFOs/devices and files growing after a
+    separate preflight. This guards the data actually sent to the model, rather
+    than trusting an earlier pathname-based stat.
+    """
+    safe_file(root, name)  # tracked-path/scope and initial size validation
+    if (os.name != "posix" or not getattr(os, "O_NOFOLLOW", 0)
+            or not getattr(os, "O_DIRECTORY", 0)
+            or os.open not in os.supports_dir_fd):
+        raise ValueError("secure context reading needs POSIX dirfd/nofollow")
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    opened = []
+    try:
+        root_fd = os.open(root, dir_flags)
+        opened.append(root_fd)
+        parts = name.split("/")
+        for part in parts[:-1]:
+            fd = os.open(part, dir_flags, dir_fd=opened[-1])
+            opened.append(fd)
+        fd = os.open(parts[-1], file_flags, dir_fd=opened[-1])
+        opened.append(fd)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError("context file must be regular")
+        if st.st_size > 16000:
+            raise ValueError("context file too large")
+        data = bytearray()
+        while len(data) <= 16000:
+            chunk = os.read(fd, 16001 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        if len(data) > 16000:
+            raise ValueError("context file grew above 16000 bytes")
+        return data.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("cannot safely read context file") from exc
+    finally:
+        for fd in reversed(opened):
+            os.close(fd)
+
+
 def task_context(root, task):
     data = json.loads(task["payload"])
     paths = data.get("paths")
@@ -60,7 +107,7 @@ def task_context(root, task):
             not isinstance(instruction, str) or not 1 <= len(instruction) <= 3000):
         raise ValueError("task must contain bounded instruction and 1-5 paths")
     body = "\n\n".join("FILE " + p + ":\n" +
-                       safe_file(root, p).read_text(encoding="utf-8") for p in paths)
+                       _read_context_file(root, p) for p in paths)
     if len(body.encode()) > 48000:
         raise ValueError("context too large")
     return instruction + "\n\n" + body, paths
