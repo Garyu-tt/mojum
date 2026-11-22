@@ -1,4 +1,5 @@
 import os
+import stat
 import sys
 import subprocess
 import tempfile
@@ -302,6 +303,55 @@ sys.exit(1)
         self.assertEqual(out.stat().st_mode & 0o777, 0o700)
         with self.assertRaises(ValueError):
             legion._write_private_patch(out, "candidate.patch", "overwritten\\n")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_fsyncs_file_then_directory(self):
+        out = self.root / "private-sync" / "patches"
+        original = os.fsync
+        calls = []
+
+        def record(fd):
+            mode = os.fstat(fd).st_mode
+            calls.append("file" if stat.S_ISREG(mode) else
+                         "directory" if stat.S_ISDIR(mode) else "other")
+            return original(fd)
+
+        with patch.object(legion.os, "fsync", side_effect=record):
+            legion._write_private_patch(out, "candidate.patch", "durable diff\\n")
+        self.assertEqual(calls, ["file", "directory"])
+        self.assertEqual((out / "candidate.patch").read_text(), "durable diff\\n")
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_file_sync_failure_unlinks_partial(self):
+        out = self.root / "private-file-sync" / "patches"
+        with patch.object(legion.os, "fsync", side_effect=OSError("sync failure")):
+            with self.assertRaisesRegex(ValueError, "persist"):
+                legion._write_private_patch(out, "candidate.patch", "incomplete")
+        self.assertFalse((out / "candidate.patch").exists())
+
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_directory_sync_failure_unlinks_partial(self):
+        out = self.root / "private-dir-sync" / "patches"
+        original = os.fsync
+
+        def fail_directory(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError("directory sync failure")
+            return original(fd)
+
+        with patch.object(legion.os, "fsync", side_effect=fail_directory):
+            with self.assertRaisesRegex(ValueError, "persist"):
+                legion._write_private_patch(out, "candidate.patch", "incomplete")
+        self.assertFalse((out / "candidate.patch").exists())
 
     @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
                          and os.open in os.supports_dir_fd
