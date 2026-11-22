@@ -111,6 +111,10 @@ def _peak(intervals):
     live = Counter()
     active = 0
     peak_requests = peak_workers = 0
+    # Track the tie-breaker at the worker peak independently from the
+    # lifetime maximum number of simultaneous requests. The two peaks
+    # need not occur at the same time.
+    requests_at_worker_peak = 0
     peak_at_ms = None
     for at_ms, kind, worker in events:
         if kind == 0:
@@ -121,9 +125,10 @@ def _peak(intervals):
         else:
             live[worker] += 1
             active += 1
-            if (len(live), active) > (peak_workers, peak_requests):
+            peak_requests = max(peak_requests, active)
+            if (len(live), active) > (peak_workers, requests_at_worker_peak):
                 peak_workers = len(live)
-                peak_requests = active
+                requests_at_worker_peak = active
                 peak_at_ms = at_ms
     return {"peak_requests": peak_requests, "peak_distinct_workers": peak_workers,
             "peak_at_ms": peak_at_ms}
