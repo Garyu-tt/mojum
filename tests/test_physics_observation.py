@@ -75,6 +75,16 @@ class VirtualPhysicsObservationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_virtual_physics_observation(p)
 
+    def test_rejects_out_of_range_wire_clock_fields(self):
+        for field in ("tick", "time_ns"):
+            with self.subTest(field=field):
+                packet = sample()
+                packet[field] = 2**63 - 1
+                self.assertEqual(validate_virtual_physics_observation(packet)[field], 2**63 - 1)
+                packet[field] = 2**63
+                with self.assertRaises(ValueError):
+                    validate_virtual_physics_observation(packet)
+
     def test_bounded_lists(self):
         p = sample()
         p["joints"] = [copy.deepcopy(p["joints"][0]) for _ in range(257)]
