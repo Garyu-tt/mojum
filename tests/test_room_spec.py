@@ -478,5 +478,38 @@ class NumericWireRegressionTests(unittest.TestCase):
         self.assertEqual(report.summary["start"], ["1e-2", "2.0"])
 
 
+class NativeIntegerRuntimeParityTests(unittest.TestCase):
+    """Offline validator agrees with native JSON int/float room geometry."""
+
+    def test_large_integer_obstacle_does_not_round_onto_valid_start(self):
+        from mojum.world_room import Room, initial_state
+
+        boundary = 2**53
+        raw = (
+            '{"width":%d,"height":1,"obstacles":[[%d,0,1,1]],'
+            '"start":[%d,0.5]}' % (boundary + 4, boundary + 1, boundary)
+        ).encode("ascii")
+        initial_state(Room(boundary + 4, 1, ((boundary + 1, 0, 1, 1),)),
+                      float(boundary), 0.5)
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+
+    def test_explicit_float_token_still_collides_after_rounding(self):
+        from mojum.world_room import Room, initial_state
+
+        boundary = 2**53
+        raw = (
+            '{"width":%d,"height":1,"obstacles":[[%d.0,0,1,1]],'
+            '"start":[%d,0.5]}' % (boundary + 4, boundary + 1, boundary)
+        ).encode("ascii")
+        with self.assertRaisesRegex(ValueError, "invalid initial position"):
+            initial_state(Room(boundary + 4, 1,
+                               ((float(boundary + 1), 0, 1, 1),)),
+                          float(boundary), 0.5)
+        report = validate_room_bytes(raw)
+        self.assertFalse(report.valid)
+        self.assertIn("runtime float", report.errors[0])
+
+
 if __name__ == "__main__":
     unittest.main()
