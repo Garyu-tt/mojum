@@ -150,7 +150,7 @@ class SpartanInflightAuditTests(unittest.TestCase):
             chunk = b"x" * 4096
             for _ in range(2048):
                 sink.write(chunk)
-            sink.write(b"\\n")
+            sink.write(b"\n")
         gc.collect()
         was_tracing = tracemalloc.is_tracing()
         if not was_tracing:
