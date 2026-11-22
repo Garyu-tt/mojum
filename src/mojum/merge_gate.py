@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 import json
 import os
 import stat
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -651,15 +652,30 @@ def _load_snapshot(path: str) -> object:
             raise SnapshotError(f"stdin exceeds {MAX_INPUT_BYTES} bytes")
         return json.loads(data.decode("utf-8"))
 
-    # Open once and bound reads before parsing. Path.stat + read_text
-    # races a replacement with an oversized file or blocking FIFO.
+    # Open each ancestor once via pinned dir descriptors: O_NOFOLLOW on
+    # the final file alone does not reject symlinked parent directories.
+    # Fail closed when nonblocking/nofollow or openat support is unavailable.
+    if (not all(getattr(os, flag, 0) for flag in
+                ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY", "O_CLOEXEC"))
+            or os.open not in os.supports_dir_fd):
+        raise SnapshotError("secure snapshot file reads unavailable")
+    source_path = Path(path)
+    if ".." in source_path.parts or not source_path.name:
+        raise SnapshotError("snapshot parent traversal forbidden")
+    parent_fd = -1
     descriptor = -1
     try:
+        parent_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        parent_fd = os.open("/" if source_path.is_absolute() else ".", parent_flags)
+        for component in source_path.parts[:-1]:
+            if component in ("/", "."):
+                continue
+            next_fd = os.open(component, parent_flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = next_fd
         flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
-                 | getattr(os, "O_CLOEXEC", 0)
-                 | getattr(os, "O_NOFOLLOW", 0)
-                 | getattr(os, "O_NONBLOCK", 0))
-        descriptor = os.open(path, flags)
+                 | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(source_path.name, flags, dir_fd=parent_fd)
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise SnapshotError("snapshot source must be a regular file")
         with os.fdopen(descriptor, "rb") as source:
@@ -671,6 +687,8 @@ def _load_snapshot(path: str) -> object:
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+        if parent_fd >= 0:
+            os.close(parent_fd)
     if len(data) > MAX_INPUT_BYTES:
         raise SnapshotError(f"snapshot exceeds {MAX_INPUT_BYTES} bytes")
     return json.loads(data.decode("utf-8"))
