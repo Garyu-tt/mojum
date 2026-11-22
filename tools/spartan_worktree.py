@@ -1,7 +1,7 @@
 """Prepare a task-specific Git worktree from a pinned commit.
 
 Only use with a trusted repository and trusted Git configuration, under an
-operator-owned private worktree root. This does not sandbox Git filters,
+operator-owned mode-0700 worktree root. This does not sandbox Git filters,
 apply model patches, execute tests, or publish PRs.
 """
 import argparse
@@ -38,7 +38,9 @@ def _require_private_worktree_root(root: Path) -> None:
         if not stat.S_ISDIR(info.st_mode):
             raise IsolationError("worktree root path contains a non-directory")
         if depth == 0:
-            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o022)
+            # Worktrees may contain private source and generated artifacts.
+            # The root must be inaccessible to other users, not just unwritable.
+            unsafe = info.st_uid != os.geteuid() or bool(info.st_mode & 0o077)
         else:
             unsafe = (info.st_uid not in (0, os.geteuid())
                       or (bool(info.st_mode & 0o022)
