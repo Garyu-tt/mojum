@@ -228,6 +228,27 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(duplicate)
         self.assertEqual(old["status"], "finished")
 
+    def test_dispatch_rejects_symlink_and_fifo_prompt_without_claiming(self):
+        p = self.private_prompt()
+        alias = self.home / "alias.txt"
+        alias.symlink_to(p)
+        with self.assertRaises(m.AdmissionError):
+            m.dispatch(self.db, self.ident(), alias)
+        if hasattr(os, "mkfifo"):
+            pipe = self.home / "pipe.txt"
+            os.mkfifo(pipe)
+            with self.assertRaises(m.AdmissionError):
+                m.dispatch(self.db, self.ident(), pipe)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
+    def test_dispatch_rejects_symlink_in_prompt_ancestors(self):
+        p = self.private_prompt()
+        alias = Path(self.tmp.name) / "alias-parent"
+        alias.symlink_to(self.home, target_is_directory=True)
+        with self.assertRaises(m.AdmissionError):
+            m.dispatch(self.db, self.ident(), alias / p.name)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM admission").fetchone()[0], 0)
+
     def test_dispatch_refuses_nonprivate_prompt(self):
         p = self.private_prompt()
         p.chmod(0o644)
