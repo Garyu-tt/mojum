@@ -96,14 +96,20 @@
       ?m.inference_busy_known+" / "+m.capacity_slots_known+(m.capacity_complete?"":" (частично)"):"неизвестно");
     row("Открытые PR GitHub",typeof g.open_prs==="number"?g.open_prs:"неизвестно");
     const recent=Array.isArray(g.latest_open_prs)?g.latest_open_prs:[];
-    const newest=recent.filter(x=>x&&x.created_at&&Number.isFinite(Date.parse(x.created_at)))
-      .sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+    const cached=g.fallback===true;
+    const dateKey=cached?"updated_at":"created_at";
+    const newest=recent.filter(x=>x&&x[dateKey]&&Number.isFinite(Date.parse(x[dateKey])))
+      .sort((a,b)=>Date.parse(b[dateKey])-Date.parse(a[dateKey]))[0];
+    if(cached)panel.appendChild(el("p","GitHub: отображается последний локальный снимок, а не прямая связь. Данные от "+clock(g.observed_at),"fleet-warn fleet-small"));
     if(newest){
-      row("Последний созданный PR","#"+newest.number+" · "+elapsed(newest.created_at));
-      if((Date.now()-Date.parse(newest.created_at))>35*60000)
-        panel.appendChild(el("p","Новых PR не видно "+elapsed(newest.created_at)+
+      row(cached?"Последнее изменение PR (кеш)":"Последний созданный PR",
+        "#"+newest.number+" · "+elapsed(newest[dateKey]));
+      if((Date.now()-Date.parse(newest[dateKey]))>35*60000)
+        panel.appendChild(el("p",cached?
+          "В локальном снимке нет более свежих изменений PR; создание новых PR отсюда не подтверждается.":
+          "Новых PR не видно "+elapsed(newest[dateKey])+
           ". Публикации могли остановиться, но это не доказывает остановку внешних агентов.","fleet-warn fleet-small"));
-    }else row("Последний созданный PR","нет данных","fleet-warn");
+    }else row("Последняя активность PR","нет данных","fleet-warn");
 
     row("Открытые Issues GitHub",typeof g.open_issues==="number"?g.open_issues:"неизвестно");
     row("Merged в последних закрытых PR",typeof h.merged_in_visible_sample==="number"?h.merged_in_visible_sample:"неизвестно",h.snapshot_fresh===false?"fleet-warn":"");
@@ -135,8 +141,9 @@
         panel.appendChild(item);
       }
     }
-    publicRecords("Новые открытые PR (GitHub)",g.latest_open_prs,"pr","created_at");
-    publicRecords("Открытые Issues (GitHub)",g.latest_open_issues,"issue","created_at");
+    publicRecords(cached?"Недавно обновлённые PR (кеш)":"Новые открытые PR (GitHub)",
+      g.latest_open_prs,"pr",cached?"updated_at":"created_at");
+    publicRecords("Открытые Issues (GitHub)",g.latest_open_issues,"issue",cached?"updated_at":"created_at");
     if(h.available===true) {
       publicRecords("Недавние закрытые / слитые PR (GitHub)",h.recent,"pr","updated_at");
       panel.appendChild(el("p","История: "+clock(h.observed_at)+
