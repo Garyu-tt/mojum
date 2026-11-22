@@ -238,3 +238,51 @@ listener changes. The operator's private laptop URL retains the same
 path; a normal page reload should request the no-cache HTML and the
 new versioned script. Never expose this unauthenticated loopback UI on
 a public interface.
+
+## R07 live CPU QA fleet and visibility (23 Nov 2026 Kyiv)
+
+The loopback Cezar 0.20.0 owner cockpit on mirbi-linux has the r07
+versioned JavaScript fleet overlay installed and HTTP-verified. It now
+shows five *configured* ChatGPT schedules and their most recent
+owner-observed action receipts, alongside **separate** actual CPU model
+inference requests in a 17-slot QA pool. External ChatGPT live status is
+still **unknown** until verifiable ongoing executor heartbeats exist.
+
+Physical model slot inventory across the five already-running localhost
+endpoints is 2+6+4+4+1=17. This is **capacity**, not 17 distinct coding
+agents or a promise of 17 simultaneously generating model streams. The
+first unrestricted 17-request test completed only 3/17 before 14 client
+timeouts. After bounded prompt/output size and per-provider semaphores,
+the next 17-task batch completed **17/17** with no errors. The fleet is
+conservatively capped at up to two simultaneous inference requests per
+endpoint, one for the endpoint with capacity one, while retaining 17
+distinct logical QA slots and work assignments.
+
+On-host `cezar-qa-fleet-r01.timer` is enabled, running the read-only
+`qa_fleet.py` equivalent every 30 minutes. PR sources are drawn from
+the private, owner-only cache of the *public* Mojum issue/PR index. Real
+diff excerpts are fetched from the exact public
+`patch-diff.githubusercontent.com/raw/Garyu-tt/mojum/pull/N.diff`
+endpoint, without credentials, redirects or arbitrary remote URLs.
+Snapshots and dedup records are private, atomic and fail closed.
+Successful first-pass review of unchanged PRs is not repeatedly paid
+for within a day, while updated PR metadata reopens eligibility.
+
+GitHub's unauthenticated public REST core budget was observed exhausted
+(0/60 remaining); therefore the visible Cezar GitHub count now uses
+its clearly flagged local cached snapshot (47 open PRs in the verified
+sample), not a fabricated zero or a claim of live GitHub availability.
+The r07 overlay is visible by default and cache-versioned because the
+upstream static asset server sends year-long immutable caching.
+The original HTML and earlier collector/overlay files were backed up
+before installation; Cezar core and production state were not restarted.
+
+**Boundary:** This is limited first-pass model triage with up to 1,400
+characters of untrusted diff excerpt per PR; it is **not** exact-HEAD
+independent acceptance, doesn't execute code from PRs, doesn't publish
+new code PRs, doesn't approve, doesn't merge and doesn't deploy.
+A human or independent qualified QA system must still verify the full
+diff, actual tests, checked HEAD/BASE and branch rulesets. The
+authoritative source PR remains Draft pending independent QA, and this
+document is an observed on-host deployment receipt, not proof of
+merging the source branch into main.
