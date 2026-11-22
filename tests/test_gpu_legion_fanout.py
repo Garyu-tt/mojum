@@ -176,9 +176,9 @@ class FanoutContract(unittest.TestCase):
                 None,None,302,"no",{},"https://example.org")
 
     def test_nested_bounded_response_json_fails_closed(self):
-        # A 4 KiB syntactically valid JSON document exceeds the parser's
-        # recursion limit; a byte cap alone cannot prevent RecursionError.
-        payload = b"[" * 2000 + b"]" * 2000
+        # A 30 KiB syntactically valid JSON document exceeds the parser's
+        # recursion limit on Python 3.11-3.13; bytes alone are insufficient.
+        payload = b"[" * 15000 + b"]" * 15000
 
         class Response:
             status = 200
