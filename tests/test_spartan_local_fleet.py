@@ -709,5 +709,56 @@ class FleetTests(unittest.TestCase):
             fleet.main()
         self.assertEqual(json.loads(output.getvalue()), report)
 
+
+class ModelJsonDepthTests(unittest.TestCase):
+    def test_nested_json_isolated_from_healthy_backends_in_both_profiles(self):
+        # A small valid JSON array can exceed the CPython parser depth.
+        nested = b"[" * 20000 + b"0" + b"]" * 20000
+        self.assertLess(len(nested), fleet.MAX_RESPONSE)
+
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return nested[:limit]
+
+        class Opener:
+            def open(self, req, timeout):
+                return Response()
+
+        with patch.object(fleet, "build_opener", return_value=Opener()):
+            for port in (18182, 48082):
+                with self.subTest(port=port):
+                    with self.assertRaisesRegex(
+                        fleet.FleetError, "JSON nesting exceeds"
+                    ):
+                        fleet._http(port, "/slots")
+
+            def vm200_request(port, path):
+                return fleet._http(port, path) if port == 18182 else fake_server(port, path)
+
+            defaults = fleet.discover(request=vm200_request)
+            self.assertEqual({item.port for item in defaults}, {18180, 18181})
+
+            def mirbi_request(port, path):
+                if port == 48082:
+                    return fleet._http(port, path)
+                if path == "/health":
+                    return {"status": "ok"}
+                if path == "/slots":
+                    return [{"id": 0, "n_ctx": 2048, "is_processing": False}]
+                raise AssertionError(path)
+
+            mirbi = fleet.discover(request=mirbi_request, profile="mirbi-linux")
+            self.assertEqual({item.port for item in mirbi}, {48081, 48083, 48084})
+
+
 if __name__ == "__main__":
     unittest.main()
