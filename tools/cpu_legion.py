@@ -216,11 +216,20 @@ def _write_private_patch(out, name, diff):
             name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
             | getattr(os, "O_CLOEXEC", 0), 0o600, dir_fd=current_fd,
         )
-        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
-            file_fd = -1
-            handle.write(diff)
+        try:
+            with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+                file_fd = -1
+                handle.write(diff)
+                handle.flush()
+                os.fsync(handle.fileno())
+            # Commit the directory entry before the separate SQLite review
+            # state can point to this patch after an abrupt power loss.
+            os.fsync(current_fd)
+        except BaseException:
+            os.unlink(name, dir_fd=current_fd)
+            raise
     except OSError as exc:
-        raise ValueError("cannot securely write patch artifact") from exc
+        raise ValueError("cannot securely persist patch artifact") from exc
     finally:
         if file_fd >= 0:
             os.close(file_fd)
