@@ -210,6 +210,10 @@ def validate_tasks(data):
 
 
 def plan(validated, backends, *, limit=MAX_REQUESTS):
+    # A list with two entries is not proof of two physical replicas.
+    ports = [b.port for b in backends]
+    if len(ports) != len(set(ports)):
+        raise FanoutError("duplicate physical backend port")
     healthy = [b for b in backends if b.free_slots > 0]
     if not healthy:
         raise FanoutError("no free live model slots")
