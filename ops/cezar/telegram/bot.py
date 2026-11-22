@@ -24,6 +24,7 @@ API = "https://api.telegram.org/bot"
 STATE_DIR = Path("/var/lib/cezar-telegram")
 STATE_FILE = STATE_DIR / "state.json"
 LOCK = STATE_DIR / "singleton.lock"
+STATE_MAX_BYTES = 256 * 1024
 POLL_SECONDS = 70
 REPO = "Garyu-tt/mojum"
 SHORT = 84
@@ -33,6 +34,11 @@ SAFE_COMMANDS = frozenset({"start","help","status","prs","pr","ci","runs","run",
 
 class BotFailure(Exception):
     pass
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        raise BotFailure("HTTP redirect refused")
 
 
 def stable_text(value, maximum=SHORT):
@@ -48,7 +54,7 @@ def cezar_get(path):
         "Accept": "application/json", "User-Agent": "claudefabric-cezar-ui/1"
     })
     try:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         with opener.open(req, timeout=19) as r:
             if r.status != 200 or r.geturl() != BASE + path:
                 raise BotFailure("unexpected Cezar response")
@@ -67,7 +73,7 @@ def telegram(token, method, args, *, timeout=32):
         API + token + "/" + method, data=json.dumps(args,ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type":"application/json"})
     try:
-        with urllib.request.urlopen(request,timeout=timeout) as r:
+        with urllib.request.build_opener(NoRedirect()).open(request,timeout=timeout) as r:
             if r.status != 200:
                 raise BotFailure("Telegram API unavailable")
             response = json.load(r)
@@ -79,21 +85,38 @@ def telegram(token, method, args, *, timeout=32):
 
 
 def _state():
-    if not STATE_FILE.exists():
-        return {"schema":1,"offset":None,"primed":False,"alerts":True,
-                "highest_pr":0,"run_states":{},"announced":False}
-    st = os.lstat(STATE_FILE)
-    if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-            or st.st_mode & 0o077 or st.st_nlink != 1):
-        raise BotFailure("invalid private state file")
-    obj = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    if not isinstance(obj,dict) or obj.get("schema")!=1:
+    default = {"schema":1,"offset":None,"primed":False,"alerts":True,
+               "highest_pr":0,"run_states":{},"announced":False}
+    # A pathname check followed by read_text() is a symlink/replace race.
+    # Pin one descriptor, validate its inode and cap the actual bytes read.
+    try:
+        fd = os.open(STATE_FILE, os.O_RDONLY | os.O_NOFOLLOW | getattr(os,"O_CLOEXEC",0))
+    except FileNotFoundError:
+        return default
+    except OSError as exc:
+        raise BotFailure("cannot safely open private state") from exc
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_mode & 0o077 or st.st_nlink != 1
+                or st.st_size > STATE_MAX_BYTES):
+            raise BotFailure("invalid private state file")
+        with os.fdopen(fd,"rb",closefd=False) as source:
+            raw = source.read(STATE_MAX_BYTES + 1)
+        if len(raw) > STATE_MAX_BYTES:
+            raise BotFailure("private state exceeds byte budget")
+        obj = json.loads(raw)
+    finally:
+        os.close(fd)
+    if type(obj) is not dict or obj.get("schema") != 1:
         raise BotFailure("unsupported local state")
     return obj
 
 
 def save(state):
     raw = (json.dumps(state,ensure_ascii=False,separators=(",",":"))+"\n").encode()
+    if len(raw) > STATE_MAX_BYTES:
+        raise BotFailure("private state exceeds byte budget")
     temp = STATE_DIR / (".state." + str(os.getpid()))
     descriptor = os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     try:
@@ -102,6 +125,11 @@ def save(state):
             f.flush()
             os.fsync(f.fileno())
         os.replace(temp,STATE_FILE)
+        # Offset and notification dedup survive a sudden power loss only if
+        # the directory entry itself is committed after the atomic rename.
+        directory_fd = os.open(STATE_DIR,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:os.fsync(directory_fd)
+        finally:os.close(directory_fd)
     finally:
         try:temp.unlink()
         except FileNotFoundError:pass
