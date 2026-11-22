@@ -35,11 +35,12 @@ stronger model evaluation and independent QA still gate enabling them.
   The user-facing real `gh auth status` still says unauthenticated.
   The ChatGPT GitHub connector cannot inject credentials into an unrelated
   host's CLI. Never put PATs, cookies, passwords or tokens into issue content.
-- The dedicated Cezar CPU model has a larger 8192-token context. Real
-  OpenCode smoke tests show a substantial prefilling cost and sometimes
-  model-authored pseudo-tool output. That is not validated code.
+- The dedicated Cezar CPU Qwen2.5-Coder-3B endpoint was increased from
+  8192 to 16384 tokens after a real 8535-token OpenCode request exhausted
+  the prior context. Large prefill cost and model-authored pseudo-tool
+  output remain observed; the larger context is **not** proof of correct code.
 - Cezar currently has at most **one active local agent run** because
-  the selected 8k-context model serves one physical API slot.
+  the selected 16k-context model serves one physical API slot.
   Spartan's 300 logical identities/other local slots remain separate.
 
 ## Source-controlled automation definitions
@@ -100,6 +101,67 @@ Use `cez automation list` and `cez automation pause <id>` for control.
 A successful query or existing model slot is not a proof of working coding
 automation. GitHub write access belongs to a constrained PR publisher,
 separate from model execution.
+
+## Single Cezar instance and legacy deduplication (2026-11-22)
+
+The Windows laptop `DESKTOP-PUHG2PP` previously had an additional
+Cezar 0.20.0 launched through `npx cezar-run@0.20.0` in Ubuntu WSL,
+listening on loopback port 4321 for the `mechanicus-director` checkout.
+Its task queue had one completed task and no active tasks. The original
+WSL package/profile and 38 Cezar-specific Windows helper scripts/logs
+were removed **after** the historical state was archived and checksummed.
+The **original NeuroCMS and Mechanicus repositories and their histories
+were not deleted**. No task was imported into the Mojum queue.
+
+There is now one running Cezar, the Linux server instance. It remains
+bound to `127.0.0.1:4329`. A supervised SSH reverse loopback tunnel
+(`cezar-mojum-laptop-link-r01.service`) makes it available **only on the
+Windows laptop's loopback** at `127.0.0.1:14329`. The laptop's desktop
+shortcut `Cezar - Mojum (server).url` points to
+`http://127.0.0.1:14329/p/mojum/`; its health endpoint returned HTTP
+200, reporting the expected server repo path. The SSH tunnel uses a
+pinned known-host key, dedicated user key and automatic reconnect.
+The UI has no native authentication: **never** bind it to `0.0.0.0`,
+expose that port to the public Internet, or place it behind an anonymous
+proxy.
+
+The WSL backup contains task metadata for three historical projects.
+To inspect it **without executing, extracting or re-enqueuing tasks**, use
+`tools/cezar_legacy_history_index.py`:
+
+```sh
+# Paths on the server only, after creating the owner-only output directory:
+python3 -m tools.cezar_legacy_history_index \
+  --archive /var/lib/cezar/migrations/desktop-puhg2pp-cezar-20261122-r01.tar.gz \
+  --output /var/lib/cezar/home/legacy-index/desktop-puhg2pp-task-dedup-r01.json
+```
+
+The index is owner-only mode 0600, with no raw prompts, titles, secrets,
+model responses or imported runnable tasks. It uses SHA-256 of the exact
+task text **and project name**; matching text from *different projects*
+is intentionally **not** merged. Real snapshot evidence:
+
+| Legacy project | Runs | Unique task texts | Extra duplicate runs |
+| --- | ---: | ---: | ---: |
+| `neurocms-r43-review-candidate` | 9 | 2 | 7 |
+| `mechanicus-director` | 1 | 1 | 0 |
+| `neurocms-dev-r43` | 3 | 2 | 1 |
+| **Total** | **13** | **5** | **8** |
+
+All 13 historical runs were marked `done`. The index source archive
+SHA-256 is `4cc26a7e572b521338a3e9fa8c07588128ff94f515762dd84b168e204628357d`;
+the 3 original backup archives remain owner-private under
+`/var/lib/cezar/migrations`. The live Mojum Cezar queue was not
+modified and had **zero active tasks** at this inspection. No claims
+are made that historical task completions count as Mojum QA acceptance,
+and no old worktree was automatically reactivated.
+
+This history index proves archive duplicates and makes replay
+visible; it is **not yet a live cross-agent admission lock**. Before
+activating GitHub events or many workers, add a durable idempotency
+registry keyed by repository + Issue/PR identity + intended revision
+and require independent QA for any produced patch. Cezar's native
+GitHub events remain paused until that quality and admission gate exists.
 
 ## Required release invariants
 
