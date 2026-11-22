@@ -495,6 +495,8 @@ def run(db_path, folder, *, max_agents, max_jobs, backends=None,
                 "blocked": sum(r.get("state") == "blocked" for r in results),
                 "retry_queued": sum(r.get("state") == "retry_queued"
                                     for r in results),
+                "lease_expired": sum(r.get("state") == "lease_expired"
+                                      for r in results),
                 "no_task": sum(r.get("state") == "no_task" for r in results),
                 "claim_unavailable": sum(r.get("state") == "claim_unavailable"
                                          for r in results),
@@ -552,7 +554,9 @@ def main():
                  max_agents=args.agents, max_jobs=args.max_jobs,
                  max_cpu_inflight=args.max_cpu_inflight)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-    if report["claim_unavailable"] or report["worker_failures"]:
+    incomplete = ("claim_unavailable", "worker_failures", "blocked",
+                  "retry_queued", "lease_expired")
+    if any(report.get(key, 0) for key in incomplete):
         # Preserve partial work, but never claim complete batch success.
         raise SystemExit(2)
 
