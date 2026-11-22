@@ -60,6 +60,50 @@ def load_catalog(path):
     return validate_catalog(document)
 
 
+def _preflight_catalog_fragments(document):
+    """Reject giant single JSON tokens before the encoder creates them.
+
+    JSONEncoder.iterencode yields entire quoted strings and integer literals
+    as single fragments.  Byte-accounting after yield is too late to bound
+    their allocations.  This iterative, cycle-safe preflight uses only O(1)
+    size probes for primitive tokens and caps traversal work; the ordinary
+    encoder still enforces the exact final UTF-8 byte limit.
+    """
+    pending = [document]
+    seen = set()
+    visited = 0
+    while pending:
+        visited += 1
+        if visited > MAX_CATALOG_BYTES:
+            raise SchoolError("catalog byte budget exceeded")
+        value = pending.pop()
+        kind = type(value)
+        if kind is str:
+            # Even all-ASCII JSON requires at least one byte per character.
+            # Encoding/escaping can expand a permitted token at most 6-fold.
+            if len(value) > MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+        elif kind is int:
+            # Any integer with >4 bits per allowed decimal digit is too
+            # large for the wire, without materializing its decimal spelling.
+            if value.bit_length() > 4 * MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+        elif kind in (dict, list, tuple):
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if len(value) > MAX_CATALOG_BYTES:
+                raise SchoolError("catalog byte budget exceeded")
+            if kind is dict:
+                for key, child in value.items():
+                    pending.append(key)
+                    pending.append(child)
+            else:
+                pending.extend(value)
+        elif kind not in (float, bool, type(None)):
+            raise SchoolError("invalid catalog JSON encoding")
+
+
 def _validate_catalog_wire_budget(document):
     """Enforce the same bounded UTF-8 JSON contract on in-memory catalogs.
 
@@ -67,6 +111,7 @@ def _validate_catalog_wire_budget(document):
     unbounded serialized copy of caller-provided extra metadata.
     """
     try:
+        _preflight_catalog_fragments(document)
         encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True,
                                    separators=(",", ":"), allow_nan=False)
         size = 0
