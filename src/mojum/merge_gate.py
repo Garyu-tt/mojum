@@ -642,6 +642,14 @@ def fetch_snapshot(pr: int, *, gh: str = "gh") -> dict[str, object]:
     return payload
 
 
+def _decode_snapshot_bytes(data: bytes) -> object:
+    """Reject parser-depth exhaustion in bounded but deeply nested JSON."""
+    try:
+        return json.loads(data.decode("utf-8"))
+    except RecursionError as exc:
+        raise SnapshotError("snapshot JSON exceeds parser nesting limit") from exc
+
+
 def _load_snapshot(path: str) -> object:
     if path == "-":
         stream = getattr(sys.stdin, "buffer", sys.stdin)
@@ -650,7 +658,7 @@ def _load_snapshot(path: str) -> object:
             data = data.encode("utf-8")
         if len(data) > MAX_INPUT_BYTES:
             raise SnapshotError(f"stdin exceeds {MAX_INPUT_BYTES} bytes")
-        return json.loads(data.decode("utf-8"))
+        return _decode_snapshot_bytes(data)
 
     # Open each ancestor once via pinned dir descriptors: O_NOFOLLOW on
     # the final file alone does not reject symlinked parent directories.
@@ -691,7 +699,7 @@ def _load_snapshot(path: str) -> object:
             os.close(parent_fd)
     if len(data) > MAX_INPUT_BYTES:
         raise SnapshotError(f"snapshot exceeds {MAX_INPUT_BYTES} bytes")
-    return json.loads(data.decode("utf-8"))
+    return _decode_snapshot_bytes(data)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -784,7 +792,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             required=args.require,
             waivers=waivers,
         )
-    except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError) as error:
+    except (SnapshotError, FetchError, ValueError, OSError, json.JSONDecodeError, RecursionError) as error:
         _emit(
             {
                 "schema": SCHEMA,
