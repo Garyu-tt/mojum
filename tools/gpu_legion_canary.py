@@ -109,7 +109,8 @@ def call_once(endpoint: str, model: str, timeout: float, *, opener=None) -> dict
     input_tokens = _tokens(usage.get("prompt_tokens"), "prompt")
     return {
         "success": True, "endpoint": endpoint,
-        "reported_model": str(payload.get("model", ""))[:128],
+        "reported_model_matches_requested": (type(payload.get("model")) is str
+                                     and payload["model"] == model),
         "start_ns": begin, "end_ns": end,
         "latency_ms": round((end - begin) / 1000000, 2),
         "prompt_tokens_reported": input_tokens,
