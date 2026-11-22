@@ -28,10 +28,12 @@ def _check_private_sqlite_path(path: str) -> None:
     """
     db_path = Path(path)
     parent = os.lstat(db_path.parent)
-    if not stat.S_ISDIR(parent.st_mode) or parent.st_mode & 0o022:
-        raise ValueError("Spartan SQLite parent must not be group/other writable")
+    if (not stat.S_ISDIR(parent.st_mode)
+            or parent.st_uid != os.geteuid()
+            or parent.st_mode & 0o022):
+        raise ValueError("Spartan SQLite parent must be owner-controlled and not group/other writable")
 
-    owner = os.getuid()
+    owner = os.geteuid()
     for filename in (str(db_path), str(db_path) + "-wal", str(db_path) + "-shm"):
         try:
             existing = os.lstat(filename)
