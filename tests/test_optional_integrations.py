@@ -1,7 +1,9 @@
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools.optional_integrations import load_catalog
 
@@ -53,6 +55,21 @@ class OptionalIntegrationCatalogTests(unittest.TestCase):
 
     def test_oversized_registry_rejected(self):
         self.check_rejected(b"x" * (256 * 1024 + 1))
+
+    def test_oversized_input_is_never_read_unbounded(self):
+        # A full Path.read_bytes() allocates attacker-controlled file size.
+        # Guard the actual read() length, including the one-byte excess probe.
+        class BoundedSource(io.BytesIO):
+            def read(self, size=-1):
+                if size < 0 or size > 256 * 1024 + 1:
+                    raise AssertionError("catalog read exceeded byte cap")
+                return super().read(size)
+
+        source = BoundedSource(b"x" * (256 * 1024 + 2))
+        with mock.patch.object(Path, "open", return_value=source):
+            with self.assertRaisesRegex(ValueError, "oversized integration registry"):
+                load_catalog(Path("synthetic-untrusted-catalog.json"))
+        self.assertEqual(source.tell(), 256 * 1024 + 1)
 
 
 if __name__ == "__main__":
