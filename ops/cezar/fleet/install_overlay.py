@@ -17,7 +17,8 @@ SCRIPT = Path(__file__).with_name("overlay.js")
 JS_NAME = "cezar-fleet-r01.js"
 LEGACY_MARKER = '<script defer src="/assets/cezar-fleet-r01.js"></script>'
 # Immutable static assets use a one-year cache; bump this query on each update.
-MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r06"></script>'
+MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r07"></script>'
+R06_MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r06"></script>'
 R05_MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r05"></script>'
 R02_MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r02"></script>'
 R03_MARKER = '<script defer src="/assets/cezar-fleet-r01.js?v=r03"></script>'
@@ -83,7 +84,7 @@ def install(dist=DIST,script=SCRIPT,backup=BACKUP):
     if data.count("</body>")!=1:
         raise DeployRefused("unrecognized cockpit HTML shell")
     current=data.count(MARKER)
-    predecessors=(LEGACY_MARKER,R02_MARKER,R03_MARKER,R04_MARKER,R05_MARKER)
+    predecessors=(LEGACY_MARKER,R02_MARKER,R03_MARKER,R04_MARKER,R05_MARKER,R06_MARKER)
     legacy=sum(data.count(s) for s in predecessors)
     if current+legacy>1:
         raise DeployRefused("duplicate fleet script marker")
