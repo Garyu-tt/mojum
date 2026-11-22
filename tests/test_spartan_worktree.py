@@ -106,6 +106,21 @@ class WorktreeTests(unittest.TestCase):
             mod.prepare(self.repo, alias / "worktrees", "task", self.sha)
         self.assertFalse((actual_parent / "worktrees" / "task").exists())
 
+    def test_rejects_parent_traversal_before_symlink_resolution(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        alias = self.base / "alias-parent"
+        try:
+            alias.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable")
+        # The lexical ancestor chain does not contain alias-parent itself.
+        # POSIX resolves alias-parent/.. after following the symlink.
+        tricky_root = alias / ".." / "worktrees"
+        with self.assertRaises(mod.IsolationError):
+            mod.prepare(self.repo, tricky_root, "task", self.sha)
+        self.assertFalse((self.root / "task").exists())
+
     def test_rejects_unknown_commit(self):
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, self.root, "task", "f" * 40)
