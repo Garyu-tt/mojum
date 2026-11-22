@@ -529,12 +529,15 @@ def _qa_fleet():
         raise FleetError("bad QA timestamp")
     age = (NOW()-stamp).total_seconds()
     fresh = 0 <= age <= 120
+    terminal = value.get("cycle") in ("completed", "idle") and all(
+        x["state"] not in ("inflight", "waiting_model", "fetching_patch") for x in rows)
     return {"available": True,
             "source": "live local model requests; not verified final QA",
             "generated_at": value["generated_at"], "snapshot_fresh": fresh,
             "cycle": value.get("cycle"), "configured_capacity": 17,
             "assigned": value.get("assigned"),
-            "active_requests": sum(x["state"] == "inflight" for x in rows) if fresh else None,
+            "active_requests": (0 if terminal else
+                sum(x["state"] == "inflight" for x in rows) if fresh else None),
             "completed_tasks": sum(x["state"] == "completed" for x in rows),
             "failed_tasks": sum(x["state"] == "failed" for x in rows),
             "workers": rows}
