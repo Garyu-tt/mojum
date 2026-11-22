@@ -200,6 +200,33 @@ class FanoutContract(unittest.TestCase):
         with self.assertRaisesRegex(f.FanoutError, "invalid JSON response"):
             f._request_json(18180, "/health", opener=Opener())
 
+    def test_backend_duplicate_busy_flag_fails_closed(self):
+        # A repeated false value must not mask an occupied model slot.
+        payload = (b'[{"id":0,"n_ctx":2048,"is_processing":true,'
+                   b'"is_processing":false}]')
+
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return payload[:limit]
+
+        opener = Mock()
+        opener.open.return_value = Response()
+        for endpoint in ("/health", "/slots"):
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaisesRegex(
+                    f.FanoutError, "duplicate backend JSON field"
+                ):
+                    f._request_json(18180, endpoint, opener=opener)
+
     def test_infer_never_executes_generated_commands(self):
         observed=[]
         def fake(port,path,**kwargs):
