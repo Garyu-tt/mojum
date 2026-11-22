@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 MAX_EVENTS = 100_000
@@ -126,6 +129,24 @@ def _peak(intervals):
             "peak_at_ms": peak_at_ms}
 
 
+@contextmanager
+def _bounded_source(path: str | Path):
+    """Open a regular collector log without following final symlinks or FIFO stalls."""
+    descriptor = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise AuditError("collector source must be a regular file")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            yield stream
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def audit(path: str | Path, target: int = 300, max_events: int = MAX_EVENTS):
     if type(target) is not int or not 1 <= target <= 300:
         raise ValueError("target must be 1..300")
@@ -139,8 +160,10 @@ def audit(path: str | Path, target: int = 300, max_events: int = MAX_EVENTS):
     total_cost = Decimal(0)
     input_tokens = output_tokens = finished = ok = errors = count = 0
     last_ms = -1
-    with open(path, "rb") as stream:
-        for line in stream:
+    with _bounded_source(path) as stream:
+        # A normal "for line in stream" reads the *entire* attacker-sized
+        # JSONL line before any 4096-byte check can fire.
+        for line in iter(lambda: stream.readline(MAX_LINE_BYTES + 1), b""):
             count += 1
             if count > max_events:
                 raise AuditError("event count exceeds configured bound")
