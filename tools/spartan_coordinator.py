@@ -324,7 +324,9 @@ def main() -> int:
                     help="fencing attempt number returned by claim")
     commands.add_parser("status")
     args = parser.parse_args()
-    Path(args.db).parent.mkdir(parents=True, exist_ok=True)
+    # The operator must pre-create the private directory. Creating parents
+    # before connect() validates ancestry could follow a symlink and create
+    # directories outside the trusted state tree.
     db = connect(args.db)
     try:
         create_schema(db)
