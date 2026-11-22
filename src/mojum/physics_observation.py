@@ -41,13 +41,13 @@ def validate_virtual_physics_observation(payload: object) -> dict:
     """
     if type(payload) is not dict or set(payload) != _ALLOWED:
         raise ValueError("invalid virtual physics packet keys")
-    if payload["schema"] != _SCHEMA:
+    if type(payload["schema"]) is not str or payload["schema"] != _SCHEMA:
         raise ValueError("unsupported physics schema")
     if type(payload["tick"]) is not int or not 0 <= payload["tick"] <= _MAX_WIRE_I64:
         raise ValueError("invalid tick")
     if type(payload["time_ns"]) is not int or not 0 <= payload["time_ns"] <= _MAX_WIRE_I64:
         raise ValueError("invalid simulation timestamp")
-    if payload["backend"] not in ("fixture", "mujoco"):
+    if type(payload["backend"]) is not str or payload["backend"] not in ("fixture", "mujoco"):
         raise ValueError("unknown virtual physics backend")
     if (payload["synthetic"] is not True
             or payload["physical_contact"] is not False
