@@ -139,6 +139,26 @@ function loadViewer() {
  assert.equal(get("play").disabled,false);
  assert.equal(get("seek").max,"2");
  assert.ok(timer.stops>=5,"timers did not stop for every state change");
+
+ // Oversized replacement during active playback must cancel the timer before
+ // any file read, reject the new trace, and permit a clean later reload.
+ get("play").listeners.click();
+ assert.equal(timer.ms,200);
+ let oversizeRead=false;
+ input.files=[{name:"oversized.private.jsonl",size:24*1024*1024+1,
+   arrayBuffer:async()=>{oversizeRead=true;throw Error("oversize file was read");}}];
+ await input.listeners.change.call(input);
+ assert.equal(oversizeRead,false,"oversized import read bytes before rejection");
+ assert.equal(timer.callback,null,"oversized import left playback timer running");
+ assert.equal(get("play").disabled,true,"old playback remained enabled");
+ assert.equal(get("tick").textContent,"—","stale frame survived rejected import");
+ assert.match(get("status").textContent,/24 МиБ/);
+ input.files=[{name:"synthetic.private.jsonl",size:bytes.length,
+   arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];
+ await input.listeners.change.call(input);
+ assert.equal(get("play").disabled,false,"valid reload did not recover");
+ assert.equal(get("tick").textContent,"0");
+ assert.equal(timer.callback,null,"old timer survived valid recovery");
  process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
