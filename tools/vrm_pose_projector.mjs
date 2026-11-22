@@ -44,7 +44,8 @@ export function createVrmPoseProjector(vrm, bindings) {
     }
     ids.add(id);
     axes.add(bone + ':' + axis);
-    entries.push({id, bone, axis, node});
+    // Preserve the already-loaded avatar's rest pose for replay resets.
+    entries.push({id, bone, axis, node, initialRotation: node.rotation[axis]});
   }
 
   let lastTick = -1;
@@ -90,7 +91,9 @@ export function createVrmPoseProjector(vrm, bindings) {
 
   function resetReplay() {
     // Resets a *visualization* stream, never the authoritative organism.
-    entries.forEach(e => { e.node.rotation[e.axis] = 0; });
+    // A normalized humanoid bone is not guaranteed to start at zero.
+    // Reset the visualization to the captured pose, not an invented T-pose.
+    entries.forEach(e => { e.node.rotation[e.axis] = e.initialRotation; });
     lastTick = -1;
   }
 
