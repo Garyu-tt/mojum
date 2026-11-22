@@ -240,6 +240,49 @@ class GpuLegionPlanTests(unittest.TestCase):
             self.assertEqual(data["source"], "synthetic")
             self.assertEqual(devices, [])
 
+    @unittest.skipUnless(
+        os.name == "posix"
+        and all(hasattr(os, name) for name in
+                ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"))
+        and os.open in os.supports_dir_fd,
+        "secure descriptor-backed input required",
+    )
+    def test_deep_json_under_64k_is_controlled_preflight_failure(self):
+        # Deeply nested valid JSON exhausts the C JSON decoder's recursion
+        # budget long before it hits the documented file-size limit.
+        nested = "[" * 20000 + "0" + "]" * 20000
+        self.assertLess(len(nested), gpu.MAX_INPUT_BYTES)
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "deep.json"
+            snapshot.write_text(nested, encoding="ascii")
+            with self.assertRaisesRegex(gpu.InventoryError, "parser limits"):
+                gpu.load_inventory(snapshot)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = gpu.main(["--inventory", str(snapshot)])
+            self.assertEqual(rc, 2)
+            error = json.loads(stderr.getvalue())
+            self.assertIn("parser limits", error["error"])
+            self.assertFalse(error["deploy_performed"])
+            self.assertNotIn("Traceback", stderr.getvalue())
+
+    @unittest.skipUnless(
+        os.name == "posix"
+        and all(hasattr(os, name) for name in
+                ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"))
+        and os.open in os.supports_dir_fd,
+        "secure descriptor-backed input required",
+    )
+    def test_json_integer_digit_limit_is_controlled_preflight_failure(self):
+        limit = sys.get_int_max_str_digits()
+        if limit == 0 or limit + 1 > gpu.MAX_INPUT_BYTES:
+            self.skipTest("interpreter integer conversion limit is disabled/out of bounds")
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = Path(folder) / "big-int.json"
+            snapshot.write_text("9" * (limit + 1), encoding="ascii")
+            with self.assertRaisesRegex(gpu.InventoryError, "parser limits"):
+                gpu.load_inventory(snapshot)
+
     def test_imported_json_cannot_claim_hardware_verification(self):
         data, _ = p106_inventory(3)
         data["source"] = "nvidia-smi"  # Attacker-controlled label

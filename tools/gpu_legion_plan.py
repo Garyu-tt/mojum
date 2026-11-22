@@ -161,7 +161,15 @@ def load_inventory(path):
             os.close(descriptor)
     if len(raw) > MAX_INPUT_BYTES:
         raise InventoryError("GPU inventory exceeds 64 KiB")
-    data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+    try:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+    except (RecursionError, ValueError) as exc:
+        # A <64 KiB JSON document can still contain tens of thousands of
+        # nested arrays, or a numeric token that exceeds Python integer
+        # conversion limits. Report a bounded preflight error, not a traceback.
+        if isinstance(exc, (InventoryError, json.JSONDecodeError)):
+            raise
+        raise InventoryError("GPU inventory JSON exceeds parser limits") from exc
     return data, validate_inventory(data)
 
 
