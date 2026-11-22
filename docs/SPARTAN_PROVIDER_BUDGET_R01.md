@@ -52,9 +52,11 @@ Reservations are durable, even if a process crashes or the provider times out.
 - A backward wall-clock jump denies new admissions. A changed policy on an
   existing database is rejected. Persist the SQLite file and its sidecars
   securely; losing it loses the accounting evidence.
-  On POSIX the ledger requires an owner-controlled, non-writable parent,
-  rejects replaceable ancestors, symlink paths and preexisting insecure
-  DB/WAL/SHM files, and precreates new databases with mode 0600. Existing
+  On POSIX the ledger requires an absolute file path inside an owner-only
+  0700 parent, rejects replaceable ancestors and symlink paths, and rejects
+  preexisting DB/WAL/SHM files unless regular, owner-only, and single-link.
+  New databases are precreated with mode 0600. Non-POSIX platforms and hosts
+  without O_NOFOLLOW are denied until a secure implementation is available. Existing
   unsafe ledgers are **not** chmod-repaired automatically; inspect and migrate
   them explicitly before retrying. `:memory:` and SQLite URI paths are refused
   because this budget must survive process restarts.
@@ -72,9 +74,9 @@ Reservations are durable, even if a process crashes or the provider times out.
 PYTHONPATH=src python -m unittest discover -s tests -p test_spartan_budget.py -v
 ```
 
-Thirteen stdlib tests cover atomic quota caps, eight competing threads, restart
-persistence, idempotency, bad input, backward time, overrun freeze, and
-POSIX ledger/WAL privacy, symlink and directory-replacement safety. The
+Fifteen stdlib tests cover atomic quota caps, eight competing threads, restart
+persistence, idempotency, bad input, backward time, overrun freeze, and POSIX
+ledger/WAL privacy, symlinks, hardlinks, relative paths, and parent-directory safety. The
 module imports no providers or credentials and makes no network requests.
 
 The planned follow-up is to integrate this as a mandatory preflight of a
