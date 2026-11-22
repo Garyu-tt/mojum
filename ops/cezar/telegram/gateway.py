@@ -30,7 +30,12 @@ def route(path):
     parsed = urllib.parse.urlsplit(path)
     if parsed.scheme or parsed.netloc or parsed.fragment:
         return None
-    pairs = urllib.parse.parse_qs(parsed.query, strict_parsing=True)
+    try:
+        pairs = urllib.parse.parse_qs(parsed.query, strict_parsing=True)
+    except ValueError:
+        # Malformed or dangling query parameters are denied, not allowed to
+        # escape the HTTP handler before it can send a normal 404 response.
+        return None
     if parsed.path in ("/api/v1/health", "/api/v1/runs", "/api/v1/fleet") and not pairs:
         return parsed.path
     if parsed.path == "/api/v1/github":
