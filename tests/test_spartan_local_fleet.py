@@ -55,6 +55,25 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(sum(x.free for x in self.backends), 6)
         self.assertEqual(self.backends[0].model, "QwenCoder7B")
 
+    def test_gpu_gpt_reasoning_is_explicitly_low(self):
+        gpt = next(b for b in self.backends if b.model == "GPT20B")
+        seen = []
+        def capture(port, path, body=None, timeout=5):
+            seen.append(body)
+            return {"choices": [{"message": {"content": "One focused test patch."}}],
+                    "usage": {"completion_tokens": 22}}
+        result = fleet.call_model(
+            gpt, "Propose one minimal regression test only.", "test",
+            384, request=capture)
+        self.assertEqual(result["model"], "GPT20B")
+        self.assertEqual(seen[0]["reasoning_effort"], "low")
+        self.assertLessEqual(seen[0]["max_tokens"], 384)
+
+        seen.clear()
+        fleet.call_model(self.backends[0], "Propose one bounded code change.",
+                         "coder", 128, request=capture)
+        self.assertNotIn("reasoning_effort", seen[0])
+
     def test_reject_slot_metadata_that_could_overcommit(self):
         def broken(port, path, body=None, timeout=5):
             if path == "/health":
