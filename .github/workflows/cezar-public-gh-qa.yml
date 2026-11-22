@@ -7,6 +7,8 @@ on:
       - 'tools/cezar_admission.py'
       - 'tests/test_cezar_admission.py'
       - 'tools/cezar_intake.py'
+      - 'tools/cezar_reconcile.py'
+      - 'tests/test_cezar_reconcile.py'
       - 'tests/test_cezar_intake.py'
       - 'tools/cezar_legacy_history_index.py'
       - 'tests/test_cezar_legacy_history_index.py'
@@ -46,3 +48,5 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_cezar_admission.py' -v
       - name: Verify bounded label intake and one unresolved local model task
         run: python -m unittest discover -s tests -p 'test_cezar_intake.py' -v
+      - name: Verify fail-closed cancellation and historical run reconciliation
+        run: python -m unittest discover -s tests -p 'test_cezar_reconcile.py' -v
