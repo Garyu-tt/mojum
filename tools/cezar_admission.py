@@ -265,7 +265,7 @@ def _read_private_prompt(prompt_file: Path) -> bytes:
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise AdmissionError("local Cezar POST redirect refused")
+        raise AdmissionError("redirect forbidden: local Cezar POST")
 
 
 def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
