@@ -2,11 +2,15 @@
 import concurrent.futures
 from contextlib import closing
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+# The SQLite leak audit imports tests with PYTHONPATH=src, not the repo root.
+# Make the in-repository tools package importable in both discovery modes.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import spartan_capacity_probe as probe
 
 
