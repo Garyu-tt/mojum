@@ -164,7 +164,14 @@ def one_poll(db, prompts_dir: Path, *, execute=False, opener=None):
         except BaseException:
             p.unlink(missing_ok=True)
             raise
-        dispatched = admission.dispatch(db, ident, p)
+        try:
+            dispatched = admission.dispatch(db, ident, p)
+        except admission.CapacityDeferred:
+            # Another poller won the atomic cross-process slot after our
+            # optimistic pending() read. Remove only our unsubmitted prompt.
+            p.unlink(missing_ok=True)
+            summary["deferred"] += 1
+            break
         if dispatched["admitted"]:
             summary["dispatched"] += 1
         else:
