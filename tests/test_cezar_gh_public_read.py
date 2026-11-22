@@ -52,6 +52,12 @@ class CezarGhPublicReadTests(unittest.TestCase):
             ["api", "--method", "GET", "/repos/Garyu-tt/mojum/contents/README.md"],
             ["api", "--method", "GET", "/search/issues", "-f",
              "q=repo:another/repo is:pr"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr OR repo:another/repo"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr repo:another/repo"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr -org:another"],
             ["api", "--method", "GET", "repos/another/repo/issues/478/timeline"],
             ["repo", "view", "other/repo", "--json", "nameWithOwner"],
         ]
