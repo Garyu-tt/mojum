@@ -97,6 +97,45 @@ class GatewayTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     gateway.read_private_fleet()
 
+    def test_cezar_runs_redact_all_unapproved_fields(self):
+        import json
+
+        private = {
+            "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "status": "running",
+            "prNumber": 688,
+            "prompt": "DO_NOT_DISCLOSE_PRIVATE_PROMPT",
+            "credentials": {"token": "DO_NOT_DISCLOSE_API_KEY"},
+            "worker": {"private_path": "/root/secret/session"},
+        }
+        redacted = gateway.project_runs(json.dumps([private]).encode("utf-8"))
+        self.assertEqual(json.loads(redacted), [{
+            "id": private["id"],
+            "status": private["status"],
+            "prNumber": 688,
+        }])
+        for secret in ("DO_NOT_DISCLOSE_PRIVATE_PROMPT", "DO_NOT_DISCLOSE_API_KEY",
+                       "/root/secret/session", "prompt", "credentials", "worker"):
+            self.assertNotIn(secret.encode(), redacted)
+
+    def test_cezar_runs_reject_untrusted_shapes(self):
+        import json
+
+        base = {"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "status": "running", "prNumber": 688}
+        invalid = [
+            {}, {"runs": [base]}, [7], [{"id": 5, "status": "running"}],
+            [{**base, "status": "running\\nSECRET"}],
+            [{**base, "prNumber": True}],
+            [{**base, "prNumber": -1}],
+            [base] * 1001,
+        ]
+        for payload in invalid:
+            with self.subTest(kind=type(payload).__name__, size=len(payload)):
+                with self.assertRaises(ValueError):
+                    gateway.project_runs(json.dumps(payload).encode("utf-8"))
+
+
     def test_check_query_never_accepts_more_than_eight_items(self):
         self.assertIsNone(gateway.route("/api/v1/github/checks?prs="+",".join(str(x) for x in range(1,10))))
         self.assertEqual(gateway.route("/api/v1/github/checks?prs=1,2,3,4,5,6,7,8"),
