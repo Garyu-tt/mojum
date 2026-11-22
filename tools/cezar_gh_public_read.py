@@ -62,22 +62,41 @@ def parse(args):
 
     if path == "/search/issues":
         q = params.get("q", "")
-        # A prefix alone permits "repo:Mojum is:pr OR repo:other is:pr".
-        # Allow only a conjunctive, bounded subset of GitHub search syntax.
+        # Fail closed: GitHub search supports OR and free-text expressions.
+        # A repository prefix alone is not a restriction on the result set.
         terms = q.split()
         if not terms or terms[0] != "repo:" + REPO:
             raise Refused("unapproved repository scope")
         allowed = re.compile(
             r"(?:is:(?:issue|pr|open|closed)|state:(?:open|closed)|"
-            r"(?:created|updated):(?:[<>]=?)?[0-9]{4}-[0-9]{2}-[0-9]{2}|"
+            r"(?:created|updated|closed):(?:[<>]=?)?[0-9]{4}-[0-9]{2}-[0-9]{2}|"
             r"-?label:[A-Za-z0-9_.-]+)\Z"
         )
         if sum(term in ("is:issue", "is:pr") for term in terms[1:]) != 1:
             raise Refused("exactly one issue or PR qualifier required")
         if any(allowed.fullmatch(term) is None for term in terms[1:]):
             raise Refused("unsupported GitHub search operator or scope")
+        if not q.startswith("repo:" + REPO + " "):
+            raise Refused("unapproved repository scope")
+        # A valid prefix is not enough: an added repo/org/user selector or
+        # boolean OR could broaden a GitHub search beyond the pinned repo.
+        extra = q[len("repo:" + REPO + " "):]
+        if re.search(r"(?i)\b(?:repo|org|user):|\bOR\b", extra):
+            raise Refused("search must remain in the pinned repository")
+        if "is:issue" not in q and "is:pr" not in q:
+            raise Refused("missing issue or PR qualifier")
+        # For read-only PR-opened triage, ignore historical events whose
+        # pull requests are now closed, including closed-unmerged experiments.
+        # Do not change future explicit closed/merged event queries.
+        if "is:pr" in q and "created:>=" in q and "is:open" not in q:
+            q += " is:open"
         if len(q) > 400:
             raise Refused("query too large")
+        # GitHub search supports boolean OR and multiple repo: qualifiers.
+        # A required leading repo: alone does not confine the result set.
+        remainder = q[len("repo:" + REPO + " "):]
+        if re.search(r"(?i)\b(?:OR|repo:)", remainder):
+            raise Refused("unapproved repository scope")
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
         if sort not in ("updated", "created") or order != "asc":
