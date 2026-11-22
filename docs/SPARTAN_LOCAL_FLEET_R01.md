@@ -143,6 +143,20 @@ not two accepted patches.
 5. Report real active model processes, slots, in-flight requests,
    queue depth, tokens/sec, tests passing and accepted PRs separately.
 
+## Partial fleet failure visibility
+
+A single SQLite connect/schema/claim failure is recorded as
+`claim_unavailable`, without claiming lease recovery or exposing the SQL
+error message. Unexpected worker-future exceptions are sanitized as
+`worker_failed`, and completed peers' private proposals remain available.
+The worker lease is uncertain after a crash and must be reconciled through
+the existing TTL/fencing protocol; no automatic retry is performed.
+
+The batch includes `claim_unavailable` and `worker_failures` counters.
+The CLI prints the complete partial JSON summary and returns exit status
+**2** if either counter is nonzero. A partial batch is not a successful
+all-worker run and may have already consumed inference tokens.
+
 ## Instrumented concurrency accounting
 
 `scheduled_primary_workers` is the number of worker tasks submitted and is **not** actual concurrent model calls. `configured_physical_call_limit` is the sum of admitted per-backend slots. `model_invocation_attempts` counts `call_model()` attempts, including clones and failures. `observed_peak_inflight_model_calls` measures overlapping application-layer calls **after** physical semaphore admission. These are measured separately from proposals, completed model responses and the 300 registered identities. They are not proof of 300 simultaneous models or distinct provider processes.
