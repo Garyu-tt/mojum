@@ -24,6 +24,17 @@ CACHE_DIR = Path("/var/lib/cezar/home/public-gh-cache")
 MAX_BODY = 1500000
 MAX_ARG = 1200
 
+# Restrict public search to one repository and audited GitHub filters.
+# GitHub's OR / nested query grammar can otherwise widen a prefix-only repo: check.
+SEARCH_SCOPE = re.compile(
+    r"repo:Garyu-tt/mojum is:(?:issue|pr)"
+    r"(?: (?:created|updated):(?:>=|<=|>|<)?[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"| (?:is|state):(open|closed)"
+    r"| -?label:[A-Za-z0-9][A-Za-z0-9._-]{0,62}"
+    r")*\Z",
+    re.ASCII,
+)
+
 
 class Refused(ValueError):
     pass
@@ -62,10 +73,8 @@ def parse(args):
 
     if path == "/search/issues":
         q = params.get("q", "")
-        if not q.startswith("repo:" + REPO + " "):
-            raise Refused("unapproved repository scope")
-        if "is:issue" not in q and "is:pr" not in q:
-            raise Refused("missing issue or PR qualifier")
+        if not SEARCH_SCOPE.fullmatch(q):
+            raise Refused("unapproved repository scope or filters")
         if len(q) > 400:
             raise Refused("query too large")
         sort = params.get("sort", "updated")
