@@ -73,6 +73,11 @@ def parse(args):
             raise Refused("missing issue or PR qualifier")
         if len(q) > 400:
             raise Refused("query too large")
+        # GitHub search supports boolean OR and multiple repo: qualifiers.
+        # A required leading repo: alone does not confine the result set.
+        remainder = q[len("repo:" + REPO + " "):]
+        if re.search(r"(?i)\b(?:OR|repo:)", remainder):
+            raise Refused("unapproved repository scope")
         sort = params.get("sort", "updated")
         order = params.get("order", "asc")
         if sort not in ("updated", "created") or order != "asc":
