@@ -540,6 +540,36 @@ class FleetTests(unittest.TestCase):
                       backends=self.backends)
         self.assertFalse(Path(str(db_path) + ".fleet.lock").exists())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestor contract")
+    def test_fleet_does_not_create_missing_child_under_symlinked_parent(self):
+        external = self.root / "fleet-external"
+        external.mkdir(mode=0o700)
+        alias = self.root / "fleet-alias"
+        alias.symlink_to(external, target_is_directory=True)
+        child = external / "must-not-create"
+        db_path = alias / child.name / "tasks.sqlite3"
+        with self.assertRaises(fleet.FleetError):
+            fleet.run(db_path, self.out, max_agents=2, max_jobs=1,
+                      backends=self.backends)
+        self.assertFalse(child.exists(),
+                         "fleet preflight created a child through symlink ancestry")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestor contract")
+    def test_coordinator_cli_does_not_create_missing_child_through_symlink(self):
+        external = self.root / "coordinator-external"
+        external.mkdir(mode=0o700)
+        alias = self.root / "coordinator-alias"
+        alias.symlink_to(external, target_is_directory=True)
+        child = external / "must-not-create"
+        db_path = alias / child.name / "tasks.sqlite3"
+        argv = ["spartan_coordinator", "--db", str(db_path), "init",
+                "--slots", "1"]
+        with patch.object(sys, "argv", argv):
+            with self.assertRaises(OSError):
+                sc.main()
+        self.assertFalse(child.exists(),
+                         "coordinator CLI created a child through symlink ancestry")
+
     def test_fail_if_another_worker_owns_lock(self):
         import fcntl
         lock = Path(str(self.db) + ".fleet.lock")
