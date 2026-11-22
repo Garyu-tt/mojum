@@ -393,6 +393,7 @@ def _load_closed_cache():
         raise CorruptClosedCache("invalid cached PR list")
     if len(json.dumps(recent)) > 20_000:
         raise CorruptClosedCache("oversized cached PR list")
+    seen_numbers = set()
     for item in recent:
         if (type(item) is not dict
                 or set(item) != {"number", "title", "outcome", "updated_at", "merged_at"}
@@ -405,6 +406,9 @@ def _load_closed_cache():
                 or (item["merged_at"] is not None and
                     _parse_time(item["merged_at"]) is None)):
             raise CorruptClosedCache("unsafe cached PR item")
+        if item["number"] in seen_numbers:
+            raise CorruptClosedCache("duplicate cached PR number")
+        seen_numbers.add(item["number"])
     return parsed
 
 
