@@ -32,6 +32,34 @@ class CezarGhPublicReadTests(unittest.TestCase):
         self.assertIn("is%3Apr", request[0])
         self.assertFalse(include)
 
+    def test_public_search_rejects_query_scope_expansion(self):
+        # GitHub can combine secondary repo selectors and boolean operators.
+        # The adapter must never treat a pinned prefix as a sufficient scope.
+        cases = (
+            "is:pr repo:another/repo",
+            "is:issue OR is:pr",
+            "is:pr org:another",
+            "is:pr user:someone-else",
+            "is:pr -repo:Garyu-tt/mojum",
+            "is:pr (repo:another/repo)",
+            "is:pr created:>=2026-11-20 OR is:issue",
+            "is:pr arbitrary-text",
+        )
+        for suffix in cases:
+            with self.subTest(query=suffix), self.assertRaises(adapter.Refused):
+                adapter.parse([
+                    "api", "--method", "GET", "/search/issues",
+                    "-f", "q=repo:Garyu-tt/mojum " + suffix,
+                ])
+        # Narrow issue intake still supports documented date/label filters.
+        mode, request, include = adapter.parse([
+            "api", "--method", "GET", "/search/issues",
+            "-f", "q=repo:Garyu-tt/mojum is:issue label:cezar-ready updated:>=2026-11-20",
+        ])
+        self.assertEqual(mode, "api")
+        self.assertIn("label%3Acezar-ready", request[0])
+        self.assertFalse(include)
+
     def test_read_only_label_timeline_with_headers(self):
         mode, request, include = adapter.parse([
             "api", "--include", "--method", "GET",
