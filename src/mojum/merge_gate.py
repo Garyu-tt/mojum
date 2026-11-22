@@ -33,7 +33,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 import json
-from pathlib import Path
+import os
+import stat
 import re
 import subprocess
 import sys
@@ -650,10 +651,29 @@ def _load_snapshot(path: str) -> object:
             raise SnapshotError(f"stdin exceeds {MAX_INPUT_BYTES} bytes")
         return json.loads(data.decode("utf-8"))
 
-    source = Path(path)
-    if source.stat().st_size > MAX_INPUT_BYTES:
-        raise SnapshotError(f"{path} exceeds {MAX_INPUT_BYTES} bytes")
-    return json.loads(source.read_text(encoding="utf-8"))
+    # Open once and bound reads before parsing. Path.stat + read_text
+    # races a replacement with an oversized file or blocking FIFO.
+    descriptor = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_CLOEXEC", 0)
+                 | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise SnapshotError("snapshot source must be a regular file")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            data = source.read(MAX_INPUT_BYTES + 1)
+    except OSError as exc:
+        # Do not leak sensitive input paths into INVALID_INPUT reports.
+        raise SnapshotError("snapshot source unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(data) > MAX_INPUT_BYTES:
+        raise SnapshotError(f"snapshot exceeds {MAX_INPUT_BYTES} bytes")
+    return json.loads(data.decode("utf-8"))
 
 
 class _Parser(argparse.ArgumentParser):
