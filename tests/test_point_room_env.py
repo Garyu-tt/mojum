@@ -98,6 +98,21 @@ class PointRoomEnvTests(unittest.TestCase):
         observed, _, _, _, _ = env.step((0.25, 0))
         self.assertEqual(observed["tick"], 1)
 
+    def test_mutating_public_episode_budget_cannot_extend_original_limit(self):
+        env = self.make_env(max_steps=1)
+        env.reset()
+        for bad in (2, 100001, True, -1, 1.5):
+            with self.subTest(budget=bad):
+                env.max_steps = bad
+                with self.assertRaisesRegex(ValueError, "episode step budget"):
+                    env.step((0, 0))
+        env.max_steps = 1
+        observed, _, _, truncated, _ = env.step((0, 0))
+        self.assertEqual(observed["tick"], 1)
+        self.assertTrue(truncated)
+        with self.assertRaises(RuntimeError):
+            env.step((0, 0))
+
     def test_step_before_reset_refused(self):
         with self.assertRaises(RuntimeError):
             self.make_env().step((0, 0))
