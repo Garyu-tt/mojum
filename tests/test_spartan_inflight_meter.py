@@ -1,5 +1,7 @@
 """CPU-only synthetic span tests; these do not invoke an actual model API."""
 import concurrent.futures
+import os
+import stat
 import sqlite3
 import tempfile
 import unittest
@@ -128,6 +130,93 @@ class MeterTests(unittest.TestCase):
             self.assertTrue(finish(self.db, worker, f"request-{worker}",
                                    "ok", now_ms=200))
         self.assertEqual(snapshot(self.db, now_ms=201)["peak_active"], 300)
+
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_ledger_and_sidecars_are_owner_only_even_under_umask_022(self):
+        root = Path(self.temp.name) / "owned"
+        root.mkdir(mode=0o700)
+        path = root / "private.sqlite3"
+        previous = os.umask(0o022)
+        try:
+            db = connect(str(path))
+            try:
+                create_schema(db)
+                begin(db, 1, "private-one", "model.x", now_ms=100)
+                for candidate in (path, Path(str(path) + "-wal"),
+                                  Path(str(path) + "-shm")):
+                    if candidate.exists():
+                        self.assertEqual(stat.S_IMODE(candidate.stat().st_mode), 0o600)
+            finally:
+                db.close()
+        finally:
+            os.umask(previous)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_rejects_public_parent_and_symlink_directory(self):
+        root = Path(self.temp.name)
+        public = root / "world-writable"
+        public.mkdir()
+        public.chmod(0o777)
+        with self.assertRaisesRegex(PermissionError, "owner-only"):
+            connect(str(public / "meter.sqlite3"))
+        self.assertFalse((public / "meter.sqlite3").exists())
+        alias = root / "linked-directory"
+        alias.symlink_to(root, target_is_directory=True)
+        with self.assertRaisesRegex(PermissionError, "non-directory or symlink"):
+            connect(str(alias / "meter.sqlite3"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_rejects_insecure_existing_db_and_hardlinks(self):
+        path = Path(self.path)
+        path.chmod(0o644)
+        with self.assertRaisesRegex(PermissionError, "private owner-only"):
+            connect(self.path)
+        path.chmod(0o600)
+        linked = path.with_suffix(".hardlink")
+        os.link(path, linked)
+        try:
+            with self.assertRaisesRegex(PermissionError, "private owner-only"):
+                connect(self.path)
+        finally:
+            linked.unlink()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_rejects_insecure_wal_sidecar(self):
+        begin(self.db, 1, "private-sidecar", "model.x", now_ms=100)
+        wal = Path(self.path + "-wal")
+        self.assertTrue(wal.exists())
+        original_mode = stat.S_IMODE(wal.stat().st_mode)
+        wal.chmod(0o644)
+        try:
+            with self.assertRaisesRegex(PermissionError, "private owner-only"):
+                connect(self.path)
+        finally:
+            wal.chmod(original_mode)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_checks_both_wal_and_shm_even_when_wal_exists(self):
+        begin(self.db, 1, "private-shm", "model.x", now_ms=100)
+        wal = Path(self.path + "-wal")
+        shm = Path(self.path + "-shm")
+        self.assertTrue(wal.exists())
+        self.assertTrue(shm.exists())
+        original_mode = stat.S_IMODE(shm.stat().st_mode)
+        shm.chmod(0o644)
+        try:
+            with self.assertRaisesRegex(PermissionError, "private owner-only"):
+                connect(self.path)
+        finally:
+            shm.chmod(original_mode)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX private filesystem")
+    def test_rejects_relative_paths_and_symlinked_db(self):
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            connect("local.sqlite3")
+        alias = Path(self.temp.name) / "alias.sqlite3"
+        alias.symlink_to(Path(self.path))
+        with self.assertRaisesRegex(PermissionError, "private owner-only"):
+            connect(str(alias))
 
 
 if __name__ == "__main__":

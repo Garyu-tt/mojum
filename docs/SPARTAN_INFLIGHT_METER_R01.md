@@ -2,6 +2,25 @@
 
 Relates to issue #478 and dispatcher PR #477. This CPU-only stdlib component provides a **separate SQLite ledger of instrumented provider call spans**. It does not deploy 300 LLM processes, invoke a model, grant provider credentials, execute generated code, enforce spending limits or merge PRs. Synthetic unit tests only measure the SQLite mechanism.
 
+## Mandatory private SQLite storage (QA hardening)
+
+This meter records worker/model identifiers and provider usage, so its local
+SQLite database **must not** be world-readable or replaceable by another
+local account. On POSIX, `connect()` now requires an absolute normalized DB
+path in a directory owned by the current UID with mode **0700**. Ancestors
+must not be symlinked or replaceable; sticky shared ancestors (such as
+`/tmp`) are permitted only above the private directory. Existing DB,
+WAL and SHM sidecars must be regular, single-link, same-owner files with no
+group/world permissions. A missing DB is created with **O_EXCL, O_NOFOLLOW
+and 0600** before SQLite opens it. Insecure storage fails closed, without
+silently chmodding existing files or following symlinked paths.
+
+For example, prepare an owner-only `/var/lib/mojum` directory for the
+service UID before calling `connect("/var/lib/mojum/spartan-meter.sqlite3")`.
+The security check does not sandbox malicious code running as the same UID,
+and does not prevent trusted processes from altering a live DB. Non-POSIX
+storage is not admitted by this private POSIX implementation.
+
 ## Trusted provider integration
 
 Integrate at the **real synchronous model API boundary**. Only a trusted adapter may wrap an actual RPC in `track_call` and report a success after the response returns. Opaque request IDs must be unique across the ledger; models and IDs may not contain secrets, prompt text or user identifiers.
