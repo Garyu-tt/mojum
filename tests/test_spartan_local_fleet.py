@@ -201,6 +201,35 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(payload["coordinator"]["slots"], 300)
         self.assertEqual(payload["live_free_model_slots"], 6)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX private SQLite permissions")
+    def test_status_refuses_public_legacy_db_without_mutating_it(self):
+        # A read-only status request must never bypass prompt confidentiality.
+        old = self.db.read_bytes()
+        self.db.chmod(0o644)
+        argv = ["fleet", "--db", str(self.db), "--output-dir", str(self.out),
+                "--status"]
+        with patch.object(sys, "argv", argv), \
+             patch.object(fleet, "discover",
+                          side_effect=AssertionError("model probing must not run")):
+            with self.assertRaisesRegex(fleet.FleetError, "unsafe"):
+                fleet.main()
+        self.assertEqual(self.db.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.db.read_bytes(), old)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestry")
+    def test_status_refuses_symlinked_parent_without_touching_database(self):
+        alias = self.root / "alias-parent"
+        alias.symlink_to(self.root, target_is_directory=True)
+        argv = ["fleet", "--db", str(alias / self.db.name),
+                "--output-dir", str(self.out), "--status"]
+        old = self.db.read_bytes()
+        with patch.object(sys, "argv", argv), \
+             patch.object(fleet, "discover",
+                          side_effect=AssertionError("model probing must not run")):
+            with self.assertRaisesRegex(fleet.FleetError, "unsafe"):
+                fleet.main()
+        self.assertEqual(self.db.read_bytes(), old)
+
     def test_live_slots_and_cpu_gpu_inventory(self):
         self.assertEqual(len(self.backends), 3)
         self.assertEqual(sum(x.free for x in self.backends), 6)

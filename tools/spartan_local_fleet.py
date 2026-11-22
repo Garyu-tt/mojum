@@ -511,6 +511,14 @@ def main():
         db_path = Path(args.db)
         if not db_path.is_file() or db_path.is_symlink():
             raise FleetError("coordinator database missing or unsafe")
+        # Read-only is not the same as private: reject a legacy 0644 database
+        # or a replaceable/symlinked ancestor before reading any task prompts.
+        # This check must not create or migrate any SQLite state.
+        try:
+            coordinator._check_private_parent(str(db_path))
+            coordinator._check_private_file(str(db_path))
+        except (OSError, ValueError) as exc:
+            raise FleetError("coordinator database or directory unsafe") from exc
         try:
             db = sqlite3.connect(db_path.absolute().as_uri() + "?mode=ro",
                                  uri=True, timeout=30, isolation_level=None)
