@@ -2,6 +2,7 @@
 import json
 from contextlib import closing
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -497,6 +498,73 @@ class FleetTests(unittest.TestCase):
             with self.assertRaises(fleet.FleetError):
                 fleet.run(self.db, self.out, max_agents=agents, max_jobs=jobs,
                           backends=self.backends)
+
+
+    def test_sqlite_claim_failure_isolated_from_other_workers(self):
+        self.add_task("claim-one")
+        self.add_task("claim-two")
+        real_claim = sc.claim
+
+        def fail_one_claim(db, worker_id, *args, **kwargs):
+            if worker_id == 1:
+                raise sqlite3.OperationalError("SECRET SQLITE CONNECTION DETAIL")
+            return real_claim(db, worker_id, *args, **kwargs)
+
+        with patch.object(sc, "claim", side_effect=fail_one_claim), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=300, max_jobs=2,
+                               backends=self.backends)
+        self.assertEqual(report["coordinator_failures"], 1)
+        self.assertEqual(report["worker_failures"], 0)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual({x["worker"] for x in report["results"]}, {1, 2})
+        self.assertEqual(
+            next(x for x in report["results"] if x["worker"] == 1)["state"],
+            "claim_unavailable")
+        self.assertNotIn("SECRET", json.dumps(report))
+        with closing(sc.connect(str(self.db))) as db:
+            states = sc.status(db)["states"]
+        self.assertEqual(states["review"], 1)
+        self.assertEqual(states["queued"], 1)
+
+    def test_unexpected_worker_failure_keeps_other_proposals(self):
+        self.add_task("crash-one")
+        self.add_task("crash-two")
+        real_single = fleet.single
+
+        def fail_one_worker(db_path, worker_id, backend, folder, **kwargs):
+            if worker_id == 1:
+                raise RuntimeError("SECRET DEBUG TEXT MUST NOT LEAK")
+            return real_single(db_path, worker_id, backend, folder, **kwargs)
+
+        with patch.object(fleet, "single", side_effect=fail_one_worker), \
+             patch.object(fleet, "_http", side_effect=fake_server):
+            report = fleet.run(self.db, self.out, max_agents=300, max_jobs=2,
+                               backends=self.backends)
+        self.assertEqual(report["worker_failures"], 1)
+        self.assertEqual(report["coordinator_failures"], 0)
+        self.assertEqual(report["proposals"], 1)
+        self.assertEqual(
+            next(x for x in report["results"] if x["worker"] == 1)["state"],
+            "worker_failed")
+        self.assertNotIn("SECRET", json.dumps(report))
+        self.assertEqual(len(list(self.out.glob("*.json"))), 1)
+
+    def test_cli_fails_closed_on_partial_batch_without_losing_summary(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        report = {"schema": "mojum.spartan.cpu-gpu-fleet.v1",
+                  "coordinator_failures": 1, "worker_failures": 0,
+                  "proposals": 1, "results": []}
+        output = StringIO()
+        with patch.object(fleet, "run", return_value=report), \
+             patch.object(sys, "argv", ["fleet", "--db", str(self.db),
+                                      "--output-dir", str(self.out)]), \
+             redirect_stdout(output):
+            with self.assertRaises(SystemExit) as stopped:
+                fleet.main()
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertEqual(json.loads(output.getvalue()), report)
 
 
 if __name__ == "__main__":
