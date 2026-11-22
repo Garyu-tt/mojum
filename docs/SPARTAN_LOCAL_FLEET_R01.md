@@ -45,6 +45,7 @@ servers, prepare a private work directory (700) and SQLite state:
 
 ~~~sh
 install -d -m 700 /srv/alt/spartans /srv/alt/spartans/proposals
+# Do not rely on the fleet or coordinator to create missing state parents.
 python3 tools/spartan_coordinator.py \
   --db /srv/alt/spartans/tasks.sqlite3 init --slots 300
 python3 tools/spartan_coordinator.py \
