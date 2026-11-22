@@ -68,6 +68,20 @@ class VirtualPhysicsObservationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_virtual_physics_observation(p)
 
+    def test_non_string_discriminators_cannot_spoof_wire_identity(self):
+        # Python subclasses may compare equal to strings while JSON encodes
+        # them as numbers. Both selectors must be exact strings.
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other in ("mujoco", "mojum.virtual-physics-observation/1")
+
+        for field in ("schema", "backend"):
+            with self.subTest(field=field):
+                packet = sample()
+                packet[field] = PretendInt(7)
+                with self.assertRaises(ValueError):
+                    validate_virtual_physics_observation(packet)
+
     def test_rejects_bad_timestamps(self):
         for bad in (-1, True, 0.5, "2"):
             p = sample()
