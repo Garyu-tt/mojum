@@ -252,6 +252,43 @@ class CezarGhPublicReadTests(unittest.TestCase):
                 body, _ = adapter.read(url, ttl=300)
             self.assertEqual(body, b'{"kind":"trusted"}')
 
+
+    def test_cache_symlink_swap_at_descriptor_open_is_refused(self):
+        # Exercise the actual dir_fd open, not the obsolete Path.is_symlink
+        # preflight. Replace the cache entry *just before* os.open executes.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            cached = cache_dir / filename
+            cached.write_text(json.dumps({
+                "body": '{"kind":"trusted"}', "link": "",
+            }), encoding="utf-8")
+            cached.chmod(0o600)
+            foreign = Path(tmp) / "unrelated.json"
+            foreign.write_text('{"kind":"foreign"}', encoding="utf-8")
+            foreign.chmod(0o600)
+            original_open = os.open
+            observed_flags = []
+
+            def swap_at_open(path, flags, *args, **kwargs):
+                if path == filename and kwargs.get("dir_fd") is not None:
+                    observed_flags.append(flags)
+                    cached.unlink()
+                    cached.symlink_to(foreign)
+                return original_open(path, flags, *args, **kwargs)
+
+            with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
+                    adapter.os, "open", side_effect=swap_at_open):
+                with self.assertRaisesRegex(adapter.Refused, "untrusted cache entry"):
+                    adapter.read(url, ttl=300)
+            self.assertEqual(len(observed_flags), 1,
+                             "regression never reached descriptor-relative cache open")
+            self.assertTrue(observed_flags[0] & os.O_NOFOLLOW)
+            self.assertEqual(foreign.read_text(encoding="utf-8"),
+                             '{"kind":"foreign"}')
+
     def test_cache_rejects_symlink_in_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
