@@ -32,8 +32,10 @@ Both are client-side call intervals, **not** evidence that GPU kernels ran
 simultaneously; pre-request Python scheduling can also contribute to the
 interval around a failed call.
 
-The report contains model **self-reported** names and token usage, response
-latency and peak overlapping HTTP request intervals. Even 2 overlapping calls
+The report records only whether the untrusted server-reported model identifier
+matches the caller-requested model; it never prints that identifier or generated
+text. It also reports token usage, response latency and peak overlapping HTTP
+request intervals. Even 2 overlapping calls
 do NOT prove GPU kernel overlap, two separately loaded model processes,
 inference throughput, code-generation quality, correct gpt-oss-20b weights,
 or the ability to run 300 simultaneous 20B replicas. HTTP requests may overlap
