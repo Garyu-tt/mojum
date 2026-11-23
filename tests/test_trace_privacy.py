@@ -2,6 +2,7 @@
 
 import math
 import unittest
+from unittest.mock import patch
 
 from mojum.trace_privacy import (
     SCHEMA,
