@@ -78,7 +78,7 @@ class LeRobotExportTests(unittest.TestCase):
             self.load()
 
     def test_nonfinite_and_bool_vectors_fail(self):
-        for bad in [float("nan"), True, float("inf"), 1e100]:
+        for bad in [float("nan"), True, float("inf"), 1e100, 10**500]:
             with self.subTest(value=str(bad)):
                 self.rows[0]["action"] = [bad]
                 self.write()
