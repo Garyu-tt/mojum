@@ -54,6 +54,41 @@ class TestSb3Benchmark(unittest.TestCase):
         self.assertTrue(all(not e["success"] for e in first["episodes"]))
         self.assertTrue(all(e["blocked_steps"] >= 0 for e in first["episodes"]))
 
+    def test_malformed_environment_scores_fail_closed_and_close(self):
+        class BrokenEnv:
+            def __init__(self, reward, terminated, truncated, info):
+                self.reward, self.terminated = reward, terminated
+                self.truncated, self.info = truncated, info
+                self.closed = False
+
+            def reset(self, *, seed):
+                return {}, {}
+
+            def step(self, action):
+                return {}, self.reward, self.terminated, self.truncated, self.info
+
+            def close(self):
+                self.closed = True
+
+        cases = (
+            (float("nan"), True, False, {"blocked": False}),
+            (float("inf"), True, False, {"blocked": False}),
+            (10**1000, True, False, {"blocked": False}),
+            ("0.1", True, False, {"blocked": False}),
+            (True, True, False, {"blocked": False}),
+            (0.0, "true", False, {"blocked": False}),
+            (0.0, True, True, {"blocked": False}),
+            (0.0, True, False, {"blocked": "1"}),
+            (0.0, True, False, {}),
+        )
+        for i, (reward, terminated, truncated, info) in enumerate(cases):
+            with self.subTest(case=i):
+                env = BrokenEnv(reward, terminated, truncated, info)
+                with self.assertRaises(ValueError):
+                    evaluate(FrozenMoveEast(), scenes=EVAL_SCENES[:1],
+                             env_factory=lambda _scene: env)
+                self.assertTrue(env.closed)
+
     def test_evaluation_rejects_scenes_duplicated_and_bad_seed(self):
         with self.assertRaises(ValueError):
             evaluate(FrozenMoveEast(), scenes=EVAL_SCENES + EVAL_SCENES)
