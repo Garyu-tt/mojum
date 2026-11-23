@@ -160,7 +160,7 @@ class DependencyDagTests(unittest.TestCase):
                 # by exact type before treating it as an ordinary string.
                 return str.__hash__(self)
         record = row("a")
-        record[HostileString("extra")] = "value"
+        record[HostileString("id")] = record.pop("id")
         with self.assertRaisesRegex(ValueError, "native strings"):
             evaluate_dependency_dag([record])
 
