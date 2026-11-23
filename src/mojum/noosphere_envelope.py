@@ -13,10 +13,12 @@ SCHEMA = "mojum.noosphere.encrypted-envelope/1"
 ALGORITHM = "AES-256-GCM"
 _ALLOWED_VISIBILITY = frozenset({"PUBLIC", "PRIVATE", "RESTRICTED"})
 _MAX_PLAINTEXT_BYTES = 1_048_576
-_MAX_ENVELOPE_BYTES = _MAX_PLAINTEXT_BYTES + 8192
 _KEY_BYTES = 32
 _NONCE_BYTES = 12
 _TAG_BYTES = 16
+# JSON base64-encodes ciphertext, adding 4/3 expansion. Reserve the exact
+# worst-case encoded ciphertext size plus bounded metadata.
+_MAX_ENVELOPE_BYTES = 4 * ((_MAX_PLAINTEXT_BYTES + _TAG_BYTES + 2) // 3) + 8192
 _FIELDS = frozenset({
     "schema", "algorithm", "key_id", "agent_id", "visibility",
     "content_type", "nonce", "ciphertext",
