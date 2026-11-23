@@ -94,6 +94,12 @@ class WorldAirflowTests(unittest.TestCase):
             self.sample(sources=[{"id": "x", "x_mm": 1, "y_mm": 1,
                                   "vx_mm_s": 2, "vy_mm_s": 3, "extra": 4}])
 
+    def test_rejects_oversized_source_mapping_before_key_snapshot(self):
+        source = dict(self.kw["sources"][0])
+        source.update({f"unexpected_{index}": index for index in range(25_000)})
+        with self.assertRaises(AirflowError):
+            self.sample(sources=[source])
+
     def test_rejects_duplicate_ids_and_hostile_container_subclass(self):
         rows = self.kw["sources"] * 2
         with self.assertRaises(AirflowError):
