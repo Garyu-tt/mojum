@@ -132,6 +132,26 @@ class ShadowTests(unittest.TestCase):
             with self.subTest(features=features), self.assertRaises(ShadowInferenceError):
                 runner.predict(features, source_classification="PUBLIC_SYNTHETIC")
 
+    def test_huge_integer_inputs_fail_closed(self):
+        # math.isfinite(10**1000) raises OverflowError on CPython.
+        # The public boundary must raise the documented rejection instead.
+        runner = self.load()
+        for value in (10**1000, -(10**1000)):
+            with self.subTest(value_sign=value > 0):
+                with self.assertRaisesRegex(ShadowInferenceError, "unsafe input value"):
+                    runner.predict([value, 0, 0], source_classification="PUBLIC_SYNTHETIC")
+
+    def test_huge_integer_outputs_fail_closed(self):
+        original = FakeSession.result
+        try:
+            for value in (10**1000, -(10**1000)):
+                with self.subTest(value_sign=value > 0):
+                    FakeSession.result = [[value, 0]]
+                    with self.assertRaisesRegex(ShadowInferenceError, "unsafe model output"):
+                        self.load().predict([0, 0, 0], source_classification="PUBLIC_SYNTHETIC")
+        finally:
+            FakeSession.result = original
+
     def test_bad_input_width_rejected(self):
         with self.assertRaises(ShadowInferenceError):
             self.load().predict([1, 2], source_classification="PUBLIC_SYNTHETIC")
