@@ -71,6 +71,19 @@ class QueueTests(unittest.TestCase):
         with self.assertRaises(TransitionError):
             self.q.requeue(queued.job_id,expected_state="waiting_ci",now=5)
 
+    def test_ready_job_can_record_verified_merge_at_exact_head(self):
+        self.q.enqueue(12,SHA,now=1)
+        job=self.q.claim("worker",now=2)
+        ready=self.q.transition(job.job_id,job.lease_token,"ready",now=3)
+        with self.assertRaises(TransitionError):
+            self.q.record_merged(ready.job_id,expected_head_sha="b"*40,now=4)
+        merged=self.q.record_merged(ready.job_id,expected_head_sha=SHA,now=5)
+        self.assertEqual(merged.state,"merged")
+        self.assertIsNone(merged.lease_token)
+        self.assertEqual(self.q.counts()["merged"],1)
+        with self.assertRaises(TransitionError):
+            self.q.record_merged(ready.job_id,expected_head_sha=SHA,now=6)
+
     def test_invalid_transition_does_not_mutate_state(self):
         self.q.enqueue(12,SHA,now=1)
         job=self.q.claim("worker",now=2)
