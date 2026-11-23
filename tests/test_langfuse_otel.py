@@ -73,6 +73,27 @@ class LangfuseOTLPTests(unittest.TestCase):
             validate(event("ci", "passed", input_tokens=99))
         self.assertNotIn("input_tokens", validate(event("provider_result", "failed")))
 
+    def test_type_spoof_cannot_escape_privacy_allowlist(self):
+        # Library callers may provide Python objects, not only decoded JSON.
+        # Loose equality alone can admit a str subclass whose __str__ then
+        # exposes arbitrary text through the OTLP string attribute.
+        class Spoof(str):
+            def __eq__(self, other):
+                return True
+
+            def __str__(self):
+                return "PRIVATE_PROMPT_MUST_NOT_LEAVE_PROCESS"
+
+        injected = event("provider_result", "ok", model_class=Spoof("unsafe"))
+        with self.assertRaises(TelemetryError):
+            validate(injected)
+        with self.assertRaises(TelemetryError):
+            to_otlp(injected)
+        with self.assertRaises(TelemetryError):
+            validate(event(schema=Spoof("unsafe")))
+        with self.assertRaises(TelemetryError):
+            validate(event("provider_result", "ok", model_class=7))
+
     def test_summary_exact_head_and_false_success(self):
         q = event("qa", "rejected", event_id="b2367903-7a72-46e1-908c-6150df5042c5")
         other = event("qa", "rejected", event_id="5211938d-04a7-4d0d-bf55-9e7996417743", pr_head="d" * 40)
