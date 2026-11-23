@@ -75,7 +75,9 @@ def dispatch(
 
     receipt = receipt_extractor(response)
     expected = {"actual_tokens", "actual_micro_usd"}
-    if type(receipt) is not dict or set(receipt) != expected:
+    if (type(receipt) is not dict or len(receipt) != 2
+            or any(type(key) is not str for key in receipt)
+            or set(receipt) != expected):
         raise BudgetedCallError("usage receipt has an invalid shape")
     actual_tokens = receipt["actual_tokens"]
     actual_micro_usd = receipt["actual_micro_usd"]
