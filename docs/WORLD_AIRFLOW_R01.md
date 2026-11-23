@@ -21,7 +21,7 @@ sample = sample_room_airflow(
 )
 ~~~
 
-Each source is a native mapping with exactly `id`, `x_mm`, `y_mm`, `vx_mm_s`, and `vy_mm_s`. Coordinates and velocity are integer millimetres and millimetres/second. Room dimensions and obstacle geometry must align exactly to the millimetre grid. At most 32 sources are admitted; each vector component is limited to 20 m/s. A source's influence uses a deterministic inverse-square-style weight `R² / (R² + d²)` with `R = 10 m`. Components are accumulated with integer rounding, and combined output above 100 m/s is rejected. A closed obstacle intersecting the source-to-sample segment fully occludes that source.
+Each source is a native mapping with exactly `id`, `x_mm`, `y_mm`, `vx_mm_s`, and `vy_mm_s`. Coordinates and velocity are integer millimetres and millimetres/second. Room dimensions and obstacle geometry must align exactly to the millimetre grid. At most 32 sources are admitted; each vector component is limited to 20 m/s. The combined Euclidean magnitude is checked by an exact squared comparison against the 100 m/s limit (the reported integer magnitude is rounded down only after admission). Logical ticks are bounded to signed 64-bit nonnegative integers, and RoomState revision fields must be native lowercase SHA-256 strings. A source's influence uses a deterministic inverse-square-style weight `R² / (R² + d²)` with `R = 10 m`. Components are accumulated with integer rounding, and combined output above 100 m/s is rejected. A closed obstacle intersecting the source-to-sample segment fully occludes that source.
 
 ## Safety and replay boundaries
 
