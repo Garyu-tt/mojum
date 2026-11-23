@@ -1,4 +1,5 @@
 """Offline contract tests; actual sqlite-vec test activates only if pinned extra exists."""
+from contextlib import closing
 import importlib.metadata
 import math
 import sqlite3
@@ -146,8 +147,15 @@ class SqliteVecProjectionTests(unittest.TestCase):
                                  **self.args(vectors={"pub": [1, 0]}))
         self.assertEqual(summary2["count"], 1)
         self.assertEqual(len(search_index(self.index, **query, query=[1, 0])), 1)
-        with sqlite3.connect(self.index) as db:
-            db.execute("UPDATE metadata SET v = 'bad' WHERE k = 'source_head'")
+        # Data tampering must fail even if scope metadata remains unchanged.
+        with closing(sqlite3.connect(self.index)) as db:
+            with db:
+                db.execute("UPDATE records SET event_hash = 'tampered' WHERE event_id = 'pub'")
+        with self.assertRaisesRegex(VectorIndexError, "checksum"):
+            search_index(self.index, **query, query=[1, 0])
+        with closing(sqlite3.connect(self.index)) as db:
+            with db:
+                db.execute("UPDATE metadata SET v = 'bad' WHERE k = 'source_head'")
         with self.assertRaises(VectorIndexError):
             search_index(self.index, **query, query=[1, 0])
 
