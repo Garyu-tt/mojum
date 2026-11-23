@@ -201,6 +201,25 @@ class NestedGraphEditorTests(unittest.TestCase):
             with self.assertRaisesRegex(GraphError, "byte limit"):
                 _copy_json(value)
 
+    def test_preflight_counts_json_escape_expansion_before_serialization(self):
+        from mojum.graph_editor_nested import _copy_json
+        from unittest.mock import patch
+
+        # NUL expands from one UTF-8 byte to a six-byte JSON escape.
+        # Quotes and backslashes also require escaping; both keys and values
+        # must be charged before json.dumps can allocate the encoded form.
+        cases = (
+            {"value": "\\x00" * 180_000},
+            {"key\\\\": "safe"},
+            {"safe": "\\\\" * 300_000},
+        )
+        for value in cases:
+            with self.subTest(case=list(value)):
+                with patch("mojum.graph_editor_nested.json.dumps",
+                           side_effect=AssertionError("serialization must not run")):
+                    with self.assertRaisesRegex(GraphError, "byte limit"):
+                        _copy_json(value)
+
     def test_preflight_rejects_huge_integer_and_oversized_text(self):
         from mojum.graph_editor_nested import _copy_json
         for value in (10 ** 400, "x" * (1024 * 1024 + 1)):
