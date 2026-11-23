@@ -101,11 +101,19 @@ def _reject_constant(_token):
 def _normalize(value):
     if type(value) is not dict:
         raise ProfileError("profile must be a native dict")
-    if any(type(key) is not str for key in value):
-        raise ProfileError("profile keys must be native strings")
+    # The schema has exactly eight keys. Reject oversized mappings before
+    # traversing them or hashing caller-controlled key strings.
+    if len(value) != len(_FIELDS):
+        raise ProfileError("profile has missing or unknown fields")
+    if any(
+        type(key) is not str or len(key) > max(len(field) for field in _FIELDS)
+        for key in value
+    ):
+        raise ProfileError("profile keys must be bounded native strings")
     if frozenset(value) != _FIELDS:
         raise ProfileError("profile has missing or unknown fields")
-    if type(value["schema"]) is not str or value["schema"] != SCHEMA:
+    schema = value["schema"]
+    if type(schema) is not str or len(schema) != len(SCHEMA) or schema != SCHEMA:
         raise ProfileError("unsupported profile schema")
     if type(value["enabled"]) is not bool:
         raise ProfileError("enabled must be a native bool")
@@ -132,9 +140,17 @@ def _normalize(value):
 
     integrator = value["integrator"]
     solver = value["solver"]
-    if type(integrator) is not str or integrator not in _INTEGRATORS:
+    if (
+        type(integrator) is not str
+        or len(integrator) > max(map(len, _INTEGRATORS))
+        or integrator not in _INTEGRATORS
+    ):
         raise ProfileError("unsupported integrator")
-    if type(solver) is not str or solver not in _SOLVERS:
+    if (
+        type(solver) is not str
+        or len(solver) > max(map(len, _SOLVERS))
+        or solver not in _SOLVERS
+    ):
         raise ProfileError("unsupported solver")
     normalized["integrator"] = integrator
     normalized["solver"] = solver
