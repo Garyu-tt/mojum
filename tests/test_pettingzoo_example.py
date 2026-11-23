@@ -82,6 +82,26 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _normalize_adapter_actions(actions, active)
 
+    def test_adapter_normalizes_integral_scalar_actions(self):
+        from enum import IntEnum
+        from examples.pettingzoo.benchmark import _normalize_adapter_actions
+
+        class Action(IntEnum):
+            ZERO = 0
+            ONE = 1
+
+        normalized = _normalize_adapter_actions(
+            {"agent_0": Action.ZERO, "agent_1": Action.ONE},
+            ["agent_0", "agent_1"],
+        )
+        self.assertEqual(normalized, {"agent_0": 0, "agent_1": 1})
+        self.assertTrue(all(type(value) is int for value in normalized.values()))
+        with self.assertRaises(ValueError):
+            _normalize_adapter_actions(
+                {"agent_0": True, "agent_1": Action.ONE},
+                ["agent_0", "agent_1"],
+            )
+
     def test_rejects_incomplete_or_hostile_actions(self):
         env = DeterministicCoordinationEnv()
         env.reset(seed=1)
