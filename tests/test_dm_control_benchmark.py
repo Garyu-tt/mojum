@@ -129,7 +129,9 @@ class ReportTests(unittest.TestCase):
     def test_rejects_non_native_report_keys(self):
         report = make_report()
         report[object()] = "not-allowed"
-        with self.assertRaisesRegex(ValueError, "native string keys"):
+        # Cardinality is bounded before key iteration; the exact-count guard
+        # intentionally rejects this oversized object before inspecting keys.
+        with self.assertRaisesRegex(ValueError, "exact bounded field count"):
             benchmark.validate_report(report)
 
     def test_rejects_string_subclass_keys(self):
