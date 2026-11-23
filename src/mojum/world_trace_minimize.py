@@ -29,7 +29,10 @@ class TraceMinimizeError(ValueError):
 
 
 def _keys(value: object, required: set[str], optional: set[str] = frozenset()) -> dict:
-    if type(value) is not dict or not required.issubset(value) or set(value) - required - optional:
+    if (type(value) is not dict
+            or any(type(key) is not str for key in value)
+            or not required.issubset(value)
+            or set(value) - required - optional):
         raise TraceMinimizeError("invalid object fields")
     return value
 
