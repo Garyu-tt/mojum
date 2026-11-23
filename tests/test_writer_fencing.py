@@ -15,7 +15,7 @@ class WriterFenceTests(unittest.TestCase):
         self.assertIsInstance(first, FenceDecision)
         self.assertTrue(first.accepted)
         self.assertEqual(first.reason, "ACCEPTED_INITIAL")
-        self.assertEqual(len(first.receipt), 64)
+        self.assertEqual(len(first.receipt), 64)\n        self.assertEqual(evaluate_writer_fence(token(epoch=2)).reason,\n                         "REJECT_MALFORMED")
 
     def test_same_owner_must_advance_revision(self):
         old = token(epoch=4, revision=8)
