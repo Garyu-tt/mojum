@@ -28,6 +28,7 @@ class ArchivePathAdmissionTests(unittest.TestCase):
             "a\\b", "a/./b", "a/..", "a/evil.", "a/evil ",
             "a/\x00b", "a/\nb", "a/\x7fb", "a" * 1025,
             "x/" + "z" * 256, "a/\ud800",
+            "a/file:stream", "a/C:relative", "file.txt:payload",
         )
         for path in bad:
             with self.subTest(path=repr(path)), self.assertRaises(ArchivePathError):
