@@ -49,6 +49,41 @@ class CausalTailTests(unittest.TestCase):
         with self.assertRaisesRegex(CellV3EscapeError, "terminal streak counters"):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
+    def test_round_trip_streaks_beyond_four_entry_evidence_window(self):
+        for streak in (4, 5, 10):
+            with self.subTest(streak=streak):
+                snapshot = CellExplorerV3Escape().snapshot()
+                snapshot.update({
+                    "last_tick": streak - 1,
+                    "updates": streak,
+                    "records": {"0:0": {"rest": [streak, 0]}},
+                    "last_seen_at": {"0:0": streak - 1},
+                    "consecutive_rests": streak,
+                    "outcome_tail": [
+                        {"tick": tick, "cell": "0:0", "action": "rest", "blocked": False}
+                        for tick in range(streak - 4, streak)
+                    ],
+                    "history_complete": True,
+                })
+                restored = CellExplorerV3Escape.from_snapshot(snapshot)
+                self.assertEqual(restored.snapshot(), snapshot)
+
+                blocked = CellExplorerV3Escape().snapshot()
+                blocked.update({
+                    "last_tick": streak - 1,
+                    "updates": streak,
+                    "records": {"0:0": {"x+": [streak, streak]}},
+                    "last_seen_at": {"0:0": streak - 1},
+                    "consecutive_blocked_probes": streak,
+                    "outcome_tail": [
+                        {"tick": tick, "cell": "0:0", "action": "x+", "blocked": True}
+                        for tick in range(streak - 4, streak)
+                    ],
+                    "history_complete": True,
+                })
+                restored = CellExplorerV3Escape.from_snapshot(blocked)
+                self.assertEqual(restored.snapshot(), blocked)
+
     def test_legacy_zero_streak_snapshot_is_upgraded(self):
         legacy = CellExplorerV3Escape().snapshot()
         legacy.pop("snapshot_version")
