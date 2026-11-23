@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 
 CONSENT_SCHEMA = "mojum.noosphere.source-consent/1"
