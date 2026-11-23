@@ -41,7 +41,8 @@ class WhisperCPPProbeError(ValueError):
 def _manifest(value):
     if type(value) is not dict or set(value) != _MANIFEST_KEYS:
         raise WhisperCPPProbeError("exact synthetic audio manifest required")
-    if (value["schema"] != AUDIO_SCHEMA
+    if (any(type(value[key]) is not str for key in ("schema", "visibility", "origin"))
+            or value["schema"] != AUDIO_SCHEMA
             or value["visibility"] != "PUBLIC"
             or value["origin"] != "synthetic_fixture"
             or value["opt_in"] is not True):
@@ -74,7 +75,13 @@ def _validated_wav(blob):
     return frames
 
 
-def _verified_local_file(path, expected_hash, *, limit, executable=False):
+def _stage_verified_file(path, expected_hash, *, limit, executable, destination):
+    """Pin source *bytes* into an owner-private file before process execution.
+
+    A verified source pathname is not stable: rename/replace between hashing
+    and spawn would silently run different code or weights. The child receives
+    only these SHA-verified staged paths, not the caller's mutable paths.
+    """
     if type(expected_hash) is not str or _HASH.fullmatch(expected_hash) is None:
         raise WhisperCPPProbeError("explicit lowercase SHA-256 pin required")
     if not isinstance(path, (str, Path)):
@@ -82,22 +89,33 @@ def _verified_local_file(path, expected_hash, *, limit, executable=False):
     raw = Path(path)
     if not raw.is_absolute() or raw.is_symlink():
         raise WhisperCPPProbeError("backend paths must be absolute and not symlinks")
+    destination = Path(destination)
+    mode = 0o700 if executable else 0o600
     try:
-        metadata = raw.stat()
-        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= limit:
-            raise WhisperCPPProbeError("backend file is not a bounded regular file")
-        if executable and not os.access(raw, os.X_OK):
-            raise WhisperCPPProbeError("backend binary is not executable")
-        digest = hashlib.sha256()
-        with raw.open("rb") as stream:
-            while chunk := stream.read(1024 * 1024):
-                digest.update(chunk)
-        if digest.hexdigest() != expected_hash:
-            raise WhisperCPPProbeError("backend SHA-256 mismatch")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(raw, flags)
+        with os.fdopen(fd, "rb") as source:
+            metadata = os.fstat(source.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= limit:
+                raise WhisperCPPProbeError("backend file is not a bounded regular file")
+            if executable and (not (metadata.st_mode & 0o111) or not os.access(raw, os.X_OK)):
+                raise WhisperCPPProbeError("backend binary is not executable")
+            output_fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            digest = hashlib.sha256()
+            copied = 0
+            with os.fdopen(output_fd, "wb") as output:
+                while chunk := source.read(1024 * 1024):
+                    copied += len(chunk)
+                    if copied > limit:
+                        raise WhisperCPPProbeError("backend staged file exceeds byte budget")
+                    digest.update(chunk)
+                    output.write(chunk)
+            if copied != metadata.st_size or digest.hexdigest() != expected_hash:
+                raise WhisperCPPProbeError("backend SHA-256 mismatch")
+        destination.chmod(mode)
     except OSError as exc:
-        raise WhisperCPPProbeError("backend path is unavailable") from exc
-    return str(raw)
-
+        raise WhisperCPPProbeError("backend path or private staging unavailable") from exc
+    return str(destination)
 
 def _clean_transcript(raw):
     try:
@@ -162,12 +180,17 @@ def run_whispercpp_probe(
         raise WhisperCPPProbeError("timeout must be finite 1..120 seconds")
     if frozen_reference is not None:
         compare_transcript(frozen_reference, "")
-    executable = _verified_local_file(executable_path, executable_sha256,
-                                      limit=MAX_EXECUTABLE_BYTES, executable=True)
-    model = _verified_local_file(model_path, model_sha256, limit=MAX_MODEL_BYTES)
-    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="mojum-whisper-synthetic-") as tmp:
         os.chmod(tmp, 0o700)
+        executable = _stage_verified_file(
+            executable_path, executable_sha256, limit=MAX_EXECUTABLE_BYTES,
+            executable=True, destination=Path(tmp) / "whisper-cli",
+        )
+        model = _stage_verified_file(
+            model_path, model_sha256, limit=MAX_MODEL_BYTES,
+            executable=False, destination=Path(tmp) / "model.bin",
+        )
+        started = time.monotonic()
         audio_path = Path(tmp) / "public-synthetic.wav"
         fd = os.open(audio_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as stream:
