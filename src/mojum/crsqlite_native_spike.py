@@ -132,9 +132,7 @@ def _run_bounded_child(args, *, cwd, env, timeout):
             thread.join(timeout=1)
         if any(thread.is_alive() for thread in threads):
             # Descendants can inherit pipe handles; never trust such a result.
-            overflow.set()
-            child.stdout.close()
-            child.stderr.close()
+            overflow.set()  # Daemon readers remain bounded; avoid blocking close().
     if overflow.is_set():
         raise RuntimeError("native extension probe output limit exceeded")
     return subprocess.CompletedProcess(args, child.returncode, bytes(stdout), bytes(stderr))
