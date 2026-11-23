@@ -94,7 +94,7 @@ class LocalProviderTests(unittest.TestCase):
         self.assertEqual(budget.status(self.db)["requests"], 0)
 
     def test_rate_is_fail_closed_and_expires_after_one_minute(self):
-        policy = provider.ProviderPolicy("litellm_proxy", "local-model", 4000,
+        policy = provider.ProviderPolicy("llama_cpp", "local-model", 4000,
                                        enabled=True, requests_per_minute=1,
                                        max_output_tokens=16)
         p = self.adapter(policy=policy)
@@ -105,6 +105,16 @@ class LocalProviderTests(unittest.TestCase):
         self.call(p, "two")
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(budget.status(self.db)["requests"], 2)
+
+    def test_unverified_litellm_proxy_denied_before_ledger_or_transport(self):
+        policy = provider.ProviderPolicy("litellm_proxy", "local-model", 4000,
+                                       enabled=True, max_output_tokens=16)
+        adapter = self.adapter(policy=policy)
+        for request_id in ("proxy-denied-1", "proxy-denied-2"):
+            with self.assertRaisesRegex(provider.ProviderDenied, "billable"):
+                self.call(adapter, request_id)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(budget.status(self.db)["requests"], 0)
 
     def test_process_concurrency_cap(self):
         entered, release = Event(), Event()

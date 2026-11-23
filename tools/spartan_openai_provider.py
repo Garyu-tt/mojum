@@ -152,6 +152,11 @@ class LocalOpenAIProvider:
         policy = self.policy
         if not policy.enabled:
             raise ProviderDenied("provider not opted in")
+        # A loopback LiteLLM proxy can route to billable cloud upstreams.
+        # No trusted upstream routing attestation or USD settlement exists yet:
+        # a zero-USD reservation would bypass the durable spending ceiling.
+        if policy.provider == "litellm_proxy":
+            raise ProviderDenied("LiteLLM proxy routing may be billable; USD admission not implemented")
         if type(prompt) is not str:
             raise ProviderDenied("prompt must be text")
         try:
