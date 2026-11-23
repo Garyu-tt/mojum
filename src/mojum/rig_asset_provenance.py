@@ -62,7 +62,8 @@ def verify_rig_assets(manifest: object, contents: object) -> dict:
         "schema", "classification", "source", "joints", "assets",
         "calibration_evidence_asset",
     }, "manifest")
-    if m["schema"] != SCHEMA or type(m["schema"]) is not str:
+    # Reject hostile equality hooks before comparing the version selector.
+    if type(m["schema"]) is not str or m["schema"] != SCHEMA:
         raise RigProvenanceError("unsupported rig provenance schema")
     if type(m["classification"]) is not str or m["classification"] not in {
         "synthetic_unverified", "calibration_claim_unverified",
