@@ -19,6 +19,29 @@ MAX_RECORDS = 10_000
 _MAX_SEED_BYTES = 256
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _PARTITIONS = ("train", "validation", "test")
+_VIEW_KEYS = frozenset({"schema", "records", "sha256"})
+_RECORD_KEYS = frozenset({"id", "source", "tick", "observation"})
+_SPLIT_KEYS = frozenset({
+    "schema", "source_view_sha256", "assignment", "seed",
+    "weights", "train", "validation", "test", "manifest_sha256",
+})
+
+
+def _native_keys(value, expected):
+    # Check native key types before any equality/hash-based key-set comparison.
+    return (type(value) is dict and all(type(key) is str for key in value)
+            and value.keys() == expected)
+
+
+def _native_record(value):
+    return (
+        _native_keys(value, _RECORD_KEYS)
+        and type(value["id"]) is str and 0 < len(value["id"]) <= 256
+        and type(value["source"]) is str and 0 < len(value["source"]) <= 256
+        and type(value["tick"]) is int and 0 <= value["tick"] <= 2**63 - 1
+        and type(value["observation"]) is str
+        and len(value["observation"]) <= 4096
+    )
 
 
 def _canonical(value):
@@ -34,8 +57,8 @@ def _digest(value):
 
 def _admit_public_view(view):
     """Verify the complete canonical PUBLIC digest before considering any split."""
-    if (type(view) is not dict
-            or set(view) != {"schema", "records", "sha256"}
+    if (not _native_keys(view, _VIEW_KEYS)
+            or type(view["schema"]) is not str
             or view["schema"] != VIEW_SCHEMA
             or type(view["sha256"]) is not str
             or _HEX64.fullmatch(view["sha256"]) is None
@@ -46,9 +69,7 @@ def _admit_public_view(view):
     synthetic = []
     sources = set()
     for record in view["records"]:
-        if (type(record) is not dict
-                or set(record) != {"id", "source", "tick", "observation"}
-                or type(record["source"]) is not str):
+        if not _native_record(record):
             raise ValueError("invalid PUBLIC dataset record")
         # Only records with the documented projected wire keys can enter.
         # Do not accept raw episodes, hidden/private visibility fields, or
@@ -142,16 +163,31 @@ def verify_public_split(view, split):
 
     Returns True or raises ValueError; SHA-256 never proves signer identity.
     """
-    if (type(split) is not dict
-            or set(split) != {
-                "schema", "source_view_sha256", "assignment", "seed",
-                "weights", "train", "validation", "test", "manifest_sha256",
-            }
-            or split["schema"] != SCHEMA
+    if (not _native_keys(split, _SPLIT_KEYS)
+            or type(split["schema"]) is not str or split["schema"] != SCHEMA
+            or type(split["assignment"]) is not str
             or split["assignment"] != ASSIGNMENT
-            or type(split["weights"]) is not dict
-            or set(split["weights"]) != set(_PARTITIONS)):
+            or type(split["source_view_sha256"]) is not str
+            or _HEX64.fullmatch(split["source_view_sha256"]) is None
+            or type(split["manifest_sha256"]) is not str
+            or _HEX64.fullmatch(split["manifest_sha256"]) is None
+            or not _native_keys(split["weights"], _PARTITIONS)):
         raise ValueError("invalid dataset split manifest")
+    # Adversarial in-memory output must be bounded and contain only native
+    # scalars before canonical JSON encoding can inspect it.
+    count = 0
+    for name in _PARTITIONS:
+        part = split[name]
+        if (not _native_keys(part, _VIEW_KEYS)
+                or type(part["schema"]) is not str
+                or part["schema"] != VIEW_SCHEMA
+                or type(part["sha256"]) is not str
+                or _HEX64.fullmatch(part["sha256"]) is None
+                or type(part["records"]) is not list):
+            raise ValueError("invalid split partition")
+        count += len(part["records"])
+        if count > MAX_RECORDS or any(not _native_record(row) for row in part["records"]):
+            raise ValueError("invalid or overbudget split records")
     weights = split["weights"]
     expected = split_public_view(
         view, seed=split["seed"], train=weights["train"],
@@ -162,6 +198,6 @@ def verify_public_split(view, split):
     try:
         if _canonical(split) != _canonical(expected):
             raise ValueError("dataset split contents or digest do not match")
-    except (TypeError, ValueError, UnicodeError, OverflowError) as exc:
+    except (TypeError, ValueError, UnicodeError, OverflowError, RecursionError) as exc:
         raise ValueError("invalid dataset split encoding or contents") from exc
     return True
