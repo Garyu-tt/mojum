@@ -2,7 +2,6 @@
 
 import copy
 import json
-import math
 import unittest
 from pathlib import Path
 
@@ -60,10 +59,12 @@ class GraphRevisionDiffTests(unittest.TestCase):
         self.assertNotIn(FIXTURE["id"], json.dumps(result))
 
     def test_json_type_changes_do_not_hide_behind_bool_integer_equality(self):
-        after = copy.deepcopy(FIXTURE)
+        before = copy.deepcopy(FIXTURE)
+        before["nodes"][0]["config"]["enabled"] = 1
+        after = copy.deepcopy(before)
         # Python considers True == 1; the JSON wire intentionally does not.
-        after["nodes"][0]["config"]["bpm"] = True
-        result = compare_revisions(FIXTURE, after)
+        after["nodes"][0]["config"]["enabled"] = True
+        result = compare_revisions(before, after)
         self.assertEqual(result["change_counts"]["node_config_changed"], 1)
         self.assertTrue(result["semantic_changed"])
 
@@ -139,9 +140,11 @@ class GraphRevisionDiffTests(unittest.TestCase):
 
     def test_same_graph_v2_permutations_have_same_semantic_digest(self):
         before = upgrade_v1(FIXTURE, labels={"genome": "PUBLIC"})
-        after = copy.deepcopy(before)
-        after["nodes"].reverse()
-        after["edges"].reverse()
+        reordered = copy.deepcopy(FIXTURE)
+        reordered["nodes"].reverse()
+        reordered["edges"].reverse()
+        # A valid v2 provenance SHA is tied to the original v1 ordering.
+        after = upgrade_v1(reordered, labels={"genome": "PUBLIC"})
         result = compare_revisions(before, after)
         self.assertFalse(result["semantic_changed"])
         self.assertTrue(result["wire_changed"])
