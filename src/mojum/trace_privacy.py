@@ -136,8 +136,8 @@ def sanitize_trace_event(raw: object) -> TraceEnvelope:
         raise TracePrivacyError("trace event must be a mapping")
     if len(raw) > MAX_FIELDS:
         raise TracePrivacyError("trace event has too many fields")
-    if any(type(key) is not str for key in raw):
-        raise TracePrivacyError("trace keys must be strings")
+    if any(type(key) is not str or len(key) > MAX_STRING_LENGTH for key in raw):
+        raise TracePrivacyError("trace keys must be bounded native strings")
     unknown = set(raw) - _ALLOWED_KEYS
     if unknown:
         raise TracePrivacyError("trace event contains fields outside the metadata allowlist")
