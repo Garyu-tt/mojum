@@ -161,8 +161,11 @@ def _reject_constant(value):
 
 def load_garment(path):
     """Bounded JSON manifest loader, no network or executable asset processing."""
-    with Path(path).open("rb") as stream:
-        raw = stream.read(MAX_MANIFEST_BYTES + 1)
+    try:
+        with Path(path).open("rb") as stream:
+            raw = stream.read(MAX_MANIFEST_BYTES + 1)
+    except (OSError, ValueError) as exc:
+        raise GarmentContractError("missing/unreadable garment manifest") from exc
     if len(raw) > MAX_MANIFEST_BYTES:
         raise GarmentContractError("manifest byte budget exceeded")
     try:
