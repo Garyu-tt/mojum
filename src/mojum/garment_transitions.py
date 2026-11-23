@@ -21,7 +21,7 @@ class GarmentTransitionError(ValueError):
 
 
 def _identifier(value: object, name: str) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= MAX_ID_LENGTH:
+    if type(value) is not str or not 1 <= len(value) <= MAX_ID_LENGTH:
         raise GarmentTransitionError(f"{name} must be a bounded nonempty string")
     if not all(c.isascii() and (c.isalnum() or c in "_-.") for c in value):
         raise GarmentTransitionError(f"{name} contains unsupported characters")
@@ -35,10 +35,12 @@ class Garment:
     layer: str
 
     def __post_init__(self) -> None:
+        if type(self) is not Garment:
+            raise GarmentTransitionError("garment must use the native Garment type")
         _identifier(self.garment_id, "garment_id")
-        if not isinstance(self.slot, str) or self.slot not in VALID_SLOTS:
+        if type(self.slot) is not str or self.slot not in VALID_SLOTS:
             raise GarmentTransitionError("unsupported garment slot")
-        if not isinstance(self.layer, str) or self.layer not in _LAYER_RANK:
+        if type(self.layer) is not str or self.layer not in _LAYER_RANK:
             raise GarmentTransitionError("unsupported garment layer")
 
 
@@ -49,12 +51,15 @@ class Transition:
     garment: Garment
 
     def __post_init__(self) -> None:
+        if type(self) is not Transition:
+            raise GarmentTransitionError("transition must use the native Transition type")
         if type(self.sequence) is not int or self.sequence < 1:
             raise GarmentTransitionError("sequence must be a positive integer")
-        if not isinstance(self.action, str) or self.action not in ("equip", "remove"):
+        if type(self.action) is not str or self.action not in ("equip", "remove"):
             raise GarmentTransitionError("unsupported transition action")
-        if not isinstance(self.garment, Garment):
+        if type(self.garment) is not Garment:
             raise GarmentTransitionError("garment must be a Garment")
+        Garment.__post_init__(self.garment)
 
 
 @dataclass(frozen=True)
@@ -63,15 +68,18 @@ class Wardrobe:
     worn: tuple[Garment, ...] = ()
 
     def __post_init__(self) -> None:
+        if type(self) is not Wardrobe:
+            raise GarmentTransitionError("wardrobe must use the native Wardrobe type")
         if type(self.revision) is not int or self.revision < 0:
             raise GarmentTransitionError("invalid wardrobe revision")
-        if not isinstance(self.worn, tuple) or len(self.worn) > MAX_GARMENTS:
+        if type(self.worn) is not tuple or len(self.worn) > MAX_GARMENTS:
             raise GarmentTransitionError("invalid garment collection")
         ids: set[str] = set()
         occupied: set[tuple[str, str]] = set()
         for garment in self.worn:
-            if not isinstance(garment, Garment):
+            if type(garment) is not Garment:
                 raise GarmentTransitionError("invalid garment entry")
+            Garment.__post_init__(garment)
             if garment.garment_id in ids or (garment.slot, garment.layer) in occupied:
                 raise GarmentTransitionError("duplicate garment or occupied layer")
             ids.add(garment.garment_id)
@@ -86,8 +94,11 @@ def _sort_key(garment: Garment) -> tuple[str, int, str]:
 
 def apply(state: Wardrobe, event: Transition) -> Wardrobe:
     """Apply exactly one event, rejecting stale or impossible transitions."""
-    if not isinstance(state, Wardrobe) or not isinstance(event, Transition):
+    if type(state) is not Wardrobe or type(event) is not Transition:
         raise GarmentTransitionError("invalid state or event")
+    # Frozen dataclasses can still be forged with object.__setattr__; recheck at use.
+    Wardrobe.__post_init__(state)
+    Transition.__post_init__(event)
     if event.sequence != state.revision + 1:
         raise GarmentTransitionError("non-consecutive transition sequence")
     current = {g.garment_id: g for g in state.worn}
