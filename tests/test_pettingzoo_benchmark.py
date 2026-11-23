@@ -2,6 +2,7 @@
 import math
 import sys
 import subprocess
+from collections import defaultdict
 import os
 from pathlib import Path
 import unittest
@@ -65,6 +66,8 @@ class FakeRPS:
             infos[AGENTS[0]] = "secret"
         elif self.failure == "bad-agents":
             self.agents = [AGENTS[0], AGENTS[0]]
+        elif self.failure == "defaultdict-rewards":
+            rewards = defaultdict(int, rewards)
         return observations, rewards, terminations, truncations, infos
 
     def close(self):
@@ -104,6 +107,11 @@ class PettingZooBenchmarkTests(unittest.TestCase):
             with self.subTest(failure=failure), self.assertRaises(BenchmarkError):
                 run_episode(lambda: env, seed=11, enabled=True)
             self.assertTrue(env.closed)
+
+    def test_parallel_defaultdict_rewards_are_supported_without_losing_key_validation(self):
+        result = run_episode(lambda: FakeRPS("defaultdict-rewards"), seed=11, enabled=True)
+        self.assertEqual(result["cycles"], 15)
+        self.assertEqual(result["reward"], 0)
 
     def test_budget_and_argument_rejections_before_factory(self):
         factory = mock.Mock(side_effect=AssertionError("unexpected factory"))
