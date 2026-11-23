@@ -19,6 +19,14 @@ class BudgetedCallError(ValueError):
     """The provider result could not be safely settled; reservation stays spent."""
 
 
+def _is_async_callable(callback: Callable[..., object]) -> bool:
+    """Identify async functions and callable instances with async __call__."""
+    return (
+        inspect.iscoroutinefunction(callback)
+        or inspect.iscoroutinefunction(getattr(type(callback), "__call__", None))
+    )
+
+
 @dataclass(frozen=True)
 class DispatchResult:
     """Metadata result; response is in-memory only and is never persisted here."""
@@ -56,6 +64,8 @@ def dispatch(
         raise TypeError("db must be an exact sqlite3.Connection")
     if not callable(invoke) or not callable(receipt_extractor):
         raise TypeError("invoke and receipt_extractor must be callable")
+    if _is_async_callable(invoke) or _is_async_callable(receipt_extractor):
+        raise TypeError("invoke and receipt_extractor must be synchronous callables")
 
     reservation = spartan_budget.reserve(
         db, request_id, worker, reserve_tokens, reserve_micro_usd
