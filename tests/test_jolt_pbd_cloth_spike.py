@@ -71,6 +71,14 @@ class JoltPbdClothTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "nonfinite"):
                     mod._project_contacts([bad, 0.0, 0.0])
 
+    def test_exact_sphere_center_has_stable_separating_axis(self):
+        point = list(mod.BALL_CENTER)
+        mod._project_contacts(point)
+        self.assertGreaterEqual(
+            math.dist(point, mod.BALL_CENTER),
+            mod.BALL_RADIUS + mod.RADIUS - 1e-12)
+        self.assertGreaterEqual(point[2], mod.RADIUS)
+
     def _native_report(self):
         return {
             "schema": mod.NATIVE_REPORT_SCHEMA,
