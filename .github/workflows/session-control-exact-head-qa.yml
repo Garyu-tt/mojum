@@ -1,0 +1,43 @@
+name: Session control exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/session_control.py'
+      - 'tests/test_session_control.py'
+      - 'docs/SESSION_CONTROL_R01.md'
+      - '.github/workflows/session-control-exact-head-qa.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  session-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact PR HEAD
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+      - name: Compile changed module and tests
+        run: python -m py_compile src/mojum/session_control.py tests/test_session_control.py
+      - name: Run focused session-control regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_session_control.py' -v
