@@ -41,7 +41,7 @@ class ObstacleGeometryTests(unittest.TestCase):
             "y_max": 1,
         }
         with self.assertRaisesRegex(ValueError, "exact native strings"):
-            audit_obstacles([item])
+            audit_obstacles([rect("valid", 0, 0, 1, 1), item])
 
     def test_oversized_native_key_rejected_before_hashing(self):
         huge = "x" * 1_000_000
