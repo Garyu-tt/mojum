@@ -194,6 +194,8 @@ class LeRobotTrajectoryTests(unittest.TestCase):
             schema_arrow = types.SimpleNamespace(names=list(COLUMNS) + ["observation.images.front"])
             def __init__(self, path):
                 recorded.append(path)
+            def close(self):
+                recorded.append("closed")
             def iter_batches(self, *, batch_size, columns, use_threads):
                 self_ref = (batch_size, columns, use_threads)
                 recorded.append(self_ref)
@@ -209,6 +211,7 @@ class LeRobotTrajectoryTests(unittest.TestCase):
                 b = self.load(root)
             self.assertEqual(a, b)
             self.assertEqual(recorded[1], (128, list(COLUMNS), False))
+            self.assertEqual(recorded.count("closed"), 2)
             self.assertEqual(len(a.frames), 6)
             self.assertNotIn("PRIVATE-VISUAL", repr(a))
             self.assertEqual(a.metadata_sha256, b.metadata_sha256)
