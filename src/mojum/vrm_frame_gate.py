@@ -110,7 +110,7 @@ class PoseFrameGate:
             raise FrameGateError("begin_epoch must be called first")
         if type(packet) is not dict or frozenset(packet.keys()) != _PACKET_KEYS:
             raise FrameGateError("invalid packet shape")
-        if packet["schema"] != SCHEMA or type(packet["schema"]) is not str:
+        if type(packet["schema"]) is not str or packet["schema"] != SCHEMA:
             raise FrameGateError("unsupported schema")
 
         epoch = self._identity(packet["epoch"], _EPOCH_RE, "epoch")
@@ -144,7 +144,10 @@ class PoseFrameGate:
             for value in coordinates:
                 if type(value) not in (int, float):
                     raise FrameGateError("coordinate must be a plain number")
-                number = float(value)
+                try:
+                    number = float(value)
+                except (OverflowError, ValueError):
+                    raise FrameGateError("coordinate out of bounds") from None
                 if not math.isfinite(number) or abs(number) > self._max_abs_coordinate:
                     raise FrameGateError("coordinate out of bounds")
                 xyz.append(0.0 if number == 0.0 else number)
