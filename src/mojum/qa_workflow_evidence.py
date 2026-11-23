@@ -35,8 +35,10 @@ class WorkflowEvidence:
     digest: str
 
 def _integer(value: Any, field: str) -> int:
-    if type(value) is not int or not 1 <= value <= 2**63 - 1:
+    if type(value) is not int:
         raise WorkflowEvidenceError(f"{field} must be a positive native integer")
+    if value.bit_length() > 63 or value < 1:
+        raise WorkflowEvidenceError(f"{field} must be a positive signed-64-bit integer")
     return value
 
 def _string(value: Any, field: str, maximum: int = 160) -> str:
@@ -68,8 +70,8 @@ def evaluate_workflow_evidence(
     runs never satisfy a requirement. This function does not fetch or
     authenticate snapshots and does not authorize merges.
     """
-    if type(expected_head_sha) is not str or _SHA.fullmatch(expected_head_sha) is None:
-        raise WorkflowEvidenceError("expected_head_sha must be 40 lowercase hexadecimal characters")
+    if type(expected_head_sha) is not str or len(expected_head_sha) != 40 or _SHA.fullmatch(expected_head_sha) is None:
+        raise WorkflowEvidenceError("expected_head_sha must be exactly 40 lowercase hexadecimal characters")
     if type(runs) is not list or len(runs) > MAX_RUNS:
         raise WorkflowEvidenceError(f"runs must be an exact list of at most {MAX_RUNS} records")
     if type(required_workflow_ids) is not list or not 1 <= len(required_workflow_ids) <= MAX_REQUIRED_WORKFLOWS:
@@ -91,7 +93,7 @@ def evaluate_workflow_evidence(
         workflow_id = _integer(item["workflow_id"], f"runs[{index}].workflow_id")
         name = _string(item["name"], f"runs[{index}].name")
         head = item["head_sha"]
-        if type(head) is not str or _SHA.fullmatch(head) is None:
+        if type(head) is not str or len(head) != 40 or _SHA.fullmatch(head) is None:
             raise WorkflowEvidenceError(f"runs[{index}].head_sha is malformed")
         if _string(item["event"], f"runs[{index}].event", 32) != "pull_request":
             raise WorkflowEvidenceError(f"runs[{index}] is not a pull_request run")
@@ -103,7 +105,7 @@ def evaluate_workflow_evidence(
             if type(conclusion) is not str or conclusion not in _FAILURES | {"success", "neutral", "skipped"}:
                 raise WorkflowEvidenceError(f"runs[{index}].conclusion is unsupported")
         elif conclusion is not None:
-            raise WorkflowEvidenceError(f"runs[{index}] pending run must have null conclusion")
+            raise WorkflowEvidenceError(f"runs[{index}].conclusion must be null for a pending run")
         if run_id in seen_runs:
             raise WorkflowEvidenceError("duplicate run_id")
         seen_runs.add(run_id)
@@ -111,14 +113,11 @@ def evaluate_workflow_evidence(
             continue
         if head != expected_head_sha:
             stale_count += 1
-        # Select the newest run for each required workflow BEFORE deciding
-        # whether its HEAD is acceptable. Otherwise a newer stale/pending run
-        # could be skipped and an older success incorrectly remain PASS.
+        # Select the newest run before evaluating its HEAD, so a stale latest
+        # run cannot be ignored in favor of an older exact-head success.
         candidate = {"run_id": run_id, "run_attempt": attempt, "name": name,
                      "head_sha": head, "status": status, "conclusion": conclusion}
         previous = latest.get(workflow_id)
-        # Run IDs order distinct workflow runs; attempt numbers only order
-        # retries within the same run and must not outrank a newer run.
         if previous is None or (run_id, attempt) > (previous["run_id"], previous["run_attempt"]):
             latest[workflow_id] = candidate
         elif (run_id, attempt) == (previous["run_id"], previous["run_attempt"]):
