@@ -107,7 +107,12 @@ def _parse_glb(raw: bytes) -> tuple[dict[str, Any], bytes]:
             object_pairs_hook=_duplicate_keys,
             parse_constant=_bad_constant,
         )
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+    except ClothGLBError:
+        # Keep deliberate contract failures (e.g. duplicate keys) recognizable.
+        raise
+    except (ValueError, OverflowError, RecursionError) as exc:
+        # json.loads can raise a plain ValueError for >4300-digit JSON ints on
+        # Python 3.11+, not just JSONDecodeError. Keep the public API fail-closed.
         raise ClothGLBError("malformed GLB JSON") from exc
     doc = _object(doc, "GLB document")
     asset = _object(doc.get("asset"), "asset")
