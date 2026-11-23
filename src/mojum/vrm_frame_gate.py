@@ -108,7 +108,14 @@ class PoseFrameGate:
             raise FrameGateError("source must be explicitly PUBLIC_SYNTHETIC")
         if self._epoch is None or self._body_revision is None:
             raise FrameGateError("begin_epoch must be called first")
-        if type(packet) is not dict or frozenset(packet.keys()) != _PACKET_KEYS:
+        if type(packet) is not dict:
+            raise FrameGateError("invalid packet shape")
+        # Reject str subclasses before set construction: their __hash__/__eq__
+        # methods are caller-controlled and must not run during schema checks.
+        packet_keys = tuple(dict.keys(packet))
+        if any(type(key) is not str for key in packet_keys):
+            raise FrameGateError("packet keys must be native strings")
+        if frozenset(packet_keys) != _PACKET_KEYS:
             raise FrameGateError("invalid packet shape")
         if type(packet["schema"]) is not str or packet["schema"] != SCHEMA:
             raise FrameGateError("unsupported schema")
