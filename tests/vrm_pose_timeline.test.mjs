@@ -36,6 +36,22 @@ test('seek, step in both directions and rewind are deterministic', () => {
   assert.equal(timeline.position(), 0);
 });
 
+test('joint ordering is stable by code point, independent of locale', () => {
+  const measured = frame(0, {
+    joints: [
+      {id: 'a', angle_rad: 0},
+      {id: '_', angle_rad: 0},
+      {id: 'A', angle_rad: 0},
+      {id: '-', angle_rad: 0},
+    ],
+  });
+  const timeline = createVrmPoseTimeline([measured]);
+  assert.deepEqual(
+    timeline.current().joints.map(joint => joint.id),
+    ['-', 'A', '_', 'a'],
+  );
+});
+
 test('frame and joint data are detached and immutable', () => {
   const first = frame(0);
   const timeline = createVrmPoseTimeline([first, frame(1)]);
