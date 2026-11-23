@@ -93,6 +93,8 @@ def _require_native_json_tree(value):
                 seen_containers.add(identity)
                 if len(current) > MAX_GRAPH_TREE_NODES:
                     raise GraphError("Graph JSON object exceeds node budget")
+                if node_count + len(pending) + 2 * len(current) > MAX_GRAPH_TREE_NODES:
+                    raise GraphError("Graph JSON tree exceeds node budget")
                 add_wire_bytes(2 + max(0, len(current) - 1) + len(current))
                 for key, child in current.items():
                     node_count += 1
@@ -109,6 +111,8 @@ def _require_native_json_tree(value):
                 seen_containers.add(identity)
                 if len(current) > MAX_GRAPH_TREE_NODES:
                     raise GraphError("Graph JSON array exceeds node budget")
+                if node_count + len(pending) + len(current) > MAX_GRAPH_TREE_NODES:
+                    raise GraphError("Graph JSON tree exceeds node budget")
                 add_wire_bytes(2 + max(0, len(current) - 1))
                 pending.extend((child, depth + 1) for child in current)
             elif kind is str:
