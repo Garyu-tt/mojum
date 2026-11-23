@@ -4,6 +4,7 @@ import sqlite3
 
 try:
     import pytest
+from unittest.mock import patch
 except ImportError:  # Full repository unittest discovery must remain stdlib-only.
     pytest = None
 
