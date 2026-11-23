@@ -342,3 +342,18 @@ def test_concurrent_first_open_initialization_is_serialized(tmp_path):
         assert version == "mojum.qa-work-queue/1"
         assert q.counts() == {"queued": 0, "leased": 0, "succeeded": 0, "failed": 0}
 
+
+
+def test_public_query_inputs_are_bounded_before_sqlite_or_membership(tmp_path):
+    class ExplodingStatusSet:
+        def __contains__(self, value):
+            raise AssertionError("oversized status reached membership hashing")
+
+    with QAWorkQueue(str(tmp_path / "query-bounds.db")) as q:
+        with pytest.raises(QueueError, match="SQLite integer"):
+            q.get(10**10000)
+        with pytest.raises(QueueError, match="SQLite integer"):
+            q.audit(10**10000)
+        with patch("mojum.qa_work_queue._VALID_STATUSES", ExplodingStatusSet()):
+            with pytest.raises(QueueError, match="status filter"):
+                q.list_jobs(status="x" * 1_000_000)
