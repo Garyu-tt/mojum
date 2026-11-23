@@ -14,6 +14,9 @@ on:
       - "docs/V3_ESCAPE_CAUSAL_TAIL_R01.md"
       - ".github/workflows/v3-escape-causal-tail.yml"
 
+permissions:
+  contents: read
+
 jobs:
   causal-tail:
     runs-on: ubuntu-latest
@@ -23,9 +26,16 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Assert exact checked-out revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Run escape snapshot and chronology tests
         env:
           PYTHONPATH: src
