@@ -23,6 +23,7 @@ def _admit_native_tree(root: object) -> None:
     stack = [(root, 0)]
     seen: set[int] = set()
     nodes = 0
+    scheduled_nodes = 1
     while stack:
         value, depth = stack.pop()
         nodes += 1
@@ -34,6 +35,11 @@ def _admit_native_tree(root: object) -> None:
             if identity in seen:
                 raise NeuralError("snapshot contains a cycle or shared container")
             seen.add(identity)
+            child_count = dict.__len__(value)
+            # Bound work before iterating/pushing attacker-controlled children.
+            if scheduled_nodes + child_count > _MAX_NODES:
+                raise NeuralError("snapshot exceeds structural budget")
+            scheduled_nodes += child_count
             for key, child in dict.items(value):
                 if type(key) is not str:
                     raise NeuralError("snapshot keys must be native strings")
@@ -43,6 +49,11 @@ def _admit_native_tree(root: object) -> None:
             if identity in seen:
                 raise NeuralError("snapshot contains a cycle or shared container")
             seen.add(identity)
+            child_count = list.__len__(value)
+            # A huge list must not expand the traversal stack before rejection.
+            if scheduled_nodes + child_count > _MAX_NODES:
+                raise NeuralError("snapshot exceeds structural budget")
+            scheduled_nodes += child_count
             for child in list.__iter__(value):
                 stack.append((child, depth + 1))
         elif kind is str:
