@@ -32,7 +32,11 @@ def _has_keys(value: dict[str, Any], expected: set[str]) -> bool:
 
 
 def _token(value: Any) -> bool:
-    return type(value) is str and _TOKEN.fullmatch(value) is not None
+    return type(value) is str and len(value) <= 128 and _TOKEN.fullmatch(value) is not None
+
+
+def _version(value: Any) -> bool:
+    return type(value) is str and len(value) <= 128 and _VERSION.fullmatch(value) is not None
 
 
 def _safe_relative_path(value: Any) -> bool:
@@ -55,8 +59,8 @@ def _policy(policy: Any) -> dict[str, Any]:
         values = policy[key]
         if type(values) not in (list, tuple) or len(values) > 128:
             raise AssetPolicyError(f"{key} must be a bounded list or tuple")
-        valid = _MEDIA_TYPE.fullmatch if key == "allowed_media_types" else _token
-        if any(type(item) is not str or valid(item) is None for item in values) or len(set(values)) != len(values):
+        valid = (lambda item: len(item) <= 127 and _MEDIA_TYPE.fullmatch(item) is not None) if key == "allowed_media_types" else _token
+        if any(type(item) is not str or not valid(item) for item in values) or len(set(values)) != len(values):
             raise AssetPolicyError(f"{key} contains invalid or duplicate values")
     if type(policy["max_asset_bytes"]) is not int or not 1 <= policy["max_asset_bytes"] <= 2**40:
         raise AssetPolicyError("max_asset_bytes must be an exact int in range")
@@ -100,11 +104,11 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
     source, license_id = asset["source"], asset["license"]
     if not _safe_relative_path(path):
         violations.append("asset.path")
-    if type(digest) is not str or _HEX_256.fullmatch(digest) is None:
+    if type(digest) is not str or len(digest) != 64 or _HEX_256.fullmatch(digest) is None:
         violations.append("asset.sha256")
     if type(size) is not int or size <= 0 or size > rules["max_asset_bytes"]:
         violations.append("asset.size_bytes")
-    if type(media_type) is not str or media_type not in rules["allowed_media_types"]:
+    if type(media_type) is not str or len(media_type) > 127 or media_type not in rules["allowed_media_types"]:
         violations.append("asset.media_type")
     if not _token(source) or "://" in source:
         violations.append("asset.source")
@@ -128,12 +132,12 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
         seen_names.add(name)
         if name not in rules["allowed_dependencies"]:
             violations.append(f"dependencies[{index}].unapproved_name")
-        if type(version) is not str or _VERSION.fullmatch(version) is None:
+        if not _version(version):
             violations.append(f"dependencies[{index}].version")
         if type(dep_license) is not str or dep_license not in rules["allowed_licenses"]:
             violations.append(f"dependencies[{index}].license")
-        if (type(version) is str and _VERSION.fullmatch(version)
-                and type(dep_license) is str and dep_license in rules["allowed_licenses"]):
+        if (_version(version) and type(dep_license) is str
+                and dep_license in rules["allowed_licenses"]):
             normalized_dependencies.append({"name": name, "version": version, "license": dep_license})
 
     normalized_dependencies.sort(key=lambda item: (item["name"], item["version"], item["license"]))
@@ -142,8 +146,8 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
         "provenance": "PUBLIC_SYNTHETIC",
         "asset": {
             "path": path if _safe_relative_path(path) else "",
-            "sha256": digest if type(digest) is str and _HEX_256.fullmatch(digest) else "",
-            "size_bytes": size if type(size) is int else 0,
+            "sha256": digest if type(digest) is str and len(digest) == 64 and _HEX_256.fullmatch(digest) else "",
+            "size_bytes": size if type(size) is int and 0 < size <= rules["max_asset_bytes"] else 0,
             "media_type": media_type if type(media_type) is str else "",
             "source": source if _token(source) else "",
             "license": license_id if type(license_id) is str else "",
