@@ -18,6 +18,20 @@ class EnvironmentExposureAuditTests(unittest.TestCase):
              {"name": "api_token", "code": "sensitive_name"}],
         )
 
+    def test_repeated_mixed_case_values_distinguish_collision_and_duplicate(self):
+        for names, expected in (
+            (["A", "a", "a"], [
+                {"name": "A", "code": "case_collision"},
+                {"name": "a", "code": "duplicate"},
+            ]),
+            (["a", "A", "A"], [
+                {"name": "A", "code": "duplicate"},
+                {"name": "A", "code": "case_collision"},
+            ]),
+        ):
+            with self.subTest(names=names):
+                self.assertEqual(audit_environment_names(names)["findings"], expected)
+
     def test_reject_invalid(self):
         for names in (["BAD=VALUE"], ["X" * 129], [None], "PATH"):
             with self.subTest(names=names):
