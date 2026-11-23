@@ -127,8 +127,14 @@ def _admit_json_tree(
         return
     raise GenesisError("Batch input must contain only native JSON values")
 
-def _bounded_json(value: Any, *, limit: int, label: str) -> str:
-    _admit_json_tree(value, max_bytes=limit)
+def _bounded_json(
+    value: Any,
+    *,
+    limit: int,
+    label: str,
+    budget: list[int] | None = None,
+) -> str:
+    _admit_json_tree(value, max_bytes=limit, budget=budget)
     try:
         encoded = canonical(value)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -151,8 +157,15 @@ def apply_acquisition_batch(
     """
     if type(expected_base_revision) is not str or len(expected_base_revision) != 64:
         raise GenesisError("expected_base_revision must be a SHA-256 revision")
-    snapshot_json = _bounded_json(snapshot, limit=MAX_BATCH_BYTES, label="snapshot")
-    events_json = _bounded_json(events, limit=MAX_BATCH_BYTES, label="events")
+    # Share one counter across both input roots so the advertised 512 KiB
+    # ceiling applies to snapshot + events together, not separately.
+    total_budget = [0, 0]
+    snapshot_json = _bounded_json(
+        snapshot, limit=MAX_BATCH_BYTES, label="snapshot", budget=total_budget
+    )
+    events_json = _bounded_json(
+        events, limit=MAX_BATCH_BYTES, label="events", budget=total_budget
+    )
     if type(snapshot) is not dict or type(events) is not list:
         raise GenesisError("snapshot must be a native dict and events a native list")
     if not 1 <= len(events) <= MAX_BATCH_EVENTS:
