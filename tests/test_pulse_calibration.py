@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError
 from mojum.pulse_calibration import (
     CalibrationError,
     MAX_SAMPLES,
+    MAX_TICK,
     SCHEMA,
     audit_calibration,
 )
