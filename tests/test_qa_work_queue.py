@@ -38,6 +38,8 @@ def _initialize_process(path, barrier, result_queue):
 def test_huge_numeric_configuration_raises_queue_error():
     with pytest.raises(QueueError):
         QAWorkQueue(":memory:", busy_timeout=10**10000)
+    with pytest.raises(QueueError):
+        QAWorkQueue("/tmp/mojum-huge-timeout.sqlite3", busy_timeout=10**10000)
 
 
 def test_enqueue_idempotency_and_detached_payload(tmp_path):
