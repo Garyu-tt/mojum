@@ -272,7 +272,7 @@ def validate(graph):
     # dict and its complete key set has just been reduced to five short strings.
     for field in ("id", "revision"):
         value = dict.__getitem__(graph, field)
-        if type(value) is not str or not value.strip() or len(value) > 256:
+        if type(value) is not str or len(value) > 256 or not value.strip():
             raise GraphError(f"Graph v1 {field} must be nonempty bounded text")
         try:
             value.encode("utf-8", errors="strict")
