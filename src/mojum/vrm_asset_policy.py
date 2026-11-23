@@ -26,6 +26,11 @@ def _exact_dict(value: Any) -> bool:
     return type(value) is dict
 
 
+def _has_keys(value: dict[str, Any], expected: set[str]) -> bool:
+    # Validate key types before set construction to avoid hostile key equality/hash.
+    return all(type(key) is str for key in value) and set(value) == expected
+
+
 def _token(value: Any) -> bool:
     return type(value) is str and _TOKEN.fullmatch(value) is not None
 
