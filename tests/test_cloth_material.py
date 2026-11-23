@@ -78,6 +78,14 @@ class ClothMaterialProfileTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             profile.thickness_nm = 1
 
+    def test_rejects_oversized_native_dict_before_key_snapshot(self):
+        value = valid_profile()
+        value.update({f"unexpected_{index}": index for index in range(20_000)})
+        with self.assertRaisesRegex(
+            ClothMaterialError, "fields do not match the versioned schema"
+        ):
+            validate_material_profile(value)
+
     def test_rejects_mapping_subclass_before_iteration(self):
         with self.assertRaises(ClothMaterialError):
             validate_material_profile(HostileMapping(valid_profile()))
