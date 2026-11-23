@@ -47,7 +47,10 @@ def _integer(value: Any, field: str, *, minimum: int = 0, maximum: int) -> int:
 def _finite_number(value: Any, field: str, *, maximum: int) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise MetricsInputError(f"{field} must be numeric")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise MetricsInputError(f"{field} is outside the permitted range") from None
     if not math.isfinite(result) or result < 0 or result > maximum:
         raise MetricsInputError(f"{field} is outside the permitted range")
     return result
