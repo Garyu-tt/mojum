@@ -30,7 +30,7 @@ def audit_environment_names(names: Iterable[str]) -> dict:
         count += 1
         if count > MAX_NAMES:
             raise ValueError("too many environment names")
-        if not isinstance(name, str):
+        if type(name) is not str:
             raise TypeError("environment names must be strings")
         if len(name) > MAX_NAME_LENGTH or not _NAME.fullmatch(name):
             raise ValueError("invalid environment variable name")
