@@ -17,6 +17,7 @@ MAX_STEPS = 10_000
 MAX_VECTOR = 256
 MAX_NAME = 64
 MAX_SEED = 2**64 - 1
+MAX_TOTAL_SCALARS = 100_000
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,16 @@ def _plain_dict(value, name):
     if type(value) is not dict:
         raise ValueError(name + " must be a plain dict")
     return value
+
+
+def _exact_keys(value, expected, name):
+    if len(value) != len(expected):
+        raise ValueError(name + " has unexpected or missing fields")
+    keys = tuple(value.keys())
+    if any(type(key) is not str or len(key) > MAX_NAME for key in keys):
+        raise ValueError(name + " field names must be bounded native strings")
+    if set(keys) != expected:
+        raise ValueError(name + " has unexpected or missing fields")
 
 
 def _number(value, name):
@@ -57,12 +68,24 @@ def _vector(value, name):
     return tuple(_number(item, name) for item in value)
 
 
-def _agent_map(value, agents, name, converter):
+def _agent_map(value, agents, name, converter, budget):
     mapping = _plain_dict(value, name)
-    if set(mapping) != set(agents) or len(mapping) != len(agents):
+    if len(mapping) != len(agents):
         raise ValueError(name + " must contain exactly the declared agents")
-    return tuple((agent, converter(mapping[agent], name + "." + agent))
-                 for agent in agents)
+    keys = tuple(mapping.keys())
+    if any(type(key) is not str or len(key) > MAX_NAME for key in keys):
+        raise ValueError(name + " keys must be bounded native agent names")
+    if set(keys) != set(agents):
+        raise ValueError(name + " must contain exactly the declared agents")
+    result = []
+    for agent in agents:
+        item = mapping[agent]
+        cost = len(item) if type(item) in (list, tuple) else 1
+        if cost > MAX_VECTOR or budget[0] < cost:
+            raise ValueError("episode exceeds aggregate scalar budget")
+        budget[0] -= cost
+        result.append((agent, converter(item, name + "." + agent)))
+    return tuple(result)
 
 
 def admit_episode(record) -> EpisodeReceipt:
@@ -73,9 +96,9 @@ def admit_episode(record) -> EpisodeReceipt:
     Agent maps must cover exactly the declared agents at every step.
     """
     root = _plain_dict(record, "record")
-    if set(root) != {"schema", "provenance", "seed", "agents", "steps"}:
-        raise ValueError("unexpected or missing episode fields")
-    if root["schema"] != SCHEMA or root["provenance"] != PROVENANCE:
+    _exact_keys(root, {"schema", "provenance", "seed", "agents", "steps"}, "record")
+    if (type(root["schema"]) is not str or type(root["provenance"]) is not str
+            or root["schema"] != SCHEMA or root["provenance"] != PROVENANCE):
         raise ValueError("unsupported schema or provenance")
     seed = root["seed"]
     if type(seed) is not int or not 0 <= seed <= MAX_SEED:
@@ -96,23 +119,23 @@ def admit_episode(record) -> EpisodeReceipt:
         raise ValueError("steps must be a non-empty bounded sequence")
 
     normalized = []
+    scalar_budget = [MAX_TOTAL_SCALARS]
     previous_tick = -1
     for index, raw in enumerate(raw_steps):
         step = _plain_dict(raw, "steps[%d]" % index)
         expected = {"tick", "observations", "actions", "rewards",
                     "terminations", "truncations"}
-        if set(step) != expected:
-            raise ValueError("invalid step fields")
+        _exact_keys(step, expected, "step")
         tick = step["tick"]
         if type(tick) is not int or not 0 <= tick <= 2**63 - 1 or tick <= previous_tick:
             raise ValueError("step ticks must be strictly increasing native integers")
         previous_tick = tick
-        observations = _agent_map(step["observations"], agents, "observations", _vector)
-        actions = _agent_map(step["actions"], agents, "actions", _vector)
-        rewards = _agent_map(step["rewards"], agents, "rewards", _number)
+        observations = _agent_map(step["observations"], agents, "observations", _vector, scalar_budget)
+        actions = _agent_map(step["actions"], agents, "actions", _vector, scalar_budget)
+        rewards = _agent_map(step["rewards"], agents, "rewards", _number, scalar_budget)
         terminations = _agent_map(
             step["terminations"], agents, "terminations",
-            lambda v, n: v if type(v) is bool else (_ for _ in ()).throw(ValueError(n + " must be bool")))
+            lambda v, n: v if type(v) is bool else (_ for _ in ()).throw(ValueError(n + " must be bool")), scalar_budget)
         truncations = _agent_map(
             step["truncations"], agents, "truncations",
             lambda v, n: v if type(v) is bool else (_ for _ in ()).throw(ValueError(n + " must be bool")))
