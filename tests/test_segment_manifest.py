@@ -163,6 +163,25 @@ class SegmentManifestTests(unittest.TestCase):
         with self.assertRaises(SegmentManifestError):
             validate_manifest(DictSubclass(self.make().to_dict()))
 
+    def test_rejects_hostile_string_subclass_keys_before_hashing(self):
+        class HostileKey(str):
+            explode = False
+            def __hash__(self):
+                if self.explode:
+                    raise RuntimeError("hostile hash executed")
+                return super().__hash__()
+
+        manifest = self.make().to_dict()
+        key = HostileKey("agent_id")
+        manifest[key] = manifest.pop("agent_id")
+        key.explode = True
+        with self.assertRaises(SegmentManifestError):
+            validate_manifest(manifest)
+
+    def test_rejects_oversized_sequence_integer_before_range_arithmetic(self):
+        with self.assertRaises(SegmentManifestError):
+            self.make(first_seq=10**10000, last_seq=10**10000)
+
 
 if __name__ == "__main__":
     unittest.main()
