@@ -128,7 +128,8 @@ def synthesize_public_wav(
     Only PUBLIC_SYNTHETIC text is allowed. Caller must ensure that assertion is true.
     Piper and model binaries execute with caller privileges, not a full sandbox.
     """
-    if enabled is not True or provenance != "PUBLIC_SYNTHETIC":
+    if (enabled is not True or type(provenance) is not str
+            or provenance != "PUBLIC_SYNTHETIC"):
         raise PermissionError("Piper is opt-in and PUBLIC_SYNTHETIC only")
     _public_text(text)
     if not isinstance(profile, PiperProfile) or profile.voice_license_reviewed is not True:
