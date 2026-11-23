@@ -11,7 +11,7 @@ import re
 
 _SCHEMA = "mojum.argv-exposure/1"
 _SENSITIVE = re.compile(r"(?:^|[-_])(password|passwd|secret|token|api[-_]?key|access[-_]?key|private[-_]?key|credential|auth)(?:$|[-_])", re.I)
-_URL_USERINFO = re.compile(r"(?i)://[^/\\s@]+:[^/\\s@]+@")
+_URL_USERINFO = re.compile(r"(?i)://[^/\s@]+:[^/\s@]+@")
 _MAX_ARGS = 256
 _MAX_LENGTH = 4096
 _MAX_TOTAL = 65536
@@ -50,7 +50,7 @@ def audit_argv(argv: list[str], *, provenance: str = "PUBLIC_SYNTHETIC") -> Audi
     for index, arg in enumerate(argv):
         if type(arg) is not str:
             raise ValueError("arguments must be native strings")
-        if not arg or len(arg) > _MAX_LENGTH or "\\x00" in arg:
+        if not arg or len(arg) > _MAX_LENGTH or "\x00" in arg:
             raise ValueError("empty, oversized or NUL-containing argument")
         try:
             encoded_length = len(arg.encode("utf-8"))
@@ -76,9 +76,7 @@ def audit_argv(argv: list[str], *, provenance: str = "PUBLIC_SYNTHETIC") -> Audi
                 if not separator:
                     pending_secret_value = True
 
-        # Inspect every argument independently of option-name parsing. URL
-        # credentials can be embedded in --endpoint=..., -u=..., or a value
-        # consumed by a preceding sensitive option.
+        # Inspect every argument independently of option-name parsing.
         if _URL_USERINFO.search(arg):
             findings.append(Finding(index, "url-userinfo"))
 
