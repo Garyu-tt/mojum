@@ -12,6 +12,10 @@ from mojum.local_cell_sense import Proprioception, STEP_METERS
 
 def _snapshot(**changes):
     state = CellExplorerV3Escape().snapshot()
+    # Forged retention fixtures intentionally omit chronology evidence. Keep
+    # terminal counters empty so each test reaches its targeted invariant.
+    state["history_complete"] = False
+    state["outcome_tail"] = []
     state.update(changes)
     return state
 
@@ -72,6 +76,12 @@ class EscapeRetentionAcceptanceTests(unittest.TestCase):
             policy.observe(sense, policy.decide(sense), False)
         valid = policy.snapshot()
         self.assertEqual(CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid)
+        # This test targets retained-cell deadlines, not terminal streak
+        # attestation; discard the unrelated recent-history witness.
+        valid["history_complete"] = False
+        valid["outcome_tail"] = []
+        valid["consecutive_rests"] = 0
+        valid["consecutive_blocked_probes"] = 0
         valid["last_seen_at"].update({"0:25": 1, "1:25": 2})
         with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
             CellExplorerV3Escape.from_snapshot(valid)
