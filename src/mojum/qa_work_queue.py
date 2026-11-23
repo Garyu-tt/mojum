@@ -146,6 +146,8 @@ class QAWorkQueue:
     def __init__(self, database: str, *, busy_timeout: float = 5.0,
                  audit_limit: int = MAX_AUDIT_ROWS) -> None:
         self.database = _text(database, "database", 4096)
+        if self.database == ":memory:":
+            raise QueueError("durable queue requires a filesystem-backed SQLite database")
         timeout = _number(busy_timeout, "busy_timeout", 0.01, 60)
         if isinstance(audit_limit, bool) or not isinstance(audit_limit, int) or not 100 <= audit_limit <= MAX_AUDIT_ROWS:
             raise QueueError(f"audit_limit must be between 100 and {MAX_AUDIT_ROWS}")
