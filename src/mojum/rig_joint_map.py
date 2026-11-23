@@ -9,7 +9,7 @@ from typing import Any
 SCHEMA = "mojum.rig-joint-map/1"
 _SOURCE_KEYS = frozenset({"rig_id", "revision", "joints"})
 _TARGET_KEYS = frozenset({"rig_id", "revision", "joint_ids"})
-_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}\\Z", re.ASCII)
+_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}\Z", re.ASCII)
 _MAX_JOINTS = 256
 _MAX_ALIASES = 256
 _MAX_TEXT = 96
