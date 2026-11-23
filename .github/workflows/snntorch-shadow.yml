@@ -1,0 +1,58 @@
+name: snnTorch shadow-only CPU probe
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/snntorch_shadow.py'
+      - 'tests/test_snntorch_shadow.py'
+      - 'docs/SNNTORCH_SHADOW_R01.md'
+      - '.github/workflows/snntorch-shadow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Bounded default-off and PUBLIC opt-in fixture
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m unittest discover -s tests -p test_snntorch_shadow.py -v
+          python -m mojum.snntorch_shadow --enable --seed 17
+
+  native-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: src
+      PYTHONDONTWRITEBYTECODE: '1'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      CUDA_VISIBLE_DEVICES: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU-only research dependencies
+        run: |
+          python -m pip install --disable-pip-version-check torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --disable-pip-version-check snntorch==1.0.0
+      - name: Real pinned LIF trace versus stdlib reference
+        run: |
+          python -m unittest discover -s tests -p test_snntorch_shadow.py -v
+          python -m mojum.snntorch_shadow --enable --native --seed 17
+          python -m mojum.snntorch_shadow --enable --native --seed 1337
