@@ -129,5 +129,26 @@ class DurableTaskQueueTests(unittest.TestCase):
             self.queue.events(task.task_id, limit=1_001)
 
 
+    def test_operational_connections_emit_no_resource_warnings(self) -> None:
+        import gc
+        import warnings
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always", ResourceWarning)
+            queue = DurableTaskQueue(self.path)
+            task = queue.enqueue("resource-audit", "resource-audit-1", {}, now_ns=1)
+            lease = queue.claim("resource-worker", now_ns=1)
+            queue.heartbeat(task.task_id, "resource-worker", lease.lease_token, now_ns=2)
+            queue.complete(task.task_id, "resource-worker", lease.lease_token, now_ns=3)
+            queue.get(task.task_id)
+            queue.events(task.task_id)
+            del queue
+            gc.collect()
+
+        leaked = [warning for warning in captured
+                  if issubclass(warning.category, ResourceWarning)]
+        self.assertEqual(leaked, [], "SQLite connections must be closed on every path")
+
+
 if __name__ == "__main__":
     unittest.main()
