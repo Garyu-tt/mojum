@@ -16,7 +16,7 @@ SCHEMA = "mojum.cloth.damage-audit/1"
 PROVENANCE = "PUBLIC_SYNTHETIC"
 MAX_SAMPLES = 4096
 MAX_EDGE_ID = 96
-_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}\Z")
+_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}\\Z")
 
 
 class ClothDamageError(ValueError):
@@ -64,7 +64,12 @@ def audit_damage(request: Any) -> DamageReport:
     """
     if type(request) is not dict:
         raise ClothDamageError("request must be a native dict")
-    if set(request) != {
+    # Check cardinality before constructing sets or hashing attacker-controlled
+    # keys. A caller can otherwise force work proportional to an unbounded dict.
+    request_keys = tuple(request)
+    if len(request_keys) != 6 or any(type(key) is not str for key in request_keys):
+        raise ClothDamageError("request fields do not match schema")
+    if set(request_keys) != {
         "schema", "provenance", "consent", "profile_revision", "threshold", "samples"
     }:
         raise ClothDamageError("request fields do not match schema")
@@ -89,7 +94,12 @@ def audit_damage(request: Any) -> DamageReport:
     seen: set[tuple[int, str]] = set()
     previous_tick = -1
     for index, sample in enumerate(samples):
-        if type(sample) is not dict or set(sample) != {"tick", "edge_id", "stretch_ratio"}:
+        if type(sample) is not dict:
+            raise ClothDamageError(f"sample {index} has invalid fields")
+        sample_keys = tuple(sample)
+        if len(sample_keys) != 3 or any(type(key) is not str for key in sample_keys):
+            raise ClothDamageError(f"sample {index} has invalid fields")
+        if set(sample_keys) != {"tick", "edge_id", "stretch_ratio"}:
             raise ClothDamageError(f"sample {index} has invalid fields")
         tick = sample["tick"]
         edge_id = sample["edge_id"]
