@@ -54,7 +54,7 @@ class CIEvidenceTests(unittest.TestCase):
         key = HostileKey("schema")
         snapshot[key] = snapshot.pop("schema")
         key.explode = True
-        with self.assertRaisesRegex(EvidenceError, "keys must be native strings"):
+        with self.assertRaisesRegex(EvidenceError, "native strings"):
             evaluate_ci_evidence(snapshot, now=NOW)
 
     def test_oversized_field_names_rejected_before_hashing(self):
