@@ -18,7 +18,7 @@ The caller must explicitly assert \`provenance="PUBLIC_SYNTHETIC"\`. This is an 
 - Each side of a seam must be a continuous path along boundary edges. Each pair must join distinct connected mesh components.
 - \`max_gap_m\`: explicit geometric tolerance, from 0 through 0.25 m (default 0.01 m).
 
-The validator rejects non-native primitive/container types, malformed or duplicate faces, degenerate triangles, unreferenced vertices, non-manifold edges, non-boundary endpoints, component changes, reused stitch vertices, discontinuous paths, excessive gaps and out-of-budget inputs.
+The validator rejects non-native primitive/container types, seam records with any cardinality other than two fields before enumerating their keys, malformed or duplicate faces, degenerate triangles, unreferenced vertices, non-manifold edges, non-boundary endpoints, component changes, reused stitch vertices, discontinuous paths, excessive gaps and out-of-budget inputs.
 
 ## Output and reproducibility
 
