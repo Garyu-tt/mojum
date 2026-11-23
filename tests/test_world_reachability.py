@@ -76,6 +76,68 @@ class SampledPathTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 verify_witness(room, forged)
 
+    def test_direct_python_forged_header_types_fail_closed(self):
+        room = Room(4, 4)
+        report = find_sampled_path(room, (0, 0), (4, 4))
+
+        class ForgedEqual:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ExplodingCompare:
+            def __ne__(self, other):
+                raise AssertionError("untrusted comparison must not run")
+
+        class StringAlias(str):
+            pass
+
+        for field in ("schema", "status", "start_revision"):
+            for forged_value in (ForgedEqual(), ExplodingCompare(),
+                                 StringAlias(report[field])):
+                with self.subTest(field=field, value=type(forged_value).__name__):
+                    tampered = copy.deepcopy(report)
+                    tampered[field] = forged_value
+                    with self.assertRaises(ValueError):
+                        verify_witness(room, tampered)
+
+    def test_direct_python_forged_mapping_keys_fail_closed(self):
+        room = Room(4, 4)
+        report = find_sampled_path(room, (0, 0), (4, 4))
+
+        class ForgedKey:
+            def __init__(self, name):
+                self.name = name
+
+            def __hash__(self):
+                return hash(self.name)
+
+            def __eq__(self, other):
+                return other == self.name
+
+        class ExplodingKey(ForgedKey):
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not run")
+
+        class StringAlias(str):
+            pass
+
+        for location, name in (("report", "schema"),
+                               ("grid", "columns"),
+                               ("frame", "tick")):
+            for key_factory in (ForgedKey, ExplodingKey, StringAlias):
+                with self.subTest(location=location, key_type=key_factory.__name__):
+                    tampered = copy.deepcopy(report)
+                    mapping = (tampered if location == "report" else
+                               tampered["grid"] if location == "grid" else
+                               tampered["path"][0])
+                    original = mapping.pop(name)
+                    mapping[key_factory(name)] = original
+                    with self.assertRaises(ValueError):
+                        verify_witness(room, tampered)
+
     def test_invalid_inputs_rejected_without_mutating_geometry(self):
         room = Room(3, 3, ((1, 1, .5, .5),))
         baseline = room.obstacles
