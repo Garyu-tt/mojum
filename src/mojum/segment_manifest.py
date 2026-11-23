@@ -150,7 +150,7 @@ def create_manifest(
     }
     # Validate all caller fields before deriving or returning a chain head.
     validated = _validate_fields({**fields, "segment_head": EMPTY_HEAD}, check_head=False)
-    fields["segment_head"] = _calculate_head(validated)
+    fields["segment_head"] = _calculate_head(validated.to_dict())
     return _validate_fields(fields)
 
 
