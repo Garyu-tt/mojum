@@ -46,9 +46,12 @@ class ClothSeamTests(unittest.TestCase):
 
     def test_reports_sort_by_id(self):
         v, t, _ = fixture()
+        # Third disconnected triangular panel gives a second, non-overlapping seam.
+        v.extend([[0.001, 0.0, 0.0], [0.001, 1.0, 0.0], [-0.1, 0.5, 0.0]])
+        t.append([8, 9, 10])
         seams = [
             {"id": "z-side", "pairs": [[1, 4], [2, 7]]},
-            {"id": "a-side", "pairs": [[0, 4], [3, 7]]},
+            {"id": "a-side", "pairs": [[0, 8], [3, 9]]},
         ]
         result = self.admit(vertices=v, triangles=t, seams=seams)
         self.assertEqual([x.seam_id for x in result.seams], ["a-side", "z-side"])
