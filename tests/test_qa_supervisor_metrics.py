@@ -136,6 +136,12 @@ class SupervisorMetricsTests(unittest.TestCase):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [task]})
 
+    def test_top_level_and_task_field_cardinality_is_bounded(self):
+        with self.assertRaisesRegex(MetricsInputError, "too many fields"):
+            summarize_snapshot({"observed_at": 1, "tasks": [], "duration_samples_ms": [], "unexpected": 1})
+        with self.assertRaisesRegex(MetricsInputError, "too many fields"):
+            summarize_snapshot({"observed_at": 1, "tasks": [{"id": "x", "state": "READY", "age_seconds": 1, "blocked_reason": None, "lease_remaining_seconds": None, "extra": 1}]})
+
     def test_task_limit_enforced(self):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [{"id": str(i), "state": "READY"} for i in range(10001)]})
