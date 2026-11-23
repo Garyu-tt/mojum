@@ -11,17 +11,17 @@ for one episode. Each agent receives only its identity, the logical step, and
 the previous team reward. The target is not present in observations or traces.
 
 The adaptive policy is a transparent win-stay/lose-switch baseline: start with
-action 0; after a zero reward switch to action 1; otherwise keep the previous
-action. The frozen control always chooses action 0. The benchmark runs both
-policies against the same seed and reports aggregate rewards and deterministic
-per-step traces. This is a tiny controlled spike, not evidence of general
-multi-agent learning or intelligence.
+action 0; after a zero reward switch to the other action; after a positive
+reward keep the previous action. The frozen control always chooses action 0.
+The benchmark runs both policies against the same seed and reports aggregate
+rewards and deterministic per-step traces. This is a tiny controlled spike,
+not evidence of general multi-agent learning or intelligence.
 
 ## Offline execution
 
 From the repository root:
 
-    python -m unittest tests.test_pettingzoo_example -v
+    python -m unittest discover -s tests -p test_pettingzoo_example.py -v
     python examples/pettingzoo/benchmark.py --seed 0 --episodes 20 --horizon 10
 
 The CLI emits one canonical-key-order JSON document. Seeds must be unique;
