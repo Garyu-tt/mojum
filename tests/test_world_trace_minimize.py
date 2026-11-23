@@ -1,6 +1,7 @@
 """Adversarial, pure-stdlib tests for isolated world trace minimization."""
 import copy
 import json
+import random
 import unittest
 
 from mojum.world_trace_minimize import (
@@ -179,6 +180,30 @@ class TraceMinimizeTests(unittest.TestCase):
             case["witness"] = witness
             with self.assertRaises(TraceMinimizeError):
                 minimize_case(case)
+
+
+    def test_seeded_complete_results_are_one_minimal(self):
+        from mojum.world_room import Room, advance, initial_state
+
+        rng = random.Random(824)
+        for seed in range(48):
+            moves = [{"dx": rng.choice([-.5, -.25, 0, .25, .5]), "dy": 0}
+                     for _ in range(rng.randint(1, 12))]
+            room = Room(4, 4)
+            state = initial_state(room, 1, 2)
+            for tick, move in enumerate(moves, 1):
+                state, _ = advance(room, state, tick=tick, dx=move["dx"], dy=0,
+                                   expected_revision=state.revision)
+            case = make_case(moves, kind="end_position", pos=[state.x, state.y])
+            case["room"]["obstacles"] = []
+            out = minimize_case(case)
+            with self.subTest(seed=seed):
+                self.assertTrue(out["complete"])
+                for index in range(out["minimized_moves"]):
+                    candidate = copy.deepcopy(out["replay_case"])
+                    candidate["moves"].pop(index)
+                    with self.assertRaisesRegex(TraceMinimizeError, "does not satisfy"):
+                        minimize_case(candidate)
 
 
 if __name__ == "__main__":
