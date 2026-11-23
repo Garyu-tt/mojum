@@ -201,9 +201,9 @@ def matrix(snapshot: Snapshot, *, counts=(1, 2, 4, 8), worker_leases=300,
         reserved_tokens = 0
         reserved_usd = 0
         reasons = {}
-        for _ in range(requested):
+        for request_index in range(requested):
             reason = None
-            if requested > worker_leases:
+            if request_index >= worker_leases:
                 reason = "worker_lease_bound"
             elif not resident_ok:
                 reason = "resident_memory_over_budget"
