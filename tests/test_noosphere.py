@@ -155,6 +155,19 @@ class NoosphereTests(unittest.TestCase):
         with self.assertRaisesRegex(NoosphereError, "indexed column visibility"):
             self.store.verify_chain()
 
+    def test_tampered_deep_json_replay_fails_closed(self):
+        # A small wire under the 128 KiB limit can still overflow the JSON
+        # parser's nesting depth. It must not escape as raw RecursionError.
+        self.store.append(event(), expected_head=self.store.head())
+        self.store._db.execute("DROP TRIGGER noosphere_no_update")
+        nested_wire = "[" * 2500 + "0" + "]" * 2500
+        self.store._db.execute(
+            "UPDATE events SET wire_json = ? WHERE seq = 1", (nested_wire,)
+        )
+        with self.assertRaisesRegex(NoosphereError, "invalid event at row 1"):
+            self.store.verify_chain()
+        self.assertEqual(self.store.count(), 1)
+
     def test_deleted_row_sequence_detected(self):
         self.store.append(event(), expected_head=self.store.head())
         self.store.append(event("ev2", observed=30, recorded=40), expected_head=self.store.head())
