@@ -123,9 +123,15 @@ def restore_state(snapshot: dict, config: ClothLODConfig) -> ClothLODState:
         raise ClothLODError("invalid LOD snapshot or configuration")
     expected = {"schema", "policy_sha256", "next_tick", "effective",
                 "safe_samples", "pending_measurement", "fault_latched"}
-    if set(snapshot) != expected or snapshot["schema"] != SCHEMA:
+    # Python callers can pass hostile objects, not just decoded JSON. Validate
+    # exact built-in string types before equality can invoke user-defined code.
+    if (any(type(key) is not str for key in snapshot)
+            or set(snapshot) != expected
+            or type(snapshot["schema"]) is not str
+            or snapshot["schema"] != SCHEMA):
         raise ClothLODError("unknown LOD snapshot schema or fields")
-    if snapshot["policy_sha256"] != config.fingerprint():
+    if (type(snapshot["policy_sha256"]) is not str
+            or snapshot["policy_sha256"] != config.fingerprint()):
         raise ClothLODError("LOD policy mismatch; explicit restart required")
     _integer(snapshot["next_tick"], "next_tick", 0, MAX_TICK)
     _integer(snapshot["safe_samples"], "safe_samples", 0, RECOVERY_SAMPLES - 1)
