@@ -43,7 +43,7 @@ def apply_pcm16_gain(
     sample_rate_hz: int,
     gain_numerator: int,
     gain_denominator: int = 1,
-    visibility: str = VISIBILITY,
+    visibility: str | None = None,
 ) -> GainResult:
     """Scale signed PCM16LE using exact rational gain, with saturation.
 
