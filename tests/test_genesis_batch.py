@@ -42,20 +42,20 @@ def apply(events, *, seed_snapshot=None):
 
 
 class GenesisBatchTests(unittest.TestCase):
-    def test_snapshot_key_lengths_are_bounded_before_hashing(self):
+    def test_snapshot_cardinality_is_checked_before_key_snapshot(self):
         from unittest.mock import patch
         ledger = GenomeLedger(SEED)
         snapshot = ledger.snapshot()
-        snapshot["x" * 100_000] = snapshot.pop("schema")
-        with patch("mojum.genesis_batch.set", side_effect=AssertionError(
-            "snapshot keys must be length-checked before set()"
-        ), create=True) as key_set:
+        snapshot.update({f"unexpected_{index}": index for index in range(50_000)})
+        with patch("mojum.genesis_batch.tuple", side_effect=AssertionError(
+            "key snapshot must not be allocated for oversized mapping"
+        ), create=True) as key_snapshot:
             with self.assertRaisesRegex(GenesisError, "exact native GENESIS ledger shape"):
                 apply_acquisition_batch(
                     snapshot, [event("bounded-key")],
                     expected_base_revision=ledger.revision,
                 )
-            key_set.assert_not_called()
+            key_snapshot.assert_not_called()
 
     def test_resulting_event_budget_rejects_before_serialization_or_restore(self):
         from unittest.mock import patch
