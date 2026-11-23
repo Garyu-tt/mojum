@@ -100,7 +100,7 @@ def evaluate_workflow_evidence(
         if status not in _PENDING | {"completed"}:
             raise WorkflowEvidenceError(f"runs[{index}].status is unsupported")
         if status == "completed":
-            if type(conclusion) is not str or conclusion not in _FAILURES | {"success"}:
+            if type(conclusion) is not str or conclusion not in _FAILURES | {"success", "neutral", "skipped"}:
                 raise WorkflowEvidenceError(f"runs[{index}].conclusion is unsupported")
         elif conclusion is not None:
             raise WorkflowEvidenceError(f"runs[{index}] pending run must have null conclusion")
@@ -115,9 +115,11 @@ def evaluate_workflow_evidence(
         candidate = {"run_id": run_id, "run_attempt": attempt, "name": name,
                      "head_sha": head, "status": status, "conclusion": conclusion}
         previous = latest.get(workflow_id)
-        if previous is None or (attempt, run_id) > (previous["run_attempt"], previous["run_id"]):
+        # Run IDs order distinct workflow runs; attempt numbers only order
+        # retries within the same run and must not outrank a newer run.
+        if previous is None or (run_id, attempt) > (previous["run_id"], previous["run_attempt"]):
             latest[workflow_id] = candidate
-        elif (attempt, run_id) == (previous["run_attempt"], previous["run_id"]):
+        elif (run_id, attempt) == (previous["run_id"], previous["run_attempt"]):
             raise WorkflowEvidenceError("ambiguous duplicate workflow attempt")
 
     results = []
