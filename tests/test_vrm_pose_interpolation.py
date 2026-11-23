@@ -60,6 +60,12 @@ class PoseInterpolationTests(unittest.TestCase):
         with self.assertRaises(PoseInterpolationError):
             interpolate_measured_poses(a,b,target_timestamp_ns=150,max_joint_delta=huge)
 
+    def test_rejects_oversized_joint_names_before_regex(self):
+        a,b=frame("f-a",100,0.0),frame("f-b",200,1.0)
+        a["joints"]["x" * 1_000_000]=(0.0,0.0,0.0)
+        with self.assertRaisesRegex(PoseInterpolationError, "bounded native identifiers"):
+            interpolate_measured_poses(a,b,target_timestamp_ns=150)
+
     def test_rejects_duplicate_ids_and_extra_fields(self):
         a,b=frame("f-a",100,0.0),frame("f-a",200,1.0)
         with self.assertRaises(PoseInterpolationError): interpolate_measured_poses(a,b,target_timestamp_ns=150)
