@@ -7,6 +7,7 @@ visibility, validity instant, model, dimension and *exact* source chain head.
 from __future__ import annotations
 
 from contextlib import closing
+import hashlib
 import importlib.metadata
 import math
 import os
@@ -142,8 +143,11 @@ def _path_guard(index_path, source_path=None, *, nonpublic=False):
         raise VectorIndexError("index destination is not a regular file")
     if source_path is not None and path.resolve() == Path(source_path).resolve():
         raise VectorIndexError("index cannot replace the authoritative journal")
-    if nonpublic and os.name == "posix" and stat.S_IMODE(path.parent.stat().st_mode) & 0o077:
-        raise VectorIndexError("nonpublic index requires an owner-only directory (0700)")
+    if nonpublic and os.name == "posix":
+        if stat.S_IMODE(path.parent.stat().st_mode) & 0o077:
+            raise VectorIndexError("nonpublic index requires an owner-only directory (0700)")
+        if path.exists() and stat.S_IMODE(path.stat().st_mode) & 0o077:
+            raise VectorIndexError("nonpublic index requires an owner-only file (0600)")
     return path
 
 
@@ -152,6 +156,16 @@ def _metadata(owner, visibility, model, dimension, trusted_head, valid_at_ns):
             "model": model, "dimension": str(dimension), "source_head": trusted_head,
             "valid_at_ns": "none" if valid_at_ns is None else str(valid_at_ns),
             "sqlite_vec": SQLITE_VEC_VERSION}
+
+
+def _rows_digest(rows):
+    """Checksum sorted event IDs, source hashes and their stored float32 bytes."""
+    sha = hashlib.sha256(b"mojum.sqlite-vec.rows/1\\0")
+    for event_id, event_hash, packed in rows:
+        for raw in (event_id.encode("utf-8"), event_hash.encode("ascii"), bytes(packed)):
+            sha.update(len(raw).to_bytes(4, "big"))
+            sha.update(raw)
+    return sha.hexdigest()
 
 
 def _existing_meta(path):
@@ -179,6 +193,7 @@ def rebuild_index(source_path, index_path, *, owner, trusted_head, visibility,
                          allow_nonpublic=allow_nonpublic)
     path = _path_guard(index_path, source_path, nonpublic=(visibility != "PUBLIC"))
     meta = _metadata(owner, visibility, model, dimension, trusted_head, valid_at_ns)
+    meta["rows_sha256"] = _rows_digest(rows)
     if path.exists():
         if not replace:
             raise VectorIndexError("index already exists; explicit replace required")
@@ -191,6 +206,7 @@ def rebuild_index(source_path, index_path, *, owner, trusted_head, visibility,
         with closing(sqlite3.connect(tmp_name)) as db:
             db.execute("PRAGMA synchronous=FULL")
             db.execute("PRAGMA journal_mode=DELETE")
+            db.execute("PRAGMA trusted_schema=OFF")
             _load_vec(db)
             with db:
                 db.execute("CREATE TABLE metadata (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
@@ -226,7 +242,9 @@ def search_index(index_path, *, owner, trusted_head, visibility, model,
     meta = _metadata(owner, visibility, model, dimension, trusted_head, valid_at_ns)
     with closing(sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)) as db:
         db.execute("PRAGMA query_only=ON")
-        if _existing_meta(path) != meta:
+        db.execute("PRAGMA trusted_schema=OFF")
+        stored_meta = dict(db.execute("SELECT k,v FROM metadata"))
+        if any(stored_meta.get(key) != value for key, value in meta.items()):
             raise VectorIndexError("index source head/scope mismatch; rebuild required")
         _load_vec(db)
         # Fetch the whole bounded population, then break exact-score ties by ID.
@@ -234,6 +252,13 @@ def search_index(index_path, *, owner, trusted_head, visibility, model,
         count = db.execute("SELECT count(*) FROM records").fetchone()[0]
         if count > _MAX_RECORDS:
             raise VectorIndexError("derived index exceeds budget")
+        stored_rows = db.execute("""
+            SELECT records.event_id, records.event_hash, vectors.embedding
+              FROM records JOIN vectors ON records.rowid = vectors.rowid
+             ORDER BY records.event_id
+        """).fetchall()
+        if len(stored_rows) != count or _rows_digest(stored_rows) != stored_meta.get("rows_sha256"):
+            raise VectorIndexError("derived index contents do not match rebuild checksum")
         if count == 0:
             return []
         matches = db.execute("""
