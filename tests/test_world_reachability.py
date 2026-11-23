@@ -105,3 +105,40 @@ class SampledPathTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StrictReportFieldTests(unittest.TestCase):
+    class ForgedEqual:
+        def __ne__(self, other):
+            return False
+
+    class ExplodingCompare:
+        def __ne__(self, other):
+            raise RuntimeError("untrusted comparison executed")
+
+    def test_schema_requires_exact_builtin_string(self):
+        room = Room(2, 2)
+        report = find_sampled_path(room, (0, 0), (1, 1))
+        for value in (self.ForgedEqual(), self.ExplodingCompare()):
+            forged = copy.deepcopy(report)
+            forged["schema"] = value
+            with self.subTest(value=type(value).__name__), self.assertRaises(ValueError):
+                verify_witness(room, forged)
+
+    def test_status_requires_exact_builtin_string(self):
+        room = Room(2, 2)
+        report = find_sampled_path(room, (0, 0), (1, 1))
+        for value in (self.ForgedEqual(), self.ExplodingCompare()):
+            forged = copy.deepcopy(report)
+            forged["status"] = value
+            with self.subTest(value=type(value).__name__), self.assertRaises(ValueError):
+                verify_witness(room, forged)
+
+    def test_start_revision_requires_exact_lowercase_sha256(self):
+        room = Room(2, 2)
+        report = find_sampled_path(room, (0, 0), (1, 1))
+        for value in (self.ForgedEqual(), self.ExplodingCompare(), "A" * 64, "0" * 63):
+            forged = copy.deepcopy(report)
+            forged["start_revision"] = value
+            with self.subTest(value=type(value).__name__), self.assertRaises(ValueError):
+                verify_witness(room, forged)
