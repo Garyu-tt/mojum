@@ -62,9 +62,13 @@ class RigDOFLimits:
 
 
 def _exact_keys(value: dict, expected: set[str], where: str) -> None:
-    if set(value) != expected:
-        missing = sorted(expected - set(value))
-        extra = sorted(set(value) - expected)
+    keys = tuple(value.keys())
+    if any(type(key) is not str for key in keys):
+        raise DOFLimitsError(f"{where} keys must be exact strings")
+    actual = set(keys)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
         raise DOFLimitsError(f"{where} keys mismatch (missing={missing}, extra={extra})")
 
 
