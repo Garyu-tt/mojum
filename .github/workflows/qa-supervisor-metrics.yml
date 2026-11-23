@@ -1,0 +1,37 @@
+name: QA supervisor metrics
+on:
+  pull_request:
+    paths:
+      - "src/mojum/qa_supervisor_metrics.py"
+      - "tests/test_qa_supervisor_metrics.py"
+      - "docs/QA_SUPERVISOR_METRICS_R01.md"
+      - ".github/workflows/qa-supervisor-metrics.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "src/mojum/qa_supervisor_metrics.py"
+      - "tests/test_qa_supervisor_metrics.py"
+      - ".github/workflows/qa-supervisor-metrics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metrics-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile module
+        run: python -m py_compile src/mojum/qa_supervisor_metrics.py
+      - name: Run focused contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_qa_supervisor_metrics.py" -v
