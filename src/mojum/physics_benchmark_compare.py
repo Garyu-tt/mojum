@@ -98,7 +98,9 @@ def _validate(report: Any) -> _Validated:
     if (type(report) is not dict or any(type(key) is not str for key in report)
             or set(report) != _FIELDS):
         raise BenchmarkReportError("report fields do not match schema")
-    if (type(report["schema"]) is not str or type(report["visibility"]) is not str
+    if (type(report["schema"]) is not str or len(report["schema"]) != len(SCHEMA)
+            or type(report["visibility"]) is not str
+            or len(report["visibility"]) != len("PUBLIC_SYNTHETIC")
             or report["schema"] != SCHEMA
             or report["visibility"] != "PUBLIC_SYNTHETIC"):
         raise BenchmarkReportError("unsupported schema or visibility")
