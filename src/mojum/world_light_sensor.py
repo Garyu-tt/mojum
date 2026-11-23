@@ -1,15 +1,12 @@
 """Bounded synthetic point-room illumination sensor.
 
-This is a deterministic 2D fixture diagnostic, not a photometric or physical
-light transport model. It has no I/O and is never wired into the runtime.
+A deterministic 2D fixture diagnostic, not photometric or physical light transport.
 """
 from __future__ import annotations
-
 from dataclasses import dataclass
 import hashlib
 import json
 import math
-
 from .world_room import Room, RoomState, _revision
 
 SCHEMA = "mojum.world.illumination/1"
@@ -112,7 +109,8 @@ def _validate_room(room: object, state: object, tick: object,
         if _inside_closed_rect(x, y, rect):
             raise LightSensorError("sensor position intersects an obstacle")
     try:
-        actual_revision = _revision(room, tick, x, y)
+        # Preserve original int/float JSON spelling when checking revision.
+        actual_revision = _revision(room, tick, state.x, state.y)
     except Exception as exc:
         raise LightSensorError("room revision cannot be verified") from exc
     if actual_revision != state.revision:
@@ -149,7 +147,7 @@ def measure_illumination(room: Room, state: RoomState, *,
                          tick: int, expected_revision: str,
                          sources: tuple[tuple[str, float, float, float], ...],
                          ambient: float = 0.0) -> IlluminationFrame:
-    """Measure normalized direct + ambient fixture illumination at RoomState.
+    """Measure normalized direct + ambient fixture illumination.
 
     A source contributes intensity / (1 + distance_squared) when its straight
     path is not intersected by a closed obstacle AABB. Visible source
@@ -158,9 +156,7 @@ def measure_illumination(room: Room, state: RoomState, *,
     room, state = _validate_room(room, state, tick, expected_revision)
     ambient_value = _number(ambient, "ambient", 0.0, 1.0)
     parsed = _parse_sources(sources, room)
-    visible = []
-    occluded = []
-    contributions = []
+    visible, occluded, contributions = [], [], []
     direct_sum = 0.0
     for source_id, sx, sy, intensity in parsed:
         shadowed = any(
@@ -178,25 +174,20 @@ def measure_illumination(room: Room, state: RoomState, *,
     direct = min(1.0, direct_sum)
     total = min(1.0, ambient_value + direct)
     payload = {
-        "schema": SCHEMA,
-        "tick": tick,
-        "room_revision": state.revision,
-        "ambient": ambient_value,
-        "direct": direct,
-        "total": total,
-        "visible_sources": visible,
-        "occluded_sources": occluded,
+        "schema": SCHEMA, "tick": tick, "room_revision": state.revision,
+        "ambient": ambient_value, "direct": direct, "total": total,
+        "visible_sources": visible, "occluded_sources": occluded,
         "contributions": contributions,
         "provenance": "public-synthetic-point-room-illumination/v1",
         "physical_contact": False,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                            ensure_ascii=True, allow_nan=False).encode("ascii")
-    digest = hashlib.sha256(canonical).hexdigest()
     return IlluminationFrame(
         schema=SCHEMA, tick=tick, room_revision=state.revision,
         ambient=ambient_value, direct=direct, total=total,
         visible_sources=tuple(visible), occluded_sources=tuple(occluded),
         contributions=tuple(contributions),
-        provenance=payload["provenance"], physical_contact=False, digest=digest,
+        provenance=payload["provenance"], physical_contact=False,
+        digest=hashlib.sha256(canonical).hexdigest(),
     )
