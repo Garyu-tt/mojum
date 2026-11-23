@@ -43,8 +43,14 @@ def _agents(value, expected):
 
 
 def _dict(value, keys, name):
-    if not isinstance(value, dict) or set(value) != set(keys):
+    # A dict subclass may forge __len__/__iter__/keys, while a str subclass
+    # can run hostile __eq__ during set comparison. Inspect the actual builtin
+    # dict storage and reject non-native keys before any equality checks.
+    if not isinstance(value, dict) or dict.__len__(value) != len(keys):
         raise BenchmarkError(f"{name}: invalid exact agent-key set")
+    for key in dict.keys(value):
+        if type(key) is not str or key not in keys:
+            raise BenchmarkError(f"{name}: invalid exact agent-key set")
 
 
 def _observations(value):

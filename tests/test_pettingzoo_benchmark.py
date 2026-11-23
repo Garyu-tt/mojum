@@ -113,6 +113,60 @@ class PettingZooBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["cycles"], 15)
         self.assertEqual(result["reward"], 0)
 
+    def test_hostile_mapping_keys_fail_closed_without_running_equality(self):
+        from mojum import pettingzoo_benchmark as pz
+
+        class HostileKey(str):
+            eq_calls = 0
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                type(self).eq_calls += 1
+                raise RuntimeError("hostile equality must not run")
+
+        # A built-in dict can hold a str subclass with a colliding hash.
+        # set(mapping) == set(AGENTS) calls its untrusted equality.
+        for name in ("observations", "infos", "rewards", "terminations", "truncations"):
+            hostile = {HostileKey(AGENTS[0]): 3, AGENTS[1]: 3}
+            with self.subTest(name=name), self.assertRaises(BenchmarkError):
+                pz._dict(hostile, AGENTS, name)
+
+        class ForgedIterator(dict):
+            def __iter__(self):
+                return iter(AGENTS)
+
+            def keys(self):
+                return AGENTS
+
+            def __len__(self):
+                return 2
+
+        # The real dict storage, not an overrideable iterator, must be checked.
+        with self.assertRaises(BenchmarkError):
+            pz._dict(ForgedIterator({"unexpected": 3, AGENTS[1]: 3}),
+                     AGENTS, "observations")
+
+        class HostileObservation(FakeRPS):
+            def reset(self, seed=None, options=None):
+                observations, infos = super().reset(seed=seed, options=options)
+                return {HostileKey(AGENTS[0]): observations[AGENTS[0]],
+                        AGENTS[1]: observations[AGENTS[1]]}, infos
+
+        class HostileRewards(FakeRPS):
+            def step(self, actions):
+                obs, rewards, terminations, truncations, infos = super().step(actions)
+                hostile_rewards = {HostileKey(AGENTS[0]): rewards[AGENTS[0]],
+                                   AGENTS[1]: rewards[AGENTS[1]]}
+                return obs, hostile_rewards, terminations, truncations, infos
+
+        for fixture in (HostileObservation, HostileRewards):
+            env = fixture()
+            with self.subTest(fixture=fixture.__name__), self.assertRaises(BenchmarkError):
+                run_episode(lambda: env, seed=11, enabled=True)
+            self.assertTrue(env.closed)
+
+        self.assertEqual(HostileKey.eq_calls, 0)
+
     def test_budget_and_argument_rejections_before_factory(self):
         factory = mock.Mock(side_effect=AssertionError("unexpected factory"))
         for params in ({"seed": True}, {"seed": -1}, {"seed": 2**32},
