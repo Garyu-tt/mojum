@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 from dataclasses import FrozenInstanceError
 
 from mojum.segment_manifest import (
@@ -132,6 +133,12 @@ class SegmentManifestTests(unittest.TestCase):
     def test_exact_bytes_required_for_content_verification(self):
         with self.assertRaises(SegmentManifestError):
             verify_segment_bytes(self.make(), bytearray(self.segment))
+
+    def test_content_verification_rejects_oversized_buffer_before_hashing(self):
+        manifest = self.make()
+        with patch("mojum.segment_manifest.MAX_SEGMENT_BYTES", 4):
+            with self.assertRaisesRegex(SegmentManifestError, "verification budget"):
+                verify_segment_bytes(manifest, b"12345")
 
     def test_directly_constructed_invalid_manifest_is_revalidated(self):
         valid = self.make()
