@@ -16,19 +16,20 @@ objects and 4,000 dependency edges. Each task has exactly these fields:
 - state: DISCOVERED, CLAIMED, RUNNING, RETRY, WAITING_CI,
   BLOCKED_PERMISSION, BLOCKED_CONFLICT, SUCCEEDED, FAILED, or CANCELLED.
 - attempt, max_attempts: native integers bounded to 1,000.
-- lease_expires_at: non-negative integer for CLAIMED/RUNNING, otherwise null.
-- not_before: non-negative integer logical timestamp.
+- lease_expires_at: signed-64-bit non-negative integer for CLAIMED/RUNNING, otherwise null.
+- not_before: signed-64-bit non-negative logical timestamp.
 - dependencies: list of task IDs in this same snapshot.
 
-Times use one caller-selected logical integer-second domain. The module never
-reads wall-clock time, touches SQLite, performs I/O, or imports providers.
+Times use one caller-selected logical integer-second domain bounded to the
+signed 64-bit range. The module never reads wall-clock time, touches SQLite,
+performs I/O, or imports providers.
 
 ## Decisions
 
 - KEEP_TERMINAL: terminal state remains unchanged.
 - KEEP_LEASE: active lease has not expired.
 - REQUEUE: lease expired and retry budget remains.
-- MARK_FAILED: lease expired and retry budget is exhausted.
+- MARK_FAILED: lease expired or a RETRY task has exhausted its retry budget.
 - DEFER: external gate, incomplete dependency, or retry not yet due.
 - BLOCK_DEPENDENCY: dependency failed or was cancelled.
 - READY: dependencies succeeded and task is due.
