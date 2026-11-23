@@ -26,7 +26,7 @@ Each native dictionary has exactly these keys:
 All records in one audit must have the same stream and source identity.
 Sequence gaps are represented as inclusive ranges, never expanded into a list
 of missing frame numbers. Maximum frame count is 4096 and canonical input is
-limited to 1 MiB. Booleans are not accepted as integers.
+limited to 512 KiB. Booleans are not accepted as integers.
 
 ## API
 
