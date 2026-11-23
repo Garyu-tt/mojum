@@ -149,5 +149,40 @@ class DurableWorkQueueTests(unittest.TestCase):
         self.queue.complete(second["task_id"], second["lease_token"])
 
 
+    def test_every_operation_closes_its_sqlite_connection(self):
+        class TrackedConnection:
+            def __init__(self, connection):
+                self.connection = connection
+                self.closed = False
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def close(self):
+                self.closed = True
+                self.connection.close()
+
+        opened = []
+        original_connect = self.queue._connect
+
+        def tracked_connect():
+            connection = TrackedConnection(original_connect())
+            opened.append(connection)
+            return connection
+
+        self.queue._connect = tracked_connect
+        self.queue.enqueue("tracked", "tracked-key", {"ok": True})
+        claim = self.queue.claim("worker")
+        self.queue.heartbeat(claim["task_id"], claim["lease_token"])
+        self.queue.retry(claim["task_id"], claim["lease_token"])
+        claim = self.queue.claim("worker")
+        self.queue.complete(claim["task_id"], claim["lease_token"])
+        self.queue.get("tracked")
+        self.queue.counts()
+
+        self.assertGreaterEqual(len(opened), 8)
+        self.assertTrue(all(connection.closed for connection in opened))
+
+
 if __name__ == "__main__":
     unittest.main()
