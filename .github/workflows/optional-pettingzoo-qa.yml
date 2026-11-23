@@ -1,0 +1,41 @@
+name: Optional PettingZoo ParallelEnv QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/pettingzoo_pointroom.py'
+      - 'src/mojum/optional_pettingzoo.py'
+      - 'tests/test_pettingzoo_pointroom.py'
+      - 'docs/PETTINGZOO_PARALLEL_EXERCISE_R01.md'
+      - '.github/workflows/optional-pettingzoo-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-pettingzoo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned optional dependencies
+        run: python -m pip install 'pettingzoo==1.27.0' 'gymnasium==1.2.2' 'numpy==2.2.6'
+      - name: Verify installed versions and real ParallelEnv tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m
+          assert m.version('pettingzoo') == '1.27.0'
+          assert m.version('gymnasium') == '1.2.2'
+          assert m.version('numpy') == '2.2.6'
+          PY
+          python -m unittest tests.test_pettingzoo_pointroom -v
