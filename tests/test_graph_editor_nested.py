@@ -43,7 +43,7 @@ class NestedGraphEditorTests(unittest.TestCase):
                 self.assertEqual(len(wire["nodes"]), 1)
                 result = import_nested_editor(
                     wire, expected_revision=parent["revision"],
-                    expected_sha256=wire["parent_sha256"],
+                    expected_sha256=wire["source_sha256"],
                 )
                 self.assertEqual(result["containers"][0]["id"], "nested-genesis")
                 self.assertEqual(result["layout"][0]["position"], {"x": 20, "y": 40})
@@ -55,7 +55,7 @@ class NestedGraphEditorTests(unittest.TestCase):
         wire["nodes"][0]["position"] = {"x": -100, "y": 500}
         result = import_nested_editor(
             wire, expected_revision=parent["revision"],
-            expected_sha256=wire["parent_sha256"],
+            expected_sha256=wire["source_sha256"],
         )
         self.assertEqual(result["layout"][0]["position"], {"x": -100, "y": 500})
         self.assertEqual(containers[0]["position"], {"x": 20, "y": 40})
@@ -67,19 +67,19 @@ class NestedGraphEditorTests(unittest.TestCase):
         wire["nodes"][0]["data"]["child_graph"]["revision"] = "tampered"
         with self.assertRaises(GraphError):
             import_nested_editor(wire, expected_revision=parent["revision"],
-                                 expected_sha256=wire["parent_sha256"])
+                                 expected_sha256=wire["source_sha256"])
         wire = export_nested_editor(parent, containers, "reactflow")
         wire["nodes"][0]["data"]["portals"][0]["type"] = "wrong/1"
         with self.assertRaises(GraphError):
             import_nested_editor(wire, expected_revision=parent["revision"],
-                                 expected_sha256=wire["parent_sha256"])
+                                 expected_sha256=wire["source_sha256"])
 
     def test_parent_cas_mismatch_rejected(self):
         parent, containers = fixture()
         wire = export_nested_editor(parent, containers, "reactflow")
         with self.assertRaisesRegex(GraphError, "CAS"):
             import_nested_editor(wire, expected_revision="stale",
-                                 expected_sha256=wire["parent_sha256"])
+                                 expected_sha256=wire["source_sha256"])
 
     def test_wrong_port_direction_or_type_rejected(self):
         parent, containers = fixture()
