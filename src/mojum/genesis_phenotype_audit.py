@@ -15,6 +15,7 @@ PUBLIC_CLASSIFICATION = "PUBLIC_SYNTHETIC"
 MAX_INPUT_BYTES = 1_048_576
 MAX_DEPTH = 24
 MAX_NODES = 20_000
+MAX_JSON_INTEGER = 2**63 - 1
 
 
 class PhenotypeAuditError(ValueError):
@@ -26,11 +27,11 @@ def _plain_json(
     depth: int = 0,
     budget: list[int] | None = None,
 ) -> None:
-    """Admit native JSON values while bounding work and raw UTF-8 size.
+    """Preflight compact canonical JSON size before allocating its encoding.
 
-    The byte budget is charged during traversal, before whole-document JSON
-    serialization can allocate a large temporary buffer. Diagnostic messages
-    deliberately avoid echoing nested paths or caller-controlled long keys.
+    The byte budget includes JSON quoting/escaping, object and array syntax,
+    keys, separators, and scalar representations. It is therefore a bound on
+    the serialized representation, not merely the raw UTF-8 payload strings.
     """
     if budget is None:
         budget = [0, 0]
@@ -40,37 +41,72 @@ def _plain_json(
     if depth > MAX_DEPTH:
         raise PhenotypeAuditError("input nesting limit exceeded")
 
+    def add_size(amount: int) -> None:
+        budget[1] += amount
+        if budget[1] > MAX_INPUT_BYTES:
+            raise PhenotypeAuditError("input JSON byte budget exceeded")
+
     kind = type(value)
-    if value is None or kind in (bool, int):
+    if kind is str:
+        if len(value) > 16_384:
+            raise PhenotypeAuditError("input string limit exceeded")
+        size = 2  # JSON quotes
+        short_escapes = {8, 9, 10, 12, 13}
+        for char in value:
+            code = ord(char)
+            if code in (34, 92):
+                size += 2
+            elif code < 32:
+                size += 2 if code in short_escapes else 6
+            elif 0xD800 <= code <= 0xDFFF:
+                raise PhenotypeAuditError("input contains text that is not valid UTF-8")
+            elif code <= 0x7F:
+                size += 1
+            elif code <= 0x7FF:
+                size += 2
+            elif code <= 0xFFFF:
+                size += 3
+            else:
+                size += 4
+            if size > MAX_INPUT_BYTES:
+                raise PhenotypeAuditError("input JSON byte budget exceeded")
+        add_size(size)
+        return
+    if kind is bool:
+        add_size(4 if value else 5)
+        return
+    if value is None:
+        add_size(4)
+        return
+    if kind is int:
+        if not -(2**63) <= value <= MAX_JSON_INTEGER:
+            raise PhenotypeAuditError("input integer is out of range")
+        add_size(len(str(value)))
         return
     if kind is float:
         if not math.isfinite(value):
             raise PhenotypeAuditError("input contains a non-finite number")
-        return
-    if kind is str:
-        if len(value) > 16_384:
-            raise PhenotypeAuditError("input string limit exceeded")
-        try:
-            encoded_size = len(value.encode("utf-8"))
-        except UnicodeEncodeError as exc:
-            raise PhenotypeAuditError("input contains text that is not valid UTF-8") from exc
-        budget[1] += encoded_size
-        if budget[1] > MAX_INPUT_BYTES:
-            raise PhenotypeAuditError("input byte budget exceeded")
+        add_size(len(repr(value)))
         return
     if kind is list:
+        if budget[0] + len(value) > MAX_NODES:
+            raise PhenotypeAuditError("input node budget exceeded")
+        add_size(2 + max(0, len(value) - 1))  # brackets and commas
         for item in value:
             _plain_json(item, depth + 1, budget)
         return
     if kind is dict:
+        if budget[0] + 2 * len(value) > MAX_NODES:
+            raise PhenotypeAuditError("input node budget exceeded")
+        add_size(2 + max(0, len(value) - 1))  # braces and commas
         for key, item in value.items():
             if type(key) is not str:
                 raise PhenotypeAuditError("input contains a non-string object key")
             _plain_json(key, depth + 1, budget)
+            add_size(1)  # colon between key and value
             _plain_json(item, depth + 1, budget)
         return
     raise PhenotypeAuditError("input contains a non-native JSON value")
-
 
 def _canonical_bytes(value: Any) -> bytes:
     _plain_json(value)
