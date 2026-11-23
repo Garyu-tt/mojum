@@ -72,7 +72,7 @@ class WorkflowEvidenceTests(unittest.TestCase):
                 return str.__hash__(self)
         key = HostileKey("run_id")
         item = run()
-        item[key] = 2
+        item[key] = item.pop("run_id")
         key.armed = True
         with self.assertRaises(WorkflowEvidenceError):
             evaluate_workflow_evidence([item], expected_head_sha=HEAD, required_workflow_ids=[10])
