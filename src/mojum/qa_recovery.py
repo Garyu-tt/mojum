@@ -114,7 +114,7 @@ def plan_recovery(tasks: Any, *, observed_at: int) -> RecoveryReport:
         if task_id in by_id:
             raise RecoveryError(f"duplicate task_id: {task_id}")
         state = item["state"]
-        if type(state) is not str or state not in _STATES:
+        if type(state) is not str or len(state) > 32 or state not in _STATES:
             raise RecoveryError(f"tasks[{index}].state is unsupported")
         attempt = _integer(item["attempt"], f"tasks[{index}].attempt", maximum=MAX_ATTEMPTS)
         maximum = _integer(item["max_attempts"], f"tasks[{index}].max_attempts",
