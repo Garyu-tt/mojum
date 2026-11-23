@@ -54,7 +54,12 @@ def _encode_change(row):
     if not isinstance(row, (tuple, list)) or len(row) != 9:
         raise ValueError("invalid CR-SQLite change shape")
     table, pk, cid, val, col_version, db_version, site_id, cl, seq = row
-    if table != TABLE or cid != "value":
+    # pack_changes is a public in-process API, not only a sqlite3 row reader.
+    # Require native strings before invoking user-defined equality operators:
+    # a forged object could otherwise spoof an allowlisted table/column or
+    # raise arbitrary exceptions during the admission check.
+    if (type(table) is not str or type(cid) is not str
+            or table != TABLE or cid != "value"):
         raise ValueError("unapproved replicated table or column")
     return {
         "table": TABLE,
