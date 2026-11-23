@@ -112,7 +112,7 @@ class MotorSlewGuardTests(unittest.TestCase):
     def test_reject_lossy_large_int_before_bounds_or_slew(self):
         # Without a lossless check, hi+1 rounds to hi as IEEE binary64
         # and an out-of-bounds caller target is silently accepted.
-        hi = 2**53
+        hi = 2**54
         gate = MotorSlewGuard({"j": (0, hi, 10)}, {"j": hi - 10})
         before = gate.receipt()
         with self.assertRaisesRegex(MotorSlewError, "precision"):
