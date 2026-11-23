@@ -1,6 +1,8 @@
 """Bounded read-only consistency audit for a GENESIS phenotype projection."""
 from __future__ import annotations
 
+import math
+
 from mojum.genesis import GenesisError, GenomeLedger, canonical, sha256
 
 SCHEMA = "mojum.genesis.phenotype-audit/1"
@@ -87,7 +89,7 @@ def _check_tree(value, path="$"):
                 raise GenesisPhenotypeAuditError("input contains a non-finite number")
             add_size(len(repr(item)))
         elif kind is bool:
-            add_size(5 if item else 5)  # true/false are both five bytes
+            add_size(4 if item else 5)  # true is four bytes; false is five
         elif item is None:
             add_size(4)
         else:
