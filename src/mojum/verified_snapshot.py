@@ -59,8 +59,32 @@ def runtime_source_sha256():
     return sha.hexdigest()
 
 
+
+def _reject_unsafe_ancestors(path):
+    """Reject path traversal and directory-symlink redirection for PRIVATE files.
+
+    This is a static guard, not a replacement for an owner-private directory:
+    untrusted processes must not be able to rename its components concurrently.
+    """
+    location = Path(path)
+    if ".." in location.parts:
+        raise SnapshotError("PRIVATE snapshot/key path cannot contain parent traversal")
+    absolute = location if location.is_absolute() else Path.cwd() / location
+    for parent in reversed(absolute.parents):
+        try:
+            mode = parent.lstat().st_mode
+        except OSError as exc:
+            raise SnapshotError("PRIVATE snapshot/key path ancestor inaccessible") from exc
+        if (stat.S_ISLNK(mode) or
+                (hasattr(parent, "is_junction") and parent.is_junction())):
+            raise SnapshotError("PRIVATE snapshot/key ancestor cannot be a symlink")
+        if not stat.S_ISDIR(mode):
+            raise SnapshotError("PRIVATE snapshot/key ancestor must be a directory")
+
+
 def _open_regular(path, *, secret):
     location = Path(path)
+    _reject_unsafe_ancestors(location)
     if location.is_symlink():
         raise SnapshotError("PRIVATE snapshot/key path cannot be a symlink")
     flags = os.O_RDONLY
@@ -113,6 +137,7 @@ def load_snapshot(snapshot_file, key_file):
     """
     key = read_key(key_file)
     path = Path(snapshot_file)
+    _reject_unsafe_ancestors(path)
     if not path.exists() and not path.is_symlink():
         return None
     raw = _open_regular(path, secret=False)
@@ -148,6 +173,7 @@ def save_snapshot(snapshot_file, key_file, state):
     mac = hmac.new(key, canonical(state), hashlib.sha256).hexdigest()
     raw = canonical({"schema": SCHEMA, "state": state, "hmac_sha256": mac})
     path = Path(snapshot_file)
+    _reject_unsafe_ancestors(path)
     if not path.parent.is_dir() or path.is_symlink() or path.is_dir():
         raise SnapshotError("snapshot destination must be a normal local path")
     if path.exists():
@@ -182,6 +208,7 @@ def save_snapshot(snapshot_file, key_file, state):
 def create_key_file(key_file):
     """Separate explicit key-provisioning operation, never implicit at boot."""
     path = Path(key_file)
+    _reject_unsafe_ancestors(path)
     if not path.parent.is_dir() or path.is_symlink():
         raise SnapshotError("key directory must already exist and be local")
     fd = None
