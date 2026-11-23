@@ -1,3 +1,4 @@
+import builtins
 import unittest
 from unittest.mock import patch
 
@@ -130,9 +131,18 @@ class SupervisorMetricsTests(unittest.TestCase):
     def test_oversized_field_names_rejected_before_hashing(self):
         huge_key = "x" * 1_000_000
         snapshot = {"observed_at": 1, "tasks": [], huge_key: None}
+        original_set = builtins.set
+
+        def bounded_set(values):
+            values = tuple(values)
+            self.assertTrue(
+                all(type(value) is str and len(value) <= 32 for value in values),
+                "oversized field name reached set hashing",
+            )
+            return original_set(values)
+
         with patch("mojum.qa_supervisor_metrics.set",
-                   side_effect=AssertionError("field name must be bounded before hashing"),
-                   create=True):
+                   side_effect=bounded_set, create=True):
             with self.assertRaises(MetricsInputError):
                 summarize_snapshot(snapshot)
 
