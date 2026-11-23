@@ -207,6 +207,29 @@ class DurableQAQueue:
             db.commit()
         return self._decode(row)
 
+
+    def record_merged(self, job_id: str, *, expected_head_sha: str, now: float | None = None) -> QueueJob:
+        """Record an externally verified merge for a ready job using compare-and-swap.
+
+        The caller is responsible for independently verifying the merge on the
+        expected head; this method only records that observation in queue state.
+        """
+        if (type(expected_head_sha) is not str or len(expected_head_sha) not in (40, 64)
+                or any(char not in "0123456789abcdefABCDEF" for char in expected_head_sha)):
+            raise ValueError("expected_head_sha must be a full hexadecimal Git object ID")
+        ts = self._time(now)
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute("""UPDATE qa_jobs SET state='merged', updated_at=?, last_error=NULL
+                WHERE job_id=? AND state='ready' AND lease_token IS NULL AND head_sha=?""",
+                (ts, job_id, expected_head_sha.lower())).rowcount
+            if changed != 1:
+                db.rollback()
+                raise TransitionError("job is not ready at the expected head")
+            row = db.execute("SELECT * FROM qa_jobs WHERE job_id=?", (job_id,)).fetchone()
+            db.commit()
+        return self._decode(row)
+
     def get(self, job_id: str) -> QueueJob | None:
         with self._connection() as db: row=db.execute("SELECT * FROM qa_jobs WHERE job_id=?",(job_id,)).fetchone()
         return self._decode(row)
