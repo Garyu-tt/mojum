@@ -45,8 +45,8 @@ class SherpaOfflineTests(unittest.TestCase):
     def test_identical_public_fixture_is_deterministic(self):
         packet = wav()
         a, b = Recognizer(), Recognizer()
-        result = transcribe_public_wav(packet, a, enabled=True)
-        self.assertEqual(result, transcribe_public_wav(packet, b, enabled=True))
+        result = transcribe_public_wav(packet, a, enabled=True, visibility="PUBLIC_SYNTHETIC")
+        self.assertEqual(result, transcribe_public_wav(packet, b, enabled=True, visibility="PUBLIC_SYNTHETIC"))
         self.assertEqual(result["frames"], 100)
         self.assertEqual(result["duration_ms"], 6)
         self.assertEqual(result["sample_rate"], 16000)
@@ -61,7 +61,7 @@ class SherpaOfflineTests(unittest.TestCase):
 
     def test_independent_mock_inference_and_full_frame_budget(self):
         packet = wav(16000)
-        result = transcribe_public_wav(packet, Recognizer("synthetic"), enabled=True)
+        result = transcribe_public_wav(packet, Recognizer("synthetic"), enabled=True, visibility="PUBLIC_SYNTHETIC")
         self.assertEqual(result["duration_ms"], 1000)
         self.assertEqual(result["transcript"], "synthetic")
 
@@ -69,14 +69,14 @@ class SherpaOfflineTests(unittest.TestCase):
         import sys
         from unittest.mock import patch
         with patch.dict(sys.modules, {"numpy": None}):
-            result = transcribe_public_wav(wav(32), Recognizer(""), enabled=True)
+            result = transcribe_public_wav(wav(32), Recognizer(""), enabled=True, visibility="PUBLIC_SYNTHETIC")
         self.assertEqual(result["frames"], 32)
 
     def test_opt_in_and_private_denied_before_backend(self):
         a = Recognizer()
         with self.assertRaisesRegex(ASRBoundaryError, "opt-in"):
             transcribe_public_wav(wav(), a)
-        for visibility in ("PRIVATE", "PUBLIC", None, True, "PUBLIC_SYNTHETIC\n"):
+        # Opt-in alone never classifies unknown input as public synthetic.\n        with self.assertRaisesRegex(ASRBoundaryError, "explicit PUBLIC_SYNTHETIC"):\n            transcribe_public_wav(wav(), a, enabled=True)\n        for visibility in ("PRIVATE", "PUBLIC", None, True, "PUBLIC_SYNTHETIC\n"):
             with self.subTest(visibility=visibility), self.assertRaises(ASRBoundaryError):
                 transcribe_public_wav(wav(), a, enabled=True, visibility=visibility)
         self.assertEqual(a.calls, 0)
@@ -87,13 +87,13 @@ class SherpaOfflineTests(unittest.TestCase):
                      wav(samples=MAX_SAMPLES + 1), wav()[:30],
                      wav()[:-17], "not bytes"):
             with self.subTest(kind=type(data), length=len(data)), self.assertRaises(ASRBoundaryError):
-                transcribe_public_wav(data, Recognizer(), enabled=True)
+                transcribe_public_wav(data, Recognizer(), enabled=True, visibility="PUBLIC_SYNTHETIC")
 
     def test_transcript_contract(self):
         for value in (None, True, 3, "x" * 501, "\r", "hello\x00", "\ud800"):
             with self.subTest(value=repr(value)), self.assertRaises(ASRBoundaryError):
-                transcribe_public_wav(wav(), Recognizer(value), enabled=True)
-        self.assertEqual(transcribe_public_wav(wav(), Recognizer(""), enabled=True)["transcript"], "")
+                transcribe_public_wav(wav(), Recognizer(value), enabled=True, visibility="PUBLIC_SYNTHETIC")
+        self.assertEqual(transcribe_public_wav(wav(), Recognizer(""), enabled=True, visibility="PUBLIC_SYNTHETIC")["transcript"], "")
 
     def test_backend_failures_do_not_expose_private_diagnostics(self):
         marker = "token=fixture-secret /private/model/path"
@@ -133,13 +133,13 @@ class SherpaOfflineTests(unittest.TestCase):
         for backend in backends:
             with self.subTest(backend=type(backend).__name__):
                 with self.assertRaises(ASRBoundaryError) as caught:
-                    transcribe_public_wav(wav(), backend, enabled=True)
+                    transcribe_public_wav(wav(), backend, enabled=True, visibility="PUBLIC_SYNTHETIC")
                 self.assertEqual(str(caught.exception), "offline ASR backend failed")
                 self.assertIsNone(caught.exception.__context__)
 
     def test_invalid_recognizer_denied(self):
         with self.assertRaises(ASRBoundaryError):
-            transcribe_public_wav(wav(), object(), enabled=True)
+            transcribe_public_wav(wav(), object(), enabled=True, visibility="PUBLIC_SYNTHETIC")
 
 
 if __name__ == "__main__":
