@@ -26,14 +26,19 @@ def _preflight_boundary_budget(snapshot: dict, start: int, end: int) -> None:
     events still go through the authoritative GenomeLedger.from_snapshot gate.
     Never invoke comparison/hash callbacks on caller-defined event/tick types.
     """
+    # Avoid invoking hostile __hash__/__eq__ callbacks via dict lookups:
+    # only examine primitive-key fixtures and defer all others to the
+    # authoritative verifier (which never gets bypassed on success).
+    if len(snapshot) != 4 or any(type(key) is not str for key in snapshot):
+        return
     raw_events = snapshot.get("events")
     if type(raw_events) is not list or len(raw_events) > GenomeLedger.MAX_EVENTS:
         # Leave malformed and overlarge lists to canonical snapshot admission,
-        # which already rejects them in O(1) before replay.
+        # which already rejects them before replay.
         return
     ticks = {start, end}
     for event in raw_events:
-        if type(event) is not dict:
+        if type(event) is not dict or any(type(key) is not str for key in event):
             continue
         raw_tick = event.get("valid_from_tick")
         if type(raw_tick) is int and start < raw_tick < end:
