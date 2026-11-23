@@ -67,7 +67,7 @@ class VrmResourceBudgetTests(unittest.TestCase):
 
     def test_rejects_excess_inventory_cardinality_before_iteration(self):
         candidate = inventory()
-        candidate.update({f\"extra-{index}\": 0 for index in range(100_000)})
+        candidate.update({f"extra-{index}": 0 for index in range(100_000)})
         with self.assertRaises(ResourceBudgetError):
             assess_vrm_resource_budget(candidate)
 
