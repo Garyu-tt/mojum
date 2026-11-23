@@ -52,7 +52,7 @@ class Lease:
 
 
 def _text(value: object, name: str, limit: int) -> str:
-    if type(value) is not str or not value.strip() or len(value) > limit:
+    if type(value) is not str or len(value) > limit or not value.strip():
         raise QueueError(f"{name} must be nonblank text of at most {limit} characters")
     return value.strip()
 
@@ -60,7 +60,10 @@ def _text(value: object, name: str, limit: int) -> str:
 def _number(value: object, name: str, low: float, high: float) -> float:
     if type(value) not in (int, float):
         raise QueueError(f"{name} must be a finite number")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise QueueError(f"{name} is outside the permitted range") from None
     if not math.isfinite(result) or not low <= result <= high:
         raise QueueError(f"{name} is outside the permitted range")
     return result
