@@ -49,40 +49,39 @@ class CausalTailTests(unittest.TestCase):
         with self.assertRaisesRegex(CellV3EscapeError, "terminal streak counters"):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
-    def test_round_trip_streaks_beyond_four_entry_evidence_window(self):
-        for streak in (4, 5, 10):
-            with self.subTest(streak=streak):
-                snapshot = CellExplorerV3Escape().snapshot()
-                snapshot.update({
-                    "last_tick": streak - 1,
-                    "updates": streak,
-                    "records": {"0:0": {"rest": [streak, 0]}},
-                    "last_seen_at": {"0:0": streak - 1},
-                    "consecutive_rests": streak,
-                    "outcome_tail": [
-                        {"tick": tick, "cell": "0:0", "action": "rest", "blocked": False}
-                        for tick in range(streak - 4, streak)
-                    ],
-                    "history_complete": True,
-                })
-                restored = CellExplorerV3Escape.from_snapshot(snapshot)
-                self.assertEqual(restored.snapshot(), snapshot)
+    def test_round_trip_at_operational_streak_ceilings(self):
+        # Rest is capped at three consecutive ticks; blocked re-probes are
+        # capped at the four-entry chronology window. Keep fixtures within
+        # those reachable limits instead of constructing impossible states.
+        rest = CellExplorerV3Escape().snapshot()
+        rest.update({
+            "last_tick": 2,
+            "updates": 3,
+            "records": {"0:0": {"rest": [3, 0]}},
+            "last_seen_at": {"0:0": 2},
+            "consecutive_rests": 3,
+            "outcome_tail": [
+                {"tick": tick, "cell": "0:0", "action": "rest", "blocked": False}
+                for tick in range(3)
+            ],
+            "history_complete": False,
+        })
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(rest).snapshot(), rest)
 
-                blocked = CellExplorerV3Escape().snapshot()
-                blocked.update({
-                    "last_tick": streak - 1,
-                    "updates": streak,
-                    "records": {"0:0": {"x+": [streak, streak]}},
-                    "last_seen_at": {"0:0": streak - 1},
-                    "consecutive_blocked_probes": streak,
-                    "outcome_tail": [
-                        {"tick": tick, "cell": "0:0", "action": "x+", "blocked": True}
-                        for tick in range(streak - 4, streak)
-                    ],
-                    "history_complete": True,
-                })
-                restored = CellExplorerV3Escape.from_snapshot(blocked)
-                self.assertEqual(restored.snapshot(), blocked)
+        blocked = CellExplorerV3Escape().snapshot()
+        blocked.update({
+            "last_tick": 3,
+            "updates": 4,
+            "records": {"0:0": {"x+": [4, 4]}},
+            "last_seen_at": {"0:0": 3},
+            "consecutive_blocked_probes": 4,
+            "outcome_tail": [
+                {"tick": tick, "cell": "0:0", "action": "x+", "blocked": True}
+                for tick in range(4)
+            ],
+            "history_complete": True,
+        })
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(blocked).snapshot(), blocked)
 
 
     def test_hostile_mapping_keys_and_schema_values_are_rejected_before_comparison(self):
