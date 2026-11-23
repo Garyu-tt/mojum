@@ -24,6 +24,11 @@ def _claim_process(path, worker_number, result_queue):
         result_queue.put(("error", repr(exc)))
 
 
+def test_huge_numeric_configuration_raises_queue_error():
+    with pytest.raises(QueueError):
+        QAWorkQueue(":memory:", busy_timeout=10**10000)
+
+
 def test_enqueue_idempotency_and_detached_payload(tmp_path):
     path = str(tmp_path / "queue.db")
     payload = {"pr": 12, "head": "a" * 40}
