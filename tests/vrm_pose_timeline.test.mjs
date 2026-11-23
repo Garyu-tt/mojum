@@ -6,6 +6,7 @@ const revision = 'a'.repeat(64);
 function frame(sequence, options = {}) {
   return {
     schema: 'mojum.vrm-pose-timeline/1',
+    classification: 'PUBLIC_SYNTHETIC',
     sequence,
     epoch: 'body-epoch-01',
     tick: sequence * 2,
@@ -78,6 +79,18 @@ test('rejects malformed schema, hostile field sets, values and bounds', () => {
   assert.throws(() => createVrmPoseTimeline([{...frame(0), extra: true}]), /field set/);
   assert.throws(() => createVrmPoseTimeline([{...frame(0), sequence: true}]), /metadata/);
   assert.throws(() => createVrmPoseTimeline([{...frame(0), revision: 'x'}]), /metadata/);
+  assert.throws(() => createVrmPoseTimeline([{...frame(0), classification: 'PRIVATE'}]), /metadata/);
+  const getterFrame = frame(0);
+  let getterCalled = false;
+  Object.defineProperty(getterFrame, 'epoch', {enumerable: true, get() {
+    getterCalled = true;
+    return 'body-epoch-01';
+  }});
+  assert.throws(() => createVrmPoseTimeline([getterFrame]), /data properties/);
+  assert.equal(getterCalled, false);
+  const sparseJoints = frame(0);
+  sparseJoints.joints = Array(1);
+  assert.throws(() => createVrmPoseTimeline([sparseJoints]), /dense array/);
   const badAngle = frame(0);
   badAngle.joints[1].angle_rad = Number.NaN;
   assert.throws(() => createVrmPoseTimeline([badAngle]), /joint/);
