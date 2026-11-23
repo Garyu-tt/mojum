@@ -61,20 +61,28 @@ def validate_motor_batch(
     for intent in commands:
         if type(intent) is not MotorIntent:
             raise TypeError("MotorIntent required")
-        if type(intent.joint) is not str:
+        # Dataclasses are frozen by convention only; object.__new__ can forge
+        # an exact MotorIntent with missing fields. Snapshot all scalars before
+        # calling the gate, so malformed records fail as typed validation errors
+        # and caller mutation cannot change a field between our read and gate.
+        try:
+            joint, requested, revision = intent.joint, intent.target, intent.revision
+        except AttributeError as exc:
+            raise ValueError("incomplete MotorIntent") from exc
+        if type(joint) is not str:
             raise ValueError("invalid joint identifier")
         try:
-            if not 1 <= len(intent.joint.encode("utf-8", errors="strict")) <= MAX_JOINT_ID_BYTES:
+            if not 1 <= len(joint.encode("utf-8", errors="strict")) <= MAX_JOINT_ID_BYTES:
                 raise ValueError("invalid joint identifier length")
         except UnicodeError as exc:
             raise ValueError("invalid UTF-8 joint identifier") from exc
-        if intent.joint in seen:
+        if joint in seen:
             raise ValueError("duplicate joint in motor batch")
-        seen.add(intent.joint)
+        seen.add(joint)
         # The existing fail-closed gate owns numeric, per-joint range, revision,
         # and e-stop checks. Never implement a weaker duplicate validator.
-        target = gate.validate(intent)
-        checked.append(ValidatedJoint(intent.joint, 0.0 if target == 0 else target))
+        target = gate.validate(MotorIntent(joint, requested, revision))
+        checked.append(ValidatedJoint(joint, 0.0 if target == 0 else target))
 
     if gate.estop_latched:
         raise PermissionError("e-stop latched")
