@@ -13,6 +13,8 @@ MAX_PATH_BYTES = 1024
 MAX_COMPONENT_BYTES = 255
 _DRIVE = re.compile(r"^[A-Za-z]:")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_WINDOWS_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL"})
+_WINDOWS_NUMBERED = re.compile(r"^(?:COM|LPT)[1-9¹²³]$", re.IGNORECASE)
 
 
 class ArchivePathError(ValueError):
@@ -43,10 +45,21 @@ def validate_member_path(path: str) -> str:
         or ":" in component
         or len(component.encode("utf-8")) > MAX_COMPONENT_BYTES
         or component.endswith((" ", "."))
+        or _is_windows_reserved_component(component)
         for component in components
     ):
         raise ArchivePathError("unsafe path component")
     return path
+
+
+def _is_windows_reserved_component(component: str) -> bool:
+    """Reject DOS device basenames, including names with extensions."""
+    # Win32 treats device names as reserved even when an extension is present.
+    # Trim spaces/dots from the stem too, since Win32 path handling may ignore
+    # trailing characters before the first extension separator.
+    stem = component.split(".", 1)[0].rstrip(" .")
+    upper = stem.upper()
+    return upper in _WINDOWS_RESERVED or _WINDOWS_NUMBERED.fullmatch(stem) is not None
 
 
 def admit_member_paths(paths: Iterable[str], *, max_members: int = MAX_MEMBERS) -> tuple[str, ...]:
@@ -54,8 +67,8 @@ def admit_member_paths(paths: Iterable[str], *, max_members: int = MAX_MEMBERS) 
 
     Prefix collisions (e.g. 'a' and 'a/b') cannot coexist as files. Casefold
     collisions are rejected for portability across case-insensitive hosts.
-    Colons are rejected in every component to exclude Windows alternate data
-    stream syntax (for example ``file.txt:payload``).
+    Colons and reserved DOS device basenames are rejected in every component
+    to avoid Windows alternate data streams and device aliases.
     """
     if type(max_members) is not int or not 1 <= max_members <= MAX_MEMBERS:
         raise ArchivePathError("invalid member limit")
