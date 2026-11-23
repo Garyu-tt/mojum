@@ -34,13 +34,15 @@ def parse_retry_after(value: str | int | float | None, *, now_epoch: float) -> f
     """
     if value is None:
         return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        if not math.isfinite(float(value)) or value < 0:
+    if type(value) in (int, float):
+        try:
+            number = float(value)
+        except (OverflowError, ValueError):
             return None
-        return min(float(value), 86400.0)
-    if not isinstance(value, str) or len(value) > 128:
+        if not math.isfinite(number) or number < 0:
+            return None
+        return min(number, 86400.0)
+    if type(value) is not str or len(value) > 128:
         return None
     raw = value.strip()
     if not raw:
@@ -98,9 +100,8 @@ def circuit_transition(
     reset_after: float = 60.0,
 ) -> Circuit:
     """Apply one completed poll result; no transition grants write authority."""
-    if not isinstance(circuit, Circuit):
-        raise PollPolicyError("circuit must be a Circuit")
-    if outcome not in ("success", "transient", "rate_limited", "forbidden", "permanent"):
+    _validate_circuit(circuit)
+    if type(outcome) is not str or outcome not in ("success", "transient", "rate_limited", "forbidden", "permanent"):
         raise PollPolicyError("unknown outcome")
     if type(now_epoch) not in (int, float) or not math.isfinite(now_epoch) or now_epoch < 0:
         raise PollPolicyError("now_epoch must be a finite non-negative number")
@@ -121,10 +122,31 @@ def circuit_transition(
     return Circuit(status="closed", failures=failures)
 
 
+def _validate_circuit(circuit: object) -> None:
+    """Reject malformed public circuit snapshots before making policy decisions."""
+    if type(circuit) is not Circuit:
+        raise PollPolicyError("circuit must be an exact Circuit")
+    if type(circuit.status) is not str or circuit.status not in ("closed", "open", "half_open"):
+        raise PollPolicyError("circuit has an unknown status")
+    _int(circuit.failures, "circuit.failures", 0, 100)
+    if type(circuit.probe_in_flight) is not bool:
+        raise PollPolicyError("circuit.probe_in_flight must be bool")
+    if circuit.opened_at is not None:
+        if (type(circuit.opened_at) not in (int, float)
+                or not math.isfinite(circuit.opened_at) or circuit.opened_at < 0):
+            raise PollPolicyError("circuit.opened_at must be a finite non-negative number")
+    if circuit.status == "closed":
+        if circuit.opened_at is not None or circuit.probe_in_flight:
+            raise PollPolicyError("closed circuit cannot have an open timestamp or active probe")
+    elif circuit.opened_at is None:
+        raise PollPolicyError("open and half-open circuits require opened_at")
+    elif circuit.status == "open" and circuit.probe_in_flight:
+        raise PollPolicyError("open circuit cannot have a probe in flight")
+
+
 def poll_permitted(circuit: Circuit, *, now_epoch: float, reset_after: float = 60.0) -> bool:
     """Whether one read-only poll may start; half-open permits exactly one probe."""
-    if not isinstance(circuit, Circuit):
-        raise PollPolicyError("circuit must be a Circuit")
+    _validate_circuit(circuit)
     if type(now_epoch) not in (int, float) or not math.isfinite(now_epoch) or now_epoch < 0:
         raise PollPolicyError("now_epoch must be finite and non-negative")
     if type(reset_after) not in (int, float) or not math.isfinite(reset_after) or reset_after <= 0:
