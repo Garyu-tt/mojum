@@ -1,0 +1,42 @@
+name: World acoustics bounded-input QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/world_acoustics.py"
+      - "tests/test_world_acoustics.py"
+      - ".github/workflows/world-acoustics-qa.yml"
+  push:
+    branches:
+      - main
+      - "qa/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact source revision
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Focused world acoustics tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m py_compile src/mojum/world_acoustics.py
+          python -m unittest discover -s tests -p 'test_world_acoustics.py' -v
