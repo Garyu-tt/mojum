@@ -48,7 +48,7 @@ def sample_point_source(
     No walls, diffraction, absorption, microphone data or propagation delay.
     """
     for name, point in (("source_xy", source_xy), ("listener_xy", listener_xy)):
-        if not isinstance(point, (tuple, list)) or len(point) != 2:
+        if type(point) not in (tuple, list) or len(point) != 2:
             raise ValueError(f"{name} must contain exactly two coordinates")
         for value in point:
             _bounded_number(value, f"{name} coordinate", 1e9)
