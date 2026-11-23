@@ -137,6 +137,19 @@ class VirtualMassPropertiesTests(unittest.TestCase):
         with self.assertRaises(MassPropertiesError):
             build_mass_properties(raw)
 
+    def test_oversized_fixed_schema_mappings_rejected_before_key_snapshot(self):
+        raw = fixture(segment("ok"))
+        raw.update({f"extra-{index}": index for index in range(50_000)})
+        with self.assertRaisesRegex(MassPropertiesError, "missing or unknown fields"):
+            build_mass_properties(raw)
+
+        raw = fixture(segment("ok"))
+        raw["segments"][0].update({
+            f"extra-{index}": index for index in range(50_000)
+        })
+        with self.assertRaisesRegex(MassPropertiesError, "missing or unknown fields"):
+            build_mass_properties(raw)
+
     def test_non_symmetric_inertia_is_rejected(self):
         tensor = [[1, 0.1, 0], [0, 1, 0], [0, 0, 1]]
         with self.assertRaises(MassPropertiesError):
