@@ -15,6 +15,9 @@ SCHEMA = "mojum.archive-key-rotation/1"
 _MAX_ROTATIONS = 32
 _KEY_BYTES = 32
 _HEX_256 = re.compile(r"[0-9a-f]{64}", re.ASCII)
+_RECORD_FIELDS = frozenset({
+    "schema", "epoch", "previous_fingerprint", "next_fingerprint", "signature"
+})
 
 
 class RotationError(ValueError):
@@ -81,20 +84,35 @@ def verify_rotation_chain(
         raise RotationError("initial_epoch must be a bounded native integer")
     if type(rotations) not in (list, tuple) or len(rotations) > _MAX_ROTATIONS:
         raise RotationError("rotations must be a list/tuple of at most 32 records")
-    if type(keyring) is not dict:
-        raise RotationError("keyring must be a native dict")
+    if type(keyring) is not dict or len(keyring) > _MAX_ROTATIONS:
+        raise RotationError("keyring must be a native dict of at most 32 entries")
     if type(expected_final_fingerprint) is not str or not _HEX_256.fullmatch(expected_final_fingerprint):
         raise RotationError("expected final fingerprint must be lowercase SHA-256 hex")
+
+    # Admit all keyring entries before using any key for hashing/equality/lookup.
+    # Exact built-in strings/bytes prevent caller-defined methods from running.
+    admitted_keyring: dict[str, bytes] = {}
+    for fingerprint, key in keyring.items():
+        if type(fingerprint) is not str or not _HEX_256.fullmatch(fingerprint):
+            raise RotationError("keyring fingerprints must be native lowercase SHA-256 hex")
+        if type(key) is not bytes:
+            raise RotationError("keyring values must be native bytes")
+        if not hmac.compare_digest(key_fingerprint(key), fingerprint):
+            raise RotationError("keyring key does not match its fingerprint")
+        admitted_keyring[fingerprint] = key
 
     initial_fp = key_fingerprint(initial_key)
     current_fp = initial_fp
     current_epoch = initial_epoch
     seen = {initial_fp}
     chain = hashlib.sha256()
-    for index, record in enumerate(rotations):
-        if type(record) is not dict or set(record) != {
-            "schema", "epoch", "previous_fingerprint", "next_fingerprint", "signature"
-        }:
+    for record in rotations:
+        if type(record) is not dict or len(record) != len(_RECORD_FIELDS):
+            raise RotationError("rotation record has an invalid exact shape")
+        # Bound cardinality before materializing keys, and reject subclasses
+        # before set/hash/equality operations can invoke caller code.
+        keys = tuple(record)
+        if any(type(key) is not str for key in keys) or set(keys) != _RECORD_FIELDS:
             raise RotationError("rotation record has an invalid exact shape")
         schema = record["schema"]
         epoch = record["epoch"]
@@ -114,7 +132,7 @@ def verify_rotation_chain(
         if type(signature) is not str or not _HEX_256.fullmatch(signature):
             raise RotationError("invalid rotation signature encoding")
 
-        signing_key = initial_key if current_fp == initial_fp else keyring.get(current_fp)
+        signing_key = initial_key if current_fp == initial_fp else admitted_keyring.get(current_fp)
         if type(signing_key) is not bytes or not hmac.compare_digest(key_fingerprint(signing_key), current_fp):
             raise RotationError("missing or mismatched intermediate signing key")
         expected = hmac.new(signing_key, _rotation_message(epoch, previous, following), hashlib.sha256).hexdigest()
