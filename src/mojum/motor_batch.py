@@ -63,8 +63,13 @@ def validate_motor_batch(
             raise TypeError("MotorIntent required")
         if type(intent.joint) is not str:
             raise ValueError("invalid joint identifier")
+        # Every valid Unicode codepoint occupies at least one UTF-8 byte.
+        # Check the constant-time character count *before* allocating an
+        # encoded copy: hostile million-character names must fail boundedly.
+        if not 1 <= len(intent.joint) <= MAX_JOINT_ID_BYTES:
+            raise ValueError("invalid joint identifier length")
         try:
-            if not 1 <= len(intent.joint.encode("utf-8", errors="strict")) <= MAX_JOINT_ID_BYTES:
+            if len(intent.joint.encode("utf-8", errors="strict")) > MAX_JOINT_ID_BYTES:
                 raise ValueError("invalid joint identifier length")
         except UnicodeError as exc:
             raise ValueError("invalid UTF-8 joint identifier") from exc
