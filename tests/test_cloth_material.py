@@ -71,7 +71,7 @@ class ClothMaterialProfileTests(unittest.TestCase):
         profile = validate_material_profile(valid_profile())
         exported = profile.to_mapping()
         exported["areal_density_ug_m2"] = 1
-        self.assertEqual(profile.areal_density_ug_m2, 180_000)
+        self.assertEqual(profile.areal_density_ug_m2, 180_000_000)
 
     def test_dataclass_is_immutable(self):
         profile = validate_material_profile(valid_profile())
