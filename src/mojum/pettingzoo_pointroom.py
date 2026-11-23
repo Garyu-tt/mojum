@@ -51,8 +51,8 @@ class PointRoomExercise:
     def reset(self, *, seed=None, options=None):
         if seed is None:
             seed = 0
-        if type(seed) is not int or not 0 <= seed <= 0xFFFFFFFF:
-            raise ValueError("seed must be a uint32 integer")
+        if type(seed) is not int or seed < 0:
+            raise ValueError("seed must be a nonnegative integer")
         if options is not None and (type(options) is not dict or options):
             raise ValueError("only empty reset options are supported")
         starts = _STARTS[random.Random(seed).randrange(len(_STARTS))]

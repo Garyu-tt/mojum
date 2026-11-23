@@ -84,13 +84,23 @@ class IsolatedPointRoomTests(unittest.TestCase):
         env = PointRoomExercise()
         env.reset(seed=7)
         previous = env._observations()
-        for seed in (True, -1, 2**32, 1.5, "5"):
+        for seed in (True, -1, 1.5, "5"):
             with self.assertRaises(ValueError):
                 env.reset(seed=seed)
             self.assertEqual(env._observations(), previous)
         with self.assertRaises(ValueError):
             env.reset(seed=1, options={"private_data": "no"})
         self.assertEqual(env._observations(), previous)
+
+    def test_large_seed_replays_without_uint32_truncation(self):
+        for seed in (2**32, 2**64 + 17, 2**128):
+            with self.subTest(seed=seed):
+                left = PointRoomExercise()
+                right = PointRoomExercise()
+                self.assertEqual(left.reset(seed=seed), right.reset(seed=seed))
+                self.assertEqual(left.seed, seed)
+                actions = dict.fromkeys(AGENTS, 0)
+                self.assertEqual(left.step(actions), right.step(actions))
 
     def test_max_cycles_and_restart(self):
         env = PointRoomExercise(max_cycles=1)
@@ -122,6 +132,11 @@ class ActualPettingZooAPITests(unittest.TestCase):
         for a in AGENTS:
             self.assertTrue((options_obs[a] == first[a]).all())
         second, _ = env.reset(seed=13)
+        for large_seed in (2**32, 2**64 + 17, 2**128):
+            large_first, _ = env.reset(seed=large_seed)
+            large_second, _ = env.reset(seed=large_seed)
+            for a in AGENTS:
+                self.assertTrue((large_first[a] == large_second[a]).all())
         for a in AGENTS:
             self.assertTrue((first[a] == second[a]).all())
             self.assertTrue(env.observation_space(a).contains(first[a]))
