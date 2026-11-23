@@ -82,9 +82,11 @@ class AquariumConfigTests(unittest.TestCase):
         class IntSubclass(int):
             pass
 
-        for value in (True, False, 1.0, "3", IntSubclass(3), 0, 100_001):
+        for value in (True, False, 1.0, "3", IntSubclass(3), -1, 1_001):
             with self.subTest(value=value), self.assertRaises(AquariumConfigError):
                 validate_profile(profile(ticks=value))
+        self.assertEqual(validate_profile(profile(ticks=0)).ticks, 0)
+        self.assertEqual(validate_profile(profile(ticks=1_000)).ticks, 1_000)
         for value in (True, 999, 1.0, 0, 1_000_000_001):
             with self.subTest(dt_ns=value), self.assertRaises(AquariumConfigError):
                 validate_profile(profile(dt_ns=value))
@@ -121,6 +123,25 @@ class AquariumConfigTests(unittest.TestCase):
         self.assertEqual(result.motor_mode, "developmental_fixture")
         v4 = validate_profile(profile(motor_mode="local_cell_v4", sensory_mode="toy_probe_v2"))
         self.assertEqual(v4.sensory_mode, "toy_probe_v2")
+
+    def test_ticks_and_fixed_geometry_modes_match_aquarium_cli(self):
+        archive = validate_profile(profile(
+            motor_mode="local_cell_v2_a_archive", ticks=0, read_only=False
+        ))
+        self.assertEqual(archive.ticks, 0)
+        # Aquarium forces this archive selector to read-only even when the
+        # caller passes read_only=False.
+        self.assertTrue(archive.read_only)
+        with self.assertRaises(AquariumConfigError):
+            validate_profile(profile(motor_mode="local_cell_v2_a_archive", ticks=1))
+
+        fixed_room_modes = (
+            "local_cell_v2b", "local_cell_v2", "local_cell_v3",
+            "local_cell_v3_escape", "local_cell_v4", "local_cell_v2_a_archive",
+        )
+        for mode in fixed_room_modes:
+            with self.subTest(mode=mode), self.assertRaises(AquariumConfigError):
+                validate_profile(profile(motor_mode=mode, room_file="./room.json"))
 
     def test_json_duplicate_keys_and_nonfinite_values_are_rejected(self):
         duplicate = (
