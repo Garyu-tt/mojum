@@ -292,7 +292,7 @@ class DurableTaskQueue:
             if row is None:
                 raise LeaseLostError("task lease is missing, expired, or owned by another worker")
             connection.execute(
-                "UPDATE queue_tasks SET lease_until_ns=?,updated_at_ns=? WHERE task_id=?",
+                "UPDATE queue_tasks SET lease_until_ns=MAX(lease_until_ns,?),updated_at_ns=? WHERE task_id=?",
                 (until, now, task_id),
             )
             self._event(connection, task_id, event, worker_id, now)
