@@ -40,6 +40,18 @@ def _dict(value: Any, field: str) -> dict:
     return value
 
 
+def _exact_keys(value: dict, expected: set[str], field: str) -> None:
+    # Reject oversized mappings before allocating a key snapshot or set.
+    if len(value) != len(expected):
+        raise TrajectoryError(f"{field} must contain exactly the required keys")
+    keys = tuple(dict.keys(value))
+    # Do not invoke equality/hash implementations on caller-controlled key types.
+    if any(type(key) is not str for key in keys):
+        raise TrajectoryError(f"{field} keys must be exact strings")
+    if set(keys) != expected:
+        raise TrajectoryError(f"{field} must contain exactly the required keys")
+
+
 def _list(value: Any, field: str) -> list:
     if type(value) is not list:
         raise TrajectoryError(f"{field} must be a plain list")
@@ -75,8 +87,7 @@ def validate_trajectory(payload: Any) -> AdmittedTrajectory:
     """Validate and detach one PUBLIC_SYNTHETIC in-memory trajectory."""
     root = _dict(payload, "payload")
     required = {"schema", "provenance", "consent", "position_unit", "joint_names", "frames"}
-    if set(root) != required:
-        raise TrajectoryError("payload must contain exactly the v1 required keys")
+    _exact_keys(root, required, "payload")
     for key, expected in (
         ("schema", SCHEMA), ("provenance", PROVENANCE),
         ("consent", CONSENT), ("position_unit", POSITION_UNIT),
@@ -102,8 +113,7 @@ def validate_trajectory(payload: Any) -> AdmittedTrajectory:
     previous = -1
     for index, raw_frame in enumerate(frames_in):
         frame = _dict(raw_frame, f"frames[{index}]")
-        if set(frame) != {"timestamp_ns", "positions_rad"}:
-            raise TrajectoryError(f"frames[{index}] has unknown or missing keys")
+        _exact_keys(frame, {"timestamp_ns", "positions_rad"}, f"frames[{index}]")
         timestamp = _integer(
             frame["timestamp_ns"], f"frames[{index}].timestamp_ns",
             0, MAX_TIMESTAMP_NS,
