@@ -1,6 +1,7 @@
 """Process-safe durable QA queue. Scheduling metadata only; never merge authority."""
 from __future__ import annotations
 from dataclasses import dataclass
+from contextlib import contextmanager
 import json, os, sqlite3, time, uuid
 from pathlib import Path
 from typing import Any, Mapping
@@ -55,7 +56,7 @@ class DurableQAQueue:
             raise ValueError("invalid busy_timeout_ms")
         Path(self.database).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         self.busy_timeout_ms = busy_timeout_ms
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
             db.executescript("""
@@ -77,6 +78,16 @@ class DurableQAQueue:
         db.row_factory = sqlite3.Row
         db.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
         return db
+
+    @contextmanager
+    def _session(self):
+        """Commit/rollback the unit of work and always close its SQLite handle."""
+        db = self._connect()
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _decode(row):
