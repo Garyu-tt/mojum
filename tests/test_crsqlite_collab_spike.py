@@ -145,6 +145,14 @@ class CrSqliteCollabSpikeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             state.merge(batch + batch[:1])
 
+    def test_oversized_serialized_state_rolled_back_atomically(self):
+        state = Replica()
+        large = [event("r1", i + 1, "view.v9999.collapsed", True)
+                 for i in range(MAX_EVENTS)]
+        with self.assertRaisesRegex(ValueError, "serialization budget"):
+            state.merge(large)
+        self.assertEqual(state.events(), [])
+
     def test_frames_are_not_network_or_organism_commands(self):
         import mojum.crsqlite_collab_spike as m
         for name in ("send", "connect", "enroll", "write_journal",
