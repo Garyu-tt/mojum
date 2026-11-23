@@ -36,9 +36,9 @@ class Garment:
 
     def __post_init__(self) -> None:
         _identifier(self.garment_id, "garment_id")
-        if self.slot not in VALID_SLOTS:
+        if not isinstance(self.slot, str) or self.slot not in VALID_SLOTS:
             raise GarmentTransitionError("unsupported garment slot")
-        if self.layer not in _LAYER_RANK:
+        if not isinstance(self.layer, str) or self.layer not in _LAYER_RANK:
             raise GarmentTransitionError("unsupported garment layer")
 
 
@@ -51,7 +51,7 @@ class Transition:
     def __post_init__(self) -> None:
         if type(self.sequence) is not int or self.sequence < 1:
             raise GarmentTransitionError("sequence must be a positive integer")
-        if self.action not in ("equip", "remove"):
+        if not isinstance(self.action, str) or self.action not in ("equip", "remove"):
             raise GarmentTransitionError("unsupported transition action")
         if not isinstance(self.garment, Garment):
             raise GarmentTransitionError("garment must be a Garment")
