@@ -95,7 +95,10 @@ class PointRoomEnvTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             env.step((0.1, 0))
         env.max_step_m = 0.25
-        observed, _, _, _, _ = env.step((0.25, 0))
+        with self.assertRaises(ValueError):
+            env.step((0.25, 0))  # Cannot raise the constructor 0.125 m cap.
+        env.max_step_m = 0.125
+        observed, _, _, _, _ = env.step((0.125, 0))
         self.assertEqual(observed["tick"], 1)
 
     def test_mutating_public_episode_budget_cannot_extend_original_limit(self):

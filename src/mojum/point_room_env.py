@@ -52,6 +52,7 @@ class PointRoomEnv:
         # Keep the constructor's episode budget as a hard upper bound.
         self._configured_max_steps = max_steps
         self.max_step_m = max_step_m
+        self._configured_max_step_m = max_step_m
         self._state = None
         self._steps = 0
 
@@ -94,7 +95,8 @@ class PointRoomEnv:
             raise ValueError("action coordinates must be finite non-bool numbers")
         # Recheck the public configuration and the hard ceiling at every step.
         # Caller mutation must not let an experimental policy exceed 0.25 m.
-        if not _finite_number(self.max_step_m) or not 0 < self.max_step_m <= 0.25:
+        if (not _finite_number(self.max_step_m)
+                or not 0 < self.max_step_m <= self._configured_max_step_m):
             raise ValueError("invalid per-tick displacement budget")
         if math.hypot(dx, dy) > self.max_step_m:
             raise ValueError("action exceeds per-tick displacement budget")
