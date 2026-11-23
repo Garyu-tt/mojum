@@ -1,0 +1,32 @@
+name: Local Cell v3-escape causal tail
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/cell_policy_v3_escape.py"
+      - "tests/test_cell_policy_v3_escape*.py"
+      - "docs/V3_ESCAPE_CAUSAL_TAIL_R01.md"
+      - ".github/workflows/v3-escape-causal-tail.yml"
+  push:
+    paths:
+      - "src/mojum/cell_policy_v3_escape.py"
+      - "tests/test_cell_policy_v3_escape*.py"
+      - "docs/V3_ESCAPE_CAUSAL_TAIL_R01.md"
+      - ".github/workflows/v3-escape-causal-tail.yml"
+
+jobs:
+  causal-tail:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run escape snapshot and chronology tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_cell_policy_v3_escape*.py' -v
