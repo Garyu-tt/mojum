@@ -1,0 +1,26 @@
+name: Cloth GLB Import R0.1 (offline synthetic)
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/cloth_glb_import.py'
+      - 'tests/test_cloth_glb_import.py'
+      - 'docs/CLOTH_GLB_IMPORT_R01.md'
+      - '.github/workflows/cloth-glb-import-r01.yml'
+  workflow_dispatch:
+jobs:
+  offline-glb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_cloth_glb_import.py' -v
+      - run: python -m compileall -q src/mojum/cloth_glb_import.py
