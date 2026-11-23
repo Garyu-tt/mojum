@@ -30,7 +30,7 @@ class MeshRevocationError(ValueError):
     """Malformed, untrusted, stale, or unverifiable revocation input."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RevocationEntry:
     enrollment_id: str
     node_id: str
@@ -38,7 +38,7 @@ class RevocationEntry:
     revoked_at_tick: int
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, slots=True, weakref_slot=True, eq=False)
 class VerifiedRevocationSnapshot:
     """Verified snapshot object; membership is tracked by object identity."""
 
@@ -57,7 +57,7 @@ class VerifiedRevocationSnapshot:
 _VERIFIED_SNAPSHOTS: weakref.WeakSet[VerifiedRevocationSnapshot] = weakref.WeakSet()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RevocationDecision:
     operation: str
     node_id: str
