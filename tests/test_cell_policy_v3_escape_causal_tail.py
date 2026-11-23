@@ -52,6 +52,7 @@ class CausalTailTests(unittest.TestCase):
     def test_legacy_zero_streak_snapshot_is_upgraded(self):
         legacy = CellExplorerV3Escape().snapshot()
         legacy.pop("snapshot_version")
+        legacy.pop("history_complete")
         legacy.pop("outcome_tail")
         restored = CellExplorerV3Escape.from_snapshot(legacy)
         self.assertEqual(restored.snapshot()["snapshot_version"], 2)
@@ -78,6 +79,10 @@ class CausalTailTests(unittest.TestCase):
         broken = copy.deepcopy(snapshot)
         broken["outcome_tail"][-1]["tick"] -= 1
         with self.assertRaisesRegex(CellV3EscapeError, "chronology tail"):
+            CellExplorerV3Escape.from_snapshot(broken)
+        broken = copy.deepcopy(snapshot)
+        broken["outcome_tail"].pop(0)
+        with self.assertRaisesRegex(CellV3EscapeError, "completeness flag"):
             CellExplorerV3Escape.from_snapshot(broken)
         broken = copy.deepcopy(snapshot)
         broken["outcome_tail"][-1]["action"] = "not-an-action"
