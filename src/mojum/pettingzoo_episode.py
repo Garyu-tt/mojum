@@ -38,7 +38,13 @@ def _plain_dict(value, name):
 
 
 def _number(value, name):
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
+        raise ValueError(name + " must be a finite native number")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
         raise ValueError(name + " must be a finite native number")
     return value
 
