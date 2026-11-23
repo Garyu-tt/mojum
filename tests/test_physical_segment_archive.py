@@ -319,5 +319,45 @@ class PhysicalArchiveUnitQA(unittest.TestCase):
             )
 
 
+    def test_symlinked_ancestor_cannot_redirect_private_archive(self):
+        self.build(64)
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(self.root, target_is_directory=True)
+        except (NotImplementedError, OSError):
+            self.skipTest("symlinks unavailable on this filesystem")
+        # The final directory is ordinary 0700: only its ancestor is linked.
+        self.assertFalse((alias / "archive-a").is_symlink())
+        with SegmentedNoosphere(self.source, OWNER, segment_size=64) as q:
+            with self.assertRaisesRegex(ArchiveError, "symlink"):
+                export_sealed_segments(
+                    q, alias / "archive-a", include_nonpublic=True,
+                )
+        self.assertEqual(list(self.archive.iterdir()), [])
+        with self.assertRaisesRegex(ArchiveError, "symlink"):
+            verify_sealed_archive(
+                alias / "archive-a", external_expected_head=ZERO,
+            )
+
+    def test_symlinked_restore_ancestor_cannot_redirect_private_sqlite(self):
+        self.build(64)
+        receipt = self.export()
+        private_dest = self.root / "restore-dir"
+        private_dest.mkdir(mode=0o700)
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(self.root, target_is_directory=True)
+        except (NotImplementedError, OSError):
+            self.skipTest("symlinks unavailable on this filesystem")
+        dest = alias / "restore-dir" / "restored.sqlite3"
+        self.assertFalse(dest.parent.is_symlink())
+        with self.assertRaisesRegex(ArchiveError, "symlink"):
+            restore_into_new_sqlite(
+                self.archive, dest,
+                external_expected_head=receipt["sealed_head"],
+            )
+        self.assertFalse((private_dest / "restored.sqlite3").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

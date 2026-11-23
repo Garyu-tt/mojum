@@ -25,7 +25,13 @@ class ArchiveError(ValueError):
 
 def private_directory(path):
     root = Path(path)
-    if not root.is_dir() or root.is_symlink():
+    # Checking the leaf alone misses /private/alias/archive when alias is a
+    # symlink. Preserve lexical '..' components while examining the path; do
+    # not use resolve(), which would erase the evidence of a symlink hop.
+    absolute = root.absolute()
+    if any(component.is_symlink() for component in (absolute, *absolute.parents)):
+        raise ArchiveError("archive path cannot contain symlinked ancestors")
+    if not root.is_dir():
         raise ArchiveError("archive directory must exist and not be a symlink")
     if os.name == "posix" and (stat.S_IMODE(root.stat().st_mode) & 0o077):
         raise ArchiveError("archive directory must deny group/other access")
