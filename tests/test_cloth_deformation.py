@@ -95,7 +95,7 @@ class ClothDeformationTests(unittest.TestCase):
 
     def test_invalid_triangle_shapes_and_indices_rejected(self):
         for triangles in (("012",), ((0, 1),), ((0, 1, True),),
-                          ((0, 1, 3),), ((0, 0, 2),)):
+                          ((0, 1, 4),), ((0, 0, 2),)):
             with self.subTest(triangles=triangles):
                 with self.assertRaises(DeformationAuditError):
                     audit_deformation(SQUARE, SQUARE, triangles)
