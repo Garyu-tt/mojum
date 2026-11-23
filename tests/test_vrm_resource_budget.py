@@ -85,6 +85,42 @@ class VrmResourceBudgetTests(unittest.TestCase):
         with self.assertRaises(ResourceBudgetError):
             assess_vrm_resource_budget(oversized)
 
+    def test_oversized_keys_rejected_before_serialization(self):
+        candidate = inventory()
+        candidate["x" * 100_000] = 1
+        with patch.object(budget_module.json, "dumps", side_effect=AssertionError("serialized")) as dumps:
+            with self.assertRaises(ResourceBudgetError):
+                assess_vrm_resource_budget(candidate)
+            dumps.assert_not_called()
+
+    def test_hostile_string_subclass_key_rejected_before_hashing(self):
+        class HostileKey(str):
+            armed = False
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile hash executed")
+                return str.__hash__(self)
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("hostile equality executed")
+                return str.__eq__(self, other)
+
+        candidate = inventory()
+        value = candidate.pop("schema")
+        key = HostileKey("schema")
+        candidate[key] = value
+        key.armed = True
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(candidate)
+
+    def test_oversized_field_count_rejected_before_key_scan(self):
+        candidate = inventory()
+        candidate.update({f"extra_{i}": i for i in range(100_000)})
+        with patch.object(budget_module.json, "dumps", side_effect=AssertionError("serialized")) as dumps:
+            with self.assertRaises(ResourceBudgetError):
+                assess_vrm_resource_budget(candidate)
+            dumps.assert_not_called()
+
     def test_report_detached(self):
         data = inventory()
         report = assess_vrm_resource_budget(data)
