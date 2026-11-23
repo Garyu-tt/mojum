@@ -94,6 +94,14 @@ class AquariumConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(AquariumConfigError):
                 validate_profile(profile(read_only=value))
 
+    def test_oversized_native_mapping_keys_and_selectors_fail_fast(self):
+        huge_key = profile()
+        huge_key["k" * 65] = "ignored"
+        with self.assertRaises(AquariumConfigError):
+            validate_profile(huge_key)
+        with self.assertRaises(AquariumConfigError):
+            validate_profile(profile(neural_mode="x" * 65))
+
     def test_unsupported_modes_and_cross_field_conflicts_fail(self):
         bad_profiles = (
             profile(neural_mode="maybe"),
