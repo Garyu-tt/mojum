@@ -76,7 +76,15 @@ h2{font-size:14px;margin:0}.muted{font-size:12px;color:#95aab7}
   const boundedText = (v, max=256) => typeof v === "string" && v.length > 0 && v.length <= max;
   const finitePosition = (p) => exactKeys(p, ["x","y"]) &&
     ["x","y"].every(k => typeof p[k] === "number" && Number.isFinite(p[k]) && Math.abs(p[k]) <= 100000);
-  function checkDepth(root) {\n    const stack=[[root,0]];\n    while(stack.length){const [value,depth]=stack.pop();if(depth>256)fail("Слишком глубокий JSON.");if(value&&typeof value==="object"){for(const child of Object.values(value))stack.push([child,depth+1]);}}\n  }\n  function validate(envelope) {
+  function checkDepth(root) {\n    const stack=[[root,0]];\n    while(stack.length){const [value,depth]=stack.pop();if(depth>256)fail("Слишком глубокий JSON.");if(value&&typeof value==="object"){for(const child of Object.values(value))stack.push([child,depth+1]);}}\n  }\n  function checkDepth(root) {
+    const stack=[[root,0]];
+    while(stack.length){
+      const [value,depth]=stack.pop();
+      if(depth>256) fail("Слишком глубокий JSON.");
+      if(value && typeof value==="object") for(const child of Object.values(value)) stack.push([child,depth+1]);
+    }
+  }
+  function validate(envelope) {
     if (!exactKeys(envelope, ["schema","backend","revision","source_sha256","canonical","nodes","edges"])) fail("Неизвестная структура envelope.");
     if (envelope.schema !== "mojum.graph-editor-envelope/1") fail("Неподдерживаемая версия envelope.");
     if (!["reactflow","rete"].includes(envelope.backend)) fail("Неизвестный backend.");
@@ -95,18 +103,24 @@ h2{font-size:14px;margin:0}.muted{font-size:12px;color:#95aab7}
       const expected = envelope.backend === "reactflow" ?
         ["id","type","position","data"] : ["id","label","position","inputs","outputs","data"];
       if (!exactKeys(n, expected)) fail("Неподдерживаемая структура узла.");
-      if (!n.data || typeof n.data !== "object" || Array.isArray(n.data) ||
+      if (!exactKeys(n.data, ["kind","config","notes","visibility","ports"]) ||
           !boundedText(n.data.kind) || !["PUBLIC","PRIVATE","RESTRICTED"].includes(n.data.visibility) ||
           !n.data.ports || typeof n.data.ports !== "object" || Array.isArray(n.data.ports) ||
           !n.data.config || typeof n.data.config !== "object" || Array.isArray(n.data.config) ||
           !n.data.notes || typeof n.data.notes !== "object" || Array.isArray(n.data.notes)) fail("Некорректные метаданные узла.");
     }
     for (const e of envelope.edges) {
-      const source = envelope.backend === "reactflow" ? e.source : e.source;
-      const target = e.target;
-      if (!e || typeof e !== "object" || !ids.has(source) || !ids.has(target) ||
-          !boundedText(e.id) || !boundedText(envelope.backend === "reactflow" ? e.sourceHandle : e.sourceOutput) ||
-          !boundedText(envelope.backend === "reactflow" ? e.targetHandle : e.targetInput)) fail("Связь с неизвестным узлом или портом.");
+      const edgeKeys = envelope.backend === "reactflow" ?
+        ["id","source","sourceHandle","target","targetHandle"] :
+        ["id","source","sourceOutput","target","targetInput"];
+      if (!exactKeys(e, edgeKeys)) fail("Неподдерживаемая структура связи.");
+      const source = e.source, target = e.target;
+      const sourcePort = envelope.backend === "reactflow" ? e.sourceHandle : e.sourceOutput;
+      const targetPort = envelope.backend === "reactflow" ? e.targetHandle : e.targetInput;
+      if (!ids.has(source) || !ids.has(target) ||
+          !boundedText(e.id) || !boundedText(sourcePort) || !boundedText(targetPort)) {
+        fail("Связь с неизвестным узлом или портом.");
+      }
     }
     return envelope;
   }
@@ -165,6 +179,7 @@ h2{font-size:14px;margin:0}.muted{font-size:12px;color:#95aab7}
     if(file.size>MAX_BYTES){setStatus("Файл больше 512 KiB. Отклонён.",true);ev.target.value="";return;}
     try{
       const parsed=JSON.parse(await file.text());
+      checkDepth(parsed);
       state.envelope=validate(parsed);state.selected=null;
       $("search").disabled=false;$("clear").disabled=false;
       $("revision").textContent="revision: "+state.envelope.revision;
