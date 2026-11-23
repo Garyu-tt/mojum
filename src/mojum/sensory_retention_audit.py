@@ -51,7 +51,7 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
     if (
         type(schema) is not str or schema != SOURCE_SCHEMA
         or type(table) is not dict or type(last_seen) is not dict
-        or len(table) > MAX_CUES
+        or len(table) > MAX_CUES or len(last_seen) > MAX_CUES
         or type(updates) is not int or not 0 <= updates <= MAX_UPDATES
         or type(last_tick) is not int or not -1 <= last_tick <= MAX_TICK
         or (updates == 0) != (last_tick == -1)
