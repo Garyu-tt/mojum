@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -66,6 +67,7 @@ class NativeSmokeContractTests(unittest.TestCase):
             {"neurons": 3},
             {"max_abs_error": True},
             {"max_abs_error": 1e-3},
+            {"max_abs_error": -1},
             {"final_rates": [0.2, float("nan")]},
             {"observed_sha256": "Z" * 64},
         ):
@@ -112,10 +114,18 @@ class NativeSmokeContractTests(unittest.TestCase):
                     run_native_smoke(**kwargs)
             popen.assert_not_called()
 
+    def _fake_probe_source(self, root):
+        probe = Path(root) / "mojum"
+        probe.mkdir(parents=True)
+        (probe / "annarchy_rate_probe.py").write_text("# synthetic test double\\n", encoding="utf-8")
+        return Path(root)
+
     @unittest.skipUnless(os.name == "posix", "OS resource limits require POSIX")
     def test_runs_through_child_process_and_returns_bounded_receipt(self):
-        with mock.patch("tools.annarchy_native_smoke.subprocess.Popen", FakeProcess):
-            receipt = run_native_smoke(frames=32)
+        with tempfile.TemporaryDirectory() as root:
+            probe_source = self._fake_probe_source(root)
+            with mock.patch("tools.annarchy_native_smoke.subprocess.Popen", FakeProcess):
+                receipt = run_native_smoke(frames=32, probe_source=probe_source)
         self.assertEqual(receipt["schema"], SCHEMA)
         self.assertEqual(receipt["status"], "pass")
         self.assertEqual(receipt["backend"], "ANNarchy")
@@ -127,9 +137,11 @@ class NativeSmokeContractTests(unittest.TestCase):
             def __init__(self, command, *, env, **kwargs):
                 super().__init__(command, env=env, **kwargs)
                 self.returncode = 7
-        with mock.patch("tools.annarchy_native_smoke.subprocess.Popen", FailedProcess):
-            with self.assertRaisesRegex(SmokeError, "exit status 7"):
-                run_native_smoke(frames=32)
+        with tempfile.TemporaryDirectory() as root:
+            probe_source = self._fake_probe_source(root)
+            with mock.patch("tools.annarchy_native_smoke.subprocess.Popen", FailedProcess):
+                with self.assertRaisesRegex(SmokeError, "exit status 7"):
+                    run_native_smoke(frames=32, probe_source=probe_source)
 
 
 if __name__ == "__main__":
