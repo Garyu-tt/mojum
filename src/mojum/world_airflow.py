@@ -129,9 +129,12 @@ def _admit_sources(sources, room_bounds):
     for index, item in enumerate(sources):
         if type(item) is not dict:
             raise AirflowError(f"source {index} must be a native dict")
-        keys = tuple(item.keys())
         expected_keys = {"id", "x_mm", "y_mm", "vx_mm_s", "vy_mm_s"}
-        if (len(keys) != 5 or any(type(key) is not str for key in keys)
+        # Reject oversized exact dicts before allocating/iterating a key snapshot.
+        if len(item) != len(expected_keys):
+            raise AirflowError(f"source {index} has an unsupported field set")
+        keys = tuple(dict.keys(item))
+        if (any(type(key) is not str for key in keys)
                 or set(keys) != expected_keys):
             raise AirflowError(f"source {index} has an unsupported field set")
         source_id = item["id"]
