@@ -1,0 +1,42 @@
+name: Mojum optional SB3 held-out contract QA
+
+on:
+  push:
+    branches:
+      - qa/765-sb3-eval-failclosed-20261123
+  pull_request:
+    paths:
+      - src/mojum/sb3_room_benchmark.py
+      - tests/test_sb3_room_benchmark.py
+      - .github/workflows/sb3-heldout-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stdlib-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run strict stdlib regression
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m compileall -q src/mojum/sb3_room_benchmark.py tests/test_sb3_room_benchmark.py
+          python -m unittest discover -s tests -p test_sb3_room_benchmark.py -v
+          python -m mojum.sb3_room_benchmark --timesteps 256 > /tmp/mojum-sb3-dry-run.json
+          python -c 'import json; d=json.load(open("/tmp/mojum-sb3-dry-run.json")); assert d["timesteps"]==256 and d["run_requested"] is False'
