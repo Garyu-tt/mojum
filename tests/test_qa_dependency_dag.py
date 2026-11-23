@@ -147,6 +147,12 @@ class DependencyDagTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PR id"):
             evaluate_dependency_dag([record])
 
+    def test_rejects_oversized_record_before_key_traversal(self):
+        record = row("a")
+        record.update({f"extra-{index}": index for index in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "exactly"):
+            evaluate_dependency_dag([record])
+
     def test_rejects_non_native_dict_keys(self):
         class HostileString(str):
             def __hash__(self):
