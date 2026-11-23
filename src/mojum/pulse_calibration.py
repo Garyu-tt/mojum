@@ -121,10 +121,17 @@ def audit_calibration(
     observed_counts = [0] * bin_count
     squared_errors: list[float] = []
 
+    # Compare against the actual floating-point boundary values instead of
+    # multiplying by bin_count: rounding can turn an exact boundary such as
+    # 7 / 25 into 7.000000000000001 and incorrectly move it to the next bin.
+    from bisect import bisect_left
+    upper_bounds = tuple(index / bin_count for index in range(1, bin_count + 1))
+
     for _tick, forecast, observed in rows:
-        # Use right-closed equal-width bins (first bin includes zero): values
-        # exactly on an internal upper boundary remain in the lower bin.
-        slot = max(0, math.ceil(forecast * bin_count) - 1)
+        # Right-closed equal-width bins (the first also includes zero).
+        # bisect_left keeps a value equal to a represented boundary in the
+        # lower bin, including 1.0 in the final bin.
+        slot = bisect_left(upper_bounds, forecast)
         label = 1.0 if observed else 0.0
         counts[slot] += 1
         forecast_terms[slot].append(forecast)
