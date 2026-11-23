@@ -88,7 +88,7 @@ def repack_glb(doc, binary):
     """Re-encode a synthetic fixture after a single targeted JSON mutation."""
     encoded = json.dumps(doc, separators=(",", ":"), allow_nan=False).encode()
     encoded += b" " * (-len(encoded) % 4)
-    binary += b"\\x00" * (-len(binary) % 4)
+    binary += b"\x00" * (-len(binary) % 4)
     size = 12 + 8 + len(encoded) + 8 + len(binary)
     return (struct.pack("<4sII", b"glTF", 2, size) +
             struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
