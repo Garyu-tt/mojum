@@ -78,6 +78,23 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("bad" + chr(0xD800) + "id")], observed_at=0)
 
+
+    def test_exhausted_retry_is_failed_before_readiness(self):
+        report = plan_recovery([
+            task("spent", "RETRY", attempt=3, maximum=3, not_before=0)
+        ], observed_at=10)
+        action = report.actions[0]
+        self.assertEqual(action.decision, "MARK_FAILED")
+        self.assertEqual(action.reason, "retry_budget_exhausted")
+
+    def test_active_claim_requires_positive_attempt(self):
+        for state in ("CLAIMED", "RUNNING"):
+            with self.subTest(state=state):
+                with self.assertRaises(RecoveryError):
+                    plan_recovery([
+                        task("active", state, attempt=0, lease=20)
+                    ], observed_at=10)
+
     def test_bounds_and_exact_types(self):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("a")] * 501, observed_at=0)
