@@ -175,6 +175,12 @@ def _accessor(
     stride = view.get("byteStride", elem)
     if type(stride) is not int or stride < elem or stride > 252 or stride % width:
         _reject("invalid bufferView stride")
+    # glTF 2.0: index accessors are tightly packed (no explicit stride),
+    # while interleaved vertex attribute strides must be 4-byte aligned.
+    if semantic == "indices" and "byteStride" in view:
+        _reject("indices bufferView must not specify byteStride")
+    if semantic != "indices" and "byteStride" in view and stride % 4:
+        _reject("vertex attribute byteStride must be 4-byte aligned")
     base = _uint(view.get("byteOffset", 0), len(binary), "view offset")
     view_len = _uint(view.get("byteLength"), len(binary), "view length")
     local_offset = _uint(acc.get("byteOffset", 0), view_len, "accessor offset")
@@ -242,6 +248,9 @@ def import_glb(
         _reject("invalid expected SHA-256")
     if not isinstance(raw, bytes):
         _reject("GLB must be immutable bytes")
+    # Refuse oversized direct-API inputs before spending CPU on SHA-256.
+    if len(raw) > MAX_FILE:
+        _reject("GLB file size outside bounds")
     digest = hashlib.sha256(raw).hexdigest()
     if digest != expected_sha256:
         _reject("GLB SHA-256 mismatch")
@@ -262,7 +271,8 @@ def import_glb(
     if len(primitives) != 1:
         _reject("exactly one mesh primitive required")
     prim = _object(primitives[0], "primitive")
-    if prim.get("mode", 4) != 4 or "targets" in prim or "extensions" in prim:
+    mode = prim.get("mode", 4)
+    if type(mode) is not int or mode != 4 or "targets" in prim or "extensions" in prim:
         _reject("only uncompressed TRIANGLES without morph targets supported")
     attrs = _object(prim.get("attributes"), "primitive attributes")
     if any(k.startswith(("JOINTS_", "WEIGHTS_")) and k not in ("JOINTS_0", "WEIGHTS_0") for k in attrs):
