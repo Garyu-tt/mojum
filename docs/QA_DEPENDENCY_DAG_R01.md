@@ -6,11 +6,11 @@
 
 ## Input contract
 
-Pass a sequence of records with exactly these fields:
+Pass only a native Python `list` or `tuple` of records. Every record must be an exact built-in `dict`; `dict`/`list`/`tuple` subclasses and custom `Mapping`/`Sequence` implementations are rejected before traversal. All record keys and identifier/state values must be exact built-in `str` objects. Each record has exactly these fields:
 
 - `id`: non-empty PR identifier, at most 128 characters.
 - `state`: `OPEN`, `MERGED`, or `CLOSED`.
-- `depends_on`: list/tuple of distinct PR identifiers that must be merged first.
+- `depends_on`: exact built-in `list` or `tuple` of distinct PR identifiers that must be merged first.
 
 All referenced identifiers must exist in the same input. Self-edges, duplicate nodes/edges, dangling references, unsupported states and cycles fail closed with `ValueError`.
 
