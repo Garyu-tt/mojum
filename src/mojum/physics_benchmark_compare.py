@@ -52,6 +52,8 @@ def _canonical(value: Any) -> bytes:
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
+        if type(key) is not str or not key or len(key) > 64:
+            raise BenchmarkReportError("JSON object keys must be bounded native strings")
         if key in result:
             raise BenchmarkReportError("duplicate JSON object key")
         result[key] = value
@@ -94,10 +96,19 @@ def load_report_json(payload: str | bytes) -> dict[str, Any]:
     return parsed
 
 
+def _exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
+    if type(value) is not dict or len(value) != len(expected):
+        raise BenchmarkReportError(f"{label} fields do not match schema")
+    for key in value:
+        if type(key) is not str or not key or len(key) > 64:
+            raise BenchmarkReportError(f"{label} keys must be bounded native strings")
+    if set(value) != expected:
+        raise BenchmarkReportError(f"{label} fields do not match schema")
+    return value
+
+
 def _validate(report: Any) -> _Validated:
-    if (type(report) is not dict or any(type(key) is not str for key in report)
-            or set(report) != _FIELDS):
-        raise BenchmarkReportError("report fields do not match schema")
+    report = _exact_keys(report, _FIELDS, "report")
     if (type(report["schema"]) is not str or len(report["schema"]) != len(SCHEMA)
             or type(report["visibility"]) is not str
             or len(report["visibility"]) != len("PUBLIC_SYNTHETIC")
@@ -119,10 +130,7 @@ def _validate(report: Any) -> _Validated:
     count = report["measured_steps"]
     if not _integer(count, 3, MAX_STEPS):
         raise BenchmarkReportError("measured_steps must be in 3..10000")
-    platform = report["platform"]
-    if (type(platform) is not dict or any(type(key) is not str for key in platform)
-            or set(platform) != _PLATFORM):
-        raise BenchmarkReportError("platform fields do not match schema")
+    platform = _exact_keys(report["platform"], _PLATFORM, "platform")
     for name in _PLATFORM:
         if not _token(platform[name]):
             raise BenchmarkReportError("invalid platform." + name)
