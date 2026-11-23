@@ -120,6 +120,29 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(RecoveryError):
             plan_recovery([item], observed_at=0)
 
+
+    def test_rejects_oversized_identifier_before_utf8_encoding(self):
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("x" * 1_000_000)], observed_at=0)
+
+    def test_rejects_hostile_string_keys_before_hashing(self):
+        class HostileKey(str):
+            armed = False
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile hash executed")
+                return super().__hash__()
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("hostile equality executed")
+                return super().__eq__(other)
+
+        ordinary = task("safe")
+        hostile = {HostileKey(key): value for key, value in ordinary.items()}
+        HostileKey.armed = True
+        with self.assertRaises(RecoveryError):
+            plan_recovery([hostile], observed_at=0)
+
     def test_bounds_and_exact_types(self):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("a")] * 501, observed_at=0)
