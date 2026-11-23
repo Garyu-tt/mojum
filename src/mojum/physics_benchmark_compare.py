@@ -38,7 +38,7 @@ def _integer(value: Any, low: int, high: int) -> bool:
 
 
 def _token(value: Any) -> bool:
-    return type(value) is str and _TOKEN.fullmatch(value) is not None
+    return type(value) is str and 1 <= len(value) <= 64 and _TOKEN.fullmatch(value) is not None
 
 
 def _canonical(value: Any) -> bytes:
@@ -104,7 +104,7 @@ def _validate(report: Any) -> _Validated:
         raise BenchmarkReportError("unsupported schema or visibility")
     for name in ("workload_sha256", "rig_sha256", "model_sha256"):
         value = report[name]
-        if type(value) is not str or _HEX.fullmatch(value) is None:
+        if type(value) is not str or len(value) != 64 or _HEX.fullmatch(value) is None:
             raise BenchmarkReportError("invalid " + name)
     if not _token(report["solver"]):
         raise BenchmarkReportError("invalid solver identifier")
@@ -142,7 +142,10 @@ def _validate(report: Any) -> _Validated:
     median_num //= divisor
     median_den //= divisor
     p95_index = (95 * count + 99) // 100 - 1
-    return _Validated(report, hashlib.sha256(_canonical(report)).hexdigest(),
+    canonical = _canonical(report)
+    # Retain a detached JSON-native snapshot, not the caller's mutable mapping.
+    snapshot = json.loads(canonical.decode("utf-8"))
+    return _Validated(snapshot, hashlib.sha256(canonical).hexdigest(),
                       median_num, median_den, ordered[p95_index])
 
 
