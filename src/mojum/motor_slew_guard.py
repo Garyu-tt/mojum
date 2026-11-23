@@ -110,6 +110,8 @@ class MotorSlewGuard:
             checked[name] = (lo, hi, slew)
 
         starting = _mapping(initial, "initial")
+        if any(type(name) is not str for name in starting):
+            raise MotorSlewError("joint names must be native strings")
         if starting.keys() != checked.keys():
             raise MotorSlewError("initial must contain exactly the configured joints")
         targets = self._normalize_targets(starting, checked)
@@ -125,6 +127,9 @@ class MotorSlewGuard:
         targets: dict, limits: dict | MappingProxyType
     ) -> dict[str, float]:
         normalized = {}
+        # Reject str subclasses before dict-key comparison can invoke hostile __eq__.
+        if any(type(name) is not str for name in targets):
+            raise MotorSlewError("joint names must be native strings")
         # Verify exactly identical key set before ever indexing a configured joint.
         if targets.keys() != limits.keys():
             raise MotorSlewError("target frame must contain every joint exactly once")
