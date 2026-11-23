@@ -43,6 +43,18 @@ class ObstacleGeometryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact native strings"):
             audit_obstacles([item])
 
+    def test_reject_oversized_native_field_name_before_set(self):
+        item = rect("a", 0, 0, 1, 1)
+        item["x" * 100_000] = None
+        with self.assertRaisesRegex(ValueError, "field names exceed"):
+            audit_obstacles([item])
+
+    def test_reject_oversized_record_cardinality(self):
+        item = rect("a", 0, 0, 1, 1)
+        item.update({f"extra-{index}": index for index in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "field names exceed|invalid rectangle fields"):
+            audit_obstacles([item])
+
     def test_invalid(self):
         invalid = [
             "oops", [1], [rect("a", 0, 0, 0, 1)],
