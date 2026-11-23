@@ -44,7 +44,8 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
         self.assertTrue(all(truncations.values()))
         self.assertFalse(any(terminations.values()))
         self.assertEqual(env.agents, [])
-        self.assertEqual(observations, {})
+        self.assertEqual(set(observations), set(env.possible_agents))
+        self.assertTrue(all(row["step"] == 1 for row in observations.values()))
         with self.assertRaises(RuntimeError):
             env.step({"agent_0": 0, "agent_1": 0})
 
