@@ -127,6 +127,17 @@ class MeshRevocationTests(unittest.TestCase):
         with self.assertRaises(MeshRevocationError):
             verify_snapshot(envelope(), authority_keys=hostile, now_tick=150)
 
+    def test_oversized_snapshot_and_revocation_mappings_fail_before_key_scan(self):
+        oversized_envelope = envelope()
+        oversized_envelope.update({f"extra-{index}": index for index in range(25_000)})
+        with self.assertRaises(MeshRevocationError):
+            verify_snapshot(oversized_envelope, authority_keys=KEYS, now_tick=150)
+
+        oversized_entry = revoked()
+        oversized_entry.update({f"extra-{index}": index for index in range(25_000)})
+        with self.assertRaises(MeshRevocationError):
+            envelope(revocations=[oversized_entry])
+
     def test_unbounded_and_invalid_key_maps_rejected(self):
         many = {f"key-{i}": KEY for i in range(129)}
         with self.assertRaises(MeshRevocationError):
