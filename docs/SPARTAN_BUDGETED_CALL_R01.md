@@ -15,8 +15,10 @@ reservation is durably admitted.
 3. A repeated identical request ID returns `dispatched=false`; the provider
    callback is never invoked a second time. Ambiguous retries require a new ID
    and a new reservation.
-4. Only after a first reservation succeeds is the synchronous injected
-   `invoke()` callback called once. There is no retry loop.
+4. Both callbacks must be synchronous callables; declared async functions and
+   callable objects with async `__call__` are rejected before any reservation.
+   Only after a first reservation succeeds is the injected `invoke()` callback
+   called once. There is no retry loop.
 5. Trusted dispatcher code extracts an exact usage receipt containing native
    non-negative integer `actual_tokens` and `actual_micro_usd`. A failed
    invocation, invalid receipt or receipt-extraction exception leaves the
