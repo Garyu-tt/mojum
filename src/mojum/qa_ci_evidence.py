@@ -85,7 +85,7 @@ def evaluate_ci_evidence(snapshot: object, *, now: str) -> CIEvidenceDecision:
         {"schema", "complete", "pr_head_sha", "required_checks", "checks", "observed_at"},
         "snapshot",
     )
-    if data["schema"] != SCHEMA or type(data["schema"]) is not str:
+    if type(data["schema"]) is not str or data["schema"] != SCHEMA:
         raise EvidenceError("unsupported evidence schema")
     if type(data["complete"]) is not bool or data["complete"] is not True:
         raise EvidenceError("snapshot must explicitly declare complete=true")
@@ -94,6 +94,8 @@ def evaluate_ci_evidence(snapshot: object, *, now: str) -> CIEvidenceDecision:
     evaluation_time = _utc(now, "now")
     if observed > evaluation_time:
         raise EvidenceError("snapshot observation time is in the future")
+    if (evaluation_time - observed).total_seconds() > _MAX_AGE_SECONDS:
+        raise EvidenceError("snapshot observation is stale")
 
     required_raw = data["required_checks"]
     checks_raw = data["checks"]
@@ -128,9 +130,9 @@ def evaluate_ci_evidence(snapshot: object, *, now: str) -> CIEvidenceDecision:
             raise EvidenceError(f"{name} is pinned to a different PR head")
         if type(check["run_id"]) is not int or not 1 <= check["run_id"] <= 2**63 - 1:
             raise EvidenceError(f"{name}.run_id must be a positive native integer")
-        if check["status"] != "completed" or type(check["status"]) is not str:
+        if type(check["status"]) is not str or check["status"] != "completed":
             raise EvidenceError(f"{name} is not completed")
-        if check["conclusion"] != "success" or type(check["conclusion"]) is not str:
+        if type(check["conclusion"]) is not str or check["conclusion"] != "success":
             raise EvidenceError(f"{name} did not succeed")
         completed = _utc(check["completed_at"], f"{name}.completed_at")
         age = (evaluation_time - completed).total_seconds()
