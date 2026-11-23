@@ -110,6 +110,33 @@ class SqliteVecProjectionTests(unittest.TestCase):
         with self.assertRaises(VectorIndexError):
             rebuild_index(self.journal, alias, **self.args())
 
+    def test_nested_ancestor_symlink_rejected_before_index_io(self):
+        # Old guard checked only the leaf and its immediate parent, so an
+        # intermediate directory alias bypassed both checks (even at 0700).
+        real = self.dir / "real"
+        real.mkdir()
+        private = real / "private"
+        private.mkdir(mode=0o700)
+        alias = self.dir / "alias"
+        try:
+            alias.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlink unavailable")
+        destination = alias / "private" / "derived.sqlite"
+        self.assertFalse(destination.is_symlink())
+        self.assertFalse(destination.parent.is_symlink())
+        self.assertTrue(destination.parent.is_dir())
+        private_scope = self.args(visibility="PRIVATE",
+                                  vectors={"private": [0.0, 1.0]},
+                                  allow_nonpublic=True)
+        with self.assertRaisesRegex(VectorIndexError, "unsafe index path"):
+            rebuild_index(self.journal, destination, **private_scope)
+        query_scope = {name: value for name, value in private_scope.items()
+                       if name != "vectors"}
+        with self.assertRaisesRegex(VectorIndexError, "unsafe index path"):
+            search_index(destination, query=[0.0, 1.0], **query_scope)
+        self.assertFalse((private / "derived.sqlite").exists())
+
     def test_no_mandatory_extension_and_explicit_load(self):
         try:
             current = importlib.metadata.version("sqlite-vec")
