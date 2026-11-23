@@ -104,6 +104,20 @@ class PhenotypeAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(PhenotypeAuditError, "integer is out of range"):
                 self.audit(ledger, expected)
             self.assertEqual(serializer.call_count, 1)
+    def test_aggregate_object_key_budget_is_rejected_before_serialization(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        for index in range(65):
+            expected[("k" * 16_000) + str(index)] = index
+        with patch(
+            "mojum.genesis_phenotype_audit.json.dumps",
+            wraps=json.dumps,
+        ) as serializer:
+            with self.assertRaisesRegex(PhenotypeAuditError, "JSON byte budget"):
+                self.audit(ledger, expected)
+            # Only the bounded ledger may be serialized; long aggregate keys
+            # in the supplied phenotype must fail during preflight.
+            self.assertEqual(serializer.call_count, 1)
+
     def test_result_detached_from_caller_mutations(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
         result=audit_phenotype_snapshot(snapshot,expected,source_classification="PUBLIC_SYNTHETIC")
