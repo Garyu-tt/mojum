@@ -118,6 +118,9 @@ class DurableQAQueue:
               VALUES (?,?,?,?,?,'discovered',0,?,?)""",
               (uuid.uuid4().hex,issue_number,head_sha.lower(),key,encoded,ts,ts))
             row=db.execute("SELECT * FROM qa_jobs WHERE idempotency_key=?",(key,)).fetchone()
+            if row["issue_number"] != issue_number or row["head_sha"] != head_sha.lower():
+                db.rollback()
+                raise QueueError("idempotency key is already bound to a different issue/head")
             db.commit()
         return self._decode(row)
 
@@ -175,6 +178,24 @@ class DurableQAQueue:
             result=db.execute("SELECT * FROM qa_jobs WHERE job_id=?",(job_id,)).fetchone()
             db.commit()
         return self._decode(result)
+
+    def requeue(self, job_id: str, *, expected_state: str, now: float | None=None) -> QueueJob:
+        """CAS-requeue a non-leased deferred job after its blocker is rechecked."""
+        allowed = {"waiting_ci", "blocked_permission", "blocked_conflict", "escalated", "ready"}
+        if expected_state not in allowed:
+            raise TransitionError("only deferred/ready states can be requeued")
+        ts = self._time(now)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute("""UPDATE qa_jobs SET state='discovered', updated_at=?, last_error=NULL
+                WHERE job_id=? AND state=? AND lease_token IS NULL""",
+                (ts, job_id, expected_state)).rowcount
+            if changed != 1:
+                db.rollback()
+                raise TransitionError("job state changed or is not eligible for requeue")
+            row = db.execute("SELECT * FROM qa_jobs WHERE job_id=?", (job_id,)).fetchone()
+            db.commit()
+        return self._decode(row)
 
     def get(self, job_id: str) -> QueueJob | None:
         with self._connect() as db: row=db.execute("SELECT * FROM qa_jobs WHERE job_id=?",(job_id,)).fetchone()
