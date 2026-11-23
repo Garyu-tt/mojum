@@ -11,6 +11,26 @@ from pathlib import Path
 from typing import Any
 
 
+MAX_REPORT_CHARS = 8192
+
+
+class _DuplicateJSONKey(ValueError):
+    """Raised when a report repeats an object field."""
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJSONKey("duplicate report field")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError("non-finite JSON constant: " + value)
+
+
 EXPECTED_KEYS = {
     "schema",
     "engine_version",
@@ -30,10 +50,16 @@ EXPECTED_KEYS = {
 
 
 def validate_report(raw: str) -> dict[str, Any]:
+    if type(raw) is not str or not raw or len(raw) > MAX_REPORT_CHARS:
+        raise ValueError("report must be a nonempty string within the character budget")
     try:
-        report = json.loads(raw)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise ValueError("report must be one JSON object") from exc
+        report = json.loads(
+            raw,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (TypeError, ValueError, RecursionError, UnicodeError) as exc:
+        raise ValueError("report must be one bounded, unambiguous JSON object") from exc
     if type(report) is not dict or set(report) != EXPECTED_KEYS:
         raise ValueError("report keys do not match mojum.jolt-native-cloth/1")
     if report["schema"] != "mojum.jolt-native-cloth/1":
@@ -84,6 +110,21 @@ class NativeJoltClothReportTests(unittest.TestCase):
             "external_contact": False,
         })
         self.assertEqual(validate_report(raw)["vertices"], 96)
+
+    def test_rejects_duplicate_json_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            validate_report('{"schema":"first","schema":"second"}')
+
+    def test_rejects_oversized_and_deeply_nested_json(self) -> None:
+        with self.assertRaisesRegex(ValueError, "character budget"):
+            validate_report(" " * (MAX_REPORT_CHARS + 1))
+        deeply_nested = "[" * 1500 + "0" + "]" * 1500
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            validate_report(deeply_nested)
+
+    def test_rejects_nonfinite_json_constants(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            validate_report('{"value":NaN}')
 
     def test_rejects_unknown_fields_and_missing_fields(self) -> None:
         valid = {
