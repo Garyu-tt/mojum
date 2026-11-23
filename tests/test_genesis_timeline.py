@@ -148,6 +148,29 @@ class GenesisTimelineTests(unittest.TestCase):
             attest_timeline(snap, start_tick=0, through_tick=100,
                             public_synthetic=True)
 
+    def test_preflight_never_compares_hostile_snapshot_or_event_keys(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                raise AssertionError("preflight invoked hostile key equality")
+
+        event_keys = self.ledger.snapshot()
+        event_keys["events"] = [{HostileKey("valid_from_tick"): 7}]
+        snapshot_keys = self.ledger.snapshot()
+        original_events = snapshot_keys.pop("events")
+        snapshot_keys[HostileKey("events")] = original_events
+        # Ambiguous key types are not interpreted by the optimization. They
+        # must continue to the authoritative validator for rejection.
+        for snap in (event_keys, snapshot_keys):
+            with self.subTest(snapshot=snap is snapshot_keys):
+                with patch.object(GenomeLedger, "from_snapshot",
+                                  side_effect=GenesisError("canonical verifier reached")):
+                    with self.assertRaisesRegex(GenesisError, "canonical verifier reached"):
+                        attest_timeline(snap, start_tick=0, through_tick=30,
+                                        public_synthetic=True)
+
     def test_dense_same_tick_events_count_as_one_boundary(self):
         ledger = GenomeLedger(SEED)
         for i in range(256):
