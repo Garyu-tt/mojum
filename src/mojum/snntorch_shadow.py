@@ -61,7 +61,7 @@ def _number(value: object, name: str, minimum: float, maximum: float) -> float:
 
 def _validate(inputs: object, *, enabled: bool, source_class: str,
               beta: float, threshold: float) -> tuple[tuple[tuple[float, ...], ...], str, float, float]:
-    if enabled is not True or source_class != "PUBLIC_SYNTHETIC":
+    if enabled is not True or type(source_class) is not str or source_class != "PUBLIC_SYNTHETIC":
         raise ShadowError("explicit opt-in and PUBLIC_SYNTHETIC source class required")
     b = _number(beta, "beta", 0.0, 0.99999)
     th = _number(threshold, "threshold", 0.5, 2.0)
@@ -152,6 +152,8 @@ def run_shadow(inputs: Sequence[Sequence[float]], *, enabled: bool = False,
     """
     data, digest, b, th = _validate(inputs, enabled=enabled,
                                     source_class=source_class, beta=beta, threshold=threshold)
+    if type(engine) is not str:
+        raise ShadowError("engine must be an exact string")
     if engine == "reference":
         spikes, membranes = _run_reference(data, b, th)
     elif engine == "snntorch":
