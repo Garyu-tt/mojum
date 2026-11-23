@@ -1,4 +1,4 @@
-"""Bounded, deterministic, read-only cloth seam admission for synthetic meshes.
+"Bounded, deterministic, read-only cloth seam admission for synthetic meshes.
 
 This module does not simulate cloth or mutate the caller's mesh.
 """
@@ -20,7 +20,7 @@ class SeamReport:
 
 
 def audit_seams(vertex_count: int, pairs: object) -> SeamReport:
-    """Validate a bounded iterable of unique undirected vertex stitch pairs.
+    """Validate exact list/tuple input of unique undirected stitch pairs.
 
     Each pair must connect distinct valid vertex indices. Components are
     returned in stable sorted order. Isolated non-seam vertices are excluded.
