@@ -100,6 +100,8 @@ class RotationChainTests(unittest.TestCase):
 
     def test_keyring_rejects_string_subclass_before_lookup(self):
         class HostileString(str):
+            __hash__ = str.__hash__
+
             def __eq__(self, other):
                 raise AssertionError("hostile equality must not run")
 
