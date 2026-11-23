@@ -62,7 +62,7 @@ def _payload(attestation):
     """Validate and serialize signed fields; signature is deliberately excluded."""
     if type(attestation) is not NodeAttestation:
         raise AttestationError("expected exact NodeAttestation")
-    if attestation.schema != SCHEMA:
+    if type(attestation.schema) is not str or attestation.schema != SCHEMA:
         raise AttestationError("unsupported attestation schema")
     _require_text(attestation.key_id, _KEY_ID, "key id")
     if type(attestation.node_id) is not str or type(attestation.protocol) is not str:
