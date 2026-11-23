@@ -21,7 +21,9 @@ def _native_keys(value, expected, name):
     if type(value) is not dict or len(value) != len(expected):
         raise ValueError(f"{name}: expected exact native fields")
     keys = tuple(value)
-    if any(type(key) is not str for key in keys) or set(keys) != expected:
+    if any(type(key) is not str or not key or len(key) > 32 for key in keys):
+        raise ValueError(f"{name}: expected bounded native string keys")
+    if set(keys) != expected:
         raise ValueError(f"{name}: expected exact native fields")
 
 
