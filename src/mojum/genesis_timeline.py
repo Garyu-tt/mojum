@@ -43,6 +43,25 @@ def attest_timeline(
     if type(snapshot) is not dict:
         raise GenesisError("ledger snapshot must be a dict")
 
+    # A full snapshot replay performs historical prefix validation per append.
+    # If a bounded primitive list already proves this request must exceed the
+    # output boundary budget, refuse BEFORE that potentially expensive replay.
+    # This is only an early rejection: every admissible input still runs the
+    # canonical full revision/ledger validator below.
+    raw_events = snapshot.get("events")
+    if type(raw_events) is list and len(raw_events) <= GenomeLedger.MAX_EVENTS:
+        preflight_boundaries = {start, end}
+        for raw_event in raw_events:
+            if type(raw_event) is not dict:
+                break
+            effective_tick = raw_event.get("valid_from_tick")
+            if type(effective_tick) is not int or not 0 <= effective_tick <= MAX_TICK:
+                break
+            if start < effective_tick < end:
+                preflight_boundaries.add(effective_tick)
+                if len(preflight_boundaries) > MAX_BOUNDARIES:
+                    raise GenesisError("phenotype timeline boundary budget exceeded")
+
     # Exact ledger revision is checked by from_snapshot; a forged or truncated
     # event collection must not produce a plausible timeline witness.
     ledger = GenomeLedger.from_snapshot(snapshot)
