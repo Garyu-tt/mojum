@@ -142,6 +142,10 @@ class PoseFrameGateTests(unittest.TestCase):
         with self.assertRaises(FrameGateError):
             subject.admit(packet(joints={"root": [0, 0, 0], "hand": [0, 0, 0]}), consent=True, source_tag=PUBLIC_SYNTHETIC)
 
+    def test_rejects_oversized_integer_coordinate_limit(self):
+        with self.assertRaises(FrameGateError):
+            PoseFrameGate(max_abs_coordinate=10 ** 10000)
+
     def test_zero_is_canonicalized(self):
         positive = gate().admit(packet(joints={"root": [0.0, 0.0, 0.0]}), consent=True, source_tag=PUBLIC_SYNTHETIC)
         negative = gate().admit(packet(joints={"root": [-0.0, 0.0, -0.0]}), consent=True, source_tag=PUBLIC_SYNTHETIC)
