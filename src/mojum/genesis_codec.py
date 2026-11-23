@@ -51,6 +51,26 @@ def dumps(ledger: GenomeLedger) -> bytes:
     return encoded
 
 
+def _fits_utf8_budget(value: str, maximum: int) -> bool:
+    """Count UTF-8 bytes without allocating an encoded copy."""
+    size = 0
+    for char in value:
+        code = ord(char)
+        if 0xD800 <= code <= 0xDFFF:
+            return False
+        if code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > maximum:
+            return False
+    return True
+
+
 def loads(payload: bytes | str) -> GenomeLedger:
     """Restore a ledger from bounded UTF-8 JSON and verify its full revision.
 
@@ -60,10 +80,11 @@ def loads(payload: bytes | str) -> GenomeLedger:
     if type(payload) is bytes:
         raw = payload
     elif type(payload) is str:
-        # UTF-8 uses at least one byte per Unicode code point. Reject an
-        # obviously oversized text payload before allocating its encoded copy.
-        if len(payload) > MAX_SNAPSHOT_BYTES:
-            raise GenesisCodecError("Snapshot exceeds the byte limit")
+        # Count exact UTF-8 bytes before allocating the encoded copy. A
+        # character-count guard alone can still allocate nearly four times
+        # the byte budget for non-ASCII input.
+        if not _fits_utf8_budget(payload, MAX_SNAPSHOT_BYTES):
+            raise GenesisCodecError("Snapshot exceeds the byte limit or has invalid Unicode")
         try:
             raw = payload.encode("utf-8")
         except UnicodeError as exc:
