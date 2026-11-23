@@ -2,6 +2,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.genesis import ACQUISITION_SCHEMA, GENOTYPE_SCHEMA, GenesisError, GenomeLedger, sha256
 from mojum.genesis_timeline import SCHEMA, attest_timeline
@@ -130,9 +131,13 @@ class GenesisTimelineTests(unittest.TestCase):
         ledger = GenomeLedger(SEED)
         for i in range(260):
             ledger.append(acquisition(str(i), i+1, "heartbeat_bpm", 0, 200+i), ledger.revision)
-        with self.assertRaisesRegex(GenesisError, "boundary budget"):
-            attest_timeline(ledger.snapshot(), start_tick=0,
-                            through_tick=300, public_synthetic=True)
+        # The quota must reject before expensive per-event replay, rather
+        # than spending unbounded CPU validating a result it cannot emit.
+        with patch.object(GenomeLedger, "from_snapshot",
+                          side_effect=AssertionError("replay should not run")):
+            with self.assertRaisesRegex(GenesisError, "boundary budget"):
+                attest_timeline(ledger.snapshot(), start_tick=0,
+                                through_tick=300, public_synthetic=True)
 
     def test_dense_same_tick_events_count_as_one_boundary(self):
         ledger = GenomeLedger(SEED)
