@@ -26,7 +26,7 @@ Output schema: `mojum.world.line-of-sight/1`. Every output frame contains the pu
 
 ## Limits and trust boundary
 
-- Explicit `opt_in=True` and exact caller-declared `visibility='PUBLIC_SYNTHETIC'` only; not verified authorization or PRIVATE provenance attestation.
+- Explicit `opt_in=True` and exact native-string caller-declared `visibility='PUBLIC_SYNTHETIC'` only; validate the native type before comparing labels so hostile comparison operators cannot run. This is not verified authorization or PRIVATE provenance attestation.
 - Room width/height at most 10,000 m each; at most 256 obstacles; 1..64 targets; per-target observer distance at most 1,000 m; tick integer 0..10,000,000. No file/network/device access.
 - Rejects stale/forged revision and tick, malformed post-construction room/state mutation and invalid geometry before returning anything. The authoritative revision is recomputed by canonical `world_room._revision`; swept AABB contact uses canonical `world_room._segment_hits_rect`.
 - This uses **point-sample 2D geometry only**: no field of view, gaze direction, opacity, object size, height, occlusion stacking, optical sensing, camera pose or 3D MuJoCo ray cast. A clear geometric ray does not prove a creature observed or recognized a target.
