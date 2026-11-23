@@ -67,7 +67,11 @@ are consistency checks, not signatures, authentication or proof of provenance.
 
 ## Reproduction
 
-The dedicated workflow runs the stdlib contract tests on CPython 3.11, 3.12
-and 3.13. Its separate native job installs exactly `dm-control==1.0.52` and
-runs the small in-memory MuJoCo probe. Keep this feature Draft until both
-workflow families pass on the exact PR head and independent QA approves it.
+The dedicated workflow runs the dependency-free contract tests on CPython 3.11,
+3.12 and 3.13. The separate native MuJoCo job runs on CPython 3.11 only: the
+pinned `dm-control==1.0.52` dependency tree currently requires `labmaze` to build
+from source on CPython 3.13, and its upstream Bazel build fails in the hosted
+runner because `bazel_skylib` is unavailable. This is an upstream packaging
+limitation, not a reason to report Python 3.13 native support. Keep this feature
+Draft until both workflow families pass on the exact PR head and independent QA
+approves it.
