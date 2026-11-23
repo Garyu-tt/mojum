@@ -19,6 +19,49 @@ def _tick(value: object, field: str) -> int:
     return value
 
 
+
+def _native_object(value: object, label: str) -> dict:
+    # Check keys before set(), dictionary equality or ledger JSON serialization:
+    # a str subclass can run arbitrary equality code during those operations.
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise GenesisError(f"{label} requires a native JSON object with string keys")
+    return value
+
+
+def _native_text_fields(record: dict, fields: tuple[str, ...], label: str) -> None:
+    for key in fields:
+        if key in record and type(record[key]) is not str:
+            raise GenesisError(f"{label}.{key} must be a native JSON string")
+
+
+def _preflight_native_snapshot(snapshot: object) -> None:
+    """Reject Python object forgery before the underlying ledger uses equality.
+
+    The existing ledger remains authoritative for schema, value ranges, event
+    ordering and revision replay. This only enforces the primitive wire types
+    that a decoded JSON document would have, with its existing event quota.
+    """
+    record = _native_object(snapshot, "ledger")
+    _native_text_fields(record, ("schema", "revision"), "ledger")
+    seed = _native_object(record.get("seed"), "ledger.seed")
+    _native_text_fields(seed, ("schema", "genome_id", "revision"), "ledger.seed")
+    inherited = _native_object(seed.get("inherited"), "ledger.seed.inherited")
+    if any(type(value) is not int for value in inherited.values()):
+        raise GenesisError("ledger.seed.inherited requires native integer values")
+    events = record.get("events")
+    if type(events) is not list or len(events) > GenomeLedger.MAX_EVENTS:
+        raise GenesisError("ledger.events requires a bounded native JSON list")
+    for event in events:
+        entry = _native_object(event, "ledger.event")
+        _native_text_fields(
+            entry, ("schema", "event_id", "genome_id", "gene",
+                    "source", "evidence"), "ledger.event",
+        )
+        for key in ("delta", "valid_from_tick", "observed_at_ns", "recorded_at_ns"):
+            if key in entry and type(entry[key]) is not int:
+                raise GenesisError(f"ledger.event.{key} must be a native integer")
+
+
 def attest_timeline(
     snapshot: dict,
     *,
@@ -45,6 +88,7 @@ def attest_timeline(
 
     # Exact ledger revision is checked by from_snapshot; a forged or truncated
     # event collection must not produce a plausible timeline witness.
+    _preflight_native_snapshot(snapshot)
     ledger = GenomeLedger.from_snapshot(snapshot)
     verified = ledger.snapshot()
     events = verified["events"]
