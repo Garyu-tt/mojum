@@ -105,7 +105,7 @@ class QAFleetTests(unittest.TestCase):
 
     def test_corrupt_local_state_recovers_without_discarding_safety_checks(self):
         for state_path in (self.home/"current.json", self.home/"history.json"):
-            for raw in (b"{broken", b"\\xff", b"[]"):
+            for raw in (b"{broken", bytes([0xff]), b"[]"):
                 with self.subTest(path=state_path.name, raw=raw):
                     state_path.write_bytes(raw)
                     state_path.chmod(0o600)
