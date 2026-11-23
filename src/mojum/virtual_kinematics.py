@@ -111,7 +111,7 @@ def evaluate_forward_kinematics(rig: object) -> dict[str, Any]:
     positions are metres and matrices are row-major 3x3 local-to-world
     rotations. The returned report is detached and digest-anchored.
     """
-    if type(rig) is not dict or set(rig) != _INPUT_KEYS:
+    if (type(rig) is not dict or any(type(key) is not str for key in rig)\n            or set(rig) != _INPUT_KEYS):
         raise ValueError("invalid virtual rig keys")
     if type(rig["schema"]) is not str or rig["schema"] != _INPUT_SCHEMA:
         raise ValueError("unsupported virtual rig schema")
@@ -130,7 +130,7 @@ def evaluate_forward_kinematics(rig: object) -> dict[str, Any]:
     root_count = 0
 
     for index, joint in enumerate(joints):
-        if type(joint) is not dict or set(joint) != _JOINT_KEYS:
+        if (type(joint) is not dict or any(type(key) is not str for key in joint)\n                or set(joint) != _JOINT_KEYS):
             raise ValueError("invalid joint fields")
         joint_id, parent = joint["id"], joint["parent"]
         if not _name(joint_id) or joint_id in positions:
@@ -205,7 +205,7 @@ def evaluate_forward_kinematics(rig: object) -> dict[str, Any]:
 
 def verify_kinematics_report(report: object) -> bool:
     """Check the self-consistency of a detached report (not its authenticity)."""
-    if type(report) is not dict or type(report.get("sha256")) is not str:
+    if (type(report) is not dict or any(type(key) is not str for key in report)\n            or type(report.get("sha256")) is not str):
         return False
     if not re.fullmatch(r"[0-9a-f]{64}", report["sha256"], re.ASCII):
         return False
