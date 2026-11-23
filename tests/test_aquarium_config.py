@@ -82,7 +82,7 @@ class AquariumConfigTests(unittest.TestCase):
         class IntSubclass(int):
             pass
 
-        for value in (True, False, 1.0, "3", IntSubclass(3), 0, 100_001):
+        for value in (True, False, 1.0, "3", IntSubclass(3), 0, 1_001):
             with self.subTest(value=value), self.assertRaises(AquariumConfigError):
                 validate_profile(profile(ticks=value))
         for value in (True, 999, 1.0, 0, 1_000_000_001):
@@ -121,6 +121,35 @@ class AquariumConfigTests(unittest.TestCase):
         self.assertEqual(result.motor_mode, "developmental_fixture")
         v4 = validate_profile(profile(motor_mode="local_cell_v4", sensory_mode="toy_probe_v2"))
         self.assertEqual(v4.sensory_mode, "toy_probe_v2")
+
+    def test_archive_mode_requires_zero_ticks_and_other_modes_reject_zero(self):
+        archive = validate_profile(profile(
+            motor_mode="local_cell_v2_a_archive",
+            ticks=0,
+        ))
+        self.assertEqual(archive.ticks, 0)
+        with self.assertRaises(AquariumConfigError):
+            validate_profile(profile(motor_mode="local_cell_v2_a_archive", ticks=1))
+        with self.assertRaises(AquariumConfigError):
+            validate_profile(profile(ticks=0))
+
+    def test_fixed_geometry_local_cell_modes_reject_room_file(self):
+        fixed_modes = (
+            "local_cell_v2b",
+            "local_cell_v3",
+            "local_cell_v3_escape",
+            "local_cell_v4",
+            "local_cell_v2",
+            "local_cell_v2_a_archive",
+        )
+        for mode in fixed_modes:
+            with self.subTest(mode=mode), self.assertRaises(AquariumConfigError):
+                validate_profile(profile(motor_mode=mode, room_file="./room.json"))
+        # Selectors that accept a caller-provided room retain that option.
+        self.assertEqual(
+            validate_profile(profile(motor_mode="developmental_fixture", room_file="./room.json")).room_file,
+            "./room.json",
+        )
 
     def test_json_duplicate_keys_and_nonfinite_values_are_rejected(self):
         duplicate = (
