@@ -95,7 +95,7 @@ def _json_string_size(value, path):
         elif code < 32:
             size += 2 if code in short_escapes else 6
         elif 0xD800 <= code <= 0xDFFF:
-            raise BodyContractError(f"{path} contains invalid Unicode")
+            raise BodyContractError(f"{path} contains invalid UTF-8 Unicode")
         elif code <= 0x7F:
             size += 1
         elif code <= 0x7FF:
