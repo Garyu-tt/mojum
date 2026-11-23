@@ -97,6 +97,16 @@ class GarmentContractTests(unittest.TestCase):
             with self.assertRaisesRegex(GarmentContractError, 'symlink'):
                 verify_mesh_file(data, root)
 
+    def test_missing_asset_root_raises_contract_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            missing = Path(folder) / 'missing'
+            with self.assertRaisesRegex(GarmentContractError, 'asset root'):
+                verify_mesh_file(garment(), missing)
+            regular_file = Path(folder) / 'not-a-directory'
+            regular_file.write_bytes(b'fixture')
+            with self.assertRaisesRegex(GarmentContractError, 'not a directory'):
+                verify_mesh_file(garment(), regular_file)
+
     def test_manifest_file_duplicate_keys_and_size_limit(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'manifest.json'
