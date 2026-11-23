@@ -18,6 +18,6 @@ To wire into an independently reviewed browser renderer, install separately pinn
 
 ## Acceptance limits / upstream
 
-- Upstream: https://github.com/pixiv/three-vrm (license and exact version/asset redistribution clearance **pending**, no packages vendored). Check `three`'s exact license/transitives too. `src/mojum/data/optional_integrations.json` remains `planned`/`required`.
+- Proposed reproducible **candidate pins** (not installed, not runtime-tested): `@pixiv/three-vrm==3.5.5` (upstream MIT) and `three==0.187.0` (upstream MIT). Check the exact npm package archives, full transitives, pinned lockfile, redistributed VRM model/texture rights and browser compatibility before marking any license gate approved. Upstream: https://github.com/pixiv/three-vrm and https://threejs.org/license/. `src/mojum/data/optional_integrations.json` remains `planned`/`required`, and no packages are vendored.
 - CPU: 3 mapped joints in fixture, max 55 joints accepted and at most one advancing frame/tick; JSON validation O(joints), copies bounded arrays, no runtime I/O. Rendering CPU/GPU/frame-time/RAM on Pixel 9, Vive, and desktop **not measured**; browser smoke required before acceptance.
 - Not verified: REAL engine loading without installed dependencies; real avatar skeleton compatibility, calibrated 3D pose, runtime animation absence elsewhere, body self-collision or tactile output, mobile browsers, sandbox security. No claim of full #695 completion.
