@@ -52,7 +52,7 @@ def _admit_record(record: Any, *, signed: bool) -> dict[str, Any]:
 
 
 def _canonical(record: Any) -> bytes:
-    admitted = _admit_record(record, signed=("digest" in record if type(record) is dict else False))
+    admitted = _admit_record(record, signed=(len(record) == 8 if type(record) is dict else False))
     unsigned = {key: admitted[key] for key in _UNSIGNED_FIELDS}
     try:
         return json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
