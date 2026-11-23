@@ -60,9 +60,13 @@ def _fail(message: str) -> None:
 
 
 def _require_exact_keys(value: dict[str, object], expected: set[str], field: str) -> None:
+    # Fixed-schema cardinality is O(1) for an exact dict. Reject oversized
+    # caller-controlled mappings before allocating or traversing a key snapshot.
+    if len(value) != len(expected):
+        _fail(f"{field}: missing or unknown fields")
     # Check key types BEFORE set comparison so hostile non-string keys cannot
     # execute caller-defined equality/hash behavior at this trust boundary.
-    keys = tuple(value.keys())
+    keys = tuple(dict.keys(value))
     if any(type(key) is not str for key in keys):
         _fail(f"{field}: keys must be native strings")
     if set(keys) != expected:
