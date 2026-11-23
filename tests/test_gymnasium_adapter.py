@@ -33,6 +33,21 @@ class GymnasiumPointRoomTests(unittest.TestCase):
         self.assertTrue(truncated)
         env.close()
 
+    def test_large_nonnegative_seed_preserves_gymnasium_contract(self):
+        env = make_gymnasium_point_room(Room(4, 4), start=(1, 1))
+        for seed in (2**32, 2**64 + 17, 2**128):
+            with self.subTest(seed=seed):
+                observation, info = env.reset(seed=seed)
+                self.assertEqual(info["seed"], seed)
+                self.assertTrue(env.observation_space.contains(observation))
+                first, _, _, _, _ = env.step([0.1, 0.0])
+                second_reset, second_info = env.reset(seed=seed)
+                self.assertEqual(second_info["seed"], seed)
+                self.assertTrue(env.observation_space.contains(second_reset))
+                second, _, _, _, _ = env.step([0.1, 0.0])
+                self.assertTrue((first["position"] == second["position"]).all())
+        env.close()
+
     def test_float64_just_outside_box_is_rejected_before_rounding(self):
         # Previously step() cast to float32 before Box.contains() and
         # silently accepted an out-of-range float64 right at the boundary.
