@@ -91,6 +91,23 @@ class LeRobotTrajectoryTests(unittest.TestCase):
                 with self.assertRaises(LeRobotImportError):
                     self.imported(rows=rows)
 
+    def test_large_finite_values_fail_before_mse_overflow(self):
+        # IEEE-754 finite does not imply squared error is finite.
+        for field in ("action", "observation.state"):
+            rows = frames()
+            rows[0][field] = [1e200, 0.0]
+            with self.subTest(field=field), self.assertRaisesRegex(
+                    LeRobotImportError, "magnitude exceeds bounded MSE budget"):
+                self.imported(rows=rows)
+        # Boundary is valid and still yields finite scores on two episodes.
+        rows = frames()
+        rows[0]["action"] = [1e100, 0.0]
+        accepted = self.imported(rows=rows)
+        result = heldout_zero_baseline(accepted)
+        import math
+        self.assertTrue(math.isfinite(result["frozen_zero_action_mse"]))
+        self.assertTrue(math.isfinite(result["train_constant_mean_action_mse"]))
+
     def test_sequence_and_episode_fail_closed(self):
         cases = (
             [frames()[1]],  # starts mid-episode
