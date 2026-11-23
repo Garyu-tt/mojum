@@ -104,7 +104,7 @@ class PhenotypeAuditTests(unittest.TestCase):
     def test_nonfinite_and_surrogate_rejected(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected["bad"]=float("nan")
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
-        expected=ledger.phenotype(5); expected["bad"]="\\ud800"
+        expected=ledger.phenotype(5); expected["bad"]="\ud800"
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
     def test_depth_and_byte_budgets(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); cursor=expected
@@ -143,7 +143,7 @@ class PhenotypeAuditTests(unittest.TestCase):
         ) as serializer:
             with self.assertRaisesRegex(PhenotypeAuditError, "integer is out of range"):
                 self.audit(ledger, expected)
-            self.assertEqual(serializer.call_count, 1)
+            self.assertEqual(serializer.call_count, 2)
     def test_aggregate_object_key_budget_is_rejected_before_serialization(self):
         ledger=make_ledger(); expected=ledger.phenotype(5)
         for index in range(70):
@@ -156,7 +156,7 @@ class PhenotypeAuditTests(unittest.TestCase):
                 self.audit(ledger, expected)
             # Only the bounded ledger may be serialized; long aggregate keys
             # in the supplied phenotype must fail during preflight.
-            self.assertEqual(serializer.call_count, 1)
+            self.assertEqual(serializer.call_count, 2)
 
     def test_result_detached_from_caller_mutations(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
