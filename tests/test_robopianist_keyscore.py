@@ -138,7 +138,7 @@ class RoboPianistKeyscoreTests(unittest.TestCase):
             with self.assertRaisesRegex(PianoBenchmarkError, "oversized trace"):
                 read_trace(path)
 
-    def test_oversized_integer_literal_is_typed_graph_boundary_error(self):
+    def test_oversized_integer_literal_is_typed_trace_boundary_error(self):
         # CPython 3.11+ rejects this numeric token during json.loads before
         # score_trace can validate the seed. Never leak a raw ValueError.
         with tempfile.TemporaryDirectory() as tmp:
@@ -151,10 +151,12 @@ class RoboPianistKeyscoreTests(unittest.TestCase):
     def test_missing_and_directory_input_fail_as_typed_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing.json"
-            with self.assertRaisesRegex(PianoBenchmarkError, "cannot read local trace"):
+            with self.assertRaisesRegex(PianoBenchmarkError, "cannot read local trace") as missing_err:
                 read_trace(missing)
-            with self.assertRaisesRegex(PianoBenchmarkError, "cannot read local trace"):
+            self.assertIsNone(missing_err.exception.__cause__)
+            with self.assertRaisesRegex(PianoBenchmarkError, "cannot read local trace") as dir_err:
                 read_trace(Path(tmp))
+            self.assertIsNone(dir_err.exception.__cause__)
 
     def test_contact_bounded_and_not_assumed_real(self):
         d = demo_trace()
