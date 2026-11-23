@@ -36,6 +36,8 @@ tasks text, unknown columns or local absolute paths are copied into output.
 
 - `meta/info.json`: `codebase_version: "v3.0"`, fps and scalar vector
   `action` + `observation.state` features with 1–128 finite float values.
+  Vector magnitude is capped at 1e100 to keep even worst-case 8192×128 MSE
+  aggregation finite; NaN/infinity and larger finite values fail closed.
   Unknown metadata is ignored, never executed. Duplicate keys are rejected.
 - Tabular columns: `episode_index`, `frame_index`, `timestamp`,
   `task_index`, `observation.state`, `action`. No default camera/video
