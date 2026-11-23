@@ -57,8 +57,8 @@ def _exact_keys(value: object, expected: set[str], label: str) -> dict[str, Any]
     if len(value) != len(expected):
         raise EvidenceError(f"{label} must be a native object with exactly the documented keys")
     for key in value:
-        if type(key) is not str:
-            raise EvidenceError(f"{label} keys must be native strings")
+        if type(key) is not str or len(key) > 64:
+            raise EvidenceError(f"{label} keys must be bounded native strings")
     if set(value) != expected:
         raise EvidenceError(f"{label} must be a native object with exactly the documented keys")
     return value
