@@ -89,9 +89,10 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     snapshot_keys = tuple(snapshot)
     if any(type(key) is not str or len(key) > MAX_FIELD_LENGTH for key in snapshot_keys):
         raise MetricsInputError("snapshot keys must be native strings")
-    if set(snapshot_keys) - {"observed_at", "tasks", "duration_samples_ms"}:
+    allowed_snapshot_keys = ("observed_at", "tasks", "duration_samples_ms")
+    if any(key not in allowed_snapshot_keys for key in snapshot_keys):
         raise MetricsInputError("snapshot contains unknown fields")
-    if "observed_at" not in snapshot or "tasks" not in snapshot:
+    if not all(key in snapshot_keys for key in ("observed_at", "tasks")):
         raise MetricsInputError("observed_at and tasks are required")
 
     observed_at = _integer(snapshot["observed_at"], "observed_at", maximum=4_102_444_800)
@@ -99,7 +100,8 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     if type(tasks) not in (list, tuple) or len(tasks) > MAX_TASKS:
         raise MetricsInputError("tasks must be a bounded native list/tuple")
 
-    ids: set[str] = set()
+    # A dict-backed membership index avoids constructing a set from input keys.
+    ids: dict[str, None] = {}
     states: Counter[str] = Counter()
     ages: Counter[str] = Counter()
     blocked: Counter[str] = Counter()
@@ -110,16 +112,17 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         task_keys = tuple(task)
         if any(type(key) is not str or len(key) > MAX_FIELD_LENGTH for key in task_keys):
             raise MetricsInputError(f"task {index} keys must be native strings")
-        allowed = {"id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds"}
-        task_key_set = set(task_keys)
-        if task_key_set - allowed or not {"id", "state"} <= task_key_set:
+        allowed_task_keys = ("id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds")
+        if any(key not in allowed_task_keys for key in task_keys) or not all(
+            key in task_keys for key in ("id", "state")
+        ):
             raise MetricsInputError(f"task {index} has an invalid schema")
         task_id = task["id"]
         if type(task_id) is not str or not task_id or len(task_id) > MAX_ID_LENGTH:
             raise MetricsInputError(f"task {index} has an invalid id")
         if task_id in ids:
             raise MetricsInputError("duplicate task id")
-        ids.add(task_id)
+        ids[task_id] = None
 
         state = task["state"]
         if type(state) is not str or state not in STATES:
