@@ -1,0 +1,25 @@
+name: GENESIS timeline audit
+on:
+  pull_request:
+    paths:
+      - "src/mojum/genesis_timeline.py"
+      - "tests/test_genesis_timeline.py"
+      - "docs/GENESIS_TIMELINE_R01.md"
+      - ".github/workflows/genesis-timeline.yml"
+  workflow_dispatch:
+jobs:
+  timeline:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: \${{ matrix.python-version }}
+      - name: Install package
+        run: python -m pip install --no-deps .
+      - name: Run focused contract suite
+        run: python -m unittest tests.test_genesis_timeline -v
