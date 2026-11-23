@@ -18,31 +18,33 @@ def audit_obstacles(obstacles: list[dict]) -> dict:
 
     Rectangles use x_min, y_min, x_max, y_max in integer millimetres.
     Touching edges are not considered overlaps. Mapping keys are admitted
-    before set comparisons so hostile str subclasses cannot run user code.
+    before schema membership checks so hostile str subclasses cannot run
+    user code during hashing or comparisons.
     """
     if type(obstacles) is not list or len(obstacles) > MAX_OBSTACLES:
         raise ValueError("obstacles must be a bounded native list")
     validated = []
-    ids = set()
+    # A dict-backed identifier index avoids allocating a set before each
+    # rectangle has passed its bounded shape admission.
+    ids = {}
     for item in obstacles:
         if type(item) is not dict:
             raise ValueError("invalid rectangle fields")
-        # Bound cardinality before iterating attacker-controlled keys or
-        # allocating a temporary set. Each rectangle has exactly five fields.
+        # Bound cardinality before iterating attacker-controlled keys.
         if len(item) != len(_EXPECTED_FIELDS):
             raise ValueError("invalid rectangle field count")
-        # Check key types/lengths before set()/equality: str subclasses can
-        # override hashing/equality and execute arbitrary code during compares.
         if any(type(key) is not str or len(key) > 32 for key in item):
             raise ValueError("rectangle keys must be bounded exact native strings")
-        if set(item) != _EXPECTED_FIELDS:
+        # Five distinct native keys, all members of the five-field schema,
+        # implies exact schema equality without constructing a temporary set.
+        if not all(key in _EXPECTED_FIELDS for key in item):
             raise ValueError("invalid rectangle fields")
         identifier = item["id"]
         if type(identifier) is not str or not (1 <= len(identifier) <= 64) or not all(c.isascii() and (c.isalnum() or c in "_-") for c in identifier):
             raise ValueError("invalid obstacle id")
         if identifier in ids:
             raise ValueError("duplicate obstacle id")
-        ids.add(identifier)
+        ids[identifier] = True
         coords = tuple(item[k] for k in ("x_min", "y_min", "x_max", "y_max"))
         if any(type(v) is not int or abs(v) > MAX_COORD for v in coords):
             raise ValueError("coordinates must be bounded native integers")
