@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 import sqlite3
 import unittest
+import warnings
 
 from tools import spartan_budget
 from tools.spartan_budgeted_call import (
@@ -221,6 +223,47 @@ class BudgetedDispatchTests(unittest.TestCase):
             )
         self.assertEqual(calls, [])
         self.assertEqual(spartan_budget.status(self.db)["requests"], 0)
+
+    def test_sync_callbacks_returning_coroutines_are_closed(self):
+        calls = []
+
+        async def provider_coroutine():
+            calls.append("provider-coroutine-body")
+            return {"content": "not dispatched"}
+
+        async def receipt_coroutine(_):
+            calls.append("receipt-coroutine-body")
+            return {"actual_tokens": 1, "actual_micro_usd": 1}
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+
+            with self.assertRaisesRegex(BudgetedCallError, "provider callback"):
+                dispatch(
+                    self.db, request_id="returned-provider-coroutine", worker=17,
+                    reserve_tokens=10, reserve_micro_usd=100,
+                    invoke=lambda: provider_coroutine(),
+                    receipt_extractor=lambda _: {"actual_tokens": 1, "actual_micro_usd": 1},
+                )
+            gc.collect()
+            self.assertEqual(calls, [])
+            self.assertEqual(spartan_budget.status(self.db)["unsettled"], 1)
+
+            with self.assertRaisesRegex(BudgetedCallError, "receipt extractor"):
+                dispatch(
+                    self.db, request_id="returned-receipt-coroutine", worker=18,
+                    reserve_tokens=10, reserve_micro_usd=100,
+                    invoke=lambda: calls.append("provider-called"),
+                    receipt_extractor=lambda value: receipt_coroutine(value),
+                )
+            gc.collect()
+            self.assertEqual(calls, ["provider-called"])
+            self.assertEqual(spartan_budget.status(self.db)["unsettled"], 2)
+
+        self.assertFalse(
+            any("was never awaited" in str(item.message) for item in caught),
+            "rejected coroutine results must be closed without RuntimeWarning",
+        )
 
     def test_async_callable_objects_are_rejected_before_reservation(self):
         calls = []
