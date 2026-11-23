@@ -28,6 +28,32 @@ class WorkflowEvidenceTests(unittest.TestCase):
         self.assertEqual(stale.stale_run_count, 1)
         self.assertEqual(empty.state, "HOLD")
 
+    def test_rerun_attempts_share_run_id_and_latest_attempt_wins(self):
+        first = run(1, attempt=1, status="completed", conclusion="success")
+        pending = run(1, attempt=2, status="in_progress", conclusion=None)
+        failed = run(1, attempt=2, status="completed", conclusion="failure")
+        succeeded = run(1, attempt=2, status="completed", conclusion="success")
+
+        result = evaluate_workflow_evidence([first, pending], expected_head_sha=HEAD, required_workflow_ids=[10])
+        self.assertEqual(result.results[0].state, "PENDING")
+        self.assertEqual(result.results[0].run_attempt, 2)
+        self.assertEqual(result.state, "HOLD")
+
+        result = evaluate_workflow_evidence([first, failed], expected_head_sha=HEAD, required_workflow_ids=[10])
+        self.assertEqual(result.results[0].state, "FAILURE")
+        self.assertEqual(result.state, "HOLD")
+
+        result = evaluate_workflow_evidence([first, succeeded], expected_head_sha=HEAD, required_workflow_ids=[10])
+        self.assertEqual(result.results[0].state, "PASS")
+        self.assertEqual(result.results[0].run_attempt, 2)
+        self.assertEqual(result.state, "PASS")
+
+    def test_rerun_attempt_identity_must_remain_stable(self):
+        first = run(1, attempt=1)
+        changed = run(1, attempt=2, name="different workflow")
+        with self.assertRaises(WorkflowEvidenceError):
+            evaluate_workflow_evidence([first, changed], expected_head_sha=HEAD, required_workflow_ids=[10])
+
     def test_newer_stale_head_run_supersedes_exact_head_success(self):
         result = evaluate_workflow_evidence(
             [run(1, sha=HEAD), run(2, sha=OTHER, status="in_progress", conclusion=None)],
