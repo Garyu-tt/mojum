@@ -100,6 +100,27 @@ class WorldLightSensorTests(unittest.TestCase):
         with self.assertRaises(LightSensorError):
             self.measure(room, forged)
 
+
+    def test_bool_state_tick_is_not_accepted_as_zero(self):
+        room = Room(10.0, 10.0)
+        state = initial_state(room, 1.0, 1.0)
+        forged = RoomState(False, state.x, state.y, state.revision)
+        with self.assertRaises(LightSensorError):
+            self.measure(room, forged, tick=0)
+
+    def test_hostile_revision_subclass_rejected_before_equality(self):
+        class HostileRevision(str):
+            def __eq__(self, other):
+                raise AssertionError("untrusted equality must not run")
+
+        room = Room(10.0, 10.0)
+        state = initial_state(room, 1.0, 1.0)
+        forged = RoomState(
+            state.tick, state.x, state.y, HostileRevision(state.revision)
+        )
+        with self.assertRaises(LightSensorError):
+            self.measure(room, forged, expected_revision=state.revision)
+
     def test_source_inside_obstacle_is_rejected(self):
         room = Room(10.0, 10.0, ((4.0, 4.0, 2.0, 2.0),))
         state = initial_state(room, 1.0, 1.0)
