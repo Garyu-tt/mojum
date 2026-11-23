@@ -79,7 +79,7 @@ class _Pinocchio2R:
             shoulder, pin.JointModelRZ(),
             pin.SE3(np.eye(3), np.array([LINK_LENGTHS_M[0], 0.0, 0.0])), "elbow_z")
         wrist = pin.Frame(
-            "wrist_synthetic", elbow, elbow,
+            "wrist_synthetic", elbow, 0,
             pin.SE3(np.eye(3), np.array([LINK_LENGTHS_M[1], 0.0, 0.0])),
             pin.FrameType.OP_FRAME)
         frame_id = model.addFrame(wrist)
