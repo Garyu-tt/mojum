@@ -127,6 +127,37 @@ class GenesisTimelineTests(unittest.TestCase):
         restored = GenomeLedger.from_snapshot(ledger.snapshot())
         self.assertEqual(report["ledger_revision"], restored.revision)
 
+    def test_hostile_string_subclass_key_rejected_before_canonical_lookup(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash(str(self))
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key comparison must not execute")
+
+        snap = populated().snapshot()
+        seed = snap.pop("seed")
+        snap[HostileKey("seed")] = seed
+        with self.assertRaisesRegex(GenesisError, "native strings"):
+            audit_timeline(snap)
+
+    def test_oversized_mapping_cardinality_rejected_before_lookup(self):
+        snap = populated().snapshot()
+        for index in range(20_000):
+            snap[f"extra-{index}"] = None
+        with self.assertRaisesRegex(GenesisError, "mapping field limit"):
+            audit_timeline(snap)
+
+    def test_hostile_string_subclass_value_rejected_before_genesis_validation(self):
+        class HostileText(str):
+            def strip(self):
+                raise AssertionError("hostile string method must not execute")
+
+        snap = populated().snapshot()
+        snap["seed"]["genome_id"] = HostileText(SEED["genome_id"])
+        with self.assertRaisesRegex(GenesisError, "exact native JSON values"):
+            audit_timeline(snap)
+
 
 if __name__ == "__main__":
     unittest.main()
