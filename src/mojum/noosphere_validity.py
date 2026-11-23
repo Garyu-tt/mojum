@@ -127,8 +127,8 @@ def _validate_json_value(value):
 def _unique_object(pairs):
     result = {}
     for key, value in pairs:
-        if type(key) is not str:
-            raise ValidityAuditError("JSON object keys must be strings")
+        if type(key) is not str or len(key) > 256:
+            raise ValidityAuditError("JSON object keys must be bounded strings of <= 256 characters")
         if key in result:
             raise ValidityAuditError("duplicate JSON object key")
         result[key] = value
@@ -185,8 +185,9 @@ def audit_validity(facts):
         if len(fact) != len(_EXPECTED_FACT_FIELDS):
             raise ValidityAuditError(f"fact {index} has missing or unknown fields")
         keys = tuple(dict.keys(fact))
-        if any(type(key) is not str for key in keys):
-            raise ValidityAuditError(f"fact {index} has a non-native object key")
+        max_key_length = max(len(key) for key in _EXPECTED_FACT_FIELDS)
+        if any(type(key) is not str or len(key) > max_key_length for key in keys):
+            raise ValidityAuditError(f"fact {index} has an invalid object key")
         if set(keys) != _EXPECTED_FACT_FIELDS:
             raise ValidityAuditError(f"fact {index} has missing or unknown fields")
 
