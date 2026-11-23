@@ -15,17 +15,30 @@ SCHEMA = "mojum.trace-attributes/1"
 MAX_ATTRIBUTES = 24
 MAX_INTEGER = 2**63 - 1
 
-# String fields are identifiers/enums, never free-form text.
+# String fields are identifiers/enums, never free-form text. Keep explicit
+# bounds separate from the regexes so oversized input is rejected in O(1)
+# before the regex engine scans it.
+_STRING_MAX_LENGTHS = {
+    "trace_id": 64,
+    "lease_id": 64,
+    "head_sha": 64,
+    "event": 48,
+    "component": 32,
+    "operation": 48,
+    "outcome": 8,
+    "status": 10,
+    "reason_code": 48,
+}
 _STRING_PATTERNS = {
-    "trace_id": re.compile(r"[0-9a-f]{32,64}\Z"),
-    "lease_id": re.compile(r"[0-9a-f]{32,64}\Z"),
-    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z"),
-    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
-    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\Z"),
-    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
-    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\Z"),
-    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\Z"),
-    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
+    "trace_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
+    "lease_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
+    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\\Z"),
+    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
+    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\\Z"),
+    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
+    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\\Z"),
+    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\\Z"),
+    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
 }
 _INTEGER_FIELDS = {
     "fencing_epoch", "pr_number", "duration_ms", "latency_ms",
@@ -55,7 +68,11 @@ def sanitize_trace_attributes(attributes: Any) -> dict[str, str | int]:
         if type(key) is not str or key not in _ALLOWED_FIELDS:
             raise TraceSanitizationError("unknown or unsafe trace attribute")
         if key in _STRING_PATTERNS:
-            if type(value) is not str or not _STRING_PATTERNS[key].fullmatch(value):
+            if type(value) is not str:
+                raise TraceSanitizationError("invalid trace identifier or enum")
+            if len(value) > _STRING_MAX_LENGTHS[key]:
+                raise TraceSanitizationError("trace string exceeds its field length limit")
+            if not _STRING_PATTERNS[key].fullmatch(value):
                 raise TraceSanitizationError("invalid trace identifier or enum")
             clean[key] = value
             continue
