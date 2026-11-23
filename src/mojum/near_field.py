@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-import math
 import re
 
 from .developmental_policy import (
     DevelopmentError, Explorer, Proprioception, MAX_EPISODE_TICKS, MAX_ZONES,
+    _finite,
 )
 from .world_room import Room, RoomState
 
@@ -45,8 +45,10 @@ def sense_room_rays(room, state):
     if (type(state.tick) is not int or state.tick < 0
             or type(state.revision) is not str
             or _SHA.fullmatch(state.revision) is None
-            or not all(isinstance(v, (int, float)) and math.isfinite(v)
-                       for v in (x, y))
+            # Match the strict proprioception numeric boundary: bool is not
+            # a coordinate, and huge Python ints must fail as DevelopmentError
+            # instead of escaping as OverflowError from math.isfinite().
+            or not all(_finite(v) for v in (x, y))
             or not 0 <= x <= room.width or not 0 <= y <= room.height):
         raise DevelopmentError("invalid virtual world state")
     distances = [room.width - x, x, room.height - y, y]
