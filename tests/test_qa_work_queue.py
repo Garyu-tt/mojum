@@ -211,3 +211,7 @@ def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
             q.enqueue("bad-key", "review", {"\ud800": "value"})
         with pytest.raises(QueueError, match="integer exceeds bit budget"):
             q.enqueue("big-int", "review", {"value": 1 << 4096})
+
+def test_in_memory_database_is_rejected(tmp_path):
+    with pytest.raises(QueueError, match="filesystem-backed"):
+        QAWorkQueue(":memory:")
