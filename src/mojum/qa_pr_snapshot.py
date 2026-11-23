@@ -128,6 +128,10 @@ def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
     mergeable = raw["mergeable"]
     if mergeable is not None and type(mergeable) is not bool:
         raise ValueError("mergeable must be boolean or null")
+    if raw["merged"] and state != "closed":
+        raise ValueError("merged snapshots must be closed")
+    if raw["draft"] and (state != "open" or raw["merged"]):
+        raise ValueError("draft snapshots must be open and not merged")
     base_ref = _branch(raw["base_ref"], "base_ref")
     head_ref = _branch(raw["head_ref"], "head_ref")
     base_sha = _text(raw["base_sha"], "base_sha", _SHA_RE)
