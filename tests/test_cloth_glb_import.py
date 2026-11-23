@@ -211,6 +211,32 @@ class ClothGLBTests(unittest.TestCase):
             self.assertIn("malformed GLB JSON", stderr.getvalue())
             self.assertFalse(output.exists())
 
+    def test_rejects_bool_gltf_indices_and_unhashable_license(self):
+        with self.assertRaisesRegex(ClothGLBError, "license"):
+            convert(fixture(), license_id=[])
+        with self.assertRaisesRegex(ClothGLBError, "license"):
+            convert(fixture(), license_id={})
+        # JSON booleans compare equal to integer index zero in Python;
+        # they must never count as valid glTF buffer/mesh/skin references.
+        for target in ("buffer", "mesh", "skin"):
+            with self.subTest(target=target):
+                doc, blob = _parse_glb(fixture(skin=True))
+                if target == "buffer":
+                    doc["bufferViews"][0]["buffer"] = False
+                elif target == "mesh":
+                    doc["nodes"][2]["mesh"] = False
+                else:
+                    doc["nodes"][2]["skin"] = False
+                encoded = json.dumps(doc, separators=(",", ":")).encode()
+                encoded += b" " * (-len(encoded) % 4)
+                blob += bytes(-len(blob) % 4)
+                length = 12 + 8 + len(encoded) + 8 + len(blob)
+                changed = (struct.pack("<4sII", b"glTF", 2, length) +
+                           struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
+                           struct.pack("<II", len(blob), 0x004E4942) + blob)
+                with self.assertRaises(ClothGLBError):
+                    convert(changed, pinned_indices=(), anchor_joint="neck")
+
     def test_accessor_byte_length_outside_view(self):
         raw = fixture()
         doc, blob = _parse_glb(raw)
