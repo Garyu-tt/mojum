@@ -88,6 +88,23 @@ test('rejects cross-epoch frames and changing joint inventory', () => {
   assert.throws(() => createVrmPoseTimeline([frame(0), otherJoints]), /inventory/);
 });
 
+
+test('rejects aggregate frame-by-joint sample budgets', () => {
+  const joints = Array.from({length: 128}, (_, index) => ({
+    id: `joint.${String(index).padStart(3, '0')}`,
+    angle_rad: 0,
+  }));
+  const frames = Array.from({length: 2001}, (_, sequence) => frame(sequence, {
+    joints,
+    tick: sequence + 1,
+    simulation_time_ns: sequence + 1,
+  }));
+  assert.throws(
+    () => createVrmPoseTimeline(frames),
+    /exceeds 256000 joint samples/,
+  );
+});
+
 test('rejects malformed schema, hostile field sets, values and bounds', () => {
   assert.throws(() => createVrmPoseTimeline([]), /1\.\.10000/);
   assert.throws(() => createVrmPoseTimeline(Array(10001).fill(frame(0))), /1\.\.10000/);
