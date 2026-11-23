@@ -90,6 +90,15 @@ class ExternalFrameGrant:
 def _validated_frame(frame: object, grant: ExternalFrameGrant, expected_tick: int) -> dict:
     if type(grant) is not ExternalFrameGrant:
         raise ValueError("explicit external-world grant required")
+    # An exact dataclass instance can still be forged with object.__new__ or
+    # mutated with object.__setattr__ despite frozen=True. Rebuild a validated
+    # immutable grant BEFORE dereferencing it in numeric/scope comparisons.
+    try:
+        grant = ExternalFrameGrant(grant.source_kind, grant.source_id,
+                                   grant.world_id, grant.tick_period_ns,
+                                   grant.capability)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("invalid synthetic external-world grant") from exc
     if not _bounded_int(expected_tick, _MAX_TICK):
         raise ValueError("invalid expected logical tick")
     if not _fields(frame, _FRAME_KEYS):
