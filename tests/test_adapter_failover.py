@@ -144,8 +144,10 @@ class AdapterFailoverTests(unittest.TestCase):
 
     def test_string_subclass_event_key_is_rejected(self):
         class HostileString(str):
-            def __hash__(self):
-                raise AssertionError("must not hash caller subclass")
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("must not compare caller subclass")
         state = initial_state("vr-world")
         raw = event(state, "enable-1", 0, "enable", capability_granted=True)
         raw[HostileString("extra")] = "x"
