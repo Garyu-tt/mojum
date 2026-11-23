@@ -39,13 +39,19 @@ def _unique_object(pairs):
 
 
 def _checkpoint(raw, *, tick, events):
-    if type(raw) is not str or len(raw.encode("utf-8")) > MAX_OUTPUT:
+    if type(raw) is not str:
+        raise SmokeFailure("CLI checkpoint must be text")
+    try:
+        output_bytes = len(raw.encode("utf-8"))
+    except UnicodeError as exc:
+        raise SmokeFailure("CLI checkpoint is not valid UTF-8") from exc
+    if output_bytes > MAX_OUTPUT:
         raise SmokeFailure("CLI checkpoint exceeds output budget")
     try:
         result = json.loads(raw, object_pairs_hook=_unique_object,
                             parse_constant=lambda _: (_ for _ in ()).throw(
                                 SmokeFailure("nonfinite checkpoint number")))
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, RecursionError) as exc:
         raise SmokeFailure("CLI emitted invalid checkpoint JSON") from exc
     if type(result) is not dict:
         raise SmokeFailure("CLI checkpoint must be an object")
@@ -120,7 +126,7 @@ def run_audit(*, first_ticks=3, second_ticks=2, timeout=45, runner=None):
                 proc = runner(command, cwd=str(ROOT), env=env,
                               capture_output=True, text=True, timeout=timeout,
                               check=False)
-            except (OSError, subprocess.TimeoutExpired) as exc:
+            except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
                 raise SmokeFailure("Aquarium subprocess could not complete") from exc
             if proc.returncode != 0:
                 # Do not forward child stderr: it may contain a disposable path
