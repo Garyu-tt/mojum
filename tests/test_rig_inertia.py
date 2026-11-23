@@ -1,7 +1,6 @@
 """Adversarial, offline tests for the synthetic rig inertial validator."""
 from __future__ import annotations
 
-import math
 import unittest
 from dataclasses import FrozenInstanceError
 
@@ -41,6 +40,13 @@ class ListSubclass(list):
     pass
 
 
+class HostileString(str):
+    def __eq__(self, other):
+        raise RuntimeError("hostile equality must never be called")
+
+    __hash__ = str.__hash__
+
+
 class RigInertiaTests(unittest.TestCase):
     def test_valid_record_and_digest_shape(self):
         result = validate_rig_inertia(packet())
@@ -77,6 +83,14 @@ class RigInertiaTests(unittest.TestCase):
         value["scope"] = "PRIVATE"
         with self.assertRaises(RigInertiaError):
             validate_rig_inertia(value)
+
+    def test_hostile_string_subclass_rejected_without_equality(self):
+        for field in ("schema", "scope", "unit_system"):
+            with self.subTest(field=field):
+                value = packet()
+                value[field] = HostileString(value[field])
+                with self.assertRaises(RigInertiaError):
+                    validate_rig_inertia(value)
 
     def test_unknown_top_level_key_rejected(self):
         value = packet()
