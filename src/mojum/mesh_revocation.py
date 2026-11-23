@@ -5,11 +5,12 @@ revocation snapshot. A clear result is not authentication or enrollment.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hashlib
 import hmac
 import json
 import re
+import weakref
 from typing import Any
 
 SNAPSHOT_SCHEMA = "mojum.mesh.revocations/1"
@@ -19,7 +20,6 @@ MAX_ENVELOPE_BYTES = 1_048_576
 MAX_IDENTIFIER_LENGTH = 128
 MAX_TICK = (1 << 63) - 1
 MAX_VALIDITY_TICKS = 1_000_000
-_VERIFICATION_TOKEN = object()
 _IDENTIFIER = re.compile(r"[A-Za-z0-9]+(?:[._:-][A-Za-z0-9]+)*", re.ASCII)
 _ENVELOPE_FIELDS = {"schema", "authority_id", "key_id", "generation",
                     "issued_at_tick", "expires_at_tick", "revocations", "signature"}
@@ -38,8 +38,10 @@ class RevocationEntry:
     revoked_at_tick: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class VerifiedRevocationSnapshot:
+    """Verified snapshot object; membership is tracked by object identity."""
+
     authority_id: str
     key_id: str
     generation: int
@@ -47,7 +49,12 @@ class VerifiedRevocationSnapshot:
     expires_at_tick: int
     entries: tuple[RevocationEntry, ...]
     digest: str
-    _verification_token: object = field(repr=False, compare=False)
+
+
+# A WeakSet avoids a transferable marker on the object itself. eq=False above
+# makes membership identity-based; copied/reconstructed dataclass instances
+# are not accepted as products of verify_snapshot().
+_VERIFIED_SNAPSHOTS: weakref.WeakSet[VerifiedRevocationSnapshot] = weakref.WeakSet()
 
 
 @dataclass(frozen=True)
@@ -201,12 +208,13 @@ def verify_snapshot(envelope: Any, *, authority_keys: dict[str, bytes],
     if not normalized["issued_at_tick"] <= now <= normalized["expires_at_tick"]:
         raise MeshRevocationError("revocation snapshot is not currently valid")
     digest = hashlib.sha256(_canonical({**normalized, "signature": signature})).hexdigest()
-    return VerifiedRevocationSnapshot(
+    verified = VerifiedRevocationSnapshot(
         authority_id=normalized["authority_id"], key_id=normalized["key_id"],
         generation=normalized["generation"], issued_at_tick=normalized["issued_at_tick"],
         expires_at_tick=normalized["expires_at_tick"], entries=entries, digest=digest,
-        _verification_token=_VERIFICATION_TOKEN,
     )
+    _VERIFIED_SNAPSHOTS.add(verified)
+    return verified
 
 
 def check_peer_access(snapshot: VerifiedRevocationSnapshot, *, node_id: str,
@@ -218,7 +226,7 @@ def check_peer_access(snapshot: VerifiedRevocationSnapshot, *, node_id: str,
     verified snapshot. It does not authenticate the peer or grant storage access.
     """
     if (type(snapshot) is not VerifiedRevocationSnapshot
-            or snapshot._verification_token is not _VERIFICATION_TOKEN):
+            or snapshot not in _VERIFIED_SNAPSHOTS):
         raise MeshRevocationError("a verified snapshot is required")
     node = _identifier(node_id, "node id")
     enrollment = _identifier(enrollment_id, "enrollment id")
