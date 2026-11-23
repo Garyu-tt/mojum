@@ -50,7 +50,9 @@ Reservations are durable, even if a process crashes or the provider times out.
   errors. An observed overrun freezes new admissions persistently. There is no
   automated unfreeze, refund, reconciliation, pruning, or cap migration in R0.1.
 - A backward wall-clock jump denies new admissions. A changed policy on an
-  existing database is rejected. Persist the SQLite file and its sidecars
+  existing database is rejected, including runtime mutation of the public
+  `ledger.caps` attribute: persisted SQLite limits remain authoritative on
+  every admission. Persist the SQLite file and its sidecars
   securely; losing it loses the accounting evidence.
   On POSIX the ledger requires an absolute file path inside an owner-only
   0700 parent, rejects replaceable ancestors and symlink paths, and rejects
@@ -74,7 +76,7 @@ Reservations are durable, even if a process crashes or the provider times out.
 PYTHONPATH=src python -m unittest discover -s tests -p test_spartan_budget.py -v
 ```
 
-Fifteen stdlib tests cover atomic quota caps, eight competing threads, restart
+Eighteen stdlib tests cover atomic quota caps, eight competing threads, restart
 persistence, idempotency, bad input, backward time, overrun freeze, and POSIX
 ledger/WAL privacy, symlinks, hardlinks, relative paths, and parent-directory safety. The
 module imports no providers or credentials and makes no network requests.
