@@ -139,6 +139,15 @@ class GenesisTimelineTests(unittest.TestCase):
                 attest_timeline(ledger.snapshot(), start_tick=0,
                                 through_tick=300, public_synthetic=True)
 
+    def test_oversized_event_list_uses_canonical_bounded_rejection(self):
+        snap = self.ledger.snapshot()
+        # The refusal-only fast path must not linearly scan an arbitrarily
+        # oversized untrusted list ahead of GenomeLedger's O(1) size gate.
+        snap["events"] = [{"valid_from_tick": 1}] * (GenomeLedger.MAX_EVENTS + 1)
+        with self.assertRaisesRegex(GenesisError, "bounded list"):
+            attest_timeline(snap, start_tick=0, through_tick=100,
+                            public_synthetic=True)
+
     def test_dense_same_tick_events_count_as_one_boundary(self):
         ledger = GenomeLedger(SEED)
         for i in range(256):
