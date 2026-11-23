@@ -38,8 +38,12 @@ def peer(path):
 a = peer(sys.argv[1])
 b = peer(sys.argv[1])
 try:
+    # Deliberately conflicting edits to the same synthetic primary key:
+    # convergence must hold even if the winning value is implementation-defined.
     a.execute("INSERT INTO ui_meta (id, x) VALUES ('v1', 10)")
+    a.execute("INSERT INTO ui_meta (id, x) VALUES ('shared', 30)")
     b.execute("INSERT INTO ui_meta (id, x) VALUES ('v2', 20)")
+    b.execute("INSERT INTO ui_meta (id, x) VALUES ('shared', 40)")
     a.commit()
     b.commit()
     fields = '"table","pk","cid","val","col_version","db_version","site_id","cl","seq"'
@@ -51,14 +55,17 @@ try:
     b.executemany(insert, from_a)
     a.commit()
     b.commit()
-    expected = [("v1", 10), ("v2", 20)]
     actual_a = a.execute("SELECT id,x FROM ui_meta ORDER BY id").fetchall()
     actual_b = b.execute("SELECT id,x FROM ui_meta ORDER BY id").fetchall()
-    assert actual_a == actual_b == expected, "native replica convergence failure"
+    assert actual_a == actual_b, "native replica convergence failure"
+    assert len(actual_a) == 3, "missing native replicated records"
+    values = dict(actual_a)
+    assert values["v1"] == 10 and values["v2"] == 20
+    assert values["shared"] in (30, 40), "invalid conflict resolution"
     # Newer release exposes exact upstream build identity; do not assume a
     # user-provided filename is proof of version.
     upstream_sha = a.execute("SELECT crsql_sha()").fetchone()[0]
-    print(json.dumps({"native_converged": True, "rows": 2,
+    print(json.dumps({"native_converged": True, "rows": 3,
                       "upstream_sha": str(upstream_sha)[:80]}))
 finally:
     for db in (a, b):
