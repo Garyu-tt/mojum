@@ -20,8 +20,9 @@ or evaluate a learned policy and does not claim biological or medical meaning.
 - Outcomes must be exact booleans. Container subclasses, unknown keys and
   malformed shapes fail closed. Field names are bounded to the longest valid
   schema key before set-based schema comparison.
-- Bin count is an exact integer in [1, 100]. Empty bins are included and have
-  null statistics.
+- Bin count is an exact integer in [1, 100]. Equal-width bins are right-closed
+  (the first bin also includes zero), so an exact internal upper boundary
+  remains in the lower bin. Empty bins are included and have null statistics.
 
 The detached frozen report contains the Brier score, sample count, per-bin mean
 forecast, observed frequency and absolute calibration gap, plus a SHA-256
