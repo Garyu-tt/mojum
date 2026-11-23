@@ -31,7 +31,10 @@ def _identifier(value: object, field: str) -> str:
 def _checked_parent(value: object, field: str) -> dict:
     # Require ordinary dicts before calling the shared GENESIS validator so
     # hostile Mapping implementations cannot execute arbitrary methods here.
-    if type(value) is not dict or type(value.get("inherited")) is not dict:
+    if (type(value) is not dict
+            or any(type(key) is not str for key in value)
+            or type(value.get("inherited")) is not dict
+            or any(type(key) is not str for key in value["inherited"])):
         raise RecombinationError(f"{field} must be a native GENESIS seed object")
     try:
         return validate_seed(value)
@@ -128,12 +131,16 @@ def recombine(
 
 def verify_recombination(result: dict, parent_a: dict, parent_b: dict) -> bool:
     """Verify a public result against the two supplied parent seeds."""
-    if type(result) is not dict or set(result) != {"schema", "seed", "provenance"}:
+    if (type(result) is not dict
+            or any(type(key) is not str for key in result)
+            or set(result) != {"schema", "seed", "provenance"}):
         return False
     if result.get("schema") != RECOMBINATION_SCHEMA:
         return False
     provenance = result.get("provenance")
-    if type(provenance) is not dict or "digest" not in provenance:
+    if (type(provenance) is not dict
+            or any(type(key) is not str for key in provenance)
+            or "digest" not in provenance):
         return False
     digest = provenance.get("digest")
     body = {key: value for key, value in provenance.items() if key != "digest"}
@@ -141,7 +148,9 @@ def verify_recombination(result: dict, parent_a: dict, parent_b: dict) -> bool:
         if type(digest) is not str or _digest(body) != digest:
             return False
         child_seed = result["seed"]
-        if type(child_seed) is not dict:
+        if (type(child_seed) is not dict
+                or any(type(key) is not str for key in child_seed)
+                or set(child_seed) != {"schema", "genome_id", "revision", "inherited"}):
             return False
         replay = recombine(
             parent_a, parent_b,
