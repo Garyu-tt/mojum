@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -40,8 +41,10 @@ class StubRunner:
         assert cwd and env["PYTHONPATH"].endswith("src")
         assert capture_output and text and not check and timeout >= 5
         db = Path(command[command.index("--db") + 1])
-        with sqlite3.connect(db) as con:
+        # sqlite3.Connection context manager commits but does NOT close.
+        with closing(sqlite3.connect(db)) as con:
             con.execute("CREATE TABLE IF NOT EXISTS marker (id INT)")
+            con.commit()
         tick_batch = int(command[command.index("--ticks") + 1])
         previous = self.calls[-2] if len(self.calls) > 1 else None
         tick = sum(int(call[call.index("--ticks") + 1]) for call in self.calls)
