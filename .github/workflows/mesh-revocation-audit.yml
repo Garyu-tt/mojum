@@ -1,0 +1,33 @@
+name: Mesh revocation audit
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/mesh_revocation_audit.py"
+      - "tests/test_mesh_revocation_audit.py"
+      - "docs/MESH_REVOCATION_AUDIT_R01.md"
+      - ".github/workflows/mesh-revocation-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact PR head
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_mesh_revocation_audit.py' -v
