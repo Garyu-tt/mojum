@@ -32,9 +32,11 @@ function exactRecord(value, keys, name) {
 }
 
 function exactArray(value, minimum, maximum, name) {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
-      value.length < minimum || value.length > maximum) {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
     throw new TypeError(name + ' has an invalid array shape');
+  }
+  if (value.length < minimum || value.length > maximum) {
+    throw new TypeError(name + ' must contain ' + minimum + '..' + maximum + ' entries');
   }
   const keys = Reflect.ownKeys(value);
   if (keys.length !== value.length + 1 || !keys.includes('length')) {
