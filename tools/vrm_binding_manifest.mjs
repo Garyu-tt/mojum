@@ -19,8 +19,13 @@ const BONES = new Set([
   'leftToes', 'rightToes'
 ]);
 
+// Track validator-owned failures without inspecting arbitrary thrown objects.
+const VALIDATION_ERRORS = new WeakSet();
+
 function fail(message) {
-  throw new TypeError(message);
+  const error = new TypeError(message);
+  VALIDATION_ERRORS.add(error);
+  throw error;
 }
 
 function plainRecord(value, requiredKeys, label) {
@@ -47,7 +52,7 @@ function plainRecord(value, requiredKeys, label) {
     }
     return result;
   } catch (error) {
-    if (error instanceof TypeError) throw error;
+    if (VALIDATION_ERRORS.has(error)) throw error;
     fail(label + ' must be a plain record');
   }
 }
@@ -72,7 +77,7 @@ function denseArray(value, min, max, label) {
     }
     return out;
   } catch (error) {
-    if (error instanceof TypeError) throw error;
+    if (VALIDATION_ERRORS.has(error)) throw error;
     fail(label + ' must be a bounded native array');
   }
 }
