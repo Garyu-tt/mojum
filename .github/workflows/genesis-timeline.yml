@@ -7,6 +7,10 @@ on:
       - "docs/GENESIS_TIMELINE_R01.md"
       - ".github/workflows/genesis-timeline.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   timeline:
     runs-on: ubuntu-latest
@@ -16,9 +20,16 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Assert exact checked-out revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Install package
         run: python -m pip install --no-deps .
       - name: Run focused contract suite
