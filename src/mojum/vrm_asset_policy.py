@@ -27,8 +27,15 @@ def _exact_dict(value: Any) -> bool:
 
 
 def _has_keys(value: dict[str, Any], expected: set[str]) -> bool:
-    # Validate key types before set construction to avoid hostile key equality/hash.
-    return all(type(key) is str for key in value) and set(value) == expected
+    # Cardinality is the cheapest bound: reject before iterating caller keys.
+    if len(value) != len(expected):
+        return False
+    # Validate exact native strings before set construction to avoid hostile
+    # str-subclass hashing/equality during admission.
+    keys = tuple(value.keys())
+    if any(type(key) is not str or len(key) > 128 for key in keys):
+        return False
+    return set(keys) == expected
 
 
 def _token(value: Any) -> bool:
