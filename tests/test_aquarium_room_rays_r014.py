@@ -16,7 +16,7 @@ from mojum.near_field import (
     SENSE_SCHEMA, sense_room_rays,
 )
 from mojum.noosphere import NoosphereError
-from mojum.world_room import Room, initial_state
+from mojum.world_room import Room, RoomState, initial_state
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "examples/genesis_seed.json").read_text(encoding="utf-8"))
@@ -51,6 +51,25 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
         for oracle in ("obstacles", "toy_id", "material", "softness", "geometry",
                        "future", "goal", "object_identity"):
             self.assertNotIn(oracle, public)
+
+    def test_ray_sensor_rejects_forged_nonfinite_boolean_and_huge_integer_positions(self):
+        room = Room(4, 4)
+        good = initial_state(room, 1., 2.)
+        self.assertEqual(sense_room_rays(room, good), (12, 12, 12, 12))
+        # RoomState is a plain frozen dataclass, so direct callers can supply
+        # forged coordinates. Do not leak raw OverflowError on huge integers
+        # or allow bools as a valid world-position measurement.
+        invalid_positions = (
+            (True, 2.), (1., False),
+            (10**5000, 2.), (-10**5000, 2.),
+            (float("nan"), 2.), (1., float("inf")),
+            ("1", 2.),
+        )
+        for index, (x, y) in enumerate(invalid_positions):
+            forged = RoomState(good.tick, x, y, good.revision)
+            with self.subTest(case=index), self.assertRaisesRegex(
+                    DevelopmentError, "invalid virtual world state"):
+                sense_room_rays(room, forged)
 
     def test_real_a_b_collision_evidence_changes_action_on_identical_numeric_input(self):
         blocked_room = Room(4, 4, ((.965, 1.98, .01, .04),))
