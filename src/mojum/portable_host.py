@@ -26,6 +26,7 @@ from .genesis import GenesisError, validate_seed
 from .noosphere import NoosphereError
 from .room_draft_runtime import load_runtime_room
 from .room_spec import RoomSpecError
+from .sensory_play import ToyScene
 
 
 SCHEMA = "mojum.portable-host.run/2"
@@ -234,7 +235,13 @@ def main(argv=None):
             room, start = load_runtime_room(args.room_file)
         except RoomSpecError as exc:
             parser.error(f"invalid --room-file: {exc}")
-        room_options = {"room": room, "start": start}
+        # Room drafts contain geometry, not virtual toy definitions. Supply a
+        # dimension-matched empty scene instead of silently adding the fixed
+        # 4x4 built-in toys (which may lie inside authored walls).
+        room_options = {
+            "room": room, "start": start,
+            "sensory_scene": ToyScene(width=room.width, height=room.height, toys=()),
+        }
 
     stopped = threading.Event()
     started = time.monotonic()
