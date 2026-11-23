@@ -90,6 +90,11 @@ class SampledPathTests(unittest.TestCase):
                 find_sampled_path(room, start, goal, columns=cols, rows=rows)
         self.assertEqual(room.obstacles, baseline)
 
+    def test_subnormal_geometry_fails_closed_as_valueerror(self):
+        room = Room(5e-324, 1)
+        with self.assertRaisesRegex(ValueError, "resolution"):
+            find_sampled_path(room, (0, 0), (5e-324, 1))
+
     def test_audit_budgets_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "budget"):
             find_sampled_path(Room(10001, 3), (0, 0), (1, 1))
