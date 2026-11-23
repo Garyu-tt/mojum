@@ -15,7 +15,7 @@ from typing import Any
 
 _SCHEMA = "mojum.rig-inertia/1"
 _SCOPE = "PUBLIC_SYNTHETIC"
-_LINK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\\Z", re.ASCII)
+_LINK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\Z", re.ASCII)
 _MAX_LINKS = 256
 _MAX_MASS_KG = 1_000_000.0
 _MAX_COM_M = 1_000.0
