@@ -246,13 +246,9 @@ def validate(graph):
     # to its id/revision field without invoking caller-controlled behavior.
     if type(graph) is not dict:
         raise GraphError("Graph v1 requires a native root object")
-    # Preserve the legacy graph-version diagnostic before enforcing the v1
-    # root shape. This lookup is safe only for a native str schema; other
-    # caller values are admitted by the bounded native-tree walk below.
-    schema_value = dict.get(graph, "schema")
-    if type(schema_value) is str and schema_value != SCHEMA:
-        raise GraphError("Unsupported or absent graph schema")
-    # Inspect the bounded root shape using only exact built-in dict operations.
+    # Inspect the bounded root shape before any lookup: a str subclass used
+    # as a root key can override equality/hash and execute during dict.get().
+    # Only exact native string keys may participate in schema lookups or sets.
     # Check individual key wire sizes before the short-name rule so a malicious
     # multi-megabyte key still receives the byte-budget diagnostic.
     if len(graph) != 5:
@@ -266,6 +262,12 @@ def validate(graph):
             raise GraphError("Graph v1 root keys must be bounded exact strings")
     if set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}:
         raise GraphError("Graph v1 graph schema requires exact root fields (unsupported v1 field)")
+
+    # Preserve the legacy mismatch diagnostic now that the root keys have
+    # been proven exact native strings and dict lookup cannot invoke caller code.
+    schema_value = dict.get(graph, "schema")
+    if type(schema_value) is str and schema_value != SCHEMA:
+        raise GraphError("Unsupported or absent graph schema")
 
     # Preserve the established field-specific identity diagnostics before the
     # whole-tree UTF-8 walk. These direct lookups are safe: the root is an exact
