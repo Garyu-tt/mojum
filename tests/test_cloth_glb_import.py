@@ -19,7 +19,8 @@ from mojum.cloth_glb_import import (
 
 def fixture(*, skin=False, bad_index=False, zero_area=False, external=False,
             extensions=False, invalid_weight=False, secondary=False,
-            nonfinite=False, interleaved=False, nodes_missing=False):
+            nonfinite=False, interleaved=False, nodes_missing=False,
+            joints_stride=None, index_stride=None, primitive_mode=None):
     doc = {"asset": {"version": "2.0"}, "buffers": [{"byteLength": 0}],
            "bufferViews": [], "accessors": [], "meshes": [{"name": "test_cloth", "primitives": [{}]}]}
     binary = bytearray()
@@ -60,9 +61,12 @@ def fixture(*, skin=False, bad_index=False, zero_area=False, external=False,
     triangles = [(0,), (1,), (2,), (1,), (3,), ((4 if bad_index else 2),)]
     prim = doc["meshes"][0]["primitives"][0]
     prim["attributes"] = attrs
-    prim["indices"] = accessor(triangles, "H", "SCALAR")
+    prim["indices"] = accessor(triangles, "H", "SCALAR", stride=index_stride)
+    if primitive_mode is not None:
+        prim["mode"] = primitive_mode
     if skin:
-        attrs["JOINTS_0"] = accessor([(0, 1, 0, 0)] * 4, "B", "VEC4")
+        attrs["JOINTS_0"] = accessor([(0, 1, 0, 0)] * 4, "B", "VEC4",
+                                     stride=joints_stride)
         value = 100 if invalid_weight else 255
         attrs["WEIGHTS_0"] = accessor([(value, 0, 0, 0)] * 4, "B", "VEC4", normalized=True)
         doc["nodes"] = [{"name": "neck"}, {"name": "hand"}, {"mesh": 0, "skin": 0}]
@@ -104,6 +108,27 @@ class ClothGLBTests(unittest.TestCase):
 
     def test_interleaved_positions_and_unsigned_short_indices(self):
         self.assertEqual(len(convert(fixture(interleaved=True))["geometry"]["vertices"]), 4)
+
+    def test_rejects_illegal_gltf_buffer_view_strides(self):
+        # uint8 VEC4 uses one-byte components, but explicit vertex byteStride
+        # still MUST be 4-byte aligned per glTF 2.0.
+        with self.assertRaisesRegex(ClothGLBError, "multiple of four"):
+            convert(fixture(skin=True, joints_stride=5),
+                    pinned_indices=(), anchor_joint="neck")
+        # Even a sufficiently aligned stride is prohibited on index views.
+        with self.assertRaisesRegex(ClothGLBError, "indices.*byteStride"):
+            convert(fixture(index_stride=4))
+        # A valid 4-byte-aligned, interleaved uint8 joint view is supported.
+        result = convert(fixture(skin=True, joints_stride=8),
+                         pinned_indices=(), anchor_joint="neck")
+        self.assertEqual(result["attachment"]["pinned_vertex_indices"], [0, 1, 2, 3])
+
+    def test_primitive_mode_requires_exact_json_integer(self):
+        # JSON 4.0 compares equal to Python int 4; it is NOT an enum integer.
+        for invalid_mode in (4.0, True, "4"):
+            with self.subTest(mode=invalid_mode):
+                with self.assertRaisesRegex(ClothGLBError, "TRIANGLES"):
+                    convert(fixture(primitive_mode=invalid_mode))
 
     def test_skin_anchor_selection_by_joint_weight(self):
         raw = fixture(skin=True)
