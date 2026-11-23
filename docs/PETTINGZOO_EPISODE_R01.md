@@ -23,6 +23,7 @@ Agent names are sorted during normalization. Each accepted frame is detached int
 ## Limits and safety
 
 - Python standard library only; no new mandatory dependencies.
+- Aggregate admission is capped at 100,000 scalar values across the complete episode, in addition to per-vector, per-agent and per-step limits.
 - Caller passes an in-memory object; this module performs no filesystem or network access.
 - Exact built-in containers and primitive numeric types only; booleans are not numeric values.
 - Rejected input does not mutate caller-owned objects.
