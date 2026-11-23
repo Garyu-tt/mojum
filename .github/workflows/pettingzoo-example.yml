@@ -8,7 +8,8 @@ on:
       - "docs/PETTINGZOO_EXAMPLE_R01.md"
       - ".github/workflows/pettingzoo-example.yml"
   push:
-    branches: [main]
+    branches:
+      - "build/700-pettingzoo-example-20261124"
     paths:
       - "examples/pettingzoo/**"
       - "tests/test_pettingzoo_example.py"
@@ -21,17 +22,27 @@ permissions:
 jobs:
   offline:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out exact submitted revision
+        uses: actions/checkout@v4
         with:
-          # Keep this as a native GitHub Actions expression, without escaping.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out revision
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
           python-version: ${{ matrix.python-version }}
       - name: Run deterministic offline tests
-        run: python -m unittest discover -s tests -p test_pettingzoo_example.py -v
+        run: python -m unittest discover -s tests -p "test_pettingzoo_example.py" -v
       - name: Run bounded benchmark smoke
         run: python examples/pettingzoo/benchmark.py --seed 10 --episodes 4 --horizon 6
