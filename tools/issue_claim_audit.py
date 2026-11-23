@@ -21,7 +21,7 @@ MAX_ISSUES = 300
 MAX_COMMENTS = 20000
 MAX_BODY_BYTES = 16384
 MAX_MARKERS_PER_SOURCE = 1
-CLAIM_MARKER = re.compile(r"^\s*<!-- mojum-claim/1: (\{[^\r\n]*\}) -->\s*$", re.M)
+CLAIM_MARKER = re.compile(r"^ {0,3}<!-- mojum-claim/1: (\{[^\r\n]*\}) -->[ \t\r]*$", re.M)
 MARKER_HINT = re.compile(r"mojum-claim/1", re.I)
 LEGACY_CLAIM_HINT = re.compile(r"(?:🔒|\bCLAIMED\b|\bCLAIM\s*/\s*IN\s+PROGRESS\b|\bCLAIM\s+UPDATE\b)", re.I)
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,95}\Z")
@@ -75,8 +75,32 @@ def _time(value: Any) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _reject_quoted_claims(body: str) -> None:
+    """Never interpret Markdown fenced examples as active worker claims."""
+    fence_char = None
+    fence_width = 0
+    for raw_line in body.splitlines():
+        line = raw_line.expandtabs(4)
+        indent = len(line) - len(line.lstrip(" "))
+        content = line[indent:]
+        if fence_char is not None:
+            if MARKER_HINT.search(raw_line):
+                raise ClaimAuditError("claim marker inside Markdown code fence")
+            if (indent <= 3 and content.startswith(fence_char * fence_width)
+                    and not content.lstrip(fence_char).strip()):
+                fence_char = None
+                fence_width = 0
+            continue
+        if indent > 3:
+            continue
+        opener = re.match(r"^(`{3,}|~{3,})(.*)$", content)
+        if opener and (opener.group(1)[0] == "~" or "`" not in opener.group(2)):
+            fence_char = opener.group(1)[0]
+            fence_width = len(opener.group(1))
+
 def _marker_payload(body: str) -> tuple[dict[str, str] | None, bool]:
     """Return exact standalone claim marker, and whether any untrusted hint exists."""
+    _reject_quoted_claims(body)
     matches = list(CLAIM_MARKER.finditer(body))
     if len(matches) > MAX_MARKERS_PER_SOURCE:
         raise ClaimAuditError("at most one claim marker per source")
