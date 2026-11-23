@@ -4,6 +4,7 @@ PUBLIC_SYNTHETIC disposable files only. This is not an independent trusted
 Noosphere anchor, production reliability or performance certification.
 """
 import hashlib
+from contextlib import closing
 import os
 from pathlib import Path
 import sqlite3
@@ -31,7 +32,7 @@ class NativeLitestreamSmoke(unittest.TestCase):
             private.mkdir(mode=0o700)
             replica.mkdir(mode=0o700)
             source = private / "source.db"
-            with sqlite3.connect(source) as db:
+            with closing(sqlite3.connect(source)) as db, db:
                 db.execute("PRAGMA journal_mode=WAL")
                 db.execute("CREATE TABLE sample (value INTEGER NOT NULL)")
                 db.execute("INSERT INTO sample VALUES (1)")
@@ -41,7 +42,7 @@ class NativeLitestreamSmoke(unittest.TestCase):
             def write_during_replication():
                 try:
                     time.sleep(2)
-                    with sqlite3.connect(source) as db:
+                    with closing(sqlite3.connect(source)) as db, db:
                         db.execute("INSERT INTO sample VALUES (2)")
                 except Exception as exc:
                     failures.append(str(exc))
@@ -60,7 +61,7 @@ class NativeLitestreamSmoke(unittest.TestCase):
                                     stdin=subprocess.DEVNULL, capture_output=True,
                                     timeout=25, check=False)
             self.assertEqual(result.returncode, 0, "native Litestream restore failed")
-            with sqlite3.connect(expected) as db:
+            with closing(sqlite3.connect(expected)) as db, db:
                 self.assertEqual(db.execute("SELECT value FROM sample ORDER BY value").fetchall(),
                                  [(1,), (2,)])
             # First-restore SHA is a disposable smoke comparator,
