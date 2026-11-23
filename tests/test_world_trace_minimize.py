@@ -96,6 +96,33 @@ class TraceMinimizeTests(unittest.TestCase):
                 with self.assertRaises(TraceMinimizeError):
                     minimize_case(case)
 
+    def test_rejects_forged_field_name_subclasses_before_equality(self):
+        """Direct-Python field admission never invokes hostile key equality."""
+        class Alias(str):
+            pass
+
+        class EqualityTrap(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("hostile field-name equality executed")
+
+        for key_type in (Alias, EqualityTrap):
+            for location, name in (("root", "schema"),
+                                   ("room", "width"),
+                                   ("move", "dx"),
+                                   ("witness", "kind")):
+                with self.subTest(key_type=key_type.__name__, location=location):
+                    case = make_case()
+                    record = (case if location == "root" else
+                              case["room"] if location == "room" else
+                              case["moves"][0] if location == "move" else
+                              case["witness"])
+                    value = record.pop(name)
+                    record[key_type(name)] = value
+                    with self.assertRaises(TraceMinimizeError):
+                        minimize_case(case)
+
     def test_strict_schema_rejects_extra_fields(self):
         for key, value in (("notes", "PRIVATE"), ("shell", "echo hi")):
             case = make_case()
