@@ -53,6 +53,39 @@ class TrajectoryAdmissionTests(unittest.TestCase):
             with self.assertRaises(TrajectoryError):
                 validate_trajectory(payload)
 
+    def test_rejects_oversized_root_and_frame_mappings_before_key_snapshot(self):
+        payload = sample()
+        payload.update({f"unexpected_{i}": i for i in range(25_000)})
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
+        payload = sample()
+        payload["frames"][0].update({f"unexpected_{i}": i for i in range(25_000)})
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
+    def test_rejects_non_native_root_and_frame_keys_before_comparison(self):
+        class HostileKey:
+            def __init__(self, target):
+                self.target = target
+            def __hash__(self):
+                return hash(self.target)
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not run")
+
+        payload = sample()
+        payload.pop("schema")
+        payload[HostileKey("schema")] = SCHEMA
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
+        payload = sample()
+        frame = payload["frames"][0]
+        frame.pop("timestamp_ns")
+        frame[HostileKey("timestamp_ns")] = 10
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
     def test_provenance_and_consent_required(self):
         for field, value in (("provenance", "PRIVATE"), ("consent", "implicit")):
             payload = sample()
