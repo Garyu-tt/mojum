@@ -27,6 +27,13 @@ resume, omission of the draft or a mismatch in geometry/start is rejected before
 any new events are appended. The original file bytes are not authenticated or
 hashed; two different drafts that yield the same runtime geometry are compatible.
 
+Authored drafts describe **geometry only**, not spectator toy coordinates.
+The host supplies an explicitly **empty** dimension-matched synthetic sensor
+scene for custom rooms: the motor policy can move and record observations, but
+it has no virtual toy contacts to learn from until an independently reviewed
+authored-toy contract is available. Built-in rooms retain the historical
+spectator toy fixture. No toys are silently inserted through authored walls.
+
 Without `--room-file`, the host retains the built-in room and its existing
 `mojum.portable-host.run/2` JSON output. In both cases stdout reports **metadata
 only**, not PRIVATE observations, genome, geometry, or file paths.
