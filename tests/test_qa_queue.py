@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import unittest
@@ -11,7 +12,7 @@ import warnings
 import gc
 
 from mojum.qa_queue import (
-    DurableTaskQueue, DuplicateTaskError, LeaseLostError,
+    DurableTaskQueue, DuplicateTaskError, LeaseLostError, QueueError,
 )
 
 
@@ -141,16 +142,16 @@ class DurableTaskQueueTests(unittest.TestCase):
 
     def test_unversioned_and_unknown_schema_are_refused(self) -> None:
         legacy = Path(self.temp.name) / "legacy.sqlite3"
-        with sqlite3.connect(legacy) as db:
+        with closing(sqlite3.connect(legacy)) as db:
             db.execute("CREATE TABLE queue_tasks (task_id INTEGER)")
-        with self.assertRaisesRegex(Exception, "unversioned queue database"):
+        with self.assertRaisesRegex(QueueError, "unversioned queue database"):
             DurableTaskQueue(legacy)
 
         unknown = Path(self.temp.name) / "unknown.sqlite3"
-        with sqlite3.connect(unknown) as db:
+        with closing(sqlite3.connect(unknown)) as db:
             db.execute("CREATE TABLE queue_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
             db.execute("INSERT INTO queue_meta VALUES('schema_version', '99')")
-        with self.assertRaisesRegex(Exception, "unsupported or missing queue schema version"):
+        with self.assertRaisesRegex(QueueError, "unsupported or missing queue schema version"):
             DurableTaskQueue(unknown)
 
     def test_operational_connections_are_closed_on_success_and_error(self) -> None:
