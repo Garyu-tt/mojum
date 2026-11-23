@@ -12,7 +12,6 @@ import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import urllib.error
@@ -47,7 +46,9 @@ def validate(raw):
     """Return a detached, strictly typed event; reject unknown/private fields."""
     if type(raw) is not dict or not REQUIRED <= raw.keys() or raw.keys() - REQUIRED - OPTIONAL:
         raise TraceError('invalid telemetry schema fields')
-    if raw['schema'] != SCHEMA or raw['phase'] not in PHASES or raw['outcome'] not in OUTCOMES:
+    if (raw['schema'] != SCHEMA or type(raw['phase']) is not str
+            or raw['phase'] not in PHASES or type(raw['outcome']) is not str
+            or raw['outcome'] not in OUTCOMES):
         raise TraceError('invalid telemetry event category')
     if (type(raw['event_id']) is not str or not EVENT_ID.fullmatch(raw['event_id'])
             or type(raw['task_id']) is not str or not TASK_ID.fullmatch(raw['task_id'])):
