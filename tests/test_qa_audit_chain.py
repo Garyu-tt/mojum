@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.qa_audit_chain import (
     AuditChainError, GENESIS, SCHEMA, record_digest, verify_audit_chain,
@@ -158,6 +159,35 @@ class AuditChainTests(unittest.TestCase):
         row["x" * 1_000_000] = digest
         with self.assertRaisesRegex(AuditChainError, "bounded native strings"):
             verify_audit_chain([row])
+
+    def test_oversized_task_key_rejected_before_regex(self):
+        row = make_chain([("enqueued", "queued", None, 1)])[0]
+        row["task_key"] = "a" * 1_000_000
+        with patch("mojum.qa_audit_chain._TOKEN") as token_pattern:
+            with self.assertRaises(AuditChainError):
+                verify_audit_chain([row])
+            token_pattern.fullmatch.assert_not_called()
+
+    def test_oversized_digest_fields_rejected_before_regex(self):
+        for field in ("previous_digest", "digest"):
+            with self.subTest(field=field):
+                row = make_chain([("enqueued", "queued", None, 1)])[0]
+                row[field] = "a" * 1_000_000
+                with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
+                    with self.assertRaises(AuditChainError):
+                        verify_audit_chain([row])
+                    hex_pattern.fullmatch.assert_not_called()
+
+    def test_record_digest_bounds_task_key_and_previous_digest(self):
+        row = make_chain([("enqueued", "queued", None, 1)])[0]
+        unsigned = {key: value for key, value in row.items() if key != "digest"}
+        for field, value in (("task_key", "a" * 1_000_000),
+                             ("previous_digest", "a" * 1_000_000)):
+            with self.subTest(field=field):
+                candidate = dict(unsigned)
+                candidate[field] = value
+                with self.assertRaises(AuditChainError):
+                    record_digest(candidate)
 
 
 if __name__ == "__main__":
