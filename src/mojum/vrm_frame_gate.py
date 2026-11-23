@@ -59,7 +59,10 @@ class PoseFrameGate:
             raise FrameGateError("invalid max_joints")
         if type(max_abs_coordinate) not in (int, float):
             raise FrameGateError("invalid coordinate limit")
-        limit = float(max_abs_coordinate)
+        try:
+            limit = float(max_abs_coordinate)
+        except (OverflowError, ValueError):
+            raise FrameGateError("invalid coordinate limit") from None
         if not math.isfinite(limit) or not 0.0 < limit <= 1_000_000.0:
             raise FrameGateError("invalid coordinate limit")
         self._max_joints = max_joints
@@ -108,7 +111,14 @@ class PoseFrameGate:
             raise FrameGateError("source must be explicitly PUBLIC_SYNTHETIC")
         if self._epoch is None or self._body_revision is None:
             raise FrameGateError("begin_epoch must be called first")
-        if type(packet) is not dict or frozenset(packet.keys()) != _PACKET_KEYS:
+        if type(packet) is not dict:
+            raise FrameGateError("invalid packet shape")
+        # Check exact key types before hashing or equality-based set comparison.
+        # A str subclass can override __hash__/__eq__ even inside a plain dict.
+        packet_keys = tuple(dict.keys(packet))
+        if any(type(key) is not str for key in packet_keys):
+            raise FrameGateError("packet keys must be exact strings")
+        if frozenset(packet_keys) != _PACKET_KEYS:
             raise FrameGateError("invalid packet shape")
         if type(packet["schema"]) is not str or packet["schema"] != SCHEMA:
             raise FrameGateError("unsupported schema")
