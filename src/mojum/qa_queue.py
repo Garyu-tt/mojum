@@ -5,6 +5,7 @@ JSON payloads and scheduling metadata only; it does not authorize merges.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 import json
 import sqlite3
@@ -57,6 +58,8 @@ class DurableQueue:
         busy_timeout_ms: int = 5000,
     ) -> None:
         self.path = str(path)
+        if self.path == ":memory:":
+            raise ValueError("DurableQueue requires a file-backed SQLite database")
         self._clock = clock
         if not isinstance(busy_timeout_ms, int) or isinstance(busy_timeout_ms, bool) or busy_timeout_ms < 0:
             raise ValueError("busy_timeout_ms must be a non-negative integer")
@@ -74,10 +77,9 @@ class DurableQueue:
         return connection
 
     def _initialize(self, busy_timeout_ms: int) -> None:
-        with self._connect(busy_timeout_ms) as db:
-            if self.path != ":memory:":
-                db.execute("PRAGMA journal_mode = WAL")
-                db.execute("PRAGMA synchronous = FULL")
+        with closing(self._connect(busy_timeout_ms)) as db:
+            db.execute("PRAGMA journal_mode = WAL")
+            db.execute("PRAGMA synchronous = FULL")
             db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS qa_queue_meta (
@@ -166,7 +168,7 @@ class DurableQueue:
         key = self._validate_key(idempotency_key)
         encoded = self._serialize(payload)
         now = float(self._clock())
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 """
