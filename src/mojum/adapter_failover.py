@@ -69,10 +69,17 @@ def _validate_state(state: object) -> FailoverState:
         raise FailoverError("last_event_id must be a native string")
     if state.last_event_id:
         _identifier(state.last_event_id, "last_event_id", _MAX_EVENT_ID)
-    if state.revision == 0 and (state.last_tick != -1 or state.failure_count != 0 or state.last_event_id):
+    if state.revision == 0 and (
+        state.mode != "disabled" or state.last_tick != -1
+        or state.failure_count != 0 or state.last_event_id
+    ):
         raise FailoverError("initial state fields are inconsistent")
     if state.revision > 0 and (state.last_tick < 0 or not state.last_event_id):
         raise FailoverError("advanced state is missing its event cursor")
+    if state.mode == "active" and state.failure_count != 0:
+        raise FailoverError("an active adapter cannot retain a failure streak")
+    if state.failure_count > 1:
+        raise FailoverError("failure count exceeds the one-failure quarantine policy")
     return state
 
 
