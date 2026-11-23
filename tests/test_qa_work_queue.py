@@ -259,6 +259,25 @@ def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
             q.enqueue("big-int", "review", {"value": 1 << 4096})
 
 
+def test_text_and_numeric_bounds_precede_expensive_operations(tmp_path):
+    class SneakyText(str):
+        def strip(self):
+            raise AssertionError("subclass method must not execute")
+
+    with QAWorkQueue(str(tmp_path / "bounds.db")) as q:
+        with pytest.raises(QueueError):
+            q.enqueue("x" * 1_000_000, "review", {})
+        with pytest.raises(QueueError):
+            q.enqueue(SneakyText("idempotency"), "review", {})
+        with pytest.raises(QueueError):
+            q.enqueue("huge-time", "review", {}, available_at=10 ** 10_000)
+        with pytest.raises(QueueError):
+            q.claim("worker", lease_seconds=10 ** 10_000)
+
+    with pytest.raises(QueueError):
+        QAWorkQueue(str(tmp_path / "huge-timeout.db"), busy_timeout=10 ** 10_000)
+
+
 def test_in_memory_database_is_rejected(tmp_path):
     with pytest.raises(QueueError, match="filesystem-backed"):
         QAWorkQueue(":memory:")
