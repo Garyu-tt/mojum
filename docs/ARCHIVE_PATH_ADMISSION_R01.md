@@ -10,8 +10,8 @@ modify canonical Noosphere journals, authorize a restore, or attest contents.
 relative POSIX member name. Ill-formed Unicode (including unpaired surrogates)
 is rejected as `ArchivePathError`; UTF-8 encoding errors never escape the API.
 `admit_member_paths(iterable, max_members=4096)` returns a tuple, preserving
-manifest order. The input is consumed once. Each UTF-8 name is limited to
-1024 bytes, each component to 255 bytes. The manifest is limited to 4096
+manifest order. The input is consumed once. A cheap character-count preflight rejects oversized strings before UTF-8 encoding; each UTF-8 name is limited to
+1024 bytes, each component to 255 bytes, with the component character count also checked before encoding. The manifest is limited to 4096
 entries. Unsafe names cause `ArchivePathError`, never silent rewriting.
 
 Rejected: absolute/drive/UNC paths, backslashes, dot/dotdot components,
