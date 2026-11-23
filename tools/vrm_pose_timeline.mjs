@@ -1,0 +1,150 @@
+/**
+ * Deterministic cursor over already-measured synthetic VRM pose frames.
+ *
+ * This module never interpolates, invents samples, or touches a renderer.
+ * It is an offline playback index only.
+ */
+const SCHEMA = 'mojum.vrm-pose-timeline/1';
+const REVISION = /^[0-9a-f]{64}$/;
+const EPOCH = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const JOINT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const MAX_FRAMES = 10000;
+const MAX_JOINTS = 128;
+const MAX_TICK = Number.MAX_SAFE_INTEGER;
+
+function exactRecord(value, keys, name) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) ||
+      (Object.getPrototypeOf(value) !== Object.prototype &&
+       Object.getPrototypeOf(value) !== null)) {
+    throw new TypeError(name + ' must be a plain record');
+  }
+  const actual = Reflect.ownKeys(value);
+  if (actual.some(key => typeof key !== 'string') ||
+      actual.length !== keys.length ||
+      actual.slice().sort().join(',') !== keys.slice().sort().join(',')) {
+    throw new TypeError(name + ' has an invalid field set');
+  }
+}
+
+function cloneFrame(frame, expectedJointIds) {
+  exactRecord(frame,
+    ['schema', 'sequence', 'epoch', 'tick', 'simulation_time_ns',
+     'revision', 'joints'], 'frame');
+  if (frame.schema !== SCHEMA ||
+      !Number.isSafeInteger(frame.sequence) || frame.sequence < 0 ||
+      !Number.isSafeInteger(frame.tick) || frame.tick < 0 ||
+      !Number.isSafeInteger(frame.simulation_time_ns) ||
+      frame.simulation_time_ns < 0 ||
+      typeof frame.epoch !== 'string' || !EPOCH.test(frame.epoch) ||
+      typeof frame.revision !== 'string' || !REVISION.test(frame.revision) ||
+      !Array.isArray(frame.joints) || frame.joints.length < 1 ||
+      frame.joints.length > MAX_JOINTS) {
+    throw new TypeError('invalid VRM timeline frame metadata');
+  }
+
+  const joints = [];
+  const ids = new Set();
+  for (const joint of frame.joints) {
+    exactRecord(joint, ['id', 'angle_rad'], 'joint');
+    if (typeof joint.id !== 'string' || !JOINT_ID.test(joint.id) ||
+        ids.has(joint.id) || typeof joint.angle_rad !== 'number' ||
+        !Number.isFinite(joint.angle_rad) ||
+        Math.abs(joint.angle_rad) > Math.PI) {
+      throw new TypeError('invalid or duplicate measured joint');
+    }
+    ids.add(joint.id);
+    joints.push(Object.freeze({id: joint.id, angle_rad: joint.angle_rad}));
+  }
+  joints.sort((a, b) => a.id.localeCompare(b.id));
+  const canonicalIds = joints.map(joint => joint.id);
+  if (expectedJointIds &&
+      (canonicalIds.length !== expectedJointIds.length ||
+       canonicalIds.some((id, i) => id !== expectedJointIds[i]))) {
+    throw new TypeError('joint inventory changed inside a timeline');
+  }
+
+  return Object.freeze({
+    schema: SCHEMA,
+    sequence: frame.sequence,
+    epoch: frame.epoch,
+    tick: frame.tick,
+    simulation_time_ns: frame.simulation_time_ns,
+    revision: frame.revision,
+    joints: Object.freeze(joints),
+  });
+}
+
+/**
+ * Build an immutable timeline from a bounded sequence of measured frames.
+ * Sequence numbers must be contiguous; logical time/tick must strictly rise.
+ */
+export function createVrmPoseTimeline(inputFrames) {
+  if (!Array.isArray(inputFrames) || inputFrames.length < 1 ||
+      inputFrames.length > MAX_FRAMES) {
+    throw new TypeError('frames must contain 1..10000 entries');
+  }
+
+  const frames = [];
+  let expectedJointIds = null;
+  let firstEpoch = null;
+  let lastSequence = null;
+  let lastTick = null;
+  let lastTime = null;
+
+  for (const input of inputFrames) {
+    const frame = cloneFrame(input, expectedJointIds);
+    if (firstEpoch === null) {
+      firstEpoch = frame.epoch;
+      expectedJointIds = frame.joints.map(joint => joint.id);
+    } else if (frame.epoch !== firstEpoch) {
+      throw new TypeError('timeline cannot mix body epochs');
+    }
+    if (lastSequence !== null &&
+        (frame.sequence !== lastSequence + 1 ||
+         frame.tick <= lastTick ||
+         frame.simulation_time_ns <= lastTime)) {
+      throw new TypeError('frames must be contiguous and strictly time-ordered');
+    }
+    frames.push(frame);
+    lastSequence = frame.sequence;
+    lastTick = frame.tick;
+    lastTime = frame.simulation_time_ns;
+  }
+
+  let cursor = 0;
+  function seek(index) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= frames.length) {
+      throw new RangeError('frame index is outside the timeline');
+    }
+    cursor = index;
+    return frames[cursor];
+  }
+  function step(direction = 1) {
+    if (direction !== 1 && direction !== -1) {
+      throw new TypeError('step direction must be exactly 1 or -1');
+    }
+    const next = cursor + direction;
+    if (next < 0 || next >= frames.length) {
+      throw new RangeError('timeline boundary reached');
+    }
+    cursor = next;
+    return frames[cursor];
+  }
+  function rewind() {
+    cursor = 0;
+    return frames[cursor];
+  }
+  function current() {
+    return frames[cursor];
+  }
+
+  return Object.freeze({
+    length: frames.length,
+    current,
+    seek,
+    step,
+    rewind,
+    frameAt: seek,
+    position: () => cursor,
+  });
+}
