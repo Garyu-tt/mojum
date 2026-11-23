@@ -80,6 +80,13 @@ class DependencyDagTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exactly"):
             evaluate_dependency_dag([record])
 
+
+    def test_oversized_record_rejected_before_key_snapshot(self):
+        record = row("a")
+        record.update({f"extra-{index}": None for index in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "exactly"):
+            evaluate_dependency_dag([record])
+
     def test_non_string_dependency_rejected(self):
         with self.assertRaisesRegex(ValueError, "dependency id"):
             evaluate_dependency_dag([row("a", deps=[42])])
