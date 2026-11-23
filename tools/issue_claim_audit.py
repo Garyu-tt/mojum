@@ -21,7 +21,8 @@ MAX_ISSUES = 300
 MAX_COMMENTS = 20000
 MAX_BODY_BYTES = 16384
 MAX_MARKERS_PER_SOURCE = 1
-CLAIM_MARKER = re.compile(r"^\s*<!-- mojum-claim/1: (\{[^\r\n]*\}) -->\s*$", re.M)
+CLAIM_MARKER = re.compile(r"^[ ]{0,3}<!-- mojum-claim/1: (\{[^\r\n]*\}) -->[ \t]*$", re.M)
+FENCE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})[^\r\n]*$")
 MARKER_HINT = re.compile(r"mojum-claim/1", re.I)
 LEGACY_CLAIM_HINT = re.compile(r"(?:🔒|\bCLAIMED\b|\bCLAIM\s*/\s*IN\s+PROGRESS\b|\bCLAIM\s+UPDATE\b)", re.I)
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,95}\Z")
@@ -58,8 +59,14 @@ def _name(value: Any, what: str) -> str:
 
 
 def _body(value: Any) -> str:
-    if not isinstance(value, str) or len(value.encode("utf-8")) > MAX_BODY_BYTES:
-        raise ClaimAuditError("body must be text of at most 16 KiB")
+    if not isinstance(value, str):
+        raise ClaimAuditError("body must be UTF-8 text of at most 16 KiB")
+    try:
+        byte_count = len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ClaimAuditError("body contains invalid Unicode") from exc
+    if byte_count > MAX_BODY_BYTES:
+        raise ClaimAuditError("body must be UTF-8 text of at most 16 KiB")
     return value
 
 
@@ -75,8 +82,24 @@ def _time(value: Any) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _reject_fenced_markers(body: str) -> None:
+    """Markdown code examples must never become active reservation claims."""
+    fence: tuple[str, int] | None = None
+    for line in body.splitlines():
+        match = FENCE.fullmatch(line)
+        if match is not None:
+            run = match.group(1)
+            if fence is None:
+                fence = (run[0], len(run))
+            elif run[0] == fence[0] and len(run) >= fence[1] and not line.strip(" `~\t"):
+                fence = None
+            continue
+        if fence is not None and MARKER_HINT.search(line):
+            raise ClaimAuditError("claim marker inside Markdown code fence")
+
 def _marker_payload(body: str) -> tuple[dict[str, str] | None, bool]:
     """Return exact standalone claim marker, and whether any untrusted hint exists."""
+    _reject_fenced_markers(body)
     matches = list(CLAIM_MARKER.finditer(body))
     if len(matches) > MAX_MARKERS_PER_SOURCE:
         raise ClaimAuditError("at most one claim marker per source")
@@ -127,6 +150,11 @@ def audit(snapshot: Any) -> dict[str, Any]:
         if total_comments > MAX_COMMENTS:
             raise ClaimAuditError("too many comments")
         sources: list[tuple[datetime, int, str, str]] = []
+        issue_body_fields = ("body", "author", "created_at")
+        if any(field in item for field in issue_body_fields) and not all(
+            field in item for field in issue_body_fields
+        ):
+            raise ClaimAuditError("issue body, author and created_at must appear together")
         if "body" in item:
             sources.append((_time(item.get("created_at")), 0,
                             _name(item.get("author"), "issue author"), _body(item["body"])))
