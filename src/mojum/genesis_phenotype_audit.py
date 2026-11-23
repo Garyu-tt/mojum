@@ -16,6 +16,10 @@ MAX_INPUT_BYTES = 1_048_576
 MAX_DEPTH = 24
 MAX_NODES = 20_000
 MAX_JSON_INTEGER = 2**63 - 1
+# GenomeLedger.from_snapshot() revalidates every effective tick prefix while
+# restoring events. Cap audit replay below the canonical ledger maximum to
+# keep adversarial unique valid_from_tick inventories CPU-bounded.
+MAX_AUDIT_EVENTS = 128
 
 
 class PhenotypeAuditError(ValueError):
@@ -181,6 +185,12 @@ def audit_phenotype_snapshot(
         raise PhenotypeAuditError("explicit PUBLIC_SYNTHETIC classification required")
     if type(ledger_snapshot) is not dict or type(phenotype_snapshot) is not dict:
         raise PhenotypeAuditError("ledger and phenotype snapshots must be plain dictionaries")
+
+    raw_events = ledger_snapshot.get("events")
+    if type(raw_events) is not list or len(raw_events) > MAX_AUDIT_EVENTS:
+        raise PhenotypeAuditError(
+            f"ledger event budget exceeded (maximum {MAX_AUDIT_EVENTS})"
+        )
 
     _canonical_bytes(ledger_snapshot)
     supplied_bytes = _canonical_bytes(phenotype_snapshot)
