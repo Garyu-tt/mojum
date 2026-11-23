@@ -49,6 +49,10 @@ def _preflight_json(value):
             if identity in seen:
                 raise GraphError("nested editor JSON contains a cycle or shared container")
             seen.add(identity)
+            # Bound pending work before scheduling children. Checking only
+            # when popping would allow one huge mapping to inflate the stack.
+            if nodes + len(stack) + len(item) > MAX_JSON_NODES:
+                raise GraphError("nested editor JSON structure exceeds limits")
             # Charge structural overhead before adding children to the worklist.
             estimated_bytes += 2 + len(item) * 6
             if estimated_bytes > MAX_BYTES:
@@ -71,6 +75,9 @@ def _preflight_json(value):
             if identity in seen:
                 raise GraphError("nested editor JSON contains a cycle or shared container")
             seen.add(identity)
+            # Reject oversized fan-out before allocating the traversal stack.
+            if nodes + len(stack) + len(item) > MAX_JSON_NODES:
+                raise GraphError("nested editor JSON structure exceeds limits")
             estimated_bytes += 2 + len(item)
             if estimated_bytes > MAX_BYTES:
                 raise GraphError("nested editor payload exceeds byte limit")
