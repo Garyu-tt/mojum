@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from mojum.crsqlite_native_spike import run_native_probe
+from mojum.crsqlite_native_spike import _run_bounded_child, run_native_probe
 
 
 class CrSqliteNativeSpikeTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class CrSqliteNativeSpikeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "crsqlite.so"
             path.write_bytes(b"synthetic, not a shared library")
-            with mock.patch("subprocess.run") as execute:
+            with mock.patch("mojum.crsqlite_native_spike._run_bounded_child") as execute:
                 with self.assertRaisesRegex(ValueError, "digest mismatch"):
                     run_native_probe(str(path), "a" * 64)
                 self.assertFalse(execute.called)
@@ -66,7 +66,7 @@ class CrSqliteNativeSpikeTests(unittest.TestCase):
                 self.assertEqual(kwargs["env"], {"PYTHONNOUSERSITE": "1"})
                 return mock.Mock(returncode=0, stdout=b'{"native_converged": true, "rows": 3, "upstream_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')
 
-            with mock.patch("subprocess.run", side_effect=subprocess_fixture) as run:
+            with mock.patch("mojum.crsqlite_native_spike._run_bounded_child", side_effect=subprocess_fixture) as run:
                 result = run_native_probe(str(source), digest)
                 self.assertTrue(result["native_converged"])
                 self.assertEqual(run.call_count, 1)
@@ -78,9 +78,22 @@ class CrSqliteNativeSpikeTests(unittest.TestCase):
             path.write_bytes(payload)
             digest = hashlib.sha256(payload).hexdigest()
             from subprocess import TimeoutExpired
-            with mock.patch("subprocess.run", side_effect=TimeoutExpired("probe", 1)):
+            with mock.patch("mojum.crsqlite_native_spike._run_bounded_child", side_effect=TimeoutExpired("probe", 1)):
                 with self.assertRaisesRegex(RuntimeError, "timed out"):
                     run_native_probe(str(path), digest, timeout_s=1)
+
+    def test_real_child_output_is_bounded_before_buffering(self):
+        # The native extension is not needed to test the subprocess boundary.
+        with tempfile.TemporaryDirectory() as td:
+            for target in ("stdout", "stderr"):
+                with self.subTest(stream=target), self.assertRaisesRegex(
+                    RuntimeError, "output limit"
+                ):
+                    _run_bounded_child(
+                        [os.sys.executable, "-I", "-S", "-c",
+                         "import sys; getattr(sys, %r).write('X' * 65536)" % target],
+                        cwd=td, env={"PYTHONNOUSERSITE": "1"}, timeout=5,
+                    )
 
     def test_native_version_unverified_is_not_auto_accepted(self):
         with tempfile.TemporaryDirectory() as td:
@@ -88,7 +101,7 @@ class CrSqliteNativeSpikeTests(unittest.TestCase):
             payload = b"fixture"
             path.write_bytes(payload)
             digest = hashlib.sha256(payload).hexdigest()
-            with mock.patch("subprocess.run", return_value=mock.Mock(
+            with mock.patch("mojum.crsqlite_native_spike._run_bounded_child", return_value=mock.Mock(
                 returncode=0, stdout=b'{"native_converged": false}', stderr=b""
             )):
                 with self.assertRaisesRegex(RuntimeError, "missing convergence proof"):
