@@ -120,5 +120,30 @@ class VrmAssetPolicyTests(unittest.TestCase):
         self.assertEqual(violations, ["provenance", "schema"])
 
 
+    def test_oversized_values_are_rejected_before_digest_serialization(self):
+        candidate = manifest()
+        candidate["asset"]["size_bytes"] = 10 ** 10000
+        candidate["asset"]["media_type"] = "m" * 100000
+        candidate["asset"]["source"] = "s" * 100000
+        candidate["asset"]["license"] = "l" * 100000
+        report = validate_manifest(candidate, POLICY)
+        self.assertFalse(report["accepted"])
+        self.assertEqual(report["normalized"]["asset"]["size_bytes"], 0)
+        self.assertEqual(report["normalized"]["asset"]["media_type"], "")
+        self.assertEqual(report["normalized"]["asset"]["source"], "")
+        self.assertEqual(report["normalized"]["asset"]["license"], "")
+        self.assertEqual(len(report["manifest_digest"]), 64)
+
+    def test_oversized_policy_tokens_and_versions_are_rejected(self):
+        bad_policy = dict(POLICY, allowed_licenses=["L" * 100000])
+        with self.assertRaises(AssetPolicyError):
+            validate_manifest(manifest(), bad_policy)
+        candidate = manifest()
+        candidate["dependencies"][0]["version"] = "1.2.3" + "x" * 100000
+        report = validate_manifest(candidate, POLICY)
+        self.assertFalse(report["accepted"])
+        self.assertIn("dependencies[0].version", report["violations"])
+
+
 if __name__ == "__main__":
     unittest.main()
