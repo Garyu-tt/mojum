@@ -16,7 +16,7 @@ SCHEMA = "mojum.cloth.damage-audit/1"
 PROVENANCE = "PUBLIC_SYNTHETIC"
 MAX_SAMPLES = 4096
 MAX_EDGE_ID = 96
-_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}\\Z")
+_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}\Z")
 
 
 class ClothDamageError(ValueError):
@@ -66,8 +66,10 @@ def audit_damage(request: Any) -> DamageReport:
         raise ClothDamageError("request must be a native dict")
     # Check cardinality before constructing sets or hashing attacker-controlled
     # keys. A caller can otherwise force work proportional to an unbounded dict.
+    if len(request) != 6:
+        raise ClothDamageError("request fields do not match schema")
     request_keys = tuple(request)
-    if len(request_keys) != 6 or any(type(key) is not str for key in request_keys):
+    if any(type(key) is not str for key in request_keys):
         raise ClothDamageError("request fields do not match schema")
     if set(request_keys) != {
         "schema", "provenance", "consent", "profile_revision", "threshold", "samples"
