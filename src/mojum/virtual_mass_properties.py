@@ -59,6 +59,16 @@ def _fail(message: str) -> None:
     raise MassPropertiesError(message)
 
 
+def _require_exact_keys(value: dict[str, object], expected: set[str], field: str) -> None:
+    # Check key types BEFORE set comparison so hostile non-string keys cannot
+    # execute caller-defined equality/hash behavior at this trust boundary.
+    keys = tuple(value.keys())
+    if any(type(key) is not str for key in keys):
+        _fail(f"{field}: keys must be native strings")
+    if set(keys) != expected:
+        _fail(f"{field}: missing or unknown fields")
+
+
 def _number(value: object, field: str, *, minimum: float, maximum: float) -> float:
     if type(value) not in (int, float):
         _fail(f"{field}: expected a native finite number")
@@ -107,24 +117,47 @@ def _validate_rotation(matrix: tuple[tuple[float, float, float], ...], field: st
         _fail(f"{field}: determinant must be +1")
 
 
-def _validate_inertia(matrix: tuple[tuple[float, float, float], ...], field: str) -> None:
+def _require_positive_semidefinite(
+    matrix: tuple[tuple[float, float, float], ...], field: str
+) -> None:
     scale = max(1.0, *(abs(item) for row in matrix for item in row))
     tolerance = _TENSOR_TOLERANCE * scale * scale
+    for index in range(3):
+        if matrix[index][index] < -tolerance:
+            _fail(f"{field}: matrix must be positive semidefinite")
+    for a, b in ((0, 1), (0, 2), (1, 2)):
+        minor = matrix[a][a] * matrix[b][b] - matrix[a][b] * matrix[b][a]
+        if minor < -tolerance:
+            _fail(f"{field}: matrix must be positive semidefinite")
+    if _determinant3(matrix) < -tolerance * scale:
+        _fail(f"{field}: matrix must be positive semidefinite")
+
+
+def _validate_inertia(matrix: tuple[tuple[float, float, float], ...], field: str) -> tuple[tuple[float, float, float], ...]:
+    scale = max(1.0, *(abs(item) for row in matrix for item in row))
     for row in range(3):
         for col in range(row + 1, 3):
             if abs(matrix[row][col] - matrix[col][row]) > _TENSOR_TOLERANCE * scale:
                 _fail(f"{field}: tensor must be symmetric")
-    # Positive-semidefinite test for a real symmetric 3x3 matrix:
-    # all principal minors (1x1, 2x2, and 3x3) must be non-negative.
-    for index in range(3):
-        if matrix[index][index] < -tolerance:
-            _fail(f"{field}: tensor must be positive semidefinite")
-    for a, b in ((0, 1), (0, 2), (1, 2)):
-        minor = matrix[a][a] * matrix[b][b] - matrix[a][b] * matrix[b][a]
-        if minor < -tolerance:
-            _fail(f"{field}: tensor must be positive semidefinite")
-    if _determinant3(matrix) < -tolerance * scale:
-        _fail(f"{field}: tensor must be positive semidefinite")
+    # Remove accepted floating-point noise in symmetric off-diagonal pairs.
+    symmetric = tuple(
+        tuple(
+            matrix[row][row] if row == col
+            else (matrix[row][col] + matrix[col][row]) / 2.0
+            for col in range(3)
+        )
+        for row in range(3)
+    )
+    _require_positive_semidefinite(symmetric, field)
+    # A physical inertia tensor must also obey the principal-moment triangle
+    # inequalities. Equivalently, its second-moment matrix must be PSD.
+    trace_half = math.fsum(symmetric[index][index] for index in range(3)) / 2.0
+    second_moment = tuple(
+        tuple((trace_half if row == col else 0.0) - symmetric[row][col] for col in range(3))
+        for row in range(3)
+    )
+    _require_positive_semidefinite(second_moment, f"{field} triangle inequality")
+    return symmetric
 
 
 def _matmul3(
@@ -154,8 +187,7 @@ def build_mass_properties(raw: object) -> MassProperties:
     """
     if type(raw) is not dict:
         _fail("fixture: expected a native dict")
-    if set(raw) != {"schema", "visibility", "segments"}:
-        _fail("fixture: missing or unknown fields")
+    _require_exact_keys(raw, {"schema", "visibility", "segments"}, "fixture")
     if type(raw["schema"]) is not str or raw["schema"] != SCHEMA:
         _fail("fixture: unsupported schema")
     if type(raw["visibility"]) is not str or raw["visibility"] != VISIBILITY:
@@ -172,8 +204,7 @@ def build_mass_properties(raw: object) -> MassProperties:
         if type(segment) is not dict:
             _fail(f"{field}: expected a native dict")
         required = {"id", "mass_kg", "center_m", "inertia_kg_m2", "rotation", "translation_m"}
-        if set(segment) != required:
-            _fail(f"{field}: missing or unknown fields")
+        _require_exact_keys(segment, required, field)
         identifier = segment["id"]
         if type(identifier) is not str or not identifier or len(identifier) > MAX_ID_LENGTH:
             _fail(f"{field}.id: invalid identifier")
@@ -186,7 +217,7 @@ def build_mass_properties(raw: object) -> MassProperties:
         mass = _number(segment["mass_kg"], f"{field}.mass_kg", minimum=1e-12, maximum=MAX_MASS_KG)
         center = _vector(segment["center_m"], f"{field}.center_m", bound=MAX_POSITION_M)
         inertia = _matrix(segment["inertia_kg_m2"], f"{field}.inertia_kg_m2", bound=MAX_INERTIA_KG_M2)
-        _validate_inertia(inertia, f"{field}.inertia_kg_m2")
+        inertia = _validate_inertia(inertia, f"{field}.inertia_kg_m2")
         rotation = _matrix(segment["rotation"], f"{field}.rotation", bound=1.0)
         _validate_rotation(rotation, f"{field}.rotation")
         translation = _vector(segment["translation_m"], f"{field}.translation_m", bound=MAX_POSITION_M)
@@ -213,7 +244,6 @@ def build_mass_properties(raw: object) -> MassProperties:
         _fail("segments: total mass exceeds the supported budget")
 
     normalized.sort(key=lambda item: item["id"])
-    normalized_by_id = {item["id"]: item for item in normalized}
     world_centers: list[tuple[float, float, float]] = []
     rotated_tensors: list[tuple[tuple[float, float, float], ...]] = []
     ordered_masses: list[float] = []
