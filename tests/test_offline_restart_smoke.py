@@ -89,6 +89,20 @@ class RestartAuditTests(unittest.TestCase):
         with self.assertRaises(SmokeFailure):
             _checkpoint('{"tick":NaN}', tick=1, events=2)
 
+    def test_bounded_deep_json_and_invalid_utf8_fail_closed(self):
+        # About 30 KiB, below MAX_OUTPUT, but beyond JSON nesting limits.
+        deep = "[" * 15000 + "0" + "]" * 15000
+        for bad in (deep, "\ud800"):
+            with self.subTest(kind="nesting" if bad is deep else "surrogate"):
+                with self.assertRaises(SmokeFailure):
+                    _checkpoint(bad, tick=1, events=2)
+
+    def test_subprocess_decode_error_is_typed_without_leaking_bytes(self):
+        def invalid_utf8(*args, **kwargs):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        with self.assertRaisesRegex(SmokeFailure, "subprocess could not complete"):
+            run_audit(runner=invalid_utf8)
+
     def test_bounded_cli_batches_and_timeouts(self):
         for inputs in ({"first_ticks": 0}, {"second_ticks": 33},
                        {"first_ticks": True}, {"timeout": 0},
