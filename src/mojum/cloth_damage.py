@@ -100,8 +100,10 @@ def audit_damage(request: Any) -> DamageReport:
     for index, sample in enumerate(samples):
         if type(sample) is not dict:
             raise ClothDamageError(f"sample {index} has invalid fields")
+        if len(sample) != 3:
+            raise ClothDamageError(f"sample {index} has invalid fields")
         sample_keys = tuple(sample)
-        if len(sample_keys) != 3 or any(type(key) is not str for key in sample_keys):
+        if any(type(key) is not str for key in sample_keys):
             raise ClothDamageError(f"sample {index} has invalid fields")
         if set(sample_keys) != {"tick", "edge_id", "stretch_ratio"}:
             raise ClothDamageError(f"sample {index} has invalid fields")
