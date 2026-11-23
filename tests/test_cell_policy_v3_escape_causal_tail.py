@@ -96,6 +96,7 @@ class CausalTailTests(unittest.TestCase):
     def test_legacy_nonzero_streak_fails_closed(self):
         legacy = CellExplorerV3Escape().snapshot()
         legacy.pop("snapshot_version")
+        legacy.pop("history_complete")
         legacy.pop("outcome_tail")
         legacy.update({
             "last_tick": 0, "updates": 1, "records": {"0:0": {"rest": [1, 0]}},
