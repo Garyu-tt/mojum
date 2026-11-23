@@ -162,6 +162,19 @@ class WorldAirflowTests(unittest.TestCase):
         with self.assertRaises(AirflowError):
             self.sample(sources=many)
 
+    def test_result_speed_limit_uses_exact_squared_magnitude(self):
+        # The true norm is just above 100 m/s, while floor(sqrt(norm²)) is
+        # exactly 100000. Compare squared values before the display rounding.
+        sources = [
+            {"id": f"x{i}", "x_mm": 1000, "y_mm": 1000,
+             "vx_mm_s": MAX_SOURCE_SPEED_MM_S, "vy_mm_s": 0}
+            for i in range(5)
+        ]
+        sources.append({"id": "y", "x_mm": 1000, "y_mm": 1000,
+                        "vx_mm_s": 0, "vy_mm_s": 1})
+        with self.assertRaisesRegex(AirflowError, "combined airflow"):
+            self.sample(sources=sources)
+
     def test_huge_native_integer_is_rejected_as_domain_error(self):
         with self.assertRaises(AirflowError):
             self.sample(sources=[{"id": "huge", "x_mm": 10**1000, "y_mm": 0,
