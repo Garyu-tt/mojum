@@ -7,7 +7,7 @@ Parent: #6. Reserved build issue: #963. This is an opt-in, offline, stdlib/CPU-o
 Run in the installed Mojum environment (no network or private data):
 
     python -m mojum.pulse_holdout --train 64 --holdout 32
-    python -m unittest tests.test_pulse_holdout -v
+    python -m unittest discover -s tests -p 'test_pulse_holdout.py' -v
 
 Only the generated deterministic toy signal is used by the CLI. Importers can call `evaluate_holdout(frames, train_frames=N, classification="PUBLIC_SYNTHETIC")` with a strictly typed list or tuple of 3..2048 synthetic interoception frames. No PRIVATE journal replay, user content, room geometry, child health measurement, recording or external runtime is supported.
 
