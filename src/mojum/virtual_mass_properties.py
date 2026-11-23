@@ -124,21 +124,30 @@ def _validate_rotation(matrix: tuple[tuple[float, float, float], ...], field: st
 def _require_positive_semidefinite(
     matrix: tuple[tuple[float, float, float], ...], field: str
 ) -> None:
-    scale = max(1.0, *(abs(item) for row in matrix for item in row))
-    tolerance = _TENSOR_TOLERANCE * scale * scale
+    # Normalize before principal-minor checks. An absolute floor of 1.0
+    # makes the tolerance dwarf physically small tensors and can admit negative
+    # inertia eigenvalues. PSD is scale invariant, so test the normalized tensor.
+    scale = max(abs(item) for row in matrix for item in row)
+    if scale == 0.0:
+        return
+    normalized = tuple(tuple(value / scale for value in row) for row in matrix)
+    tolerance = _TENSOR_TOLERANCE
     for index in range(3):
-        if matrix[index][index] < -tolerance:
+        if normalized[index][index] < -tolerance:
             _fail(f"{field}: matrix must be positive semidefinite")
     for a, b in ((0, 1), (0, 2), (1, 2)):
-        minor = matrix[a][a] * matrix[b][b] - matrix[a][b] * matrix[b][a]
+        minor = (normalized[a][a] * normalized[b][b]
+                 - normalized[a][b] * normalized[b][a])
         if minor < -tolerance:
             _fail(f"{field}: matrix must be positive semidefinite")
-    if _determinant3(matrix) < -tolerance * scale:
+    if _determinant3(normalized) < -tolerance:
         _fail(f"{field}: matrix must be positive semidefinite")
 
 
 def _validate_inertia(matrix: tuple[tuple[float, float, float], ...], field: str) -> tuple[tuple[float, float, float], ...]:
-    scale = max(1.0, *(abs(item) for row in matrix for item in row))
+    # Symmetry tolerance is relative to this tensor's own scale, including
+    # tiny SI inertias; do not impose a 1 kg*m^2 absolute tolerance floor.
+    scale = max(abs(item) for row in matrix for item in row)
     for row in range(3):
         for col in range(row + 1, 3):
             if abs(matrix[row][col] - matrix[col][row]) > _TENSOR_TOLERANCE * scale:
