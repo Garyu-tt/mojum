@@ -112,7 +112,7 @@ class DurableTaskQueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.queue.enqueue("ok", "key4", {"tuple": (1, 2)}, now_ns=1)
         with self.assertRaises(ValueError):
-            self.queue.enqueue("ok", "key5", {"surrogate": "\\ud800"}, now_ns=1)
+            self.queue.enqueue("ok", "key5", {"surrogate": "\ud800"}, now_ns=1)
         with self.assertRaises(ValueError):
             self.queue.claim("worker", lease_seconds=True, now_ns=1)
         with self.assertRaises(ValueError):
