@@ -210,8 +210,8 @@ class NestedGraphEditorTests(unittest.TestCase):
         # must be charged before json.dumps can allocate the encoded form.
         cases = (
             {"value": chr(0) * 180_000},
-            {("key" + chr(92) * 180_000): "safe"},
-            {"safe": chr(92) * 300_000},
+            {("key" + chr(92) * 600_000): "safe"},
+            {"safe": chr(92) * 600_000},
         )
         for value in cases:
             with self.subTest(case=list(value)):
