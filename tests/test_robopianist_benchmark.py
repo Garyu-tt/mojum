@@ -120,6 +120,11 @@ class RoboPianistBenchmarkTests(unittest.TestCase):
         with self.assertRaises(BenchmarkError):
             score_trace(task, bad_trace, consent=True)
 
+    def test_make_trace_rejects_hostile_mode_subclass(self):
+        task = make_task(19)
+        with self.assertRaises(BenchmarkError):
+            make_trace(task, mode=HostileText("policy"))
+
     def test_rejects_hostile_text_subclasses_before_scalar_comparison(self):
         task = make_task(18)
         bad = dict(task)
