@@ -164,6 +164,8 @@ class DurableTaskQueue:
 
     def _initialize(self) -> None:
         with closing(self._connect()) as connection:
+            # Serialize first-time schema admission across simultaneous workers.
+            connection.execute("BEGIN IMMEDIATE")
             # Refuse unknown or legacy unversioned queue schemas. Only a truly
             # empty database is initialized as schema version 1.
             existing = {
@@ -188,6 +190,7 @@ class DurableTaskQueue:
                 ).fetchone()
                 if version is None or version["value"] != "1":
                     raise QueueError("unsupported or missing queue schema version")
+            connection.commit()
             # Use WAL for durable file-backed worker coordination.
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
