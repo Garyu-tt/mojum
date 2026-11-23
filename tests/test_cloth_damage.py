@@ -97,6 +97,16 @@ class ClothDamageTests(unittest.TestCase):
         with self.assertRaises(ClothDamageError):
             audit_damage(request(profile_revision="../escape"))
 
+    def test_rejects_oversized_schema_mappings_before_key_validation(self):
+        oversized_request = request(extra_1=1, extra_2=2)
+        with self.assertRaises(ClothDamageError):
+            audit_damage(oversized_request)
+
+        oversized_sample = {"tick": 1, "edge_id": "e", "stretch_ratio": 1.1}
+        oversized_sample.update({f"extra_{i}": i for i in range(100)})
+        with self.assertRaises(ClothDamageError):
+            audit_damage(request([oversized_sample]))
+
     def test_digest_changes_with_measurement(self):
         a = audit_damage(request([{"tick": 1, "edge_id": "e", "stretch_ratio": 1.1}]))
         b = audit_damage(request([{"tick": 1, "edge_id": "e", "stretch_ratio": 1.2}]))
