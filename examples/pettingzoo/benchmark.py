@@ -64,10 +64,12 @@ class DeterministicCoordinationEnv:
         is_truncated = self._step_count >= self.horizon
         truncations = {agent: is_truncated for agent in self.agents}
         infos = {agent: {"step": self._step_count} for agent in self.agents}
+        # ParallelEnv returns one final observation for every agent that
+        # acted in this step, even when the step truncates the episode.
+        observations = self._observations()
         if is_truncated:
             self.agents = []
             self._done = True
-        observations = self._observations()
         return observations, rewards, terminations, truncations, infos
 
     def state(self) -> tuple[int, int]:
