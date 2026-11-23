@@ -29,7 +29,7 @@ class GraphNodeKindRegressionTests(unittest.TestCase):
         by_id, incoming, order = validate(_minimal_graph())
 
         self.assertEqual(set(by_id), {"seed"})
-        self.assertEqual(dict(incoming), {})
+        self.assertEqual(dict(incoming["seed"]), {})
         self.assertEqual(order, ["seed"])
 
     def test_non_string_and_unhashable_kinds_raise_graph_error(self):
