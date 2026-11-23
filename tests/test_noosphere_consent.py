@@ -218,9 +218,8 @@ class NoosphereConsentTests(unittest.TestCase):
     def test_non_json_payload_rejected(self):
         source = dataset([event()])
         source["projection"]["items"][0]["event"]["payload"] = {"n": float("nan")}
-        source["sha256"] = digest({
-            **source["projection"],
-        }) if False else "0" * 64
+        # Keep the original digest: canonicalization must reject NaN before
+        # comparing the supplied projection hash.
         with self.assertRaises(ConsentError):
             authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
 
