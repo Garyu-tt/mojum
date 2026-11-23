@@ -163,6 +163,14 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         }
         self.assertEqual(len(validate(graph)[0]), 6)
 
+    def test_huge_integer_node_kind_stays_inside_graph_error_boundary(self):
+        graph = self.fresh()
+        # Below the preflight bit-length cap but above Python's default
+        # decimal-conversion digit limit.
+        graph["nodes"][0]["kind"] = 1 << 20_000
+        with self.assertRaisesRegex(GraphError, "Unsupported node kind"):
+            validate(graph)
+
     def test_schema_mismatch_still_uses_graph_error(self):
         graph = self.fresh()
         graph["schema"] = SCHEMA + "/unexpected"
