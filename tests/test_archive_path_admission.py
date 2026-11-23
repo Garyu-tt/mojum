@@ -40,11 +40,20 @@ class ArchivePathAdmissionTests(unittest.TestCase):
             "COM1", "COM9.data", "LPT1", "LPT9.data",
             "COM¹", "COM².txt", "COM³", "LPT¹", "LPT².log", "LPT³",
             "folder/CON", "folder/NUL.txt", "folder/COM1.log",
-            "CON .txt", "NUL .log",
+            "CON .txt", "NUL .log", "CONIN$", "CONOUT$.txt",
         )
         for path in bad:
             with self.subTest(path=path), self.assertRaises(ArchivePathError):
                 validate_member_path(path)
+
+    def test_ordinary_names_are_not_false_positives(self):
+        good = (
+            "console.txt", "nulled", "com10.txt", "lpt0.txt",
+            "folder/CONSOLE", "folder/COM1x", "report.con.txt",
+        )
+        for path in good:
+            with self.subTest(path=path):
+                self.assertEqual(validate_member_path(path), path)
 
     def test_non_strings(self):
         for path in (None, 3, b"a", StringSubclass("safe/path")):
