@@ -126,6 +126,10 @@ def run_native_probe(extension: str, expected_sha256: str, *, timeout_s: int = 1
             raise RuntimeError("invalid native probe result") from exc
         if not isinstance(report, dict) or report.get("native_converged") is not True:
             raise RuntimeError("missing convergence proof")
+        if (type(report.get("rows")) is not int or report["rows"] != 3
+                or not isinstance(report.get("upstream_sha"), str)
+                or re.fullmatch(r"[0-9a-fA-F]{7,64}", report["upstream_sha"]) is None):
+            raise RuntimeError("incomplete native proof")
         return report
 
 
