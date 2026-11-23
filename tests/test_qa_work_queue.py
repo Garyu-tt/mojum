@@ -1,6 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
+try:
+    import pytest
+except ImportError:  # Full repository unittest discovery must remain stdlib-only.
+    pytest = None
 
 from mojum.qa_work_queue import IdempotencyConflict, LeaseLost, QAWorkQueue, QueueError
 
