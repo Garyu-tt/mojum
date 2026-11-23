@@ -1,0 +1,89 @@
+"""Bounded, deterministic read-only occupancy preview for the synthetic point-room.
+
+This is offline authoring/QA geometry, never an organism observation, planner,
+physics solver, or alternative source of canonical world state.
+"""
+
+from bisect import bisect_left, bisect_right
+import hashlib
+import json
+
+from .world_room import Room
+
+SCHEMA = "mojum.world.point-room-occupancy/1"
+MAX_AXIS_CELLS = 128
+MAX_TOTAL_CELLS = 16_384
+
+
+def _edges(length, count):
+    # Avoid `length * i` overflow for large finite rooms. Endpoint is exact.
+    edges = [length * (i / count) for i in range(count)] + [length]
+    if any(not a < b for a, b in zip(edges, edges[1:])):
+        raise ValueError("grid resolution collapses room coordinates")
+    return edges
+
+
+def _intersecting_cells(edges, start, end):
+    """Inclusive geometry: touching a cell boundary counts as occupied."""
+    first = max(0, bisect_left(edges, start) - 1)
+    last = min(len(edges) - 2, bisect_right(edges, end) - 1)
+    return first, last
+
+
+def rasterize(room: Room, *, columns: int = 32, rows: int = 32) -> dict:
+    """Render closed obstacles into a bounded, bottom-up occupancy grid.
+
+    A cell is `#` if its closed rectangle intersects a closed obstacle,
+    including edge/corner touches; otherwise it is `.`. Boundary of the
+    outer room is legal inside, consistent with world_room._valid().
+
+    Raster is a read-only conservative visualization: a free *cell* does
+    not grant permission for movement and cannot replace swept collision.
+    """
+    if not isinstance(room, Room):
+        raise ValueError("expected point-room geometry")
+    if (type(columns) is not int or type(rows) is not int
+            or not 1 <= columns <= MAX_AXIS_CELLS
+            or not 1 <= rows <= MAX_AXIS_CELLS
+            or columns * rows > MAX_TOTAL_CELLS):
+        raise ValueError("invalid or excessive occupancy grid size")
+
+    x_edges = _edges(room.width, columns)
+    y_edges = _edges(room.height, rows)
+    # 16,384 bytes at most, regardless of the original room's dimensions.
+    bits = [bytearray(columns) for _ in range(rows)]
+    for x, y, width, height in room.obstacles:
+        first_x, last_x = _intersecting_cells(x_edges, x, x + width)
+        first_y, last_y = _intersecting_cells(y_edges, y, y + height)
+        for j in range(first_y, last_y + 1):
+            for i in range(first_x, last_x + 1):
+                bits[j][i] = 1
+
+    geometry_json = json.dumps(
+        [room.width, room.height, room.obstacles],
+        separators=(",", ":"), allow_nan=False,
+    )
+    return {
+        "schema": SCHEMA,
+        "geometry_sha256": hashlib.sha256(geometry_json.encode("utf-8")).hexdigest(),
+        "columns": columns,
+        "rows": rows,
+        "row_order": "bottom_to_top",
+        "blocked_rows": ["".join("#" if v else "." for v in line) for line in bits],
+        "provenance": "offline-point-room-authoring-qa-only",
+    }
+
+
+def verify_raster(room: Room, frame: dict) -> bool:
+    """Fail closed if a saved QA preview differs from current geometry."""
+    if (type(frame) is not dict or set(frame) != {
+            "schema", "geometry_sha256", "columns", "rows", "row_order",
+            "blocked_rows", "provenance"}):
+        raise ValueError("invalid occupancy preview envelope")
+    if (type(frame["blocked_rows"]) is not list
+            or any(type(line) is not str for line in frame["blocked_rows"])):
+        raise ValueError("invalid occupancy rows")
+    expected = rasterize(room, columns=frame["columns"], rows=frame["rows"])
+    if frame != expected:
+        raise ValueError("stale or tampered occupancy preview")
+    return True
