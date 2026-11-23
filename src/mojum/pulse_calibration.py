@@ -16,6 +16,7 @@ SCHEMA = "mojum.neural.pulse-calibration/1"
 PROVENANCE = "PUBLIC_SYNTHETIC"
 MAX_SAMPLES = 10_000
 MAX_BINS = 100
+MAX_TICK = (1 << 63) - 1
 
 
 class CalibrationError(ValueError):
@@ -98,8 +99,8 @@ def audit_calibration(
         tick = row["tick"]
         forecast = row["forecast"]
         observed = row["observed"]
-        if type(tick) is not int or tick < 0:
-            raise CalibrationError(f"row {index} tick must be a nonnegative integer")
+        if type(tick) is not int or not 0 <= tick <= MAX_TICK:
+            raise CalibrationError(f"row {index} tick must be an integer in [0, 2^63-1]")
         if previous_tick is not None and tick <= previous_tick:
             raise CalibrationError("ticks must be strictly increasing")
         if not _finite_probability(forecast):
