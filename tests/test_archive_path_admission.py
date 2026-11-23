@@ -8,10 +8,18 @@ from mojum.archive_path_admission import (
 )
 
 
+class StringSubclass(str):
+    pass
+
+
 class ArchivePathAdmissionTests(unittest.TestCase):
     def test_valid_nested_paths_preserve_order(self):
         names = ("segments/0001.jsonl", "roots/0001.sha256", "manifest.json")
         self.assertEqual(admit_member_paths(iter(names)), names)
+
+    def test_literal_escape_like_characters_are_valid(self):
+        self.assertEqual(validate_member_path("x0f7"), "x0f7")
+        self.assertEqual(validate_member_path("folder/x1f7.txt"), "folder/x1f7.txt")
 
     def test_bad_paths(self):
         bad = (
@@ -19,14 +27,14 @@ class ArchivePathAdmissionTests(unittest.TestCase):
             "a/", "C:/Windows/file", "C:relative", "\\\\server\\share",
             "a\\b", "a/./b", "a/..", "a/evil.", "a/evil ",
             "a/\x00b", "a/\nb", "a/\x7fb", "a" * 1025,
-            "x/" + "z" * 256,
+            "x/" + "z" * 256, "a/\ud800",
         )
         for path in bad:
             with self.subTest(path=repr(path)), self.assertRaises(ArchivePathError):
                 validate_member_path(path)
 
     def test_non_strings(self):
-        for path in (None, 3, b"a"):
+        for path in (None, 3, b"a", StringSubclass("safe/path")):
             with self.subTest(path=path), self.assertRaises(ArchivePathError):
                 validate_member_path(path)
 
