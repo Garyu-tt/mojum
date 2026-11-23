@@ -12,6 +12,20 @@ def sample():
                 duration_ms=20, attempt=1)
 
 
+class HostileKey(str):
+    def __new__(cls, value):
+        obj = super().__new__(cls, value)
+        obj.hash_calls = 0
+        return obj
+
+    def __hash__(self):
+        self.hash_calls += 1
+        return hash(str(self))
+
+    def __eq__(self, other):
+        raise RuntimeError("hostile equality executed")
+
+
 class TraceEnvelopeTests(unittest.TestCase):
     def test_valid_and_deterministic(self):
         a = sample()
@@ -54,6 +68,16 @@ class TraceEnvelopeTests(unittest.TestCase):
         for value in [[], None, DictSubclass(sample())]:
             with self.assertRaises(TraceEnvelopeError):
                 admit_trace(value)
+
+    def test_hostile_string_key_rejected_before_hash_or_equality(self):
+        key = HostileKey("schema")
+        value = sample()
+        del value["schema"]
+        value[key] = SCHEMA
+        calls_before = key.hash_calls
+        with self.assertRaises(TraceEnvelopeError):
+            admit_trace(value)
+        self.assertEqual(key.hash_calls, calls_before)
 
     def test_error_never_echoes_input(self):
         x = sample()
