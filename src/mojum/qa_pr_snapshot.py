@@ -92,13 +92,19 @@ def _timestamp(value: Any, field: str) -> str:
 
 def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
     """Validate and detach one bounded public PR metadata record."""
-    if not isinstance(raw, Mapping):
-        raise ValueError("snapshot must be a mapping")
+    # Only exact built-in dictionaries are admitted. In particular, do not
+    # invoke caller-defined Mapping methods while validating untrusted input.
+    if type(raw) is not dict:
+        raise ValueError("snapshot must be an exact built-in dict")
     if len(raw) > len(_ALLOWED):
         raise ValueError("snapshot has too many fields")
-    keys = set(raw)
-    if any(type(key) is not str for key in keys):
-        raise ValueError("snapshot keys must be strings")
+
+    # Inspect key types before constructing a set: hashing a str subclass can
+    # execute caller code. Iterating dict.keys() does not hash the keys again.
+    raw_keys = tuple(raw.keys())
+    if any(type(key) is not str for key in raw_keys):
+        raise ValueError("snapshot keys must be exact native strings")
+    keys = set(raw_keys)
     forbidden = keys & _FORBIDDEN
     if forbidden:
         raise ValueError("snapshot contains disallowed payload fields")
