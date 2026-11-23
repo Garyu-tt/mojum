@@ -1,0 +1,37 @@
+name: Mojum world-room integer-wall exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/world-room-integer-wall-qa.yml"
+      - "src/mojum/world_room.py"
+      - "tests/test_world_room_integer_wall_rounding.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integer-wall-rounding:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact PR head checkout
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run integer-wall rounding regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_world_room_integer_wall_rounding.py -v
