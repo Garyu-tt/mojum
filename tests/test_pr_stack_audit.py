@@ -115,6 +115,27 @@ class PrStackAuditTests(unittest.TestCase):
         with self.assertRaises(AUDIT.SnapshotError):
             self.analyze(bad)
 
+    def test_reject_git_invalid_branch_components(self):
+        # These match Git's check-ref-format --branch rejections. Check all
+        # snapshot entry points, not just PR heads.
+        rejected = ("foo/.hidden", "foo/.lock", "foo/bar.lock",
+                    "foo/bar.lock/baz", "foo/./baz", "foo/a..b")
+        for ref in rejected:
+            for field in ("base_branch", "head_ref", "base_ref"):
+                with self.subTest(ref=ref, field=field):
+                    data = snapshot(item(1))
+                    if field == "base_branch":
+                        data[field] = ref
+                    else:
+                        data["pull_requests"][0][field] = ref
+                    with self.assertRaises(AUDIT.SnapshotError):
+                        AUDIT.audit(data)
+
+        # A dot inside a component, and the substring 'locked', are valid.
+        good = item(1)
+        good["head_ref"] = "feature/a.b/locked"
+        self.assertTrue(self.analyze(good)["ok"])
+
     def test_reject_duplicate_json_fields_and_unknown_keys(self):
         with self.assertRaises(AUDIT.SnapshotError):
             AUDIT.decode_snapshot(b'{"schema":"a","schema":"b"}')

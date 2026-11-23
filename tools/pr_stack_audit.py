@@ -49,6 +49,10 @@ def _branch(value: Any, where: str) -> str:
         _failure(f"{where}: invalid branch ref")
     if ".." in value or value.endswith(".") or "//" in value or value.endswith("/"):
         _failure(f"{where}: noncanonical branch ref")
+    # Git check-ref-format forbids components starting with '.' or ending in '.lock'.
+    # These checks run on every path component, not only the full ref suffix.
+    if any(part.startswith(".") or part.endswith(".lock") for part in value.split("/")):
+        _failure(f"{where}: invalid Git ref component")
     return value
 
 
