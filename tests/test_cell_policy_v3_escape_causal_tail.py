@@ -84,6 +84,41 @@ class CausalTailTests(unittest.TestCase):
                 restored = CellExplorerV3Escape.from_snapshot(blocked)
                 self.assertEqual(restored.snapshot(), blocked)
 
+
+    def test_hostile_mapping_keys_and_schema_values_are_rejected_before_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                raise AssertionError("hostile key hash executed")
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality executed")
+
+        class HostileText(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile schema equality executed")
+
+        snapshot = CellExplorerV3Escape().snapshot()
+        snapshot[HostileKey("schema")] = snapshot.pop("schema")
+        with self.assertRaisesRegex(CellV3EscapeError, "mapping keys"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
+        snapshot = CellExplorerV3Escape().snapshot()
+        snapshot["schema"] = HostileText(snapshot["schema"])
+        with self.assertRaisesRegex(CellV3EscapeError, "retention envelope"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
+        snapshot = CellExplorerV3Escape().snapshot()
+        snapshot["outcome_tail"] = [{
+            HostileKey("tick"): 0, "cell": "0:0", "action": "rest", "blocked": False,
+        }]
+        snapshot["last_tick"] = 0
+        snapshot["updates"] = 1
+        snapshot["records"] = {"0:0": {"rest": [1, 0]}}
+        snapshot["last_seen_at"] = {"0:0": 0}
+        snapshot["history_complete"] = False
+        snapshot["consecutive_rests"] = 1
+        with self.assertRaisesRegex(CellV3EscapeError, "mapping keys"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
     def test_legacy_zero_streak_snapshot_is_upgraded(self):
         legacy = CellExplorerV3Escape().snapshot()
         legacy.pop("snapshot_version")
