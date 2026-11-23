@@ -63,7 +63,7 @@ def _checkpoint(raw, *, tick, events):
     for key, value in checks.items():
         if type(result.get(key)) is not type(value) or result[key] != value:
             raise SmokeFailure("invalid checkpoint " + key)
-    for key in ("journal_head", "manifest_sha256", "world_revision"):
+    for key in ("journal_head", "manifest_sha256", "world_revision", "genome_revision"):
         if type(result.get(key)) is not str or HEX_SHA256.fullmatch(result[key]) is None:
             raise SmokeFailure("invalid checkpoint " + key)
     if type(result.get("agent_id")) is not str or not result["agent_id"]:
@@ -71,7 +71,7 @@ def _checkpoint(raw, *, tick, events):
     if type(result.get("status")) is not str or not result["status"].startswith(
             "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"):
         raise SmokeFailure("CLI reported a non-synthetic mode")
-    for key in ("sim_time_ns", "genome_revision"):
+    for key in ("sim_time_ns",):
         if type(result.get(key)) is not int or result[key] < 0:
             raise SmokeFailure("invalid checkpoint " + key)
     return result
