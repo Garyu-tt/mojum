@@ -31,7 +31,9 @@ class RigProvenanceError(ValueError):
 
 
 def _keys(obj: object, expected: set[str], label: str) -> dict:
-    if type(obj) is not dict or set(obj) != expected:
+    if (type(obj) is not dict or len(obj) != len(expected)
+            or any(type(key) is not str for key in obj)
+            or set(obj) != expected):
         raise RigProvenanceError(f"invalid {label} fields")
     return obj
 
@@ -126,7 +128,9 @@ def verify_rig_assets(manifest: object, contents: object) -> dict:
     elif type(evidence) is not str or evidence not in names:
         raise RigProvenanceError("calibration claim must reference supplied evidence")
 
-    if type(contents) is not dict or set(contents) != names:
+    if (type(contents) is not dict or len(contents) != len(names)
+            or any(type(key) is not str for key in contents)
+            or set(contents) != names):
         raise RigProvenanceError("missing or unexpected asset bytes")
     total_bytes = 0
     for a in assets:
