@@ -150,7 +150,7 @@ class GraphEditorBridgeTests(unittest.TestCase):
                         self._import(envelope)
 
     def test_reject_unbounded_and_invalid_positions(self):
-        for value in (float("nan"), float("inf"), "1", None, True, 100001):
+        for value in (float("nan"), float("inf"), "1", None, True, 100001, 10 ** 400):
             with self.subTest(value=repr(value)):
                 envelope = export_editor(self.source, "reactflow",
                                          allow_private=True)
@@ -168,8 +168,9 @@ class GraphEditorBridgeTests(unittest.TestCase):
                 self._import(envelope, new_revision=value)
 
     def test_unknown_backend_v1_and_extra_envelope_fields_rejected(self):
-        with self.assertRaises(GraphError):
-            export_editor(self.source, "other", allow_private=True)
+        for backend in ("other", [], {}, None):
+            with self.subTest(backend=repr(backend)), self.assertRaises(GraphError):
+                export_editor(self.source, backend, allow_private=True)
         with self.assertRaises(GraphError):
             export_editor(FIXTURE, "reactflow", allow_private=True)
         envelope = export_editor(self.source, "rete", allow_private=True)
