@@ -56,6 +56,14 @@ def _text(value: Any, field: str, pattern: re.Pattern[str] | None = None) -> str
     return value
 
 
+def _repository(value: Any) -> str:
+    repository = _text(value, "repository", _REPO_RE)
+    owner, name = repository.split("/")
+    if owner in {".", ".."} or name in {".", ".."} or owner.startswith(".") or name.startswith("."):
+        raise ValueError("repository components are invalid")
+    return repository.lower()
+
+
 def _branch(value: Any, field: str) -> str:
     branch = _text(value, field, _BRANCH_RE)
     parts = branch.split("/")
@@ -101,7 +109,7 @@ def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
     if missing:
         raise ValueError("snapshot is missing required fields")
 
-    repository = _text(raw["repository"], "repository", _REPO_RE).lower()
+    repository = _repository(raw["repository"])
     number = raw["number"]
     if type(number) is not int or not 1 <= number <= 2**31 - 1:
         raise ValueError("number must be a positive bounded integer")
