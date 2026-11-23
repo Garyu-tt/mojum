@@ -168,6 +168,11 @@ class BodyAccelerationAuditTests(unittest.TestCase):
             with self.subTest(limits=limits), self.assertRaises(BodyAccelerationError):
                 self.audit(limits=limits)
 
+    def test_rejects_oversized_limit_mapping_before_key_scan(self):
+        limits = {f"unused-{index}": 1.0 for index in range(50_000)}
+        with self.assertRaisesRegex(BodyAccelerationError, "missing or unknown fields"):
+            self.audit(limits=limits)
+
     def test_rejects_boolean_or_nonpositive_limit(self):
         for limit in (True, 0.0, -1.0):
             with self.subTest(limit=limit), self.assertRaises(BodyAccelerationError):
