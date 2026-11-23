@@ -4,7 +4,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
 from pathlib import Path
+import sqlite3
 import unittest
+from unittest.mock import patch
+import warnings
+import gc
 
 from mojum.qa_queue import (
     DurableTaskQueue, DuplicateTaskError, LeaseLostError,
@@ -83,7 +87,8 @@ class DurableTaskQueueTests(unittest.TestCase):
         reopened = DurableTaskQueue(self.path)
         restored = reopened.get(task.task_id)
         self.assertEqual(restored.payload, {"safe": True})
-        self.assertEqual(restored.lease_token, claimed.lease_token)
+        self.assertIsNone(restored.lease_token)
+        self.assertIsNotNone(claimed.lease_token)
         self.assertEqual([e.event for e in reopened.events(task.task_id)],
                          ["enqueued", "claimed"])
 
@@ -119,6 +124,61 @@ class DurableTaskQueueTests(unittest.TestCase):
             self.queue.claim("worker", now_ns=True)
         with self.assertRaises(ValueError):
             DurableTaskQueue(":memory:")
+
+    def test_get_redacts_active_lease_token(self) -> None:
+        self.queue.enqueue("private", "private-1", {}, now_ns=1)
+        claimed = self.queue.claim("worker-a", now_ns=1)
+        observed = self.queue.get(claimed.task_id)
+        self.assertIsNone(observed.lease_token)
+        self.assertIsNotNone(claimed.lease_token)
+
+    def test_payload_node_and_aggregate_text_budgets_precede_serialization(self) -> None:
+        with patch("mojum.qa_queue.json.dumps", side_effect=AssertionError("serialized before admission")):
+            with self.assertRaisesRegex(ValueError, "node count"):
+                self.queue.enqueue("many", "many-1", {"items": [None] * 10_001}, now_ns=1)
+            with self.assertRaisesRegex(ValueError, "aggregate text"):
+                self.queue.enqueue("text", "text-1", {"a": "x" * 40_000, "b": "y" * 40_000}, now_ns=1)
+
+    def test_unversioned_and_unknown_schema_are_refused(self) -> None:
+        legacy = Path(self.temp.name) / "legacy.sqlite3"
+        with sqlite3.connect(legacy) as db:
+            db.execute("CREATE TABLE queue_tasks (task_id INTEGER)")
+        with self.assertRaisesRegex(Exception, "unversioned queue database"):
+            DurableTaskQueue(legacy)
+
+        unknown = Path(self.temp.name) / "unknown.sqlite3"
+        with sqlite3.connect(unknown) as db:
+            db.execute("CREATE TABLE queue_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            db.execute("INSERT INTO queue_meta VALUES('schema_version', '99')")
+        with self.assertRaisesRegex(Exception, "unsupported or missing queue schema version"):
+            DurableTaskQueue(unknown)
+
+    def test_operational_connections_are_closed_on_success_and_error(self) -> None:
+        original = self.queue._connect
+        opened = []
+
+        def capture():
+            connection = original()
+            opened.append(connection)
+            return connection
+
+        self.queue._connect = capture
+        self.queue.get(1)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            opened[-1].execute("SELECT 1")
+
+        with self.assertRaises(LeaseLostError):
+            self.queue.heartbeat(1, "wrong", "invalid", now_ns=2)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            opened[-1].execute("SELECT 1")
+
+    def test_repeated_operations_emit_no_unclosed_connection_warning(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            for index in range(20):
+                self.queue.enqueue(f"resource:{index}", f"resource:{index}", {}, now_ns=index + 1)
+                self.queue.get(index + 1)
+            gc.collect()
 
     def test_event_limit_is_bounded(self) -> None:
         task = self.queue.enqueue("events", "events-1", {}, now_ns=1)
