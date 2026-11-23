@@ -133,8 +133,12 @@ int main() {
 
     TempAllocatorImpl temp_allocator(2 * 1024 * 1024);
     const uint hardware_threads = std::max(1u, std::thread::hardware_concurrency());
-    JobSystemThreadPool jobs(cMaxPhysicsJobs, cMaxPhysicsBarriers,
-        std::max(1u, hardware_threads - 1u));
+    // This probe simulates only 96 vertices; cap background workers so a
+    // large host does not spend more resources on scheduling than the cloth.
+    constexpr uint max_worker_threads = 8;
+    const uint worker_threads = std::min(
+        max_worker_threads, std::max(1u, hardware_threads - 1u));
+    JobSystemThreadPool jobs(cMaxPhysicsJobs, cMaxPhysicsBarriers, worker_threads);
 
     constexpr uint count_x = 12;
     constexpr uint count_z = 8;
