@@ -260,6 +260,38 @@ class GenesisBatchTests(unittest.TestCase):
                 )
             self.assertEqual(serializer.call_count, 2)  # snapshot and batch; individual event rejected before serialization
 
+    def test_snapshot_and_batch_share_one_aggregate_byte_budget(self):
+        from unittest.mock import patch
+        from mojum.genesis import canonical as canonical_json
+
+        ledger = GenomeLedger(SEED)
+        snapshot = ledger.snapshot()
+        # Individually valid JSON components whose combined encoded size is
+        # above 512 KiB. The snapshot still has <128 prior events and the new
+        # batch still has <=64 events with each event below the 8 KiB cap.
+        snapshot["events"] = [
+            {"event_id": f"prior-{index}", "evidence": "x" * 9500}
+            for index in range(32)
+        ]
+        events = [
+            event(f"new-{index}", delta=0, recorded=1000 + index)
+            | {"evidence": "y" * 7200}
+            for index in range(32)
+        ]
+        with patch(
+            "mojum.genesis_batch.canonical", wraps=canonical_json,
+        ) as serializer, patch(
+            "mojum.genesis_batch.GenomeLedger.from_snapshot",
+        ) as restore:
+            with self.assertRaisesRegex(GenesisError, "JSON byte budget"):
+                apply_acquisition_batch(
+                    snapshot, events, expected_base_revision=ledger.revision
+                )
+            # Snapshot is within budget and is serialized once. The shared
+            # preflight rejects the combined input before encoding the batch.
+            self.assertEqual(serializer.call_count, 1)
+            restore.assert_not_called()
+
     def test_invalid_unicode_rejected(self):
         bad = event()
         bad["evidence"] = "bad-\ud800"
