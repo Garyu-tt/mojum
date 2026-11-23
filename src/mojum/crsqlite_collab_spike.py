@@ -22,7 +22,9 @@ def validate_event(event: object) -> dict:
     """Copy a restricted, explicitly synthetic event without coercions."""
     if type(event) is not dict or set(event) != _FIELDS:
         raise ValueError("invalid CRDT event fields")
-    if event["wire"] != WIRE or event["visibility"] != VISIBILITY:
+    if (type(event["wire"]) is not str or event["wire"] != WIRE
+            or type(event["visibility"]) is not str
+            or event["visibility"] != VISIBILITY):
         raise PermissionError("only PUBLIC_SYNTHETIC UI fixtures are allowed")
     actor, counter, key, value = (
         event["actor"], event["counter"], event["key"], event["value"]
