@@ -96,8 +96,8 @@ def fingerprint_episode(transitions, *, episode_id: str) -> dict:
         if type(transition) is not dict or len(transition) != len(required):
             raise FingerprintError("invalid transition shape")
         keys = tuple(dict.keys(transition))
-        if any(type(key) is not str for key in keys):
-            raise FingerprintError("transition keys must be native strings")
+        if any(type(key) is not str or not key or len(key) > 128 for key in keys):
+            raise FingerprintError("transition keys must be bounded native strings")
         if set(keys) != required:
             raise FingerprintError("invalid transition shape")
 
