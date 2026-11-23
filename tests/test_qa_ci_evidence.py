@@ -1,5 +1,6 @@
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
 from mojum.qa_ci_evidence import EvidenceError, evaluate_ci_evidence, SCHEMA
 
@@ -145,6 +146,14 @@ class CIEvidenceTests(unittest.TestCase):
         x["pr_head_sha"] = "not-a-sha"
         with self.assertRaises(EvidenceError):
             evaluate_ci_evidence(x, now=NOW)
+
+    def test_oversized_sha_rejected_before_regex_scan(self):
+        snapshot = fixture()
+        snapshot["pr_head_sha"] = "a" * 1_000_000
+        with patch("mojum.qa_ci_evidence._SHA_RE") as sha_pattern:
+            with self.assertRaisesRegex(EvidenceError, "40-character"):
+                evaluate_ci_evidence(snapshot, now=NOW)
+            sha_pattern.fullmatch.assert_not_called()
 
     def test_no_merge_authority_in_report(self):
         result = evaluate_ci_evidence(fixture(), now=NOW).to_dict()

@@ -77,7 +77,11 @@ def _utc(value: object, label: str) -> datetime:
 
 
 def _sha(value: object, label: str) -> str:
-    if type(value) is not str or not _SHA_RE.fullmatch(value):
+    # Bound the scan before regex matching: fullmatch still traverses an
+    # arbitrarily long malformed string even though valid SHAs are 40 chars.
+    if type(value) is not str or len(value) != 40:
+        raise EvidenceError(f"{label} must be a lowercase 40-character commit SHA")
+    if not _SHA_RE.fullmatch(value):
         raise EvidenceError(f"{label} must be a lowercase 40-character commit SHA")
     return value
 
