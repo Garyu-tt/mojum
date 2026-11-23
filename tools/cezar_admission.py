@@ -332,6 +332,46 @@ def mark_finished(db, admission_id: str, run_id: str) -> dict:
         db.execute("ROLLBACK")
         raise
 
+def block_claimed_after_reconciliation(
+    db, admission_id: str, revision: str, *, checked_cezar_runs: bool = False,
+) -> dict:
+    """Operator-only terminal recovery of an uncertain POST with no run ID.
+
+    Do not call unless the Cezar run list has been independently inspected
+    and a matching possible run has been stopped or ruled out. No auto retry.
+    """
+    if checked_cezar_runs is not True:
+        raise AdmissionError("manual Cezar run reconciliation required")
+    try:
+        admission_id = str(uuid.UUID(admission_id))
+    except (ValueError, AttributeError) as exc:
+        raise AdmissionError("invalid admission UUID") from exc
+    if not isinstance(revision, str) or not _ALLOWED_REVISION.fullmatch(revision):
+        raise AdmissionError("exact source revision required")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = db.execute("SELECT * FROM admission WHERE id=?", (admission_id,)).fetchone()
+        if row is None or row["revision"] != revision:
+            raise AdmissionError("admission/revision mismatch")
+        if row["status"] == "blocked" and row["run_id"] is None:
+            db.execute("COMMIT")
+            return dict(row)
+        if row["status"] != "claimed" or row["run_id"] is not None:
+            raise AdmissionError("only a run-ID-less claim may be manually blocked")
+        db.execute(
+            "UPDATE admission SET status='blocked',"
+            " updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+            (admission_id,),
+        )
+        row = db.execute("SELECT * FROM admission WHERE id=?", (admission_id,)).fetchone()
+        db.execute("COMMIT")
+        return dict(row)
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
+
+
+
 def dispatch(db, ident, prompt_file: Path, *, url=_LOCAL_CEZAR, timeout=8,
              single_flight=True) -> dict:
     if url != _LOCAL_CEZAR:
@@ -388,6 +428,13 @@ def main(argv=None):
         terminal_parser = sub.add_parser(terminal)
         terminal_parser.add_argument("--admission-id", required=True)
         terminal_parser.add_argument("--run-id", required=True)
+    claimed_parser = sub.add_parser("block-claimed")
+    claimed_parser.add_argument("--admission-id", required=True)
+    claimed_parser.add_argument("--revision", required=True)
+    claimed_parser.add_argument(
+        "--checked-cezar-runs", action="store_true",
+        help="operator confirms Cezar was inspected; matching active run is stopped or absent",
+    )
     sub.add_parser("stats")
     args = parser.parse_args(argv)
     prior_umask = os.umask(0o077)
@@ -399,6 +446,13 @@ def main(argv=None):
             elif args.command in ("block", "finish"):
                 terminal = mark_blocked if args.command == "block" else mark_finished
                 row = terminal(db, args.admission_id, args.run_id)
+                result = {"admission_id": row["id"], "status": row["status"],
+                          "run_id": row["run_id"]}
+            elif args.command == "block-claimed":
+                row = block_claimed_after_reconciliation(
+                    db, args.admission_id, args.revision,
+                    checked_cezar_runs=args.checked_cezar_runs,
+                )
                 result = {"admission_id": row["id"], "status": row["status"],
                           "run_id": row["run_id"]}
             else:

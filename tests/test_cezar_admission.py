@@ -280,6 +280,68 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(result["status"], "finished")
         self.assertEqual(result["run_id"], run_id)
 
+
+    def test_reconciled_claim_releases_slot_but_never_replays(self):
+        ident = self.ident()
+        fresh, row = m.claim(self.db, ident, single_flight=True)
+        self.assertTrue(fresh)
+        self.assertFalse(m.claim(self.db, self.ident(number=613), single_flight=True)[0])
+        with self.assertRaises(m.AdmissionError):
+            m.block_claimed_after_reconciliation(self.db, row["id"], self.revision)
+        with self.assertRaises(m.AdmissionError):
+            m.block_claimed_after_reconciliation(
+                self.db, row["id"], "b" * 40, checked_cezar_runs=True)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM admission WHERE id=?", (row["id"],)
+        ).fetchone()[0], "claimed")
+        done = m.block_claimed_after_reconciliation(
+            self.db, row["id"], self.revision, checked_cezar_runs=True)
+        self.assertEqual(done["status"], "blocked")
+        self.assertIsNone(done["run_id"])
+        self.assertEqual(m.block_claimed_after_reconciliation(
+            self.db, row["id"], self.revision, checked_cezar_runs=True
+        )["status"], "blocked")
+        self.assertFalse(m.claim(self.db, ident, single_flight=True)[0])
+        self.assertTrue(m.claim(self.db, self.ident(number=613), single_flight=True)[0])
+
+    def test_claim_reconciliation_rejects_submitted_unknown_and_bad_revision(self):
+        _, row = m.claim(self.db, self.ident())
+        for bad_id, bad_revision in (
+            (str(uuid.uuid4()), self.revision),
+            ("bad-uuid", self.revision),
+            (row["id"], "bad"),
+        ):
+            with self.assertRaises(m.AdmissionError):
+                m.block_claimed_after_reconciliation(
+                    self.db, bad_id, bad_revision, checked_cezar_runs=True)
+        run_id = str(uuid.uuid4())
+        m.mark_submitted(self.db, row["id"], run_id)
+        with self.assertRaises(m.AdmissionError):
+            m.block_claimed_after_reconciliation(
+                self.db, row["id"], self.revision, checked_cezar_runs=True)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM admission WHERE id=?", (row["id"],)
+        ).fetchone()[0], "submitted")
+
+    def test_cli_block_claimed_requires_manual_acknowledgement(self):
+        _, row = m.claim(self.db, self.ident())
+        with self.assertRaises(SystemExit) as caught:
+            m.main(["--db", str(self.db_path), "block-claimed",
+                    "--admission-id", row["id"], "--revision", self.revision])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM admission WHERE id=?", (row["id"],)
+        ).fetchone()[0], "claimed")
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            rc = m.main(["--db", str(self.db_path), "block-claimed",
+                         "--admission-id", row["id"], "--revision", self.revision,
+                         "--checked-cezar-runs"])
+        self.assertEqual(rc, 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "blocked")
+        self.assertIsNone(result["run_id"])
+
     def test_blocking_rejected_model_result_is_terminal_and_idempotent(self):
         ident = self.ident()
         _, row = m.claim(self.db, ident)

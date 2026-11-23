@@ -242,6 +242,27 @@ python3 /var/lib/cezar/guarded-intake/cezar_admission.py \
   --db /var/lib/cezar/home/admission/mojum.sqlite stats
 ```
 
+### Recovery when a POST outcome is unknown and no run ID was recorded
+
+A timeout or malformed response can strand `claimed, run_id=NULL` despite a
+possibly launched Cezar run. Ordinary `block` and `finish` only handle
+submitted runs. **Never retry the POST.** An authorized operator must inspect
+Cezar's live run list and independently establish that the matching task is
+absent or stopped. Then explicitly mark the exact claim terminal:
+
+```sh
+python3 /var/lib/cezar/guarded-intake/cezar_admission.py \
+  --db /var/lib/cezar/home/admission/mojum.sqlite \
+  block-claimed --admission-id '<admission-uuid>' \
+  --revision '<exact-revision>' --checked-cezar-runs
+```
+
+UUID, exact revision, owner-private SQLite and `claimed` with NULL run ID are
+mandatory. The action is idempotent only for the already blocked same claim,
+frees one-task capacity, and never replays the source revision. The flag is
+a *human acknowledgement*, not evidence automatically obtained from Cezar.
+Do not assert it if any matching task could still be active.
+
 Only an authorized operator with access to the owner-private admission
 database should mark a failed task blocked; never automatically mark
 an unreviewed model answer `finished`. Once the exact Cezar run ID is
