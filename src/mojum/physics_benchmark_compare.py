@@ -95,9 +95,12 @@ def load_report_json(payload: str | bytes) -> dict[str, Any]:
 
 
 def _validate(report: Any) -> _Validated:
-    if type(report) is not dict or set(report) != _FIELDS:
+    if (type(report) is not dict or any(type(key) is not str for key in report)
+            or set(report) != _FIELDS):
         raise BenchmarkReportError("report fields do not match schema")
-    if report["schema"] != SCHEMA or report["visibility"] != "PUBLIC_SYNTHETIC":
+    if (type(report["schema"]) is not str or type(report["visibility"]) is not str
+            or report["schema"] != SCHEMA
+            or report["visibility"] != "PUBLIC_SYNTHETIC"):
         raise BenchmarkReportError("unsupported schema or visibility")
     for name in ("workload_sha256", "rig_sha256", "model_sha256"):
         value = report[name]
@@ -115,7 +118,8 @@ def _validate(report: Any) -> _Validated:
     if not _integer(count, 3, MAX_STEPS):
         raise BenchmarkReportError("measured_steps must be in 3..10000")
     platform = report["platform"]
-    if type(platform) is not dict or set(platform) != _PLATFORM:
+    if (type(platform) is not dict or any(type(key) is not str for key in platform)
+            or set(platform) != _PLATFORM):
         raise BenchmarkReportError("platform fields do not match schema")
     for name in _PLATFORM:
         if not _token(platform[name]):
