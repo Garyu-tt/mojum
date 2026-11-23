@@ -31,6 +31,21 @@ class FakeRecognizer:
         assert stream is self.stream
 
 
+class MisreportedPCM:
+    """A hostile Sequence-like object whose iterator disagrees with len()."""
+
+    def __init__(self, declared, actual):
+        self.declared = declared
+        self.actual = actual
+
+    def __len__(self):
+        return self.declared
+
+    def __iter__(self):
+        for _ in range(self.actual):
+            yield 0.2
+
+
 class SpeechOfflineTests(unittest.TestCase):
     def setUp(self):
         self.recognizer = FakeRecognizer()
@@ -70,6 +85,17 @@ class SpeechOfflineTests(unittest.TestCase):
         with self.assertRaises(SpeechBridgeError):
             self.session.transcribe([0.2], **{**self.kw, "start_ms": 119})
         self.assertEqual(self.recognizer.calls, 2)
+
+    def test_dishonest_iterable_cannot_bypass_sample_budget_or_clock(self):
+        for declared, actual in ((1, 2), (2, 1),
+                                 (MAX_WINDOW_SAMPLES, MAX_WINDOW_SAMPLES + 1)):
+            with self.subTest(declared=declared, actual=actual):
+                with self.assertRaisesRegex(SpeechBridgeError, "sample count changed"):
+                    self.session.transcribe(MisreportedPCM(declared, actual), **self.kw)
+        self.assertEqual(self.recognizer.calls, 0)
+        good = self.session.transcribe([0.2] * 160, **self.kw)
+        self.assertEqual((good["sequence"], good["start_ms"], good["end_ms"]),
+                         (0, 100, 110))
 
     def test_bad_pcm_fails_before_native_backend(self):
         cases = ([], [float("nan")], [float("inf")], [1.01], [-1.01], [True], ["0.2"], [0.0] * (MAX_WINDOW_SAMPLES + 1), b"raw")
