@@ -25,6 +25,19 @@ def _int(value: object, name: str, minimum: int, maximum: int) -> int:
     return value
 
 
+def _finite_float(value: object, name: str, *, minimum: float = 0.0) -> float:
+    """Convert an exact native numeric input without leaking float overflow."""
+    if type(value) not in (int, float):
+        raise PollPolicyError(f"{name} must be a finite number")
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise PollPolicyError(f"{name} is outside the permitted range") from None
+    if not math.isfinite(result) or result < minimum:
+        raise PollPolicyError(f"{name} is outside the permitted range")
+    return result
+
+
 def parse_retry_after(value: str | int | float | None, *, now_epoch: float) -> float | None:
     """Parse Retry-After delta-seconds or HTTP-date into a bounded delay.
 
@@ -32,6 +45,10 @@ def parse_retry_after(value: str | int | float | None, *, now_epoch: float) -> f
     the result is deterministic and testable. A valid server hint is capped
     at 24 hours; negative, non-finite and boolean values are rejected.
     """
+    try:
+        now_value = _finite_float(now_epoch, "now_epoch")
+    except PollPolicyError:
+        return None
     if value is None:
         return None
     if type(value) in (int, float):
@@ -57,9 +74,7 @@ def parse_retry_after(value: str | int | float | None, *, now_epoch: float) -> f
         dt = parsedate_to_datetime(raw)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        if not math.isfinite(float(now_epoch)):
-            return None
-        return min(max(0.0, dt.timestamp() - float(now_epoch)), 86400.0)
+        return min(max(0.0, dt.timestamp() - now_value), 86400.0)
     except (TypeError, ValueError, OverflowError, IndexError):
         return None
 
@@ -74,15 +89,14 @@ def backoff_delay(
 ) -> float:
     """Return capped exponential delay, respecting a valid Retry-After hint."""
     _int(consecutive_failures, "consecutive_failures", 0, 31)
-    if (type(now_epoch) not in (int, float) or not math.isfinite(now_epoch) or now_epoch < 0):
-        raise PollPolicyError("now_epoch must be a finite non-negative number")
-    if (type(base_seconds) not in (int, float) or type(max_seconds) not in (int, float)
-            or not math.isfinite(base_seconds) or not math.isfinite(max_seconds)
-            or base_seconds <= 0 or max_seconds < base_seconds or max_seconds > 86400):
+    now_value = _finite_float(now_epoch, "now_epoch")
+    base_value = _finite_float(base_seconds, "base_seconds", minimum=0.000000001)
+    max_value = _finite_float(max_seconds, "max_seconds", minimum=0.000000001)
+    if max_value < base_value or max_value > 86400:
         raise PollPolicyError("invalid backoff bounds")
-    exponential = min(float(max_seconds), float(base_seconds) * (2 ** consecutive_failures))
-    hint = parse_retry_after(retry_after, now_epoch=now_epoch)
-    return min(float(max_seconds), max(exponential, hint or 0.0))
+    exponential = min(max_value, base_value * (2 ** consecutive_failures))
+    hint = parse_retry_after(retry_after, now_epoch=now_value)
+    return min(max_value, max(exponential, hint or 0.0))
 
 
 @dataclass(frozen=True)
@@ -105,18 +119,16 @@ def circuit_transition(
     _validate_circuit(circuit)
     if type(outcome) is not str or outcome not in ("success", "transient", "rate_limited", "forbidden", "permanent"):
         raise PollPolicyError("unknown outcome")
-    if type(now_epoch) not in (int, float) or not math.isfinite(now_epoch) or now_epoch < 0:
-        raise PollPolicyError("now_epoch must be a finite non-negative number")
+    now_value = _finite_float(now_epoch, "now_epoch")
+    reset_value = _finite_float(reset_after, "reset_after", minimum=0.000000001)
     _int(failure_threshold, "failure_threshold", 1, 100)
-    if type(reset_after) not in (int, float) or not math.isfinite(reset_after) or reset_after <= 0:
-        raise PollPolicyError("reset_after must be positive and finite")
 
     if outcome == "success":
         return Circuit()
     if outcome in ("forbidden", "permanent"):
         # Permission and permanent errors are not transient network failures.
         return Circuit(status="open", failures=max(circuit.failures, failure_threshold),
-                       opened_at=float(now_epoch), probe_in_flight=False)
+                       opened_at=now_value, probe_in_flight=False)
     failures = min(100, circuit.failures + 1)
     if circuit.status == "half_open" or failures >= failure_threshold:
         return Circuit(status="open", failures=failures, opened_at=float(now_epoch),
@@ -134,9 +146,7 @@ def _validate_circuit(circuit: object) -> None:
     if type(circuit.probe_in_flight) is not bool:
         raise PollPolicyError("circuit.probe_in_flight must be bool")
     if circuit.opened_at is not None:
-        if (type(circuit.opened_at) not in (int, float)
-                or not math.isfinite(circuit.opened_at) or circuit.opened_at < 0):
-            raise PollPolicyError("circuit.opened_at must be a finite non-negative number")
+        _finite_float(circuit.opened_at, "circuit.opened_at")
     if circuit.status == "closed":
         if circuit.opened_at is not None or circuit.probe_in_flight:
             raise PollPolicyError("closed circuit cannot have an open timestamp or active probe")
@@ -149,15 +159,13 @@ def _validate_circuit(circuit: object) -> None:
 def poll_permitted(circuit: Circuit, *, now_epoch: float, reset_after: float = 60.0) -> bool:
     """Whether one read-only poll may start; half-open permits exactly one probe."""
     _validate_circuit(circuit)
-    if type(now_epoch) not in (int, float) or not math.isfinite(now_epoch) or now_epoch < 0:
-        raise PollPolicyError("now_epoch must be finite and non-negative")
-    if type(reset_after) not in (int, float) or not math.isfinite(reset_after) or reset_after <= 0:
-        raise PollPolicyError("reset_after must be positive and finite")
+    now_value = _finite_float(now_epoch, "now_epoch")
+    reset_value = _finite_float(reset_after, "reset_after", minimum=0.000000001)
     if circuit.status == "closed":
         return True
     if circuit.status == "half_open":
         return not circuit.probe_in_flight
-    return circuit.opened_at is not None and now_epoch >= circuit.opened_at + reset_after
+    return circuit.opened_at is not None and now_value >= circuit.opened_at + reset_value
 
 
 def begin_probe(circuit: Circuit, *, now_epoch: float, reset_after: float = 60.0) -> Circuit:
