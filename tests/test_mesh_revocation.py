@@ -162,6 +162,20 @@ class MeshRevocationTests(unittest.TestCase):
             check_peer_access(forged, node_id="node-a", enrollment_id="enroll-a",
                               operation="read", now_tick=150)
 
+    def test_verified_snapshot_and_entries_have_no_mutable_instance_dict(self):
+        verified = verify_snapshot(
+            envelope(revocations=[revoked()]), authority_keys=KEYS, now_tick=150
+        )
+        with self.assertRaises(AttributeError):
+            _ = verified.__dict__
+        with self.assertRaises(AttributeError):
+            _ = verified.entries[0].__dict__
+        with self.assertRaises(AttributeError):
+            _ = check_peer_access(
+                verified, node_id="node-17", enrollment_id="enroll-17",
+                operation="read", now_tick=150
+            ).__dict__
+
     def test_copied_or_replaced_snapshot_is_not_verification_provenance(self):
         verified = verify_snapshot(envelope(revocations=[revoked()]),
                                    authority_keys=KEYS, now_tick=150)
