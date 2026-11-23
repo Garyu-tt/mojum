@@ -26,7 +26,7 @@ def evaluate_dependency_dag(
     when every direct dependency is MERGED. CLOSED dependencies remain blocking.
     """
     if type(records) not in (list, tuple):
-        raise ValueError("records must be a native list or tuple")
+        raise ValueError("records must be a native list or tuple sequence")
     if type(max_nodes) is not int or not 1 <= max_nodes <= MAX_NODES:
         raise ValueError("max_nodes must be an integer in [1, 500]")
     if type(max_edges) is not int or not 0 <= max_edges <= MAX_EDGES:
@@ -40,7 +40,7 @@ def evaluate_dependency_dag(
 
     for record in records:
         if type(record) is not dict:
-            raise ValueError("each record must be a native dict")
+            raise ValueError("each record must be a native dict mapping")
         keys = tuple(record.keys())
         if any(type(key) is not str for key in keys):
             raise ValueError("record keys must be native strings")
