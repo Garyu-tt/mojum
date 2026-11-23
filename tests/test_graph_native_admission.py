@@ -121,6 +121,16 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate(graph)
 
+    def test_hostile_root_string_subclass_key_is_rejected_before_lookup(self):
+        # Rebuild without the native "schema" key so insertion does not
+        # compare the hostile key against an equal native key.
+        graph = {
+            HostileString(key) if key == "schema" else key: value
+            for key, value in self.fresh().items()
+        }
+        with self.assertRaises(GraphError):
+            validate(graph)
+
     def test_hostile_string_subclass_value_is_rejected(self):
         graph = self.fresh()
         graph["nodes"][0]["notes"]["purpose"] = HostileString("synthetic")
