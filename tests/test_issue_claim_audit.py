@@ -106,6 +106,7 @@ class ClaimAuditTests(unittest.TestCase):
             '<!-- mojum-claim/1: {"worker":"x","worker":"y","scope":"x","action":"claim"} -->',
             '<!-- mojum-claim/1: {"worker":"x","scope":"x","action":"claim","extra":1} -->',
             '> ' + marker("agent", "scope"),
+            marker("agent", "scope") + "\n<!-- mojum-claim/1: broken -->",
         ]
         for raw in candidates:
             with self.subTest(raw=raw), self.assertRaises(claim_audit.ClaimAuditError):
