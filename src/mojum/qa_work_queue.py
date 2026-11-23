@@ -144,6 +144,22 @@ def _payload(value: object) -> tuple[str, dict[str, Any]]:
     return encoded, decoded
 
 
+def _execute_with_busy_retry(
+    connection: sqlite3.Connection, statement: str, timeout: float
+) -> sqlite3.Cursor:
+    """Retry SQLite's transient first-open lock errors within a bounded deadline."""
+    deadline = time.monotonic() + timeout
+    delay = 0.01
+    while True:
+        try:
+            return connection.execute(statement)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+
+
 class QAWorkQueue:
     """Atomic queue with expiring leases, idempotency and bounded audit history."""
 
@@ -160,15 +176,16 @@ class QAWorkQueue:
         self._db = sqlite3.connect(self.database, timeout=timeout,
                                    isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
-        self._db.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
-        self._db.execute("PRAGMA foreign_keys=ON")
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=FULL")
-        # Serialize first-open schema admission across processes. Without this
-        # write lock, two constructors can both observe a missing version row
-        # and race to insert the unique schema_version key.
-        self._db.execute("BEGIN IMMEDIATE")
         try:
+            self._db.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+            self._db.execute("PRAGMA foreign_keys=ON")
+            # WAL mode negotiation can race on the first open from several
+            # worker processes. SQLite's busy handler is not consistent for
+            # this PRAGMA, so retry only transient locked errors to a deadline.
+            _execute_with_busy_retry(self._db, "PRAGMA journal_mode=WAL", timeout)
+            self._db.execute("PRAGMA synchronous=FULL")
+            # Serialize first-open schema admission across processes.
+            _execute_with_busy_retry(self._db, "BEGIN IMMEDIATE", timeout)
             has_jobs = self._db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_jobs'"
             ).fetchone() is not None
@@ -193,7 +210,10 @@ class QAWorkQueue:
                 raise QueueError("unsupported queue schema version")
             self._db.commit()
         except Exception:
-            self._db.rollback()
+            try:
+                self._db.rollback()
+            except sqlite3.Error:
+                pass
             self._db.close()
             raise
         self._db.executescript("""
