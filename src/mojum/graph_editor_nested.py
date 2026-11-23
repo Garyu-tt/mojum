@@ -73,8 +73,11 @@ def _position(value):
         raise GraphError("nested container position requires x/y")
     for axis in ("x", "y"):
         number = value[axis]
-        if (type(number) not in (int, float) or not math.isfinite(number)
-                or abs(number) > MAX_POSITION):
+        try:
+            finite = math.isfinite(number) if type(number) in (int, float) else False
+        except OverflowError:
+            finite = False
+        if not finite or abs(number) > MAX_POSITION:
             raise GraphError("nested container position is not finite and bounded")
     return {"x": value["x"], "y": value["y"]}
 
@@ -93,6 +96,7 @@ def validate_nested(parent_graph, containers):
     if type(items) is not list or len(items) > MAX_CONTAINERS:
         raise GraphError("nested container count exceeds limit")
     seen_ids = set()
+    seen_parent_nodes = set()
     normalized = []
     for item in items:
         if type(item) is not dict or set(item) != {
@@ -104,8 +108,10 @@ def validate_nested(parent_graph, containers):
                 or cid in seen_ids):
             raise GraphError("invalid or duplicate nested container ID")
         seen_ids.add(cid)
-        if type(parent_id) is not str or parent_id not in parent_nodes:
-            raise GraphError("nested container parent node is absent")
+        if (type(parent_id) is not str or parent_id not in parent_nodes
+                or parent_id in seen_parent_nodes):
+            raise GraphError("nested container parent node is absent or already claimed")
+        seen_parent_nodes.add(parent_id)
         child = _copy_json(item["child_graph"])
         child_nodes = _graph_nodes(child)
         portals = _copy_json(item["portals"])
