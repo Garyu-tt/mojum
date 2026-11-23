@@ -73,7 +73,10 @@ class CellExplorerV3:
             "schema", "cell_size_m", "last_tick", "updates",
             "records", "last_seen_at", "evictions", "forgotten_observations",
         }
-        if (type(state) is not dict or set(state) != mandatory
+        if (type(state) is not dict
+                or any(type(key) is not str for key in state)
+                or set(state) != mandatory
+                or type(state["schema"]) is not str
                 or state["schema"] != SCHEMA
                 or type(state["cell_size_m"]) is not float
                 or state["cell_size_m"] != STEP_METERS
@@ -84,6 +87,9 @@ class CellExplorerV3:
                 or type(state["records"]) is not dict
                 or type(state["last_seen_at"]) is not dict
                 or not 0 <= len(state["records"]) <= MAX_CELLS
+                or len(state["last_seen_at"]) > MAX_CELLS
+                or any(type(key) is not str for key in state["records"])
+                or any(type(key) is not str for key in state["last_seen_at"])
                 or set(state["records"]) != set(state["last_seen_at"])
                 or type(state["evictions"]) is not int
                 or type(state["forgotten_observations"]) is not int
@@ -95,6 +101,7 @@ class CellExplorerV3:
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
                     or type(actions) is not dict or not actions
+                    or any(type(action) is not str for action in actions)
                     or not set(actions) <= set(ACTIONS)):
                 raise CellV3Error("invalid v3 cell or action records")
             last_seen = state["last_seen_at"][key]
@@ -145,7 +152,15 @@ class CellExplorerV3:
         }
 
     def observe(self, sense, intent, blocked):
-        if type(blocked) is not bool or intent != self.decide(sense):
+        if type(blocked) is not bool or type(intent) is not dict:
+            raise CellV3Error("stale, forged or unmeasured v3 motor outcome")
+        expected = self.decide(sense)
+        if (len(intent) != len(expected)
+                or any(type(key) is not str for key in intent)
+                or set(intent) != set(expected)
+                or any(type(intent[key]) is not type(value)
+                       for key, value in expected.items())
+                or intent != expected):
             raise CellV3Error("stale, forged or unmeasured v3 motor outcome")
         cell, action = intent["zone"], intent["action"]
         evicted = None

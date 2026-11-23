@@ -62,8 +62,10 @@ class CellExplorer:
     @classmethod
     def from_snapshot(cls, snapshot):
         if (type(snapshot) is not dict
+                or any(type(key) is not str for key in snapshot)
                 or set(snapshot) != {"schema", "cell_size_m",
                                     "last_tick", "updates", "records"}
+                or type(snapshot["schema"]) is not str
                 or snapshot["schema"] != SCHEMA
                 or type(snapshot["cell_size_m"]) is not float
                 or snapshot["cell_size_m"] != STEP_METERS
@@ -79,6 +81,7 @@ class CellExplorer:
             if (type(zone) is not str or not _KEY.fullmatch(zone)
                     or any(int(v) > 25000 for v in zone.split(":"))
                     or type(actions) is not dict or not actions
+                    or any(type(action) is not str for action in actions)
                     or not set(actions) <= set(ACTIONS)):
                 raise LocalCellError("invalid 4cm cell key or action set")
             for counters in actions.values():
@@ -116,7 +119,15 @@ class CellExplorer:
         }
 
     def observe(self, sense, intent, blocked):
-        if type(blocked) is not bool or intent != self.decide(sense):
+        if type(blocked) is not bool or type(intent) is not dict:
+            raise LocalCellError("stale or fabricated measured motor outcome")
+        expected = self.decide(sense)
+        if (len(intent) != len(expected)
+                or any(type(key) is not str for key in intent)
+                or set(intent) != set(expected)
+                or any(type(intent[key]) is not type(value)
+                       for key, value in expected.items())
+                or intent != expected):
             raise LocalCellError("stale or fabricated measured motor outcome")
         zone, action = intent["zone"], intent["action"]
         if zone not in self.records and len(self.records) >= MAX_CELLS:

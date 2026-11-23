@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.aquarium import Aquarium, AquariumError
-from mojum.cell_policy_v2 import CellExplorer
+from mojum.cell_policy_v2 import CellExplorer, LocalCellError
 from mojum.cell_policy_v3 import (
     CellExplorerV3, CellV3Error, MAX_CELLS, SCHEMA, LEARNING_SCHEMA,
 )
@@ -254,6 +254,89 @@ class VersionedV3SQLiteTests(unittest.TestCase):
             self.assertEqual(restart.tick, 1)
             self.assertEqual(restart.explorer.updates, 1)
             self.assertEqual(restart.store.count(), 2)
+
+
+
+class EqualitySpoof(str):
+    """Adversarial in-memory object: compares as a different canonical string."""
+
+    def __new__(cls, wire, target):
+        obj = str.__new__(cls, wire)
+        obj.target = target
+        return obj
+
+    def __eq__(self, other):
+        return other == self.target
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash(self.target)
+
+
+class StrictNativeLocalCellAdmissionQA(unittest.TestCase):
+    """Fail closed before forged equality can enter model or journal state."""
+
+    def test_v2_v3_reject_forged_schema_and_top_level_keys(self):
+        for policy, error in ((CellExplorer, LocalCellError),
+                              (CellExplorerV3, CellV3Error)):
+            with self.subTest(policy=policy.__name__):
+                original = policy().snapshot()
+                bad = deepcopy(original)
+                bad["schema"] = EqualitySpoof("foreign-policy", bad["schema"])
+                with self.assertRaises(error):
+                    policy.from_snapshot(bad)
+
+                # Same hash/equality as "schema", but not a native str key.
+                bad = deepcopy(original)
+                raw = bad.pop("schema")
+                bad[EqualitySpoof("other-key", "schema")] = raw
+                with self.assertRaises(error):
+                    policy.from_snapshot(bad)
+
+    def test_v2_v3_reject_forged_action_keys_and_intents(self):
+        for policy, error in ((CellExplorer, LocalCellError),
+                              (CellExplorerV3, CellV3Error)):
+            with self.subTest(policy=policy.__name__):
+                model = policy()
+                cue = Proprioception(0, "0" * 64, .16, .16, True)
+                canonical = model.decide(cue)
+                malicious = dict(canonical)
+                malicious["action"] = EqualitySpoof(
+                    "not-an-action", canonical["action"],
+                )
+                self.assertEqual(malicious, canonical)
+                before = model.snapshot()
+                with self.assertRaises(error):
+                    model.observe(cue, malicious, False)
+                self.assertEqual(model.snapshot(), before)
+
+                # Native canonical action still works and produces one record.
+                model.observe(cue, canonical, False)
+                after = model.snapshot()
+                cell = canonical["zone"]
+                action = canonical["action"]
+                bad = deepcopy(after)
+                bad["records"][cell] = {
+                    EqualitySpoof("wrong-action", action): [1, 0],
+                }
+                with self.assertRaises(error):
+                    policy.from_snapshot(bad)
+                self.assertEqual(
+                    policy.from_snapshot(after).snapshot(), after,
+                )
+
+    def test_v3_rejects_forged_last_seen_key(self):
+        model = CellExplorerV3()
+        cue = Proprioception(0, "0" * 64, .16, .16, False)
+        model.observe(cue, model.decide(cue), False)
+        state = model.snapshot()
+        original_cell = next(iter(state["last_seen_at"]))
+        tick = state["last_seen_at"].pop(original_cell)
+        state["last_seen_at"][EqualitySpoof("wrong-cell", original_cell)] = tick
+        with self.assertRaises(CellV3Error):
+            CellExplorerV3.from_snapshot(state)
 
 
 if __name__ == "__main__":
