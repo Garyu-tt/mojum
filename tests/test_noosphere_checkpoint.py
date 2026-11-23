@@ -123,6 +123,43 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(restored, manifest)
         self.assertEqual(encode_checkpoint(restored), wire)
 
+    def test_hostile_string_subclass_keys_fail_closed(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash(str(self))
+
+            def __eq__(self, other):
+                raise RuntimeError("hostile key equality must not escape")
+
+        def replace_key(mapping, name):
+            result = dict(mapping)
+            value = result.pop(name)
+            result[HostileKey(name)] = value
+            return result
+
+        manifest = self.make()
+        hostile_root = replace_key(manifest, "schema")
+        with self.assertRaises(CheckpointError):
+            verify_checkpoint(hostile_root)
+
+        manifest = self.make()
+        hostile_components = dict(manifest["components"])
+        hostile_components = replace_key(hostile_components, "brain")
+        hostile_manifest = dict(manifest)
+        hostile_manifest["components"] = hostile_components
+        with self.assertRaises(CheckpointError):
+            verify_checkpoint(hostile_manifest)
+
+        source = refs()
+        hostile_refs = replace_key(source, "brain")
+        with self.assertRaises(CheckpointError):
+            self.make(components=hostile_refs)
+
+        source = refs()
+        source["brain"] = replace_key(source["brain"], "schema")
+        with self.assertRaises(CheckpointError):
+            self.make(components=source)
+
     def test_duplicate_json_keys_rejected(self):
         manifest = self.make()
         wire = json.dumps(manifest, separators=(",", ":"))
