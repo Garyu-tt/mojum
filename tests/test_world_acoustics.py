@@ -58,5 +58,21 @@ class TestWorldAcoustics(unittest.TestCase):
                     sample_point_source(source, listener, level, **kwargs)
 
 
+    def test_rejects_hostile_point_container_subclasses_before_methods(self):
+        class HostileList(list):
+            def __len__(self):
+                raise AssertionError("hostile __len__ must not execute")
+
+        class HostileTuple(tuple):
+            def __getitem__(self, index):
+                raise AssertionError("hostile __getitem__ must not execute")
+
+        for point in (HostileList([0, 0]), HostileTuple((0, 0))):
+            with self.subTest(point_type=type(point).__name__):
+                with self.assertRaises(ValueError):
+                    sample_point_source(point, (1, 1), 40)
+
+
+
 if __name__ == "__main__":
     unittest.main()
