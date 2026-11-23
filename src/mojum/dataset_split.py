@@ -19,6 +19,7 @@ MAX_RECORDS = 10_000
 _MAX_SEED_BYTES = 256
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _PARTITIONS = ("train", "validation", "test")
+_WEIGHT_KEYS = frozenset(_PARTITIONS)
 _VIEW_KEYS = frozenset({"schema", "records", "sha256"})
 _RECORD_KEYS = frozenset({"id", "source", "tick", "observation"})
 _SPLIT_KEYS = frozenset({
@@ -171,7 +172,7 @@ def verify_public_split(view, split):
             or _HEX64.fullmatch(split["source_view_sha256"]) is None
             or type(split["manifest_sha256"]) is not str
             or _HEX64.fullmatch(split["manifest_sha256"]) is None
-            or not _native_keys(split["weights"], _PARTITIONS)):
+            or not _native_keys(split["weights"], _WEIGHT_KEYS)):
         raise ValueError("invalid dataset split manifest")
     # Adversarial in-memory output must be bounded and contain only native
     # scalars before canonical JSON encoding can inspect it.
