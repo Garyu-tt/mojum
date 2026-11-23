@@ -1,0 +1,49 @@
+name: Graph editor bridge independent CPU QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/graph_editor_bridge.py'
+      - 'src/mojum/graph_editor_cli.py'
+      - 'src/mojum/graph.py'
+      - 'src/mojum/graph_v2.py'
+      - 'src/mojum/graph_audit_cli.py'
+      - 'tests/test_graph_editor_bridge.py'
+      - 'tests/test_graph_editor_cli.py'
+      - 'examples/first_loop.json'
+      - '.github/workflows/graph-editor-bridge-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - name: Check out exact pull request HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact-head checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile bridge and CLI
+        run: python -m compileall -q src/mojum/graph_editor_bridge.py src/mojum/graph_editor_cli.py
+      - name: Run stdlib editor round-trip, CAS and privacy regressions
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p test_graph_editor_bridge.py -v
+          python -m unittest discover -s tests -p test_graph_editor_cli.py -v
