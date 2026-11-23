@@ -48,9 +48,14 @@ class WorkflowEvidenceTests(unittest.TestCase):
 
     def test_hostile_key_and_unknown_field_rejected(self):
         class HostileKey(str):
-            def __hash__(self): raise AssertionError("hostile hash called")
+            armed = False
+            def __hash__(self):
+                if self.armed: raise AssertionError("hostile hash called")
+                return str.__hash__(self)
+        key = HostileKey("run_id")
         item = run()
-        item[HostileKey("run_id")] = 2
+        item[key] = 2
+        key.armed = True
         with self.assertRaises(WorkflowEvidenceError):
             evaluate_workflow_evidence([item], expected_head_sha=HEAD, required_workflow_ids=[10])
         with self.assertRaises(WorkflowEvidenceError):
