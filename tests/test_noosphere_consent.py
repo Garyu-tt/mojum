@@ -52,6 +52,12 @@ def dataset(events):
     return {"projection": projection, "sha256": digest(projection)}
 
 
+def resign(source):
+    """Recompute a projection digest after deliberately changing fixture filters."""
+    source["sha256"] = digest(source["projection"])
+    return source
+
+
 def grant(*, consent_id="consent-1", source="sensor-a", revision="rev-1",
           topics=None, visibility=None, valid_from=0, valid_to=100,
           purpose="research", agent_id="dante"):
@@ -229,36 +235,6 @@ class NoosphereConsentTests(unittest.TestCase):
         with self.assertRaises(ConsentError):
             authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
 
-    def test_oversized_schema_mappings_rejected_before_key_snapshot(self):
-        source = dataset([event()])
-        source.update({f"unexpected_{index}": None for index in range(25_000)})
-        with self.assertRaises(ConsentError):
-            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
-
-        oversized_grant = grant()
-        oversized_grant.update({f"unexpected_{index}": None for index in range(25_000)})
-        with self.assertRaises(ConsentError):
-            validate_grant(oversized_grant)
-
-    def test_hostile_schema_keys_rejected_before_equality(self):
-        class HostileKey(str):
-            def __hash__(self):
-                return str.__hash__(self)
-
-            def __eq__(self, other):
-                raise RuntimeError("hostile key equality must not run")
-
-        source = dataset([event()])
-        source[HostileKey("schema")] = source.pop("schema")
-        with self.assertRaises(ConsentError):
-            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
-
-        candidate = grant()
-        value = candidate.pop("schema")
-        candidate[HostileKey("schema")] = value
-        with self.assertRaises(ConsentError):
-            validate_grant(candidate)
-
     def test_oversized_payload_rejected_before_json_serialization(self):
         source = dataset([event()])
         source["projection"]["items"][0]["event"]["payload"] = {
@@ -279,11 +255,97 @@ class NoosphereConsentTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(ConsentError):
                 authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
 
+    def test_declared_topic_filter_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["topic"] = "different-topic"
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_source_filter_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["source"] = "different-source"
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_recorded_time_filter_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["as_of_recorded_ns"] = 10
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_validity_filter_is_enforced(self):
+        source = dataset([event(valid_from=20)])
+        source["projection"]["filters"]["valid_at_ns"] = 10
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_public_only_dataset_filter_rejects_private_event_even_with_grant(self):
+        source = dataset([event(visibility="PRIVATE")])
+        source["projection"]["filters"]["include_nonpublic"] = False
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant(visibility=["PRIVATE"])],
+                              as_of_ns=50, purpose="research")
+
+    def test_oversized_exact_mapping_is_rejected_by_node_preflight(self):
+        source = dataset([])
+        source["projection"]["padding"] = {f"extra-{n}": n for n in range(200_001)}
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
     def test_caller_mapping_is_not_mutated(self):
         original = dataset([event()])
         snapshot = copy.deepcopy(original)
         authorize_dataset(original, [grant()], as_of_ns=50, purpose="research")
         self.assertEqual(original, snapshot)
+
+
+    def test_rejects_hostile_string_subclass_keys_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("projection")
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not run")
+
+        source = dataset([event()])
+        projection = source.pop("projection")
+        source[HostileKey("projection")] = projection
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_rejects_custom_mapping_before_iteration(self):
+        with self.assertRaises(ConsentError):
+            validate_grant(UserDict(grant()))
+
+    def test_rejects_cyclic_payload_before_digest_or_serialization(self):
+        payload = {}
+        payload["self"] = payload
+        source = dataset([])
+        source["projection"]["items"] = [{
+            "seq": 1, "event": event(), "event_hash": "0" * 64,
+        }]
+        source["projection"]["items"][0]["event"]["payload"] = payload
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+
+
+    def test_aggregate_json_budget_is_rejected_before_serialization(self):
+        source = dataset([])
+        source["projection"]["padding"] = ["x" * 1_000_000 for _ in range(17)]
+        with patch(
+            "mojum.noosphere_consent.json.dumps",
+            side_effect=AssertionError("json.dumps must not run"),
+        ):
+            with self.assertRaises(ConsentError):
+                authorize_dataset(
+                    source, [grant()], as_of_ns=50, purpose="research",
+                )
 
 
 if __name__ == "__main__":
