@@ -59,6 +59,39 @@ class PianoBridgeTests(unittest.TestCase):
         self.assertEqual(env.step_calls, 0)
         self.assertEqual(bridge.step([0.0] * 12)["tick"], 1)
 
+    def test_post_cast_action_validation_prevents_backend_dispatch(self):
+        # An optional array_factory / dtype conversion can turn a previously
+        # validated finite vector into NaN, infinity, out-of-spec, or a wrong
+        # shape. The exact native vector must be checked before env.step().
+        for altered in (float("nan"), float("inf"), -5.0, 5.0):
+            with self.subTest(altered=altered):
+                env = SyntheticPianoEnv(7, steps=2)
+                bridge = PianoBridge(
+                    env, piano_keys=env.keys, array_factory=lambda vector, x=altered:
+                    (x,) + tuple(vector[1:]))
+                bridge.reset()
+                with self.assertRaises(PianoBridgeError):
+                    bridge.step([0.0] * env.keys)
+                self.assertEqual(env.step_calls, 0)
+                with self.assertRaises(PianoBridgeError):
+                    bridge.step([0.0] * env.keys)
+
+        env = SyntheticPianoEnv(7, steps=2)
+        bridge = PianoBridge(env, piano_keys=env.keys,
+                             array_factory=lambda vector: tuple(vector[:-1]))
+        bridge.reset()
+        with self.assertRaises(PianoBridgeError):
+            bridge.step([0.0] * env.keys)
+        self.assertEqual(env.step_calls, 0)
+
+    def test_valid_native_factory_action_dispatches_once(self):
+        env = SyntheticPianoEnv(11, steps=2)
+        bridge = PianoBridge(env, piano_keys=env.keys,
+                             array_factory=lambda vector: tuple(float(v) for v in vector))
+        bridge.reset()
+        self.assertEqual(bridge.step([0.0] * env.keys)["tick"], 1)
+        self.assertEqual(env.step_calls, 1)
+
     def test_out_of_bounds_spec_and_parameter_validation(self):
         for kw in ({"seed": True}, {"seed": -1}, {"seed": 2**32},
                    {"seed": 2, "steps": MAX_STEPS + 1}, {"seed": 1, "keys": 0}):
