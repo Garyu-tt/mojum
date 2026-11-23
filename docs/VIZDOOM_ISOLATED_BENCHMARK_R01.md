@@ -23,6 +23,11 @@ seed, realized ticks, total reward, per-policy SHA-256 trace digest and a
 repeat-execution equality gate. No raw frames or game state are persisted.
 Failure cases include malformed/oversized screens, nonfinite engine rewards,
 invalid seeds, oversized episodes, and guaranteed `close()` after errors.
+Strict RGB24 admission permits packed 1D bytes, H×(W×3) packed bytes or
+H×W×3 unsigned 8-bit buffers only; it rejects channel-first layouts and
+float/non-byte element types even when total bytes match. Each engine reward
+must be a native int/float within ±1,000,000 before conversion to float;
+nonfinite values and arbitrarily large Python integers fail closed.
 The only computed visual features are coarse region brightness values,
 not privileged geometry.
 

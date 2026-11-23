@@ -1,6 +1,7 @@
 """stdlib contract tests; no ViZDoom install or network needed."""
 import math
 import unittest
+from array import array
 
 from mojum import vizdoom_benchmark as mod
 
@@ -80,6 +81,43 @@ class ViZDoomBenchmarkTests(unittest.TestCase):
             with self.subTest(screen_size=None if screen is None else len(screen)):
                 with self.assertRaises(ValueError):
                     mod.run_episode(lambda *args: game, seed=0, steps=2, policy="vision")
+                self.assertTrue(game.closed)
+
+    def test_rgb24_rejects_chw_and_float_buffers_before_policy(self):
+        pixels = bytearray([173]) * mod.FRAME_BYTES
+        wrong_shape = memoryview(pixels).cast(
+            "B", shape=[3, mod.HEIGHT, mod.WIDTH])
+        wrong_type = memoryview(array(
+            "f", [0.0] * (mod.FRAME_BYTES // 4)))
+        # Genuine packed HWC and raw bytes both describe the same RGB24 frame.
+        correct_hwc = memoryview(pixels).cast(
+            "B", shape=[mod.HEIGHT, mod.WIDTH, 3])
+        self.assertEqual(mod._vision(correct_hwc), mod._vision(bytes(pixels)))
+
+        for bad in (wrong_shape, wrong_type):
+            class Broken(mod.SyntheticVisualGame):
+                def get_state(self):
+                    state = type("State", (), {})()
+                    state.screen_buffer = bad
+                    return state
+            game = Broken(0, 1)
+            with self.subTest(shape=bad.shape, format=bad.format):
+                with self.assertRaisesRegex(ValueError, "RGB24"):
+                    mod.run_episode(lambda *args: game,
+                                    seed=0, steps=1, policy="vision")
+                self.assertTrue(game.closed)
+
+    def test_oversized_integer_and_nonfinite_rewards_reject_and_close(self):
+        for value in (10**1000, -(10**1000), 1_000_001,
+                      math.inf, -math.inf, math.nan):
+            class Broken(mod.SyntheticVisualGame):
+                def make_action(self, action, tics):
+                    return value
+            game = Broken(0, 1)
+            with self.subTest(reward_type=type(value).__name__):
+                with self.assertRaises(ValueError):
+                    mod.run_episode(lambda *args: game,
+                                    seed=0, steps=1, policy="frozen")
                 self.assertTrue(game.closed)
 
     def test_nonfinite_reward_close_engine(self):
