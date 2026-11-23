@@ -1,0 +1,59 @@
+name: Nengo LIF baseline (optional CPU QA)
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/nengo_lif_baseline.py'
+      - 'tests/test_nengo_lif_baseline.py'
+      - 'docs/NENGO_LIF_BASELINE_R01.md'
+      - '.github/workflows/nengo-lif-baseline-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact PR head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run synthetic zero-dependency unit tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_nengo_lif_baseline.py' -v
+
+  native-nengo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact PR head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install optional, pinned Nengo only in isolated CI
+        run: |
+          python -m pip install 'nengo==4.1.0'
+          python -c 'import nengo; assert nengo.__version__ == "4.1.0"'
+      - name: Execute real Nengo LIF CPU tests without silent native skip
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python -m unittest discover -s tests -p 'test_nengo_lif_baseline.py' -v 2>&1 | tee /tmp/nengo-lif-native.log
+          if grep -Eq 'test_real_nengo_4_1_if_installed.*skipped' /tmp/nengo-lif-native.log; then
+            echo 'Real Nengo 4.1.0 test was unexpectedly skipped'
+            exit 1
+          fi
