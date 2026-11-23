@@ -142,11 +142,11 @@ def sanitize_trace_event(raw: object) -> TraceEnvelope:
     if unknown:
         raise TracePrivacyError("trace event contains fields outside the metadata allowlist")
     schema = raw.get("schema")
-    if type(schema) is not str or schema != SCHEMA:
+    if type(schema) is not str or len(schema) > 32 or schema != SCHEMA:
         raise TracePrivacyError("unsupported trace schema")
 
     event_type = raw.get("event_type")
-    if type(event_type) is not str or event_type not in _ALLOWED_EVENTS:
+    if type(event_type) is not str or len(event_type) > 32 or event_type not in _ALLOWED_EVENTS:
         raise TracePrivacyError("event_type is not allowlisted")
 
     return TraceEnvelope(
