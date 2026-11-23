@@ -1,5 +1,9 @@
 import unittest
+from unittest.mock import Mock, patch
+
+from mojum import qa_workflow_evidence as evidence
 from mojum.qa_workflow_evidence import WorkflowEvidenceError, evaluate_workflow_evidence
+
 HEAD = "a" * 40
 OTHER = "b" * 40
 
@@ -82,7 +86,8 @@ class WorkflowEvidenceTests(unittest.TestCase):
                 return str.__hash__(self)
         key = HostileKey("run_id")
         item = run()
-        item[key] = item.pop("run_id")
+        item.pop("run_id")
+        item[key] = 1
         key.armed = True
         with self.assertRaises(WorkflowEvidenceError):
             evaluate_workflow_evidence([item], expected_head_sha=HEAD, required_workflow_ids=[10])
@@ -101,6 +106,28 @@ class WorkflowEvidenceTests(unittest.TestCase):
         for change in ({"head_sha": "bad"}, {"event": "push"}, {"status": "success"}, {"status": "completed", "conclusion": "not-a-github-conclusion"}):
             with self.subTest(change=change), self.assertRaises(WorkflowEvidenceError):
                 evaluate_workflow_evidence([dict(run(), **change)], expected_head_sha=HEAD, required_workflow_ids=[10])
+
+    def test_oversized_sha_rejected_before_regex(self):
+        oversized = "a" * 1_000_000
+        matcher = Mock()
+        with patch.object(evidence, "_SHA", matcher):
+            with self.assertRaises(WorkflowEvidenceError):
+                evaluate_workflow_evidence([], expected_head_sha=oversized, required_workflow_ids=[10])
+            matcher.fullmatch.assert_not_called()
+            with self.assertRaises(WorkflowEvidenceError):
+                evaluate_workflow_evidence([run(sha=oversized)], expected_head_sha=HEAD, required_workflow_ids=[10])
+            matcher.fullmatch.assert_not_called()
+
+    def test_oversized_integer_ids_rejected(self):
+        huge = 1 << 1_000_000
+        for field in ("run_id", "run_attempt", "workflow_id"):
+            with self.subTest(field=field):
+                item = run()
+                item[field] = huge
+                with self.assertRaises(WorkflowEvidenceError):
+                    evaluate_workflow_evidence([item], expected_head_sha=HEAD, required_workflow_ids=[10])
+        with self.assertRaises(WorkflowEvidenceError):
+            evaluate_workflow_evidence([run()], expected_head_sha=HEAD, required_workflow_ids=[huge])
 
     def test_input_unchanged_and_digest_stable(self):
         item = run()
