@@ -101,6 +101,21 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(leaked, [])
 
 
+
+    def test_ready_job_can_record_verified_merge_at_exact_head(self):
+        self.q.enqueue(12, SHA, now=1)
+        job = self.q.claim("worker", now=2)
+        ready = self.q.transition(job.job_id, job.lease_token, "ready", now=3)
+        with self.assertRaises(TransitionError):
+            self.q.record_merged(ready.job_id, expected_head_sha="b" * 40, now=4)
+        merged = self.q.record_merged(ready.job_id, expected_head_sha=SHA, now=5)
+        self.assertEqual(merged.state, "merged")
+        self.assertIsNone(merged.lease_token)
+        self.assertEqual(self.q.counts()["merged"], 1)
+        with self.assertRaises(TransitionError):
+            self.q.record_merged(ready.job_id, expected_head_sha=SHA, now=6)
+
+
     def test_terminal_ready_is_not_claimed_automatically(self):
         self.q.enqueue(12,SHA,now=1)
         job=self.q.claim("worker",now=2)
