@@ -128,6 +128,34 @@ class ClaimAuditTests(unittest.TestCase):
             with self.assertRaises(claim_audit.ClaimAuditError):
                 claim_audit.audit(raw)
 
+    def test_code_fenced_and_indented_example_markers_fail_closed(self):
+        real = marker("agent-a", "issue-786/audit")
+        examples = [
+            "```text\n" + real + "\n```",
+            "~~~markdown\n" + real + "\n~~~",
+            "    " + real,
+            "\t" + real,
+        ]
+        for body in examples:
+            with self.subTest(body=body), self.assertRaises(claim_audit.ClaimAuditError):
+                claim_audit.audit(snapshot(comment(1, "docs", body)))
+
+    def test_marker_after_closed_fence_is_accepted(self):
+        raw = "Example:\n```text\nnot a claim\n```\n" + marker("agent-a", "scope-a")
+        report = claim_audit.audit(snapshot(comment(1, "bot", raw)))
+        self.assertEqual(report["status"], "clear")
+        self.assertEqual(report["issues"][0]["active_claims"][0]["worker"], "agent-a")
+
+    def test_reject_global_duplicate_comment_ids(self):
+        raw = snapshot(comment(1, "bot", marker("agent-a", "scope-a")))
+        raw["issues"].append({"number": 479, "comments": [comment(1, "bot", marker("agent-b", "scope-b"))]})
+        with self.assertRaisesRegex(claim_audit.ClaimAuditError, "duplicate comment id"):
+            claim_audit.audit(raw)
+
+    def test_surrogate_body_is_typed_invalid(self):
+        with self.assertRaisesRegex(claim_audit.ClaimAuditError, "valid UTF-8"):
+            claim_audit.audit(snapshot(comment(1, "bot", "\ud800")))
+
     def test_cli_exit_status_collision_and_corrupt_json(self):
         script = Path(__file__).resolve().parents[1] / "tools" / "issue_claim_audit.py"
         with tempfile.TemporaryDirectory() as temp:
