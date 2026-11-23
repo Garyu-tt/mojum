@@ -101,13 +101,20 @@ class RecoveryTests(unittest.TestCase):
 
     def test_hostile_string_subclass_field_name_rejected(self):
         class HostileKey(str):
+            armed = False
             def __hash__(self):
-                raise AssertionError("hostile key was hashed")
+                if self.armed:
+                    raise AssertionError("hostile key was hashed")
+                return 0
             def __eq__(self, other):
-                raise AssertionError("hostile key was compared")
+                if self.armed:
+                    raise AssertionError("hostile key was compared")
+                return str.__eq__(self, other)
 
         record = task("safe")
-        record[HostileKey("task_id")] = record.pop("task_id")
+        hostile = HostileKey("task_id")
+        record[hostile] = record.pop("task_id")
+        hostile.armed = True
         with self.assertRaises(RecoveryError):
             plan_recovery([record], observed_at=0)
 
