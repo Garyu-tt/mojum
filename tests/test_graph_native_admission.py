@@ -66,6 +66,17 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         self.assertEqual(digest(graph), before)
         self.assertEqual(graph, FIXTURE)
 
+    def test_oversized_identity_fields_are_rejected_before_tree_walk(self):
+        for field in ("id", "revision"):
+            graph = self.fresh()
+            graph[field] = "x" * (MAX_GRAPH_BYTES * 4)
+            with self.subTest(field=field), patch(
+                "mojum.graph._require_native_json_tree",
+                side_effect=AssertionError("oversized identity must fail before tree walk"),
+            ):
+                with self.assertRaisesRegex(GraphError, "nonempty bounded text"):
+                    validate(graph)
+
     def test_hostile_schema_value_is_rejected_before_comparison(self):
         for value in (HostileSchemaValue(), HostileSchemaString("mechanicus.universal-graph/1")):
             graph = self.fresh()
