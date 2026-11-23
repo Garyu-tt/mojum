@@ -11,7 +11,11 @@ def sample(tick=0, contact="body", force=100, strain=25):
             "normal_force_mn": force, "strain_ue": strain}
 
 
-class DictChild(dict):\n    pass\n\n\nclass ClothContactTelemetryTests(unittest.TestCase):
+class DictChild(dict):
+    pass
+
+
+class ClothContactTelemetryTests(unittest.TestCase):
     def test_reduces_categories_and_returns_no_raw_samples(self):
         report = reduce_contacts([
             sample(1, "body", 120, -9),
