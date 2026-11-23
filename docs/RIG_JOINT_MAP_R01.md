@@ -17,7 +17,7 @@ The optional aliases dictionary maps an alternate source spelling to an exact me
 - Plain built-in dictionaries, lists and strings only; subclasses are rejected.
 - At most 256 source joints, target IDs and aliases.
 - Stable IDs are ASCII identifiers using letters, digits, underscore, dot, colon or hyphen.
-- Names and revisions are exact, case-sensitive UTF-8 strings, up to 96 characters.
+- Names and revisions are exact, case-sensitive UTF-8 strings, up to 96 characters; all Unicode Cc control characters (including C1) are rejected.
 - Missing/unknown target IDs, unknown source names, duplicate inventories, duplicate source bindings, malformed descriptors and invalid aliases raise JointMapError.
 - Returned JointMap and JointBinding values are frozen dataclasses with tuple bindings. as_dict() returns a detached JSON-safe copy.
 - SHA-256 identifies canonical receipt bytes. It is not a signature, authentication, source-asset provenance, or physical-rig attestation.
