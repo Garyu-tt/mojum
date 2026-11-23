@@ -34,6 +34,17 @@ def _plain_int(value: Any, low: int, high: int, field: str) -> int:
     return value
 
 
+def _require_exact_dict(value: Any, expected: frozenset[str], label: str) -> dict:
+    """Bound and validate an envelope before hashing or comparing its keys."""
+    if type(value) is not dict or len(value) != len(expected):
+        raise BenchmarkError("invalid " + label + " envelope")
+    if any(type(key) is not str or len(key) > 32 for key in value):
+        raise BenchmarkError("invalid " + label + " keys")
+    if frozenset(value) != expected:
+        raise BenchmarkError("invalid " + label + " fields")
+    return value
+
+
 def _canonical(value: Any) -> bytes:
     try:
         text = json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -79,13 +90,17 @@ def make_task(seed: int, *, held_out: bool = False, note_count: int = 12) -> dic
 
 def validate_task(task: Any) -> dict:
     """Validate and detach a task. Its digest is integrity evidence, not identity."""
-    if type(task) is not dict or set(task) != {
+    _require_exact_dict(task, frozenset({
         "schema", "provenance", "consent", "seed", "split",
         "tempo_ticks_per_second", "notes", "sha256"
-    }:
-        raise BenchmarkError("invalid task envelope")
-    if task["schema"] != TASK_SCHEMA or task["provenance"] != PROVENANCE or task["consent"] is not True:
-        raise BenchmarkError("task schema, provenance, or consent rejected")
+    }), "task")
+    for field in ("schema", "provenance", "split", "sha256"):
+        if type(task[field]) is not str:
+            raise BenchmarkError("task textual fields must be exact native strings")
+    if type(task["consent"]) is not bool or task["consent"] is not True:
+        raise BenchmarkError("task consent must be exact native true")
+    if task["schema"] != TASK_SCHEMA or task["provenance"] != PROVENANCE:
+        raise BenchmarkError("task schema or provenance rejected")
     _plain_int(task["seed"], 0, 2**32 - 1, "seed")
     if task["split"] not in ("train", "held_out"):
         raise BenchmarkError("invalid split")
@@ -97,8 +112,7 @@ def validate_task(task: Any) -> dict:
     detached = []
     previous_tick = -1
     for index, note in enumerate(notes):
-        if type(note) is not dict or set(note) != {"index", "key", "finger", "tick", "duration_ticks"}:
-            raise BenchmarkError("invalid note fields")
+        _require_exact_dict(note, frozenset({"index", "key", "finger", "tick", "duration_ticks"}), "note")
         if _plain_int(note["index"], 0, MAX_NOTES - 1, "note index") != index:
             raise BenchmarkError("note indices must be contiguous")
         key = _plain_int(note["key"], KEYS[0], KEYS[-1], "key")
@@ -112,7 +126,7 @@ def validate_task(task: Any) -> dict:
                          "tick": tick, "duration_ticks": duration})
     unsigned = {k: task[k] for k in ("schema", "provenance", "consent", "seed",
                                       "split", "tempo_ticks_per_second", "notes")}
-    if type(task["sha256"]) is not str or task["sha256"] != _digest(unsigned):
+    if task["sha256"] != _digest(unsigned):
         raise BenchmarkError("task digest mismatch")
     return {"schema": TASK_SCHEMA, "provenance": PROVENANCE, "consent": True,
             "seed": task["seed"], "split": task["split"],
@@ -124,7 +138,7 @@ def validate_task(task: Any) -> dict:
 def make_trace(task: Any, *, mode: str = "policy") -> dict:
     """Create a deterministic policy or frozen-control trace for a task."""
     checked = validate_task(task)
-    if mode not in ("policy", "frozen"):
+    if type(mode) is not str or mode not in ("policy", "frozen"):
         raise BenchmarkError("unknown trace mode")
     events = []
     for index, key, finger, tick, duration in checked["notes"]:
@@ -147,12 +161,16 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
     checked = validate_task(task)
     if consent is not True:
         raise BenchmarkError("explicit caller consent required")
-    if type(trace) is not dict or set(trace) != {
+    _require_exact_dict(trace, frozenset({
         "schema", "provenance", "consent", "task_sha256", "mode", "events", "sha256"
-    }:
-        raise BenchmarkError("invalid trace envelope")
+    }), "trace")
+    for field in ("schema", "provenance", "task_sha256", "mode", "sha256"):
+        if type(trace[field]) is not str:
+            raise BenchmarkError("trace textual fields must be exact native strings")
+    if type(trace["consent"]) is not bool or trace["consent"] is not True:
+        raise BenchmarkError("trace consent must be exact native true")
     if (trace["schema"] != TRACE_SCHEMA or trace["provenance"] != PROVENANCE
-            or trace["consent"] is not True or trace["task_sha256"] != checked["sha256"]
+            or trace["task_sha256"] != checked["sha256"]
             or trace["mode"] not in ("policy", "frozen")):
         raise BenchmarkError("trace/task provenance or identity mismatch")
     events = trace["events"]
@@ -160,15 +178,14 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
         raise BenchmarkError("invalid event budget")
     unsigned = {k: trace[k] for k in ("schema", "provenance", "consent",
                                        "task_sha256", "mode", "events")}
-    if type(trace["sha256"]) is not str or trace["sha256"] != _digest(unsigned):
+    if trace["sha256"] != _digest(unsigned):
         raise BenchmarkError("trace digest mismatch")
     hits = 0
     timing_error = 0
     for index, event in enumerate(events):
-        if type(event) is not dict or set(event) != {
+        _require_exact_dict(event, frozenset({
             "index", "key", "finger", "tick", "duration_ticks"
-        }:
-            raise BenchmarkError("invalid event fields")
+        }), "event")
         ei = _plain_int(event["index"], 0, MAX_NOTES - 1, "event index")
         key = _plain_int(event["key"], KEYS[0], KEYS[-1], "event key")
         finger = _plain_int(event["finger"], 1, 5, "event finger")
