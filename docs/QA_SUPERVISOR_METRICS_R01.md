@@ -6,14 +6,16 @@ A pure-stdlib reducer for bounded caller-supplied QA supervisor snapshots. It is
 
 ## Input contract
 
-`summarize_snapshot(mapping)` accepts only:
-- `observed_at`: non-negative integer epoch seconds (booleans rejected)
-- `tasks`: at most 10,000 task mappings, each with a unique bounded `id`, a known state, and optional `age_seconds`
+`summarize_snapshot(mapping)` accepts only exact built-in containers and scalar types:
+- top-level and task records must be built-in `dict` objects (subclasses rejected)
+- `observed_at`: non-negative built-in integer epoch seconds (booleans and integer subclasses rejected)
+- `tasks`: built-in `list` or `tuple` with at most 10,000 task dictionaries
+- each task has a unique bounded built-in string `id`, a known built-in string state, and optional `age_seconds`
 - optional `blocked_reason` only for blocked/waiting/escalated states, from the fixed allowlist
 - optional `lease_remaining_seconds` only for active states
-- optional `duration_samples_ms`: at most 10,000 finite non-negative numeric samples
+- optional `duration_samples_ms`: built-in `list` or `tuple` with at most 10,000 finite non-negative built-in integer/float samples
 
-Unknown fields, duplicate IDs, unknown states/reasons, invalid native types, non-finite values, and out-of-range values fail closed.
+Container and scalar subclasses are rejected so caller-defined methods cannot run during validation. Unknown fields, duplicate IDs, unknown states/reasons, invalid native types, non-finite values, and out-of-range values fail closed.
 
 ## Output
 
@@ -28,7 +30,7 @@ The caller must supply only data it is authorized to aggregate. The reducer deli
 Run with Python 3.11+:
 
 ```sh
-PYTHONPATH=src python -m unittest tests/test_qa_supervisor_metrics.py
+PYTHONPATH=src python -m unittest discover -s tests -p "test_qa_supervisor_metrics.py" -v
 ```
 
 This is an opt-in diagnostic primitive. It is not evidence of CI success, QA approval, service deployment, or merge permission.
