@@ -113,7 +113,7 @@ class WorkflowEvidenceTests(unittest.TestCase):
         with patch.object(evidence, "_SHA", matcher):
             with self.assertRaises(WorkflowEvidenceError):
                 evaluate_workflow_evidence([], expected_head_sha=oversized, required_workflow_ids=[10])
-            matcher.fullmatch.assert_called_once_with(HEAD)
+            matcher.fullmatch.assert_not_called()
             matcher.fullmatch.reset_mock()
             with self.assertRaises(WorkflowEvidenceError):
                 evaluate_workflow_evidence([run(sha=oversized)], expected_head_sha=HEAD, required_workflow_ids=[10])
