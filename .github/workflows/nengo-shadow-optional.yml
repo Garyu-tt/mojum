@@ -1,0 +1,42 @@
+name: Optional Nengo 4.1 CPU shadow regression
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/nengo_shadow.py'
+      - 'tests/test_nengo_shadow.py'
+      - 'docs/NENGO_CPU_SHADOW_R01.md'
+      - '.github/workflows/nengo-shadow-optional.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pinned-native-nengo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install exact optional CPU dependencies
+        run: python -m pip install --disable-pip-version-check 'nengo==4.1.0' 'numpy==2.5.5'
+      - name: Assert exact source and native versions
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python -c 'from importlib.metadata import version; assert version("nengo") == "4.1.0"; assert version("numpy") == "2.5.5"'
+      - name: Exercise fixture boundaries and native Nengo replay
+        run: PYTHONPATH=src python -m unittest -v tests.test_nengo_shadow
+      - name: Repeat native CLI fixture and compare aggregate output
+        run: |
+          PYTHONPATH=src python -m mojum.nengo_shadow --backend nengo --execute --steps 128 --neurons 16 --seed 7 > /tmp/nengo-a.json
+          PYTHONPATH=src python -m mojum.nengo_shadow --backend nengo --execute --steps 128 --neurons 16 --seed 7 > /tmp/nengo-b.json
+          python -c 'import json; a=json.load(open("/tmp/nengo-a.json")); b=json.load(open("/tmp/nengo-b.json")); assert a == b and a["engine"] == "nengo_lif" and a["spike_events"] > 0'
