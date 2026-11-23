@@ -287,5 +287,18 @@ class NoosphereConsentTests(unittest.TestCase):
 
 
 
+    def test_aggregate_json_budget_is_rejected_before_serialization(self):
+        source = dataset([])
+        source["projection"]["padding"] = ["x" * 1_000_000 for _ in range(17)]
+        with patch(
+            "mojum.noosphere_consent.json.dumps",
+            side_effect=AssertionError("json.dumps must not run"),
+        ):
+            with self.assertRaises(ConsentError):
+                authorize_dataset(
+                    source, [grant()], as_of_ns=50, purpose="research",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
