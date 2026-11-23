@@ -10,19 +10,28 @@ Release acceptance and the remaining work on the integrated sensorimotor loop ar
 
 ## Exact-head CI merge gate (acceptance tooling)
 
-`mojum.merge_gate` turns a PR snapshot into a `ready` / `defer` / `reject`
-verdict for one exact commit and never performs a merge. Pass the snapshot from
-`gh pr view --json ...` with the SHA you intend to merge:
+`mojum.merge_gate` preflights a PR rollup as `ready` / `defer` / `reject` for
+one pinned head and current base, and never performs a merge. Live mode reads
+the rollup, its recorded base commit, and the current target-branch commit
+through read-only GitHub calls:
 
 ```sh
-PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 --expected-head-sha "$SHA" \
-  --require '*aquarium*' --require '*motor-gate*' --require '*mesh*'
+SHA=$(gh pr view 419 --json headRefOid -q .headRefOid)
+BASE=$(gh api 'repos/{owner}/{repo}/git/ref/heads/main' --jq .object.sha)
+PYTHONPATH=src python3 -m mojum.merge_gate --pr 419 \
+  --expected-head-sha "$SHA" --expected-base-sha "$BASE"
 ```
 
+For `main`, the gate always requires the nine Aquarium, Motor Gate, and Mesh
+jobs for Python 3.11, 3.12, and 3.13. Use `--require 'WORKFLOW / JOB'` for any
+additional GitHub Actions check identified in the reviewed CI workflow. A PR
+tested against an older `main` defers even if GitHub reports
+`mergeStateStatus=CLEAN`.
+
 Exit `0` means ready, `2` means defer while CI is incomplete, `1` means reject.
-See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdict matrix and
-the recommended `gh pr merge --match-head-commit` sequence. The gate is a
-client-side guard; repository rulesets remain authoritative.
+See [docs/MERGE_GATE_R01.md](docs/MERGE_GATE_R01.md) for the verdicts and
+the GitHub acceptance policy. A `ready` rollup is not merge authorization;
+tested check-run provenance still requires independent verification.
 
 ## Offline room designer (experimental)
 
