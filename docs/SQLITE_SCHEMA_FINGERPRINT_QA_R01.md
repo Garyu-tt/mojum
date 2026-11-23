@@ -6,6 +6,8 @@
 
 The SQLite connection is explicitly closed with `contextlib.closing` on success and on exceptions. Its transaction context is nested inside the closing context; `Connection.__exit__` alone does not close the handle. Regression coverage repeatedly invokes the function with `ResourceWarning` elevated.
 
+The schema query has a hard SQLite virtual-machine instruction cutoff: the progress handler interrupts execution at the first callback after 100,000 VM instructions. This is a deterministic work cutoff, **not** a wall-time or memory limit. A valid but unusually complex schema may therefore be rejected with `SchemaAuditError`; the cutoff is intentional fail-closed behavior, not a claim that every schema under the entry/text limits will be accepted.
+
 ## Filesystem trust boundary
 
 The initial `lstat()` rejects a path that is already a symlink and enforces the main database file's initial size. It is **not** an fd-bound no-follow open: callers must use a trusted directory that is not concurrently modified. This utility does not claim resistance to rename/symlink TOCTOU races. SQLite may consult WAL sidecars; the main-file size check is not a bound on sidecar sizes or total I/O. Do not use this utility as a hostile-path sandbox or as a content-integrity/backup validator.
