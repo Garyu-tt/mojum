@@ -134,6 +134,19 @@ class PhenotypeAuditTests(unittest.TestCase):
             with self.assertRaises(GenesisPhenotypeAuditError):
                 audit_phenotype(ledger.snapshot(), observed, 3)
 
+    def test_non_finite_float_rejected_before_serialization(self):
+        ledger = make_ledger()
+        for value in (float("nan"), float("inf"), float("-inf")):
+            observed = ledger.phenotype(3)
+            observed["padding"] = value
+            with self.subTest(value=value):
+                with patch(
+                    "mojum.genesis_phenotype_audit.canonical",
+                    side_effect=AssertionError("canonical serialization must not run"),
+                ):
+                    with self.assertRaises(GenesisPhenotypeAuditError):
+                        audit_phenotype(ledger.snapshot(), observed, 3)
+
     def test_excessive_nesting_rejected(self):
         ledger = make_ledger()
         observed = ledger.phenotype(3)
