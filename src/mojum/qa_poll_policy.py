@@ -143,7 +143,7 @@ def circuit_transition(
                        opened_at=now_value, probe_in_flight=False)
     failures = min(100, circuit.failures + 1)
     if circuit.status == "half_open" or failures >= failure_threshold:
-        return Circuit(status="open", failures=failures, opened_at=clock,
+        return Circuit(status="open", failures=failures, opened_at=now_value,
                        probe_in_flight=False)
     return Circuit(status="closed", failures=failures)
 
