@@ -36,6 +36,11 @@ class HostileDict(dict):
         raise AssertionError("custom get must never be called")
 
 
+class HostileValue:
+    def __eq__(self, other):
+        raise AssertionError("hostile equality must never be invoked")
+
+
 class NeuralObserveGuardTests(unittest.TestCase):
     def test_valid_frames_delegate_to_predictor(self):
         model = PulsePredictor()
@@ -96,6 +101,7 @@ class NeuralObserveGuardTests(unittest.TestCase):
     def test_rejects_bad_outer_and_heartbeat_types(self):
         cases = []
         x = sample(); x["kind"] = StrSubclass("interoception"); cases.append(x)
+        x = sample(); x["kind"] = HostileValue(); cases.append(x)
         x = sample(); x["observed_at_ns"] = True; cases.append(x)
         x = sample(); x["observed_at_ns"] = IntSubclass(0); cases.append(x)
         x = sample(); x["heartbeat"] = HostileDict(x["heartbeat"]); cases.append(x)
