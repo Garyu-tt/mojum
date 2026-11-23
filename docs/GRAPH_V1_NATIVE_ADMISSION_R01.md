@@ -22,7 +22,8 @@ Object keys must be exact strings and valid UTF-8. It rejects:
 - cycles and shared container references (JSON has no alias representation);
 - non-finite floats, unpaired surrogates, and excessively large integers;
 - nesting above `MAX_JSON_DEPTH`, more than
-  `MAX_GRAPH_TREE_NODES` tree entries, or serialized input above
+  `MAX_GRAPH_TREE_NODES` tree entries (including pending traversal work before
+  expanding containers), or serialized input above
   `MAX_GRAPH_BYTES` (256 KiB).
 
 The native-tree gate runs before key-set equality, membership lookups, or
