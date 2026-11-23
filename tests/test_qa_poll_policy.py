@@ -35,6 +35,10 @@ class PollPolicyTests(unittest.TestCase):
                 backoff_delay(value)
         with self.assertRaises(PollPolicyError):
             backoff_delay(1, max_seconds=1)
+        for clock in (True, -1, float("nan"), float("inf"), "100"):
+            with self.subTest(clock=clock):
+                with self.assertRaises(PollPolicyError):
+                    backoff_delay(1, now_epoch=clock)
 
     def test_transient_failure_opens_at_threshold(self):
         c = Circuit()
