@@ -35,19 +35,19 @@ class PulseCalibrationTests(unittest.TestCase):
     def test_brier_score_and_bins_are_correct(self):
         report = audit_calibration([
             row(1, 0.1, False),
-            row(2, 0.2, False),
+            row(2, 0.19, False),
             row(3, 0.8, True),
             row(4, 1.0, True),
         ], bin_count=5)
         self.assertEqual(report.schema, SCHEMA)
         self.assertEqual(report.provenance, "PUBLIC_SYNTHETIC")
         self.assertEqual(report.sample_count, 4)
-        self.assertAlmostEqual(report.brier_score, (0.01 + 0.04 + 0.04 + 0.0) / 4)
+        self.assertAlmostEqual(report.brier_score, (0.01 + 0.0361 + 0.04 + 0.0) / 4)
         self.assertEqual(len(report.bins), 5)
         self.assertEqual(report.bins[0].sample_count, 2)
-        self.assertAlmostEqual(report.bins[0].mean_forecast, 0.15)
+        self.assertAlmostEqual(report.bins[0].mean_forecast, 0.145)
         self.assertEqual(report.bins[0].observed_frequency, 0.0)
-        self.assertAlmostEqual(report.bins[0].absolute_gap, 0.15)
+        self.assertAlmostEqual(report.bins[0].absolute_gap, 0.145)
         self.assertEqual(report.bins[1].sample_count, 0)
         self.assertIsNone(report.bins[1].mean_forecast)
         self.assertEqual(report.bins[3].sample_count, 1)
