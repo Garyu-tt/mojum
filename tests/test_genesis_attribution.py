@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
@@ -135,6 +136,26 @@ class GenesisAttributionTests(unittest.TestCase):
         snap["padding"] = "x" * 270_000
         with self.assertRaises(AttributionError):
             audit_attribution(snap, 0)
+
+    def test_aggregate_text_budget_rejected_before_serialization(self):
+        snap = sample_snapshot()
+        snap["padding"] = ["x" * MAX_TEXT_LENGTH for _ in range(40)]
+        with patch(
+            "mojum.genesis_attribution.json.dumps",
+            side_effect=AssertionError("json.dumps must not run"),
+        ):
+            with self.assertRaises(AttributionError):
+                audit_attribution(snap, 15)
+
+    def test_aggregate_key_budget_rejected_before_serialization(self):
+        snap = sample_snapshot()
+        snap.update({("k" * 8_000) + str(i): i for i in range(40)})
+        with patch(
+            "mojum.genesis_attribution.json.dumps",
+            side_effect=AssertionError("json.dumps must not run"),
+        ):
+            with self.assertRaises(AttributionError):
+                audit_attribution(snap, 15)
 
     def test_nested_snapshot_depth_is_bounded(self):
         snap = sample_snapshot()
