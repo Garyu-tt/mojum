@@ -50,7 +50,7 @@ class CIEvidenceDecision:
 
 
 def _exact_keys(value: object, expected: set[str], label: str) -> dict[str, Any]:
-    if type(value) is not dict or set(value) != expected:
+    if type(value) is not dict or len(value) != len(expected) or set(value) != expected:
         raise EvidenceError(f"{label} must be a native object with exactly the documented keys")
     return value
 
@@ -68,7 +68,7 @@ def _utc(value: object, label: str) -> datetime:
 
 
 def _sha(value: object, label: str) -> str:
-    if type(value) is not str or not _SHA_RE.fullmatch(value):
+    if type(value) is not str or len(value) != 40 or not _SHA_RE.fullmatch(value):
         raise EvidenceError(f"{label} must be a lowercase 40-character commit SHA")
     return value
 
