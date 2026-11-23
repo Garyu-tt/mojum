@@ -289,6 +289,25 @@ class FleetTests(unittest.TestCase):
             raise AssertionError
         self.assertEqual(fleet.discover(request=broken), [])
 
+    def test_relative_artifact_directory_persists_absolute_lease_reference(self):
+        self.add_task("relative-artifact-reference")
+        prior_cwd = Path.cwd()
+        try:
+            os.chdir(self.root)
+            result = fleet.single(self.db, 1, self.backends[0],
+                                  Path("artifacts"), request=fake_server)
+        finally:
+            os.chdir(prior_cwd)
+        self.assertEqual(result["state"], "proposal_for_independent_review")
+        artifact = Path(result["artifact"])
+        self.assertTrue(artifact.is_absolute())
+        self.assertEqual(artifact.parent, self.out)
+        self.assertTrue(artifact.is_file())
+        with closing(sc.connect(str(self.db))) as db:
+            row = db.execute("SELECT artifact FROM tasks WHERE id=?",
+                             ("relative-artifact-reference",)).fetchone()
+        self.assertEqual(row["artifact"], str(artifact))
+
     def test_private_review_artifact_and_exact_lease_completion(self):
         self.add_task("issue-123")
         result = fleet.single(self.db, 1, self.backends[0], self.out,
@@ -643,6 +662,44 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(second["scheduled_primary_workers"], 2)
         with closing(sc.connect(str(self.db))) as db:
             self.assertEqual(sc.status(db)["states"]["review"], 4)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX replaceable ancestors")
+    def test_artifact_store_rejects_nonsticky_writable_ancestor(self):
+        shared = self.root / "untrusted-output-parent"
+        private = shared / "private"
+        shared.mkdir(mode=0o700)
+        private.mkdir(mode=0o700)
+        shared.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(fleet.FleetError, "ancestor replaceable"):
+                fleet.save_private(private, "untrusted-parent", 1,
+                                   {"secret": "never persist"})
+            self.assertEqual(list(private.iterdir()), [])
+            # Batch admission must reject before any model request.
+            with self.assertRaisesRegex(fleet.FleetError, "ancestor replaceable"):
+                fleet.run(self.db, private, max_agents=1, max_jobs=1,
+                          backends=[])
+        finally:
+            shared.chmod(0o700)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX replaceable ancestors")
+    def test_single_checks_unsafe_ancestor_before_claim_or_model_call(self):
+        self.add_task("unsafe-single-output")
+        shared = self.root / "unsafe-single-parent"
+        private = shared / "private"
+        shared.mkdir(mode=0o700)
+        private.mkdir(mode=0o700)
+        shared.chmod(0o777)
+        def should_not_invoke(*args, **kwargs):
+            self.fail("model called before private artifact preflight")
+        try:
+            with self.assertRaisesRegex(fleet.FleetError, "ancestor replaceable"):
+                fleet.single(self.db, 1, self.backends[0], private,
+                             request=should_not_invoke)
+            with closing(sc.connect(str(self.db))) as db:
+                self.assertEqual(sc.status(db)["states"]["queued"], 1)
+        finally:
+            shared.chmod(0o700)
 
     @unittest.skipUnless(os.name == "posix", "POSIX symlink ancestry")
     def test_artifact_store_rejects_symlinked_ancestor_without_writing(self):
