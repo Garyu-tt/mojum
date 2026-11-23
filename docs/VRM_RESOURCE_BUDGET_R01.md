@@ -16,4 +16,4 @@ An offline, standard-library-only admission helper for optional VRM viewers. It 
 Caller owns metadata accuracy and asset provenance. Do not pass PRIVATE organism assets or user-specific paths. Compressed/transcoded GPU overhead is not inferred. This helper is advisory and opt-in, not a renderer sandbox, license verifier, or substitute for browser/mobile profiling.
 
 ## Verification
-Run python -m unittest discover -s tests -p test_vrm_resource_budget.py on CPython 3.11–3.13. No third-party dependencies or network access.
+Run PYTHONPATH=src python -m unittest discover -s tests -p test_vrm_resource_budget.py on CPython 3.11–3.13. No third-party dependencies or network access.
