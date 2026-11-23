@@ -16,9 +16,9 @@ ZERO_HEAD = "0" * 64
 MAX_IDENTIFIER = 128
 MAX_SOURCE_SCHEMA = 160
 MAX_TIMESTAMP_NS = (1 << 63) - 1
-_HEX_256 = re.compile(r"[0-9a-f]{64}\\Z")
-_IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}\\Z")
-_SOURCE_SCHEMA = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,159}\\Z")
+_HEX_256 = re.compile(r"[0-9a-f]{64}\Z")
+_IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}\Z")
+_SOURCE_SCHEMA = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,159}\Z")
 _FIELDS = frozenset({
     "schema", "agent_id", "first_seq", "last_seq", "event_count",
     "previous_segment_head", "segment_head", "source_schema",
