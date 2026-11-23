@@ -21,7 +21,7 @@ print(report.to_dict())
 - Ledger schema, event count, revision and acquisition rules are delegated to GenomeLedger.from_snapshot().
 
 ## Report semantics
-accepted is true only when the supplied phenotype has exactly the same keys and values as the recomputed projection. mismatch_fields reports field names only. SHA-256 values cover canonical computed and supplied phenotype objects. The report contains no raw event IDs or parameter values.
+`accepted` is true only when the supplied phenotype has exactly the same keys, JSON value types and values as the recomputed projection. Nested objects and arrays are compared recursively without Python's bool/int or int/float equality coercions. `mismatch_fields` reports field names only. SHA-256 values cover canonical computed and supplied phenotype objects. The report contains no raw event IDs or parameter values.
 
 ## Security and limitations
 This is a deterministic consistency check over caller-supplied synthetic data. It is not authentication: SHA-256 is a digest, not a signature. Caller-provided PUBLIC_SYNTHETIC is an assertion, not independently verified provenance. It does not prove biological accuracy, learning, cognition, physics or live runtime state. It does not read files, SQLite, Noosphere, networks, hardware or process state; it performs no writes. It adds no mandatory dependencies and does not change Aquarium behavior.
