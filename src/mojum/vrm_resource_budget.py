@@ -61,15 +61,16 @@ def assess_vrm_resource_budget(inventory, limits=None):
         raise ResourceBudgetError("limits must be a ResourceLimits instance")
     if type(inventory) is not dict:
         raise ResourceBudgetError("inventory must be a native dict")
-    try:
-        raw = json.dumps(inventory, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
-    except (TypeError, ValueError, RecursionError, OverflowError) as exc:
-        raise ResourceBudgetError("inventory must contain bounded JSON-compatible values") from exc
-    if len(raw) > MAX_INVENTORY_BYTES:
-        raise ResourceBudgetError("inventory exceeds encoded size limit")
-    if set(inventory) != {"schema", *FIELDS}:
+    # Validate shape and primitive bounds before serializing any caller values.
+    # The exact field-count check makes key inspection and subsequent work bounded.
+    if len(inventory) != len(FIELDS) + 1:
         raise ResourceBudgetError("inventory fields must exactly match the versioned schema")
-    if type(inventory["schema"]) is not str or inventory["schema"] != SCHEMA:
+    keys = tuple(inventory)
+    if any(type(key) is not str or len(key) > 32 for key in keys):
+        raise ResourceBudgetError("inventory keys must be short native strings")
+    if any(key not in {"schema", *FIELDS} for key in keys):
+        raise ResourceBudgetError("inventory fields must exactly match the versioned schema")
+    if type(inventory.get("schema")) is not str or inventory["schema"] != SCHEMA:
         raise ResourceBudgetError("unsupported inventory schema")
     counts = {}
     for field in FIELDS:
@@ -79,6 +80,13 @@ def assess_vrm_resource_budget(inventory, limits=None):
         counts[field] = value
     if counts["index_count"] % 3:
         raise ResourceBudgetError("index_count must describe complete triangles")
+    try:
+        raw = json.dumps({"schema": SCHEMA, **counts}, sort_keys=True,
+                         separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    except (TypeError, ValueError, RecursionError, OverflowError) as exc:
+        raise ResourceBudgetError("inventory must contain bounded JSON-compatible values") from exc
+    if len(raw) > MAX_INVENTORY_BYTES:
+        raise ResourceBudgetError("inventory exceeds encoded size limit")
     estimate = sum(counts[name] * COST[name] for name in FIELDS)
     caps = {"vertex_count": limits.max_vertices, "index_count": limits.max_indices,
             "material_count": limits.max_materials, "texture_bytes": limits.max_texture_bytes,
