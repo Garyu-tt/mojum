@@ -49,7 +49,9 @@ def safe_load(path, default):
     # remain hard failures; never mask security or filesystem errors.
     try:
         decoded=json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    # CPython may reject >4300-digit JSON integers with ValueError before
+    # the decoded cache shape can be validated. Treat as corrupt cache only.
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return default
     return decoded if isinstance(decoded,dict) else default
 def get(url,*,timeout=10):

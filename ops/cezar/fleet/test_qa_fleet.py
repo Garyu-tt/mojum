@@ -137,6 +137,20 @@ class QAFleetTests(unittest.TestCase):
                 self.assertEqual(result["status"],"dry-run")
                 self.assertEqual(set(result["assigned"]),{1,2,3})
 
+    def test_large_json_integer_cache_recovers_before_schema_checks(self):
+        # Valid JSON can still trigger CPython's >4300-digit integer limit
+        # during json.loads, before a malformed cache shape is available.
+        payload = b'{"cursor":' + b"9" * 5000 + b',"seen":{}}'
+        for path in (self.home / "history.json", self.home / "current.json"):
+            with self.subTest(path=path.name):
+                path.write_bytes(payload)
+                path.chmod(0o600)
+                with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                    self.assertEqual(fleet.main(["--dry-run", "--max-workers", "3"]), 0)
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(result["status"], "dry-run")
+                self.assertEqual(set(result["assigned"]), {1, 2, 3})
+
     def test_malformed_snapshot_shapes_do_not_fabricate_completed_work(self):
         path=self.home/"current.json"
         for value in (
