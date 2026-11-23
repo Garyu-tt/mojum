@@ -1,0 +1,35 @@
+name: GENESIS phenotype audit focused QA
+on:
+  pull_request:
+    paths:
+      - "src/mojum/genesis_phenotype_audit.py"
+      - "tests/test_genesis_phenotype_audit.py"
+      - ".github/workflows/genesis-phenotype-audit-qa.yml"
+permissions:
+  contents: read
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Assert exact pull request head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile implementation and tests
+        run: python -m py_compile src/mojum/genesis_phenotype_audit.py tests/test_genesis_phenotype_audit.py
+      - name: Run focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_genesis_phenotype_audit.py" -v
