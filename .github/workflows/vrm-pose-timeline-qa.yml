@@ -1,0 +1,28 @@
+name: VRM pose timeline focused QA
+on:
+  pull_request:
+    paths:
+      - "tools/vrm_pose_timeline.mjs"
+      - "tests/vrm_pose_timeline.test.mjs"
+      - "docs/VRM_POSE_TIMELINE_R01.md"
+      - ".github/workflows/vrm-pose-timeline-qa.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact PR head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run timeline tests
+        run: node --test tests/vrm_pose_timeline.test.mjs
