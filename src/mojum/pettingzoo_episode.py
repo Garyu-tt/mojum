@@ -18,6 +18,7 @@ MAX_VECTOR = 256
 MAX_NAME = 64
 MAX_SEED = 2**64 - 1
 MAX_TOTAL_SCALARS = 100_000
+MAX_INTEGER_BITS = 128
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,8 @@ def _exact_keys(value, expected, name):
 def _number(value, name):
     if type(value) not in (int, float):
         raise ValueError(name + " must be a finite native number")
+    if type(value) is int and value.bit_length() > MAX_INTEGER_BITS:
+        raise ValueError(name + " integer exceeds the bit budget")
     try:
         finite = math.isfinite(value)
     except OverflowError:
