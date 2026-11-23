@@ -5,8 +5,7 @@ from separate cloth-solver experiments. It does not run a physics engine.
 
 ## Input and bounds
 
-UTF-8 JSON schema: moj um.cloth-benchmark-report/1 (without the space:
-mojum.cloth-benchmark-report/1), visibility PUBLIC_SYNTHETIC, 2–16 run records.
+UTF-8 JSON schema: `mojum.cloth-benchmark-report/1`, visibility `PUBLIC_SYNTHETIC`, 2–16 run records.
 Each record has engine/version, scenario id, seed, mesh SHA-256, vertex and
 constraint counts, timestep, total/warmup steps, one CPU microsecond sample per
 post-warmup step, peak RSS bytes, penetration count and dropped-step count.
