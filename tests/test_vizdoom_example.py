@@ -32,6 +32,19 @@ class OfflineNavigationTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertTrue(result["truncated"])
         self.assertEqual(result["steps"], 3)
+        self.assertEqual([row["action"] for row in result["trace"]], ["WAIT"] * 3)
+        self.assertEqual([row["position"] for row in result["trace"]], [[0, 0]] * 3)
+
+    def test_wait_is_a_valid_stationary_environment_action(self):
+        env = MODULE.OfflineNavigationEnv(max_steps=2)
+        env.reset(seed=9)
+        first = env.step("WAIT")
+        self.assertEqual(first.info["position"], (0, 0))
+        self.assertFalse(first.terminated)
+        self.assertFalse(first.truncated)
+        second = env.step("WAIT")
+        self.assertEqual(second.info["position"], (0, 0))
+        self.assertTrue(second.truncated)
 
     def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
