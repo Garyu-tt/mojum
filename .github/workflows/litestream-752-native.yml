@@ -1,0 +1,39 @@
+name: 'Litestream #752 pinned native WAL smoke'
+
+on:
+  pull_request:
+    paths:
+      - 'tools/litestream_local.py'
+      - 'tests/test_litestream_local.py'
+      - 'tests/test_litestream_native.py'
+      - 'docs/LITESTREAM_LOCAL_REPLICA_R01.md'
+      - '.github/workflows/litestream-752-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-local-file:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install exact upstream Litestream 0.5.18 archive (verified SHA-256)
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/benbjohnson/litestream/releases/download/v0.5.18/litestream-0.5.18-linux-x86_64.tar.gz'
+          archive="$RUNNER_TEMP/litestream-0.5.18.tar.gz"
+          curl --fail --location --silent --show-error --retry 2 --max-time 90 "$url" -o "$archive"
+          echo "d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea  $archive" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/litestream-bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/litestream-bin"
+          binary="$(find "$RUNNER_TEMP/litestream-bin" -type f -name litestream -print -quit)"
+          test -n "$binary"
+          chmod +x "$binary"
+          echo "LITESTREAM_BINARY=$binary" >> "$GITHUB_ENV"
+      - name: Offline fail-closed synthetic unit suite
+        run: python3 -m unittest discover -s tests -p 'test_litestream_local.py' -v
+      - name: Native Litestream WAL update and cold restore on PUBLIC_SYNTHETIC SQLite
+        run: python3 -m unittest discover -s tests -p 'test_litestream_native.py' -v
