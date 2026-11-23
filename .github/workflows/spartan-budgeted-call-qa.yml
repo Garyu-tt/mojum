@@ -1,0 +1,46 @@
+name: Spartan budgeted-call exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - "tools/spartan_budget.py"
+      - "tools/spartan_budgeted_call.py"
+      - "tests/test_spartan_budgeted_call.py"
+      - "docs/SPARTAN_BUDGETED_CALL_R01.md"
+      - ".github/workflows/spartan-budgeted-call-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  budgeted-call:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout exact pull-request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Assert tested revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$actual" = "$expected"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run budgeted-call tests
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -p "test_spartan_budgeted_call.py" -v
