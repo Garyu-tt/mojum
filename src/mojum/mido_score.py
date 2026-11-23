@@ -109,7 +109,7 @@ def normalize_tracks(
                 raise MidiScoreError("MIDI tick budget exceeded")
             events.append((tick, track_idx, msg_idx, msg))
     events.sort(key=lambda event: event[:3])
-    active: dict[tuple[int, int, int], tuple[int, Fraction, int]] = {}
+    active: dict[tuple[int, int], tuple[int, Fraction, int, int]] = {}
     notes: list[dict[str, int]] = []
     previous_tick = 0
     elapsed = Fraction(0)
@@ -144,17 +144,17 @@ def normalize_tracks(
         velocity = _integer(getattr(msg, "velocity", None), 0, 127, "velocity")
         if channel == 9:
             raise MidiScoreError("percussion channel not a pitched piano score")
-        key = (track_idx, channel, pitch)
+        key = (channel, pitch)  # MIDI channels are global across SMF tracks
         if kind == "note_on" and velocity > 0:
             if key in active:
                 raise MidiScoreError("overlapping same-pitch note is ambiguous")
             if len(active) + len(notes) >= MAX_NOTES:
                 raise MidiScoreError("note budget exceeded")
-            active[key] = (tick, elapsed, velocity)
+            active[key] = (tick, elapsed, velocity, track_idx)
         else:
             if key not in active:
                 raise MidiScoreError("note_off has no matching note_on")
-            started_tick, started_at, started_velocity = active.pop(key)
+            started_tick, started_at, started_velocity, origin_track = active.pop(key)
             if tick <= started_tick:
                 raise MidiScoreError("zero-duration note")
             start = _time_us(started_at)
@@ -162,7 +162,7 @@ def normalize_tracks(
             if end <= start:
                 raise MidiScoreError("sub-microsecond note duration")
             notes.append({
-                "track": track_idx, "channel": channel, "pitch": pitch,
+                "track": origin_track, "channel": channel, "pitch": pitch,
                 "velocity": started_velocity, "start_us": start,
                 "end_us": end, "duration_us": end - start,
             })
