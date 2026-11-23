@@ -15,7 +15,6 @@ from .school_activity import (
     MAX_PULSES,
     MAX_STROKES,
     RHYTHM_SCHEMA,
-    SchoolError,
     _check_private_fixture_run,
 )
 
