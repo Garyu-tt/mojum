@@ -9,6 +9,18 @@ from mojum.robopianist_benchmark import (
 )
 
 
+class HostileKey(str):
+    def __hash__(self):
+        return hash(str(self))
+    def __eq__(self, other):
+        raise AssertionError("hostile key comparison executed")
+
+
+class HostileText(str):
+    def __eq__(self, other):
+        raise AssertionError("hostile scalar comparison executed")
+
+
 class RoboPianistBenchmarkTests(unittest.TestCase):
     def test_repeatable_policy_and_frozen_control(self):
         task = make_task(42)
@@ -83,6 +95,43 @@ class RoboPianistBenchmarkTests(unittest.TestCase):
         # Digest mismatch is sufficient to reject any altered event ordering.
         with self.assertRaises(BenchmarkError):
             score_trace(task, bad, consent=True)
+
+    def test_rejects_hostile_keys_before_hash_or_equality_comparison(self):
+        task = make_task(17)
+        bad = dict(task)
+        bad[HostileKey("extra")] = None
+        with self.assertRaises(BenchmarkError):
+            validate_task(bad)
+
+        bad = copy.deepcopy(task)
+        note = bad["notes"][0]
+        note[HostileKey("extra")] = None
+        with self.assertRaises(BenchmarkError):
+            validate_task(bad)
+
+        trace = make_trace(task)
+        bad_trace = dict(trace)
+        bad_trace[HostileKey("extra")] = None
+        with self.assertRaises(BenchmarkError):
+            score_trace(task, bad_trace, consent=True)
+
+        bad_trace = copy.deepcopy(trace)
+        bad_trace["events"][0][HostileKey("extra")] = None
+        with self.assertRaises(BenchmarkError):
+            score_trace(task, bad_trace, consent=True)
+
+    def test_rejects_hostile_text_subclasses_before_scalar_comparison(self):
+        task = make_task(18)
+        bad = dict(task)
+        bad["schema"] = HostileText(TASK_SCHEMA)
+        with self.assertRaises(BenchmarkError):
+            validate_task(bad)
+
+        trace = make_trace(task)
+        bad_trace = dict(trace)
+        bad_trace["mode"] = HostileText("policy")
+        with self.assertRaises(BenchmarkError):
+            score_trace(task, bad_trace, consent=True)
 
     def test_no_network_or_device_side_effects(self):
         task = make_task(6)
