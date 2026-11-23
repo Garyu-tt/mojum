@@ -246,6 +246,9 @@ def validate(graph):
     # to its id/revision field without invoking caller-controlled behavior.
     if type(graph) is not dict:
         raise GraphError("Graph v1 requires a native root object")
+    # Reject caller-controlled schema values and oversized root mappings before
+    # any equality comparison or key-set operation can invoke user behavior.
+    _require_native_json_tree(graph)
     root_keys = tuple(dict.keys(graph))
     if any(type(key) is not str for key in root_keys):
         raise GraphError("Graph v1 root keys must be exact strings")
@@ -264,9 +267,6 @@ def validate(graph):
         except UnicodeEncodeError as exc:
             raise GraphError(f"Graph v1 {field} must be valid UTF-8") from exc
 
-    # Validate the complete caller-owned object tree before any schema set
-    # comparison or topology lookup can invoke custom Python behavior.
-    _require_native_json_tree(graph)
     if graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
     nodes = graph.get("nodes")
