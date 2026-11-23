@@ -41,7 +41,7 @@ not add a new event-count or schema version and does not migrate old records.
 Run the isolated regression module:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_genesis_codec -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_genesis_codec.py' -v
 ```
 
 The repository's full CI matrix and independent review remain required before
