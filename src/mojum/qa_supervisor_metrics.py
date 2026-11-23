@@ -84,6 +84,10 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """
     if type(snapshot) is not dict:
         raise MetricsInputError("snapshot must be a built-in dict")
+    # Check keys by iteration and exact type before set/dict lookup can invoke
+    # a hostile str-subclass __hash__ or __eq__ implementation.
+    if any(type(key) is not str for key in snapshot):
+        raise MetricsInputError("snapshot keys must be built-in strings")
     if set(snapshot) - {"observed_at", "tasks", "duration_samples_ms"}:
         raise MetricsInputError("snapshot contains unknown fields")
     if "observed_at" not in snapshot or "tasks" not in snapshot:
@@ -102,6 +106,8 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     for index, task in enumerate(tasks):
         if type(task) is not dict:
             raise MetricsInputError(f"task {index} must be a built-in dict")
+        if any(type(key) is not str for key in task):
+            raise MetricsInputError(f"task {index} keys must be built-in strings")
         allowed = {"id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds"}
         if set(task) - allowed or not {"id", "state"} <= set(task):
             raise MetricsInputError(f"task {index} has an invalid schema")
