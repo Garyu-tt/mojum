@@ -219,10 +219,20 @@ class BudgetLedger:
             db.execute("BEGIN IMMEDIATE")
             try:
                 row = db.execute(
-                    "SELECT last_epoch_s, frozen FROM budget_settings WHERE singleton=1"
+                    "SELECT last_epoch_s, frozen, rpm, tpm, daily_usd_micros "
+                    "FROM budget_settings WHERE singleton=1"
                 ).fetchone()
                 if row is None or row[1]:
                     raise BudgetDenied("budget ledger missing or frozen")
+                # SQLite settings are authoritative: changing the public caps
+                # attribute must never increase allowance after initialization.
+                persisted_caps = row[2:]
+                if (type(self.caps) is not BudgetCaps or persisted_caps != (
+                    self.caps.requests_per_minute,
+                    self.caps.tokens_per_minute,
+                    self.caps.usd_micros_per_utc_day,
+                )):
+                    raise BudgetDenied("budget caps mismatch: ledger policy is immutable")
                 if now_s < row[0]:
                     raise BudgetDenied("clock regression: admission closed")
                 existing = db.execute(
@@ -249,9 +259,9 @@ class BudgetLedger:
                     "FROM budget_requests WHERE day_bucket=?", (day,),
                 ).fetchone()
                 if (
-                    count >= self.caps.requests_per_minute
-                    or total_tokens + tokens > self.caps.tokens_per_minute
-                    or spent + usd_micros > self.caps.usd_micros_per_utc_day
+                    count >= persisted_caps[0]
+                    or total_tokens + tokens > persisted_caps[1]
+                    or spent + usd_micros > persisted_caps[2]
                 ):
                     raise BudgetDenied("model request exceeds rate or daily cost cap")
                 db.execute(
