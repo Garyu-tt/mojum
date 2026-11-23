@@ -106,9 +106,33 @@ class ProbeConfig:
         object.__setattr__(self, "obstacles_m", tuple(frozen_obstacles))
 
 
-def _config_payload(config: ProbeConfig) -> dict:
+def _validated_config(config: ProbeConfig) -> ProbeConfig:
+    """Revalidate frozen instances at execution and serialization boundaries.
+
+    Frozen dataclasses still permit mutation through object.__setattr__.
+    Reconstructing exact native fields prevents forged post-construction values
+    from bypassing resource, numeric and geometry limits.
+    """
     if type(config) is not ProbeConfig:
         raise ValueError("config must be an exact ProbeConfig")
+    try:
+        return ProbeConfig(
+            width_m=config.width_m,
+            height_m=config.height_m,
+            start_x_m=config.start_x_m,
+            start_y_m=config.start_y_m,
+            steps=config.steps,
+            timestep_ns=config.timestep_ns,
+            control_period=config.control_period,
+            control_pattern=config.control_pattern,
+            obstacles_m=config.obstacles_m,
+        )
+    except (AttributeError, TypeError, OverflowError) as exc:
+        raise ValueError("config no longer satisfies the bounded point-room profile") from exc
+
+
+def _config_payload(config: ProbeConfig) -> dict:
+    config = _validated_config(config)
     return {
         "schema": "mojum.synthetic.point-room-workload/1",
         "width_m": float(config.width_m),
@@ -132,8 +156,7 @@ def _canonical_bytes(value: dict) -> bytes:
 
 def build_mjcf_xml(config: ProbeConfig = ProbeConfig()) -> str:
     """Create a deterministic in-memory MJCF model with no external assets."""
-    if type(config) is not ProbeConfig:
-        raise ValueError("config must be an exact ProbeConfig")
+    config = _validated_config(config)
     root = ET.Element("mujoco", {"model": "mojum_dm_control_point_room"})
     ET.SubElement(root, "compiler", {"angle": "radian"})
     ET.SubElement(root, "option", {
@@ -194,8 +217,7 @@ def _version(distribution: str) -> str:
 
 def run_benchmark(config: ProbeConfig = ProbeConfig()) -> dict:
     """Run the optional native MuJoCo/dm_control workload and return a receipt."""
-    if type(config) is not ProbeConfig:
-        raise ValueError("config must be an exact ProbeConfig")
+    config = _validated_config(config)
     try:
         from dm_control import mujoco
     except ImportError as exc:
