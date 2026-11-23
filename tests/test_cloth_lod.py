@@ -121,6 +121,26 @@ class ClothLODTests(unittest.TestCase):
             with self.subTest(field=next(iter(changed))), self.assertRaises(ClothLODError):
                 restore_state({**snap, **changed}, c)
 
+    def test_snapshot_rejects_non_native_field_keys_before_comparison(self):
+        """Forged str-subclass keys cannot enter field set equality."""
+        c = ClothLODConfig(requested="low")
+        snap = start(c).to_snapshot()
+
+        class StringAlias(str):
+            pass
+
+        class EqualityTrap(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality invoked")
+
+        for key_type in (StringAlias, EqualityTrap):
+            with self.subTest(key_type=key_type.__name__):
+                forged = {key_type(key): value for key, value in snap.items()}
+                with self.assertRaises(ClothLODError):
+                    restore_state(forged, c)
+
     def test_rejects_policy_reinterpretation_and_forged_state(self):
         c = ClothLODConfig(requested="low")
         snap = start(c).to_snapshot()
