@@ -44,6 +44,23 @@ class GarmentContractTests(unittest.TestCase):
         out['material']['mass_g'] = 42
         self.assertEqual(src['material']['mass_g'], 120)
 
+    def test_schema_discriminators_reject_non_string_equality_spoofing(self):
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other in (GARMENT_SCHEMA, "mojum.cloth.wardrobe/1")
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+        for payload, validate in (
+            (garment(), validate_garment),
+            (new_wardrobe("rig-r1", "neutral_humanoid_fixture/1", 12), validate_wardrobe),
+        ):
+            with self.subTest(schema=payload["schema"]):
+                payload["schema"] = PretendInt(7)
+                with self.assertRaisesRegex(GarmentContractError, "schema"):
+                    validate(payload)
+
     def test_invalid_manifest_fail_closed(self):
         edits = [
             lambda x: x.update(schema='unversioned'),

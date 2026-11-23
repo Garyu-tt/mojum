@@ -92,7 +92,7 @@ def validate_garment(value):
     License metadata is provenance, NOT permission or licensing clearance.
     """
     _keys(value, ("schema", "garment_id", "slot", "source", "mesh", "rig", "material", "anchors"), "garment")
-    if value["schema"] != GARMENT_SCHEMA:
+    if type(value["schema"]) is not str or value["schema"] != GARMENT_SCHEMA:
         raise GarmentContractError("unsupported garment schema")
     _token(value["garment_id"], "garment ID")
     if type(value["slot"]) is not str or value["slot"] not in _SLOTS:
@@ -228,7 +228,7 @@ def new_wardrobe(skeleton_version, body_profile, age_years):
 
 def validate_wardrobe(state):
     _keys(state, ("schema", "revision", "rig", "worn"), "wardrobe")
-    if state["schema"] != WARDROBE_SCHEMA:
+    if type(state["schema"]) is not str or state["schema"] != WARDROBE_SCHEMA:
         raise GarmentContractError("unsupported wardrobe schema")
     _int(state["revision"], 0, _MAX_REVISION, "wardrobe revision")
     _keys(state["rig"], ("skeleton_version", "body_profile", "age_years"), "wardrobe rig")
