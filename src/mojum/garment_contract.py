@@ -180,7 +180,10 @@ def verify_mesh_file(manifest, root):
     an attacker actively replacing files while verification runs.
     """
     manifest = validate_garment(manifest)
-    root = Path(root).resolve(strict=True)
+    try:
+        root = Path(root).resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise GarmentContractError("missing/invalid asset root") from exc
     if not root.is_dir():
         raise GarmentContractError("asset root is not a directory")
     path = root
