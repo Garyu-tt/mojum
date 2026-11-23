@@ -32,6 +32,10 @@ class CheckpointError(ValueError):
 def _exact_keys(value: Any, expected: set[str], field: str) -> None:
     if type(value) is not dict:
         raise CheckpointError(f"{field} must be an exact dictionary")
+    if len(value) != len(expected):
+        raise CheckpointError(
+            f"{field} has {len(value)} fields; expected exactly {len(expected)}"
+        )
     keys = tuple(dict.keys(value))
     if any(type(key) is not str for key in keys):
         raise CheckpointError(f"{field} keys must be exact strings")
