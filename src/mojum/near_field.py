@@ -65,8 +65,14 @@ def sense_room_rays(room, state):
                 distances[2] = min(distances[2], b - y)
             if y >= b + h:
                 distances[3] = min(distances[3], y - (b + h))
-    return tuple(min(MAX_BUCKET, max(0, int(max(0.0, d) / BUCKET_M + 1e-10)))
-                 for d in distances)
+    def bucket(distance):
+        # Saturate before division. Even a finite 1e308-metre synthetic room
+        # overflows to infinity when divided by 5 cm, making int() fail.
+        if distance >= MAX_BUCKET * BUCKET_M:
+            return MAX_BUCKET
+        return max(0, int(max(0.0, distance) / BUCKET_M + 1e-10))
+
+    return tuple(bucket(d) for d in distances)
 
 
 @dataclass(frozen=True)
