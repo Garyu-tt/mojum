@@ -182,6 +182,35 @@ class ClothGLBTests(unittest.TestCase):
         with self.assertRaisesRegex(ClothGLBError, "duplicate"):
             convert(modified)
 
+    def test_giant_json_integer_is_rejected_without_traceback(self):
+        # Python 3.11+ json.loads can raise bare ValueError for an integer
+        # longer than sys.get_int_max_str_digits(), bypassing JSONDecodeError.
+        raw = fixture()
+        doc, blob = _parse_glb(raw)
+        encoded = json.dumps(doc, separators=(",", ":")).encode()
+        encoded = encoded[:-1] + b',"untrusted_number":' + b"9" * 5000 + b"}"
+        encoded += b" " * (-len(encoded) % 4)
+        blob += b"\\x00" * (-len(blob) % 4)
+        length = 12 + 8 + len(encoded) + 8 + len(blob)
+        malformed = (struct.pack("<4sII", b"glTF", 2, length) +
+                     struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
+                     struct.pack("<II", len(blob), 0x004E4942) + blob)
+        with self.assertRaisesRegex(ClothGLBError, "malformed GLB JSON"):
+            convert(malformed)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "malformed.glb"
+            output = Path(directory) / "out.json"
+            source.write_bytes(malformed)
+            argv = ["--input", str(source), "--output", str(output),
+                    "--expected-sha256", hashlib.sha256(malformed).hexdigest(),
+                    "--asset-id", "scarf", "--license", "CC0-1.0",
+                    "--rig-version", "rig-1", "--body-profile", "test",
+                    "--pin-index", "0", "--allow-public-synthetic-import"]
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                self.assertEqual(main(argv), 2)
+            self.assertIn("malformed GLB JSON", stderr.getvalue())
+            self.assertFalse(output.exists())
+
     def test_accessor_byte_length_outside_view(self):
         raw = fixture()
         doc, blob = _parse_glb(raw)
