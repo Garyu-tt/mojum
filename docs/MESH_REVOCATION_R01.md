@@ -14,7 +14,10 @@ authority-signed revocation snapshot.
 - check_peer_access(..., operation="read"|"write") returns the revocation-list
   decision for one attempted protected read or write. It accepts only the exact
   object instance returned by verify_snapshot(); reconstructed or copied
-  dataclass instances do not inherit verification provenance.
+  dataclass instances do not inherit verification provenance. Verified snapshot
+and entry objects are frozen, slotted value objects with no mutable instance
+`__dict__`; the verified snapshot additionally remains weak-referenceable for
+identity-only provenance tracking without an unbounded strong-reference cache.
 
 Authority keys are supplied out of band and must be 32..128 bytes. Snapshot
 generations are monotonic only relative to the caller-supplied minimum_generation;
