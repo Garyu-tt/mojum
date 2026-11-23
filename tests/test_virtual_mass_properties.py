@@ -162,6 +162,23 @@ class VirtualMassPropertiesTests(unittest.TestCase):
         with self.assertRaisesRegex(MassPropertiesError, "missing or unknown fields"):
             build_mass_properties(raw)
 
+    def test_oversized_fixed_schema_key_rejected_before_set_hashing(self):
+        from unittest.mock import patch
+
+        raw = fixture(segment("ok"))
+        raw.pop("schema")
+        raw["s" * 100_000] = "mojum.virtual-mass-properties/1"
+
+        def guarded_set(values=()):
+            values = tuple(values)
+            if any(type(key) is str and len(key) > 32 for key in values):
+                raise AssertionError("oversized schema key reached set hashing")
+            return set(values)
+
+        with patch("mojum.virtual_mass_properties.set", side_effect=guarded_set, create=True):
+            with self.assertRaisesRegex(MassPropertiesError, "key length"):
+                build_mass_properties(raw)
+
     def test_non_symmetric_inertia_is_rejected(self):
         tensor = [[1, 0.1, 0], [0, 1, 0], [0, 0, 1]]
         with self.assertRaises(MassPropertiesError):
