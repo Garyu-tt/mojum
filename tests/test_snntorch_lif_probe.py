@@ -65,6 +65,31 @@ class LIFProbeTests(unittest.TestCase):
             f["motor_intention"] = "walk"
             validate_fixture(f)
 
+    def test_reject_forged_schema_and_visibility(self):
+        class ForgedIdentity:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for field in ("schema", "visibility"):
+            with self.subTest(field=field):
+                candidate = copy.deepcopy(self.fixture)
+                candidate[field] = ForgedIdentity()
+                with self.assertRaises(ProbeError):
+                    validate_fixture(candidate)
+
+        # A str subclass still hashes/JSON-encodes as the canonical schema,
+        # so the snapshot digest alone cannot prove an exact wire type.
+        sim = LIFReference(beta=0.5, threshold=1.0, neurons=1)
+        forged_state = sim.snapshot()
+        forged_state["schema"] = type("StrAlias", (str,), {})(
+            "mojum.neural.snntorch-lif-state/1"
+        )
+        with self.assertRaises(ProbeError):
+            LIFReference.restore(forged_state)
+
     def test_reject_bounded_shape_values(self):
         bad = [[], [[0.1] * (MAX_NEURONS + 1)], [[0.1]] * (MAX_STEPS + 1),
                [[0.3], [0.1, 0.2]], [[float('nan')]], [[True]], [[-0.1]], [[3.0]]]
