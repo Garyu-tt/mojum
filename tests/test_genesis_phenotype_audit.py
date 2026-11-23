@@ -71,7 +71,7 @@ class PhenotypeAuditTests(unittest.TestCase):
 
     def test_json_escape_expansion_is_bounded_before_serialization(self):
         ledger=make_ledger(); expected=ledger.phenotype(5)
-        control = "\\x01" * 16_384
+        control = "\x01" * 16_384
         for index in range(11):
             expected[f"control_{index}"] = control
         with patch(
