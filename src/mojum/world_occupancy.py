@@ -92,10 +92,27 @@ def verify_raster(room: Room, frame: dict) -> bool:
             "schema", "geometry_sha256", "columns", "rows", "row_order",
             "blocked_rows", "provenance"}):
         raise ValueError("invalid occupancy preview envelope")
-    if (type(frame["blocked_rows"]) is not list
-            or any(type(line) is not str for line in frame["blocked_rows"])):
+    # Equality on untrusted objects can invoke arbitrary __eq__ methods, or
+    # accept malformed fields through forged always-true comparisons. Validate
+    # exact wire primitive types before comparing against the expected frame.
+    if (any(type(frame[key]) is not str for key in (
+            "schema", "geometry_sha256", "row_order", "provenance"))
+            or type(frame["columns"]) is not int
+            or type(frame["rows"]) is not int
+            or type(frame["blocked_rows"]) is not list):
+        raise ValueError("invalid occupancy preview field types")
+    columns, rows = frame["columns"], frame["rows"]
+    if (not 1 <= columns <= MAX_AXIS_CELLS
+            or not 1 <= rows <= MAX_AXIS_CELLS
+            or columns * rows > MAX_TOTAL_CELLS
+            or len(frame["blocked_rows"]) != rows
+            or len(frame["geometry_sha256"]) != 64):
+        raise ValueError("invalid occupancy preview dimensions or digest")
+    if any(type(line) is not str or len(line) != columns
+           or not set(line).issubset({".", "#"})
+           for line in frame["blocked_rows"]):
         raise ValueError("invalid occupancy rows")
-    expected = rasterize(room, columns=frame["columns"], rows=frame["rows"])
+    expected = rasterize(room, columns=columns, rows=rows)
     if frame != expected:
         raise ValueError("stale or tampered occupancy preview")
     return True

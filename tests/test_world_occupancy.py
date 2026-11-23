@@ -96,6 +96,43 @@ class OccupancyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_raster(Room(4, 1, ((1.6, 0.2, 0.01, 0.6),)), baseline)
 
+    def test_forged_envelope_values_cannot_bypass_wire_types(self):
+        room = Room(2, 2)
+        baseline = rasterize(room, columns=2, rows=2)
+
+        class AlwaysEqual:
+            def __eq__(self, other):
+                return True
+
+        class ExplodingEquality:
+            def __eq__(self, other):
+                raise RuntimeError("untrusted __eq__ executed")
+
+        for key in ("schema", "geometry_sha256", "row_order", "provenance"):
+            for forged in (AlwaysEqual(), ExplodingEquality()):
+                with self.subTest(key=key, forged=type(forged).__name__):
+                    candidate = dict(baseline)
+                    candidate[key] = forged
+                    with self.assertRaises(ValueError):
+                        verify_raster(room, candidate)
+
+        class StringSubclass(str):
+            pass
+
+        candidate = dict(baseline)
+        candidate["provenance"] = StringSubclass(baseline["provenance"])
+        with self.assertRaises(ValueError):
+            verify_raster(room, candidate)
+
+    def test_malformed_rows_rejected_before_full_raster_recomputation(self):
+        room = Room(2, 2)
+        baseline = rasterize(room, columns=2, rows=2)
+        for row_data in ([".."] * 100_000, [".x", ".."], [".", ".."]):
+            candidate = dict(baseline)
+            candidate["blocked_rows"] = row_data
+            with self.assertRaises(ValueError):
+                verify_raster(room, candidate)
+
     def test_mutable_caller_obstacles_cannot_change_existing_room(self):
         obstacles = [[0.5, 0.5, 0.1, 0.1]]
         room = Room(2, 2, obstacles)
