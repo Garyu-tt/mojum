@@ -152,9 +152,20 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> BodyJerkReport:
     peaks = [0.0] * len(clean_names)
     violations: list[JerkViolation] = []
     for start in range(len(samples) - 3):
-        times = tuple(timestamps[start + offset] / 1_000_000_000.0 for offset in range(4))
-        intervals = (times[1] - times[0], times[2] - times[1], times[3] - times[2])
-        spans = (times[2] - times[0], times[3] - times[1], times[3] - times[0])
+        # Subtract in the integer-nanosecond domain before converting to
+        # float; converting absolute int64 timestamps first loses 1 ns
+        # resolution near the upper boundary.
+        t0, t1, t2, t3 = (timestamps[start + offset] for offset in range(4))
+        intervals = (
+            (t1 - t0) / 1_000_000_000.0,
+            (t2 - t1) / 1_000_000_000.0,
+            (t3 - t2) / 1_000_000_000.0,
+        )
+        spans = (
+            (t2 - t0) / 1_000_000_000.0,
+            (t3 - t1) / 1_000_000_000.0,
+            (t3 - t0) / 1_000_000_000.0,
+        )
         if any(not math.isfinite(value) or value <= 0.0 for value in (*intervals, *spans)):
             raise BodyJerkError("computed time interval is invalid")
         for joint_index, joint in enumerate(clean_names):
