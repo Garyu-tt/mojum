@@ -40,13 +40,29 @@ def _number(value):
         return False
 
 
+def _checked_room(room):
+    """Reject forged Room dataclasses and detach canonical geometry first.
+
+    A frozen Room instance can still be forged with object.__setattr__(), so
+    validating the outer type alone is not a safe boundary for _valid().
+    """
+    if type(room) is not Room:
+        raise ValueError("invalid or forged point-room geometry")
+    try:
+        return Room(room.width, room.height, room.obstacles)
+    except (AttributeError, TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise ValueError("invalid or forged point-room geometry") from exc
+
+
 def _valid_room_state(room, state):
-    if (type(room) is not Room or type(state) is not RoomState
+    room = _checked_room(room)
+    if (type(state) is not RoomState
             or type(state.tick) is not int or not 0 <= state.tick <= MAX_TICK
             or not _valid(room, state.x, state.y)
             or type(state.revision) is not str or _HEX.fullmatch(state.revision) is None
             or state.revision != _revision(room, state.tick, state.x, state.y)):
         raise ValueError("invalid or forged point-room state")
+    return room
 
 
 def _digest(tick, room_revision, items, carried):
@@ -94,7 +110,7 @@ def _check_objects(room, state):
 
 def initial_objects(room: Room, room_state: RoomState, fixtures=()) -> ObjectState:
     """Birth of standalone object fixtures, strictly at logical room tick zero."""
-    _valid_room_state(room, room_state)
+    room = _valid_room_state(room, room_state)
     if room_state.tick != 0:
         raise ValueError("object fixture can only start at room birth")
     if type(fixtures) not in (list, tuple) or len(fixtures) > MAX_OBJECTS:
@@ -129,7 +145,7 @@ def advance_objects(room: Room, room_state: RoomState, state: ObjectState, *,
     Raises ValueError for invalid transitions, without modifying inputs.
     Returns (next_room_state, next_object_state, public_synthetic_event).
     """
-    _valid_room_state(room, room_state)
+    room = _valid_room_state(room, room_state)
     _check_objects(room, state)
     if (state.tick != room_state.tick or state.room_revision != room_state.revision
             or type(expected_objects_revision) is not str
@@ -198,8 +214,7 @@ def advance_objects(room: Room, room_state: RoomState, state: ObjectState, *,
 
 def snapshot_objects(room: Room, state: ObjectState) -> dict:
     """Make a detached JSON-safe snapshot; only validated states can be exported."""
-    if type(room) is not Room:
-        raise ValueError("invalid room")
+    room = _checked_room(room)
     _check_objects(room, state)
     return {"schema": SCHEMA, "tick": state.tick,
             "room_revision": state.room_revision,
@@ -209,7 +224,7 @@ def snapshot_objects(room: Room, state: ObjectState) -> dict:
 
 def restore_objects(room: Room, room_state: RoomState, document: dict) -> ObjectState:
     """Fail-closed restore from a parsed JSON snapshot at the matching room tick."""
-    _valid_room_state(room, room_state)
+    room = _valid_room_state(room, room_state)
     if (type(document) is not dict
             or any(type(k) is not str for k in document)
             or set(document) != {"schema", "tick", "room_revision", "items", "carried", "revision"}
