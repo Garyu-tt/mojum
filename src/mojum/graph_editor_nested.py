@@ -12,7 +12,7 @@ import hashlib
 import json
 import math
 
-from .graph import GraphError, PORTS, _check_json_depth
+from .graph import GraphError, PORTS
 from .graph_v2 import validate_v2
 
 NESTED_SCHEMA = "mojum.graph-editor-nested/1"
@@ -23,16 +23,85 @@ MAX_PORTALS = 32
 MAX_POSITION = 100_000
 
 
+MAX_JSON_DEPTH = 64
+MAX_JSON_NODES = 50_000
+
+
+def _preflight_json(value):
+    """Bound and validate an exact-native JSON tree before serialization.
+
+    The traversal never invokes caller-defined container/string methods. Shared
+    containers are rejected as well as cycles so the admitted tree has one
+    unambiguous ownership path and bounded traversal cost.
+    """
+    stack = [(value, 0)]
+    seen = set()
+    nodes = 0
+    estimated_bytes = 0
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_JSON_NODES or depth > MAX_JSON_DEPTH:
+            raise GraphError("nested editor JSON structure exceeds limits")
+        kind = type(item)
+        if kind is dict:
+            identity = id(item)
+            if identity in seen:
+                raise GraphError("nested editor JSON contains a cycle or shared container")
+            seen.add(identity)
+            # Charge structural overhead before adding children to the worklist.
+            estimated_bytes += 2 + len(item) * 6
+            if estimated_bytes > MAX_BYTES:
+                raise GraphError("nested editor payload exceeds byte limit")
+            for key, child in item.items():
+                if type(key) is not str:
+                    raise GraphError("nested editor JSON keys must be native strings")
+                try:
+                    key_bytes = len(key.encode("utf-8", errors="strict"))
+                except UnicodeEncodeError as exc:
+                    raise GraphError("nested editor JSON key is not valid UTF-8") from exc
+                if key_bytes > MAX_BYTES:
+                    raise GraphError("nested editor JSON key exceeds byte limit")
+                estimated_bytes += key_bytes
+                stack.append((child, depth + 1))
+        elif kind is list:
+            identity = id(item)
+            if identity in seen:
+                raise GraphError("nested editor JSON contains a cycle or shared container")
+            seen.add(identity)
+            estimated_bytes += 2 + len(item)
+            if estimated_bytes > MAX_BYTES:
+                raise GraphError("nested editor payload exceeds byte limit")
+            stack.extend((child, depth + 1) for child in item)
+        elif kind is str:
+            try:
+                estimated_bytes += len(item.encode("utf-8", errors="strict")) + 2
+            except UnicodeEncodeError as exc:
+                raise GraphError("nested editor JSON text is not valid UTF-8") from exc
+        elif kind is int:
+            if item.bit_length() > 64:
+                raise GraphError("nested editor JSON integer exceeds limit")
+            estimated_bytes += 24
+        elif kind is float:
+            if not math.isfinite(item):
+                raise GraphError("nested editor JSON number must be finite")
+            estimated_bytes += 24
+        elif item is None or kind is bool:
+            estimated_bytes += 5
+        else:
+            raise GraphError("nested editor payload must use exact native JSON values")
+        if estimated_bytes > MAX_BYTES:
+            raise GraphError("nested editor payload exceeds byte limit")
+
+
 def _copy_json(value):
+    _preflight_json(value)
     try:
         raw = json.dumps(value, ensure_ascii=False, sort_keys=True,
                          allow_nan=False, separators=(",", ":"))
         if len(raw.encode("utf-8", errors="strict")) > MAX_BYTES:
             raise GraphError("nested editor payload exceeds byte limit")
-        _check_json_depth(raw)
         result = json.loads(raw)
-        if result != value:
-            raise GraphError("nested editor payload must be lossless JSON")
         return result
     except GraphError:
         raise
