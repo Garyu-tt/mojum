@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.physics_benchmark_compare import (
     BenchmarkReportError, COMPARISON_SCHEMA, compare_json_reports,
@@ -144,6 +145,32 @@ class PhysicsBenchmarkCompareTests(unittest.TestCase):
         left = json.dumps(report(), separators=(",", ":"))
         right = json.dumps(report("candidate"), separators=(",", ":"))
         self.assertTrue(compare_json_reports(left, right)["comparable"])
+
+    def test_oversized_report_and_platform_keys_rejected_before_set(self):
+        native_set = set
+
+        def guarded_set(values):
+            values = tuple(values)
+            if any(type(value) is str and len(value) > 64 for value in values):
+                raise AssertionError("oversized key reached set hashing")
+            return native_set(values)
+
+        oversized_report = report()
+        oversized_report["x" * 1_000_000] = oversized_report.pop("schema")
+        with patch("mojum.physics_benchmark_compare.set", side_effect=guarded_set, create=True):
+            with self.assertRaisesRegex(BenchmarkReportError, "bounded native strings"):
+                compare_reports(oversized_report, report("candidate"))
+
+        oversized_platform = report()
+        oversized_platform["platform"]["x" * 1_000_000] = oversized_platform["platform"].pop("os")
+        with patch("mojum.physics_benchmark_compare.set", side_effect=guarded_set, create=True):
+            with self.assertRaisesRegex(BenchmarkReportError, "bounded native strings"):
+                compare_reports(oversized_platform, report("candidate"))
+
+    def test_json_oversized_key_rejected_before_duplicate_lookup(self):
+        payload = b'{"' + b"x" * 100_000 + b'":1}'
+        with self.assertRaisesRegex(BenchmarkReportError, "bounded native strings"):
+            load_report_json(payload)
 
 
 if __name__ == "__main__":
