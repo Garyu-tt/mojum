@@ -54,6 +54,7 @@ this source). Example:
 ```
 
 `body`, `author`, and `created_at` on the issue itself are optional **together**;
+any incomplete trio is rejected as invalid input rather than silently ignored.
 `comments` may be omitted for an empty array. The tool accepts up to 2 MiB,
 300 issues, 20,000 total comments, and 16 KiB per text body; malformed data,
 duplicate JSON keys, duplicate issue/comment IDs, non-UTC timestamps, invalid
