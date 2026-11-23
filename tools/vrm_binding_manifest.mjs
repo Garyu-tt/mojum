@@ -19,6 +19,10 @@ const BONES = new Set([
   'leftToes', 'rightToes'
 ]);
 
+function compareCodePoints(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function fail(message) {
   throw new TypeError(message);
 }
@@ -154,8 +158,9 @@ export function validateVrmBindingManifest(input) {
     schema: VRM_BINDING_SCHEMA,
     expected_joint_ids: [...expected].sort(),
     mappings: mappings.slice().sort((a, b) =>
-      a.id.localeCompare(b.id) || a.bone.localeCompare(b.bone) ||
-      a.axis.localeCompare(b.axis)),
+      compareCodePoints(a.id, b.id) ||
+      compareCodePoints(a.bone, b.bone) ||
+      compareCodePoints(a.axis, b.axis)),
     available_bones: [...available].sort()
   };
   const digest = createHash('sha256')
