@@ -62,7 +62,7 @@ def validate_split() -> None:
 
 
 def _seed(value: int) -> int:
-    # Compatible with #725 before its Gymnasium unbounded-seed QA fix lands.
+    # Intentionally uint32-compatible for SB3/NumPy RNG; Gymnasium itself supports larger seeds.
     if type(value) is not int or not 0 <= value < 2**32 - len(HELDOUT):
         raise ValueError("invalid bounded seed")
     return value
