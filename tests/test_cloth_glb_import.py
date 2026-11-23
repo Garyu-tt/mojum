@@ -288,7 +288,7 @@ class ClothGLBTests(unittest.TestCase):
         doc["meshes"][0]["primitives"][0]["mode"] = 4.0
         encoded = json.dumps(doc, separators=(",", ":")).encode()
         encoded += b" " * (-len(encoded) % 4)
-        blob += b"\\x00" * (-len(blob) % 4)
+        blob += bytes(-len(blob) % 4)
         length = 12 + 8 + len(encoded) + 8 + len(blob)
         raw = (struct.pack("<4sII", b"glTF", 2, length) +
                struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
