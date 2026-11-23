@@ -129,8 +129,8 @@ def _read_source(source: object) -> dict[str, object]:
     if len(value) > len(_ALLOWED_KEYS):
         raise AquariumConfigError("profile has too many fields")
     for key in value:
-        if type(key) is not str:
-            raise AquariumConfigError("profile keys must be exact strings")
+        if type(key) is not str or len(key) > 64:
+            raise AquariumConfigError("profile keys must be exact bounded strings")
     return value
 
 
@@ -157,7 +157,7 @@ def _exact_int(value: object, field: str, minimum: int, maximum: int) -> int:
 
 
 def _enum(value: object, field: str, allowed: frozenset[str]) -> str:
-    if type(value) is not str or value not in allowed:
+    if type(value) is not str or len(value) > 64 or value not in allowed:
         raise AquariumConfigError(f"unsupported {field}")
     return value
 
@@ -181,7 +181,8 @@ def validate_profile(source: object) -> LaunchProfile:
     unknown = set(data) - _ALLOWED_KEYS
     if unknown:
         raise AquariumConfigError(f"unknown profile field: {sorted(unknown)[0]}")
-    if type(data.get("schema")) is not str or data["schema"] != SCHEMA:
+    schema_value = data.get("schema")
+    if type(schema_value) is not str or len(schema_value) != len(SCHEMA) or schema_value != SCHEMA:
         raise AquariumConfigError(f"schema must be {SCHEMA}")
     if "db_path" not in data:
         raise AquariumConfigError("db_path is required")
