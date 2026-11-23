@@ -43,7 +43,7 @@ The schema is mandatory. `db_path` is mandatory and `room_file` is optional. Oth
 |---|---|---|
 | `schema` | exact string `mojum.aquarium.launch-profile/1` | required |
 | `db_path` | nonempty exact string, <=512 chars | required |
-| `ticks` | exact integer, 1..100000 | 120 |
+| `ticks` | exact integer, 0..1000 | 120 |
 | `dt_ns` | exact integer, 1000..1000000000 | 10000000 |
 | `neural_mode` | `shadow`, `disabled` | `shadow` |
 | `motor_mode` | supported Aquarium motor selector | `scripted` |
@@ -56,7 +56,7 @@ The schema is mandatory. `db_path` is mandatory and `room_file` is optional. Oth
 
 Motor selectors accepted at R0.1: `scripted`, `developmental_fixture`, `local_cell_v2b`, `local_cell_v3`, `local_cell_v3_escape`, `local_cell_v4`, `local_cell_v2`, and `local_cell_v2_a_archive`.
 
-Cross-field rules mirror the currently exposed Aquarium constructor constraints: developmental controller and legacy `toy_probe` require `developmental_fixture`; `toy_probe_v2` requires `developmental_fixture` or `local_cell_v4`; `local_cell_v4` rejects legacy `toy_probe`; `range_guided` requires `toy_probe`; explicit pulse summation requires neural shadow mode.
+Cross-field rules mirror the currently exposed Aquarium CLI/runtime constraints: developmental controller and legacy `toy_probe` require `developmental_fixture`; `toy_probe_v2` requires `developmental_fixture` or `local_cell_v4`; `local_cell_v4` rejects legacy `toy_probe`; `range_guided` requires `toy_probe`; explicit pulse summation requires neural shadow mode. The `local_cell_v2_a_archive` selector requires exactly `ticks=0` and is normalized to `read_only=true`, matching the runtime’s intrinsic archive behavior. Fixed-geometry local-cell selectors (`local_cell_v2b`, `local_cell_v2`, `local_cell_v3`, `local_cell_v3_escape`, `local_cell_v4`, and `local_cell_v2_a_archive`) reject a non-null `room_file`, matching the CLI gate.
 
 ## Failure and trust boundaries
 
