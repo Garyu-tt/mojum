@@ -43,7 +43,7 @@ def _agents(value, expected):
 
 
 def _dict(value, keys, name):
-    if type(value) is not dict or set(value) != set(keys):
+    if not isinstance(value, dict) or set(value) != set(keys):
         raise BenchmarkError(f"{name}: invalid exact agent-key set")
 
 
