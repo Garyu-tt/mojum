@@ -1,7 +1,7 @@
 import copy, unittest, json
 from unittest.mock import patch
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
-from mojum.genesis_phenotype_audit import MAX_INPUT_BYTES, PhenotypeAuditError, audit_phenotype_snapshot
+from mojum.genesis_phenotype_audit import (MAX_AUDIT_EVENTS, MAX_INPUT_BYTES,\n    PhenotypeAuditError, audit_phenotype_snapshot)
 
 SEED = {"schema":"mojum.genesis.genotype/1","genome_id":"public-synthetic-test","revision":"seed-r1","inherited":{"heartbeat_bpm":60,"body_scale_milli":1000,"sensory_gain_milli":1000}}
 def make_ledger():
@@ -13,6 +13,22 @@ def make_ledger():
 class PhenotypeAuditTests(unittest.TestCase):
     def audit(self, ledger, phenotype):
         return audit_phenotype_snapshot(ledger.snapshot(), phenotype, source_classification="PUBLIC_SYNTHETIC")
+    def test_event_budget_rejects_before_expensive_ledger_restore(self):
+        snapshot = {"events": [None] * (MAX_AUDIT_EVENTS + 1)}
+        with patch("mojum.genesis_phenotype_audit.GenomeLedger.from_snapshot") as restore:
+            with self.assertRaisesRegex(PhenotypeAuditError, "event budget"):
+                audit_phenotype_snapshot(
+                    snapshot, {}, source_classification="PUBLIC_SYNTHETIC"
+                )
+            restore.assert_not_called()
+
+    def test_event_budget_accepts_the_documented_limit(self):
+        ledger = make_ledger()
+        snapshot = ledger.snapshot()
+        self.assertEqual(len(snapshot["events"]), 1)
+        self.assertTrue(self.audit(ledger, ledger.phenotype(5)).accepted)
+        self.assertLessEqual(MAX_AUDIT_EVENTS, 128)
+
     def test_exact_recomputation_is_accepted(self):
         ledger=make_ledger(); result=self.audit(ledger, ledger.phenotype(5))
         self.assertTrue(result.accepted); self.assertEqual(result.mismatch_fields, ()); self.assertEqual(result.event_count,1)
