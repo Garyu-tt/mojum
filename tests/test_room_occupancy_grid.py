@@ -56,6 +56,48 @@ class OccupancyTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             out["occupied"] = 42
 
+    def test_maximum_grid_and_overlapping_obstacles(self):
+        full = dict(x0=0, y0=0, x1=256, y1=256)
+        out = rasterize_occupancy(payload(
+            room=dict(x0=0, y0=0, x1=256, y1=256),
+            cell_mm=1,
+            obstacles=[dict(full) for _ in range(1024)],
+        ))
+        self.assertEqual((out["width"], out["height"]), (256, 256))
+        self.assertEqual(out["occupied"], 65536)
+        self.assertTrue(all(all(row) for row in out["rows"]))
+
+    def test_hostile_string_subclass_keys_rejected_before_hash_or_equality(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash(str(self))
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not execute")
+
+        top = payload()
+        del top["schema"]
+        top[HostileKey("schema")] = SCHEMA
+        with self.assertRaises(ValueError):
+            rasterize_occupancy(top)
+
+        nested = payload()
+        rect = nested["room"]
+        del rect["x0"]
+        rect[HostileKey("x0")] = 0
+        with self.assertRaises(ValueError):
+            rasterize_occupancy(nested)
+
+    def test_hostile_schema_subclass_value_rejected_before_comparison(self):
+        class HostileValue(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile value comparison must not execute")
+
+        item = payload()
+        item["schema"] = HostileValue(SCHEMA)
+        with self.assertRaises(ValueError):
+            rasterize_occupancy(item)
+
 
 if __name__ == "__main__":
     unittest.main()
