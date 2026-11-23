@@ -6,13 +6,21 @@ from pathlib import Path
 
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger, canonical as genesis_canonical
 from mojum.genesis_phenotype_audit import (
-    GenesisPhenotypeAuditError, SCHEMA, audit_phenotype,
+    GenesisPhenotypeAuditError, SCHEMA, audit_phenotype as _audit_phenotype,
 )
 
 SEED = json.loads(
     (Path(__file__).resolve().parent.parent / "examples" / "genesis_seed.json")
     .read_text(encoding="utf-8")
 )
+
+
+def audit_phenotype(ledger_snapshot, phenotype_snapshot, tick):
+    """Test helper for the explicitly public synthetic fixtures below."""
+    return _audit_phenotype(
+        ledger_snapshot, phenotype_snapshot, tick,
+        source_classification="PUBLIC_SYNTHETIC",
+    )
 
 
 def make_ledger():
@@ -88,6 +96,18 @@ class PhenotypeAuditTests(unittest.TestCase):
             with self.subTest(tick=tick):
                 with self.assertRaises(GenesisPhenotypeAuditError):
                     audit_phenotype(ledger.snapshot(), ledger.phenotype(3), tick)
+
+    def test_explicit_public_classification_is_required(self):
+        ledger = make_ledger()
+        snapshot = ledger.snapshot()
+        phenotype = ledger.phenotype(3)
+        for classification in (None, "PRIVATE", "public_synthetic", 1, True):
+            with self.subTest(classification=classification):
+                with self.assertRaises(GenesisPhenotypeAuditError):
+                    _audit_phenotype(
+                        snapshot, phenotype, 3,
+                        source_classification=classification,
+                    )
 
     def test_non_object_snapshots_rejected(self):
         ledger = make_ledger()
