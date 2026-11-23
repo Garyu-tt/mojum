@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Mojum · Graph preview</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#e5edf3;background:#10171d;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;min-height:100vh}header{padding:18px clamp(16px,3vw,38px);border-bottom:1px solid #2c3d48;background:#141e26}
+h1{font-size:22px;margin:0;letter-spacing:-.03em}header p{color:#9cafbb;font-size:13px;max-width:850px;line-height:1.5;margin:7px 0 0}
+main{max-width:1600px;margin:auto;padding:18px;display:grid;gap:14px}
+.toolbar,.panel{border:1px solid #2d404c;border-radius:12px;background:#18232c}
+.toolbar{padding:12px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+button,.file-button{background:#263b49;border:1px solid #486274;color:#e8f2f7;border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+button:hover,.file-button:hover{background:#345163}button:focus-visible,.file-button:focus-visible,input:focus-visible{outline:2px solid #70d9cd;outline-offset:3px}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0)}
+#search{background:#0f1920;border:1px solid #405562;border-radius:8px;color:#e8f2f7;padding:9px 11px;min-width:210px;flex:1}
+.status{font-size:12px;color:#9eb4bf;margin-left:auto}.status.error{color:#ffc0c9}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:14px;align-items:start}
+.panel-head{padding:13px 15px;border-bottom:1px solid #2a3b46;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+h2{font-size:14px;margin:0}.muted{font-size:12px;color:#95aab7}
+#canvas-wrap{height:min(74vh,850px);min-height:420px;overflow:auto;background:#101a21;border-radius:0 0 12px 12px}
+#graph{display:block;min-width:100%;width:100%;height:100%;min-height:420px}
+#graph .edge{stroke:#7494a2;stroke-width:2;fill:none;opacity:.8}
+#graph .edge-label{fill:#a8bec9;font-size:11px}
+#graph .node{fill:#203440;stroke:#5d7c8c;stroke-width:1.5}
+#graph .node.selected{stroke:#8ce5d7;stroke-width:3}
+#graph .node.private{stroke:#d2ad76;stroke-dasharray:5 4}
+#graph .node-title{fill:#f0f5f8;font-size:13px;font-weight:650;pointer-events:none}
+#graph .node-meta{fill:#a8bdc7;font-size:10px;pointer-events:none}
+#graph .port{fill:#72cfc0;stroke:#102027;stroke-width:1}
+#graph .port-label{fill:#bdd0d8;font-size:9px}
+.inspector{padding:14px;min-height:220px}.inspector h3{margin:0 0 10px;font-size:14px}
+#details{white-space:pre-wrap;overflow-wrap:anywhere;color:#bfd2dc;font:11px/1.5 ui-monospace,Consolas,monospace;margin:0;max-height:65vh;overflow:auto}
+.notice{padding:12px 14px;color:#a9bbc5;font-size:12px;line-height:1.55}
+@media(max-width:900px){.layout{grid-template-columns:1fr}#canvas-wrap{height:58vh;min-height:360px}.inspector{min-height:120px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<header>
+<h1>Mojum / Graph Preview <span class="muted">OFFLINE · READ ONLY</span></h1>
+<p>Локальный просмотр React Flow / Rete-shaped export envelope. Файл обрабатывается в этой вкладке: данные не отправляются в сеть. Предпросмотр не исполняет граф и не подтверждает подлинность SHA-256.</p>
+</header>
+<main>
+<section class="toolbar" aria-label="Загрузка и фильтр">
+<label class="file-button" for="file">Открыть JSON</label>
+<input id="file" type="file" accept=".json,application/json">
+<input id="search" type="search" placeholder="Фильтр по ID или типу…" aria-label="Фильтр узлов" disabled>
+<button id="clear" type="button" disabled>Сбросить</button>
+<span id="status" class="status" role="status" aria-live="polite">Ожидается graph-editor-envelope/1</span>
+</section>
+<div class="layout">
+<section class="panel" aria-label="Граф">
+<div class="panel-head"><h2>Схема</h2><span id="counts" class="muted">0 узлов · 0 связей</span></div>
+<div id="canvas-wrap"><svg id="graph" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" role="img" aria-label="Предпросмотр графа"><text x="28" y="42" fill="#8da5b2" font-size="14">Откройте JSON export envelope</text></svg></div>
+</section>
+<aside class="panel" aria-label="Свойства выбранного узла">
+<div class="panel-head"><h2>Инспектор</h2><span id="revision" class="muted">revision: —</span></div>
+<div class="inspector"><h3 id="selected-title">Узел не выбран</h3><pre id="details">Сведения появятся после загрузки файла и выбора узла.</pre></div>
+<div class="notice">Ограничения: только просмотр. PRIVATE/RESTRICTED содержимое остаётся локально открытым файлом. Не загружайте файлы, которыми не вправе делиться с этим браузерным профилем. Layout из редактора читается, но не сохраняется.</div>
+</aside>
+</div>
+</main>
+<script>
+"use strict";
+(() => {
+  const MAX_BYTES = 512 * 1024, MAX_NODES = 256, MAX_EDGES = 2048;
+  const svgNS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const state = { envelope: null, selected: null };
+  const exactKeys = (value, keys) => value !== null && typeof value === "object" &&
+    !Array.isArray(value) && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+  const fail = (message) => { throw new Error(message); };
+  const boundedText = (v, max=256) => typeof v === "string" && v.length > 0 && v.length <= max;
+  const finitePosition = (p) => exactKeys(p, ["x","y"]) &&
+    ["x","y"].every(k => typeof p[k] === "number" && Number.isFinite(p[k]) && Math.abs(p[k]) <= 100000);
+  function validate(envelope) {
+    if (!exactKeys(envelope, ["schema","backend","revision","source_sha256","canonical","nodes","edges"])) fail("Неизвестная структура envelope.");
+    if (envelope.schema !== "mojum.graph-editor-envelope/1") fail("Неподдерживаемая версия envelope.");
+    if (!["reactflow","rete"].includes(envelope.backend)) fail("Неизвестный backend.");
+    if (!boundedText(envelope.revision) || !/^[a-f0-9]{64}$/.test(envelope.source_sha256)) fail("Некорректные revision/SHA поля.");
+    if (!envelope.canonical || typeof envelope.canonical !== "object" || Array.isArray(envelope.canonical) ||
+        envelope.canonical.revision !== envelope.revision || !Array.isArray(envelope.canonical.nodes)) fail("Canonical sidecar не совпадает с revision.");
+    if (!Array.isArray(envelope.nodes) || !Array.isArray(envelope.edges) ||
+        envelope.nodes.length > MAX_NODES || envelope.edges.length > MAX_EDGES ||
+        envelope.nodes.length !== envelope.canonical.nodes.length) fail("Превышен лимит либо не совпадает число узлов.");
+    const ids = new Set();
+    for (let i=0;i<envelope.nodes.length;i++) {
+      const n=envelope.nodes[i], c=envelope.canonical.nodes[i];
+      if (!n || typeof n !== "object" || !boundedText(n.id) || ids.has(n.id) || n.id !== c.id) fail("Некорректный или повторяющийся ID узла.");
+      ids.add(n.id);
+      if (!finitePosition(n.position)) fail("Некорректная позиция узла.");
+      const expected = envelope.backend === "reactflow" ?
+        ["id","type","position","data"] : ["id","label","position","inputs","outputs","data"];
+      if (!exactKeys(n, expected)) fail("Неподдерживаемая структура узла.");
+      if (!n.data || typeof n.data !== "object" || Array.isArray(n.data) ||
+          !boundedText(n.data.kind) || !["PUBLIC","PRIVATE","RESTRICTED"].includes(n.data.visibility) ||
+          !n.data.ports || typeof n.data.ports !== "object" || Array.isArray(n.data.ports) ||
+          !n.data.config || typeof n.data.config !== "object" || Array.isArray(n.data.config) ||
+          !n.data.notes || typeof n.data.notes !== "object" || Array.isArray(n.data.notes)) fail("Некорректные метаданные узла.");
+    }
+    for (const e of envelope.edges) {
+      const source = envelope.backend === "reactflow" ? e.source : e.source;
+      const target = e.target;
+      if (!e || typeof e !== "object" || !ids.has(source) || !ids.has(target) ||
+          !boundedText(e.id) || !boundedText(envelope.backend === "reactflow" ? e.sourceHandle : e.sourceOutput) ||
+          !boundedText(envelope.backend === "reactflow" ? e.targetHandle : e.targetInput)) fail("Связь с неизвестным узлом или портом.");
+    }
+    return envelope;
+  }
+  function el(tag, attrs={}, text="") {
+    const n=document.createElementNS(svgNS,tag);
+    for (const [k,v] of Object.entries(attrs)) n.setAttribute(k,String(v));
+    if (text !== "") n.textContent=String(text);
+    return n;
+  }
+  function layout(nodes) {
+    const hasLayout=nodes.some(n => n.position.x !== 0 || n.position.y !== 0);
+    return nodes.map((n,i) => {
+      const x=hasLayout ? n.position.x : 50+(i%4)*230;
+      const y=hasLayout ? n.position.y : 45+Math.floor(i/4)*155;
+      return {...n, px:50+x*0.85, py:45+y*0.85};
+    });
+  }
+  function render() {
+    const env=state.envelope, svg=$("graph"), q=$("search").value.trim().toLowerCase();
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+    if(!env) return;
+    const nodes=layout(env.nodes).filter(n => (n.id+" "+n.data.kind).toLowerCase().includes(q));
+    const visible=new Set(nodes.map(n=>n.id)), coords=new Map(nodes.map(n=>[n.id,n]));
+    let maxX=1000,maxY=650;
+    for(const n of nodes){maxX=Math.max(maxX,n.px+220);maxY=Math.max(maxY,n.py+110);}
+    svg.setAttribute("viewBox",`0 0 ${maxX} ${maxY}`);
+    for(const e of env.edges){
+      if(!visible.has(e.source)||!visible.has(e.target)) continue;
+      const a=coords.get(e.source),b=coords.get(e.target);
+      svg.appendChild(el("path",{class:"edge",d:`M ${a.px+190} ${a.py+40} C ${a.px+230} ${a.py+40}, ${b.px-35} ${b.py+40}, ${b.px} ${b.py+40}`}));
+    }
+    for(const n of nodes){
+      const g=el("g",{role:"button",tabindex:"0","aria-label":`Узел ${n.id}, ${n.data.kind}`});
+      const rect=el("rect",{class:"node"+(n.data.visibility==="PUBLIC"?"":" private")+(state.selected===n.id?" selected":""),x:n.px,y:n.py,width:190,height:82,rx:9});
+      g.appendChild(rect);
+      g.appendChild(el("text",{class:"node-title",x:n.px+12,y:n.py+24},n.data.kind));
+      g.appendChild(el("text",{class:"node-meta",x:n.px+12,y:n.py+44},n.id));
+      g.appendChild(el("text",{class:"node-meta",x:n.px+12,y:n.py+64},n.data.visibility));
+      const click=()=>select(n.id);
+      g.addEventListener("click",click);
+      g.addEventListener("keydown",ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();click();}});
+      svg.appendChild(g);
+    }
+    $("counts").textContent=`${nodes.length} / ${env.nodes.length} узлов · ${env.edges.filter(e=>visible.has(e.source)&&visible.has(e.target)).length} связей · ${env.edges.length} всего`;
+    if(state.selected && !visible.has(state.selected)) select(null);
+  }
+  function select(id){
+    state.selected=id; const n=state.envelope?.nodes.find(x=>x.id===id);
+    $("selected-title").textContent=n ? n.data.kind+" · "+n.id : "Узел не выбран";
+    $("details").textContent=n ? JSON.stringify({visibility:n.data.visibility,ports:n.data.ports,config:n.data.config,notes:n.data.notes,position:n.position},null,2) : "Выберите узел на схеме.";
+    render();
+  }
+  function setStatus(message,error=false){$("status").textContent=message;$("status").classList.toggle("error",error);}
+  $("file").addEventListener("change",async ev=>{
+    const file=ev.target.files?.[0]; if(!file)return;
+    if(file.size>MAX_BYTES){setStatus("Файл больше 512 KiB. Отклонён.",true);ev.target.value="";return;}
+    try{
+      const parsed=JSON.parse(await file.text());
+      state.envelope=validate(parsed);state.selected=null;
+      $("search").disabled=false;$("clear").disabled=false;
+      $("revision").textContent="revision: "+state.envelope.revision;
+      $("search").value="";select(null);
+      setStatus("Загружен локально · "+state.envelope.backend+" · SHA показан, но не аутентифицирован");
+    }catch(err){state.envelope=null;render();$("revision").textContent="revision: —";$("counts").textContent="0 узлов · 0 связей";setStatus(err.message||"Не удалось прочитать JSON.",true);}
+    ev.target.value="";
+  });
+  $("search").addEventListener("input",render);
+  $("clear").addEventListener("click",()=>{state.envelope=null;state.selected=null;$("search").value="";$("search").disabled=true;$("clear").disabled=true;$("revision").textContent="revision: —";$("counts").textContent="0 узлов · 0 связей";$("selected-title").textContent="Узел не выбран";$("details").textContent="Сведения появятся после загрузки файла и выбора узла.";while($("graph").firstChild)$("graph").removeChild($("graph").firstChild);$("graph").appendChild(el("text",{x:28,y:42,fill:"#8da5b2","font-size":14},"Откройте JSON export envelope"));setStatus("Ожидается graph-editor-envelope/1");});
+})();
+</script>
+</body>
+</html>
