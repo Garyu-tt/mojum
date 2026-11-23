@@ -87,6 +87,14 @@ class NengoLIFBaselineTests(unittest.TestCase):
             with self.subTest(spec=str(spec)[:60]), self.assertRaises(ValueError):
                 validate(spec)
 
+    def test_schema_discriminator_rejects_equality_spoof(self):
+        class EqualToAnything:
+            def __eq__(self, value):
+                return True
+
+        with self.assertRaisesRegex(ValueError, "unsupported Nengo fixture schema"):
+            validate(LIFSpec(((1.0,),), schema=EqualToAnything()))
+
     def test_native_pin_is_fail_closed(self):
         spec = fixture(5)
         with mock.patch.dict(sys.modules, {"nengo": types.SimpleNamespace(__version__="3.2.0")}):
