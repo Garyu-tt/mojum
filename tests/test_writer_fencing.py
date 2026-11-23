@@ -70,10 +70,13 @@ class WriterFenceTests(unittest.TestCase):
         self.assertEqual(result.reason, "REJECT_MALFORMED")
 
     def test_counter_bounds_and_boolean_rejection(self):
-        for value in (0, -1, MAX_COUNTER + 1, True, 1.0):
-            with self.subTest(value=repr(value)):
-                self.assertEqual(evaluate_writer_fence(token(epoch=value)).reason,
-                                 "REJECT_MALFORMED")
+        for field in ("epoch", "revision"):
+            for value in (0, -1, MAX_COUNTER + 1, True, 1.0):
+                with self.subTest(field=field, value=repr(value)):
+                    self.assertEqual(
+                        evaluate_writer_fence(token(**{field: value})).reason,
+                        "REJECT_MALFORMED",
+                    )
         # The first token is deliberately fixed at epoch=1/revision=1.
         # Exercise the numeric ceiling through valid advancing transitions.
         previous_epoch = token(epoch=MAX_COUNTER - 1, revision=MAX_COUNTER)
