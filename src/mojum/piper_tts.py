@@ -164,21 +164,25 @@ def synthesize_public_wav(
             "OPENBLAS_NUM_THREADS": str(cpu_threads),
             "MKL_NUM_THREADS": str(cpu_threads),
         }
-        def run(args: list[str], *, capture: bool = False) -> subprocess.CompletedProcess:
+        def run(args: list[str]) -> subprocess.CompletedProcess:
             try:
                 return subprocess.run(
                     args, cwd=root, env=safe_env, stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, timeout=timeout_seconds,
-                    check=False,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=timeout_seconds, check=False,
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise RuntimeError("Piper process unavailable or timed out") from exc
 
-        # Attest the installed distribution metadata in the selected interpreter.
-        check = run([str(python), "-c", "import importlib.metadata as m;print(m.version('piper-tts'))"], capture=True)
-        if (check.returncode != 0 or len(check.stdout) > 80
-                or check.stdout.strip() != profile.expected_piper_version.encode("ascii")):
+        # Compare inside the pinned child interpreter. Do not capture unbounded
+        # stdout into parent RAM: a faulty executable may print arbitrary data.
+        version_check = (
+            "import importlib.metadata as m, sys;"
+            "sys.exit(0 if m.version('piper-tts') == sys.argv[1] else 1)"
+        )
+        check = run([str(python), "-c", version_check,
+                     profile.expected_piper_version])
+        if check.returncode != 0:
             raise RuntimeError("Piper installed package version mismatch")
         completed = run([
             str(python), "-m", "piper", "-m", str(model),
