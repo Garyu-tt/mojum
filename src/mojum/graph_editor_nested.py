@@ -28,25 +28,29 @@ MAX_JSON_NODES = 50_000
 
 
 def _json_string_size(value):
-    """Return exact UTF-8 JSON string bytes without allocating escaped output."""
+    """Count exact UTF-8 JSON string bytes without allocating encoded output."""
     if len(value) > MAX_BYTES:
         raise GraphError("nested editor JSON text exceeds byte limit")
-    try:
-        size = len(value.encode("utf-8", errors="strict")) + 2
-    except UnicodeEncodeError as exc:
-        raise GraphError("nested editor JSON text is not valid UTF-8") from exc
-    # json.dumps(ensure_ascii=False) still escapes quotes, backslashes and
-    # every U+0000..U+001F control. Account for expansion before serialization.
+    size = 2  # JSON quotes
     for char in value:
         codepoint = ord(char)
-        if char in ('"', "\\\\") or codepoint in (8, 9, 10, 12, 13):
+        if codepoint < 0x20:
+            size += 2 if codepoint in (8, 9, 10, 12, 13) else 6
+        elif codepoint in (0x22, 0x5C):
+            size += 2
+        elif codepoint <= 0x7F:
             size += 1
-        elif codepoint < 0x20:
-            size += 5
+        elif codepoint <= 0x7FF:
+            size += 2
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            raise GraphError("nested editor JSON text is not valid UTF-8")
+        elif codepoint <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
         if size > MAX_BYTES:
             raise GraphError("nested editor payload exceeds byte limit")
     return size
-
 
 def _preflight_json(value):
     """Bound and validate an exact-native JSON tree before serialization.
