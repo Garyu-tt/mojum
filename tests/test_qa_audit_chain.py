@@ -202,7 +202,7 @@ class AuditChainTests(unittest.TestCase):
             hex_pattern.fullmatch.side_effect = AssertionError("oversized digest reached regex")
             with self.assertRaisesRegex(AuditChainError, "digest"):
                 verify_audit_chain([oversized_digest])
-            hex_pattern.fullmatch.assert_not_called()
+            hex_pattern.fullmatch.assert_called_once_with(GENESIS)
 
 
     def test_oversized_kind_and_state_rejected_before_allowlist_lookup(self):
