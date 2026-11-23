@@ -106,16 +106,14 @@ class CpuProfileTests(unittest.TestCase):
             steps=MAX_SIMULATED_NS // MAX_TIMESTEP_NS,
             warmup_steps=0)))
 
-    def test_supported_solver_integrator_combinations(self):
+    def test_allowlisted_solver_and_integrator_choices_are_independent(self):
         for integrator in ("euler", "implicit", "implicitfast"):
             for solver in ("newton", "cg"):
                 with self.subTest(integrator=integrator, solver=solver):
                     profile = valid_profile(integrator=integrator, solver=solver)
-                    if integrator == "euler" and solver == "cg":
-                        with self.assertRaises(ProfileError):
-                            validate_profile(profile)
-                    else:
-                        self.assertEqual(validate_profile(profile).solver, solver)
+                    admitted = validate_profile(profile)
+                    self.assertEqual(admitted.integrator, integrator)
+                    self.assertEqual(admitted.solver, solver)
 
     def test_rejects_unknown_solver_integrator_and_non_native_strings(self):
         for field, value in (("solver", "pgs"), ("integrator", "rk4"),
