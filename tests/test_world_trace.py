@@ -67,6 +67,22 @@ class TraceTests(unittest.TestCase):
         with self.assertRaises(TraceError):
             verify_trace(t)
 
+    def test_direct_api_rejects_non_string_schema_before_comparison(self):
+        class ForgedSchema:
+            def __eq__(self, other):
+                return other == "mojum.world.point-room-trace/1"
+
+        class HostileSchema:
+            def __eq__(self, other):
+                raise AssertionError("untrusted schema equality invoked")
+
+        for impostor in (ForgedSchema(), HostileSchema()):
+            with self.subTest(schema_type=type(impostor).__name__):
+                trace = copy.deepcopy(self.trace)
+                trace["schema"] = impostor
+                with self.assertRaisesRegex(TraceError, "unsupported trace schema"):
+                    verify_trace(trace)
+
     def test_duplicate_and_nonfinite_json_fail(self):
         for raw in (
             b'{"schema": 1, "schema": 2}',
