@@ -23,23 +23,46 @@ function exactRecord(value, keys, name) {
       actual.slice().sort().join(',') !== keys.slice().sort().join(',')) {
     throw new TypeError(name + ' has an invalid field set');
   }
+  for (const key of actual) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw new TypeError(name + ' fields must be enumerable data properties');
+    }
+  }
+}
+
+function exactArray(value, minimum, maximum, name) {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
+      value.length < minimum || value.length > maximum) {
+    throw new TypeError(name + ' has an invalid array shape');
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes('length')) {
+    throw new TypeError(name + ' must be a dense array without extra fields');
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw new TypeError(name + ' must contain only data elements');
+    }
+  }
+  return value;
 }
 
 function cloneFrame(frame, expectedJointIds) {
   exactRecord(frame,
-    ['schema', 'sequence', 'epoch', 'tick', 'simulation_time_ns',
+    ['schema', 'classification', 'sequence', 'epoch', 'tick', 'simulation_time_ns',
      'revision', 'joints'], 'frame');
-  if (frame.schema !== SCHEMA ||
+  if (frame.schema !== SCHEMA || frame.classification !== 'PUBLIC_SYNTHETIC' ||
       !Number.isSafeInteger(frame.sequence) || frame.sequence < 0 ||
       !Number.isSafeInteger(frame.tick) || frame.tick < 0 ||
       !Number.isSafeInteger(frame.simulation_time_ns) ||
       frame.simulation_time_ns < 0 ||
       typeof frame.epoch !== 'string' || !EPOCH.test(frame.epoch) ||
-      typeof frame.revision !== 'string' || !REVISION.test(frame.revision) ||
-      !Array.isArray(frame.joints) || frame.joints.length < 1 ||
-      frame.joints.length > MAX_JOINTS) {
+      typeof frame.revision !== 'string' || !REVISION.test(frame.revision)) {
     throw new TypeError('invalid VRM timeline frame metadata');
   }
+  exactArray(frame.joints, 1, MAX_JOINTS, 'joints');
 
   const joints = [];
   const ids = new Set();
@@ -64,6 +87,7 @@ function cloneFrame(frame, expectedJointIds) {
 
   return Object.freeze({
     schema: SCHEMA,
+    classification: 'PUBLIC_SYNTHETIC',
     sequence: frame.sequence,
     epoch: frame.epoch,
     tick: frame.tick,
@@ -78,10 +102,7 @@ function cloneFrame(frame, expectedJointIds) {
  * Sequence numbers must be contiguous; logical time/tick must strictly rise.
  */
 export function createVrmPoseTimeline(inputFrames) {
-  if (!Array.isArray(inputFrames) || inputFrames.length < 1 ||
-      inputFrames.length > MAX_FRAMES) {
-    throw new TypeError('frames must contain 1..10000 entries');
-  }
+  exactArray(inputFrames, 1, MAX_FRAMES, 'frames');
 
   const frames = [];
   let expectedJointIds = null;
