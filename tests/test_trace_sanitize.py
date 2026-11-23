@@ -129,11 +129,23 @@ class TraceSanitizeTests(unittest.TestCase):
 
     def test_rejects_hostile_string_subclass_key_before_hashing(self):
         class HostileKey(str):
-            def __hash__(self):
-                raise AssertionError("hostile hash must not run")
+            active = False
 
+            def __hash__(self):
+                if self.active:
+                    raise AssertionError("hostile hash must not run")
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                if self.active:
+                    raise AssertionError("hostile equality must not run")
+                return str.__eq__(self, other)
+
+        key = HostileKey("event")
+        attributes = {key: "qa.completed"}
+        key.active = True
         with self.assertRaises(TraceSanitizationError):
-            sanitize_trace_attributes({HostileKey("event"): "qa.completed"})
+            sanitize_trace_attributes(attributes)
 
     def test_digest_revalidates_input(self):
         with self.assertRaises(TraceSanitizationError):
