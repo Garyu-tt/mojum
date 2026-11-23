@@ -1,5 +1,8 @@
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
+
+from mojum import qa_ci_evidence as evidence
 
 from mojum.qa_ci_evidence import EvidenceError, evaluate_ci_evidence, SCHEMA
 
@@ -53,6 +56,30 @@ class CIEvidenceTests(unittest.TestCase):
         key.explode = True
         with self.assertRaisesRegex(EvidenceError, "keys must be native strings"):
             evaluate_ci_evidence(snapshot, now=NOW)
+
+    def test_oversized_field_names_rejected_before_hashing(self):
+        huge = "x" * 1_000_000
+        snapshot = fixture()
+        snapshot[huge] = None
+        original_set = set
+
+        def bounded_set(values):
+            values = tuple(values)
+            self.assertTrue(
+                all(type(value) is str and len(value) <= 64 for value in values),
+                "oversized field name reached hashing",
+            )
+            return original_set(values)
+
+        with patch("mojum.qa_ci_evidence.set", side_effect=bounded_set, create=True):
+            with self.assertRaises(EvidenceError):
+                evaluate_ci_evidence(snapshot, now=NOW)
+
+        nested = fixture()
+        nested["checks"][0][huge] = None
+        with patch("mojum.qa_ci_evidence.set", side_effect=bounded_set, create=True):
+            with self.assertRaises(EvidenceError):
+                evaluate_ci_evidence(nested, now=NOW)
 
     def test_incomplete_snapshot_rejected(self):
         x = fixture()
