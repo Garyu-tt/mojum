@@ -226,6 +226,9 @@ def verify_segment_bytes(manifest: SegmentManifest, segment_bytes: bytes) -> boo
     """Compare caller-supplied segment bytes with content_sha256; performs no I/O."""
     if type(manifest) is not SegmentManifest:
         raise SegmentManifestError("manifest must be a validated SegmentManifest")
+    # Dataclasses can be instantiated directly, bypassing the factory. Re-run
+    # the public contract before trusting the digest field.
+    validate_manifest(manifest.to_dict())
     if type(segment_bytes) is not bytes:
         raise SegmentManifestError("segment_bytes must be exact bytes")
     return hashlib.sha256(segment_bytes).hexdigest() == manifest.content_sha256
