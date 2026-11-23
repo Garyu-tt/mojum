@@ -6,7 +6,7 @@ import json
 import unittest
 
 from mojum.graph import GraphError, SCHEMA
-from mojum.graph_v2 import upgrade_v1
+from mojum.graph_v2 import upgrade_v1, validate_v2
 from mojum.graph_flow_witness import (
     SCHEMA as WITNESS_SCHEMA,
     attest_flow,
@@ -143,6 +143,45 @@ class FlowWitnessTests(unittest.TestCase):
         })
         with self.assertRaises(GraphError):
             attest_flow(candidate)
+
+
+    def test_rejects_hash_equality_spoofed_edge_endpoint(self):
+        class ForgedRoom(str):
+            def __hash__(self):
+                return hash("seed")
+
+            def __eq__(self, other):
+                return type(other) is str and other in ("room", "seed")
+
+        graph = strict_v2()
+        graph["edges"][3]["from"]["node"] = ForgedRoom("room")
+        # The preexisting validator normalizes a separate JSON copy, so this
+        # wire-equivalent object passes there. Using its *raw* endpoint would
+        # map the declared room source to the seed node in dict/set lookups.
+        self.assertEqual(validate_v2(graph)["node_count"], 6)
+        with self.assertRaisesRegex(GraphError, "native JSON"):
+            attest_flow(graph)
+
+    def test_rejects_nonnative_nested_json_values_and_keys(self):
+        class ForgedNumber(int):
+            pass
+
+        class ForgedKey(str):
+            pass
+
+        base = graph_v1()
+        base["nodes"][0]["config"]["integer"] = ForgedNumber(7)
+        graph = strict_v2(base)
+        self.assertEqual(validate_v2(graph)["node_count"], 6)
+        with self.assertRaisesRegex(GraphError, "native JSON"):
+            attest_flow(graph)
+
+        base = graph_v1()
+        base["nodes"][0]["config"][ForgedKey("extra")] = 3
+        graph = strict_v2(base)
+        self.assertEqual(validate_v2(graph)["node_count"], 6)
+        with self.assertRaisesRegex(GraphError, "native JSON"):
+            attest_flow(graph)
 
     def test_refuses_invalid_input_before_reading_edges(self):
         for invalid in (None, [], {"nodes": []}, {"nodes": [{}]}):
