@@ -36,7 +36,13 @@ export function inspectOfflineGlb(buffer) {
     const value = pending.pop();
     if (value && typeof value === 'object') {
       if (Object.hasOwn(value, 'uri')) throw new TypeError('external URI forbidden');
-      pending.push(...Object.values(value));
+      // Enforce the total traversal budget BEFORE adding children. Never use
+      // spread here: a large but valid JSON array can exceed JS argument limits.
+      const keys = Object.keys(value);
+      if (visited + pending.length + keys.length > 50000) {
+        throw new TypeError('GLB manifest too complex');
+      }
+      for (const key of keys) pending.push(value[key]);
     }
   }
   return true;
