@@ -8,7 +8,7 @@ bounded sequence of caller-provided synthetic pulse frames.
 
 - Input classification must be exactly `PUBLIC_SYNTHETIC`.
 - Frames are an exact `list` or `tuple` of 1–10,000 exact dictionaries. Each
-  dictionary has exactly `tick` (an integer, not `bool`) and `pulse` (an exact
+  dictionary uses native string keys and has exactly `tick` (an integer, not `bool`) and `pulse` (an exact
   `bool`).
 - Ticks are non-negative, strictly increasing logical frame numbers. The
   caller supplies a fixed integer `dt_ns` in the range 1,000–1,000,000,000.
