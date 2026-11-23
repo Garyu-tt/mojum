@@ -83,6 +83,44 @@ class ClothLODTests(unittest.TestCase):
         self.assertEqual(run(), run(8))
         self.assertEqual(run(), run(9999))
 
+    def test_receipts_must_match_preceding_cadence(self):
+        c = ClothLODConfig(requested="low")
+        _, after_step = advance(c, start(c), 0)
+        self.assertTrue(after_step.pending_measurement)
+        self.assertEqual(restore_state(after_step.to_snapshot(), c), after_step)
+        # Omission hides a missing measurement; a tick jump invents a receipt.
+        for changed in ({"pending_measurement": False}, {"next_tick": 2}):
+            with self.subTest(changed=changed), self.assertRaises(ClothLODError):
+                restore_state({**after_step.to_snapshot(), **changed}, c)
+        _, after_skip = advance(c, after_step, 1, 40)
+        self.assertFalse(after_skip.pending_measurement)
+        self.assertEqual(restore_state(after_skip.to_snapshot(), c), after_skip)
+        with self.assertRaises(ClothLODError):
+            restore_state({**after_skip.to_snapshot(), "pending_measurement": True}, c)
+
+    def test_restore_rejects_impossible_initial_state_and_streak(self):
+        c = ClothLODConfig(requested="low")
+        initial = start(c).to_snapshot()
+        for changed in ({"effective": "off"},
+                        {"effective": "off", "fault_latched": True}):
+            with self.subTest(changed=changed), self.assertRaises(ClothLODError):
+                restore_state({**initial, **changed}, c)
+        _, after_step = advance(c, start(c), 0)
+        with self.assertRaises(ClothLODError):
+            restore_state({**after_step.to_snapshot(), "safe_samples": 1}, c)
+
+    def test_snapshot_discriminators_require_exact_strings(self):
+        class AlwaysEqual:
+            def __eq__(self, other):
+                return True
+
+        c = ClothLODConfig()
+        snap = start(c).to_snapshot()
+        for changed in ({"schema": AlwaysEqual()},
+                        {"policy_sha256": AlwaysEqual()}):
+            with self.subTest(field=next(iter(changed))), self.assertRaises(ClothLODError):
+                restore_state({**snap, **changed}, c)
+
     def test_rejects_policy_reinterpretation_and_forged_state(self):
         c = ClothLODConfig(requested="low")
         snap = start(c).to_snapshot()
