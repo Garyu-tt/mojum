@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   seam-admission:
-    name: seam admission / Python \${{ matrix.python-version }}
+    name: seam admission / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -23,18 +23,18 @@ jobs:
       - name: Checkout exact pull request head
         uses: actions/checkout@v4
         with:
-          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Assert exact pull request HEAD
         if: github.event_name == 'pull_request'
         env:
-          EXPECTED_HEAD: \${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: \${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
       - name: Compile focused module and tests
         run: python -m py_compile src/mojum/cloth_seams.py tests/test_cloth_seams.py
       - name: Run focused hermetic tests
