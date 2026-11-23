@@ -174,6 +174,8 @@ class TrajectoryAdmissionTests(unittest.TestCase):
             validate_trajectory(payload)
 
         HostileString.block_hash = False
+        payload.pop(HostileString("schema"))
+        payload["schema"] = SCHEMA
         frame = payload["frames"][0]
         frame.pop("timestamp_ns")
         frame[HostileString("timestamp_ns")] = 10
