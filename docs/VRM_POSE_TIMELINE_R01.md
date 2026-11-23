@@ -14,7 +14,7 @@ Each frame is an exact record with:
 - revision: 64-character lowercase SHA-256 revision string, identical for the whole sequence
 - joints: 1..128 unique {id, angle_rad} records; IDs and inventory stay stable, angles are finite and within ±π
 
-A timeline contains 1..10,000 frames. Joint records are emitted in locale-independent Unicode code-point order, independent of the host's default locale. Only plain records with enumerable data properties and dense native arrays are admitted; accessors and sparse/extended arrays are rejected without invoking getters. Inputs are copied into detached frozen records. Frames are not sorted or interpolated: input order is authoritative and gaps, duplicate sequence numbers, reordering, time rollback, epoch changes and changing joint inventories fail closed.
+A timeline contains 1..10,000 frames and at most 256,000 aggregate joint samples (`frames × joints`); per-frame and aggregate limits both apply. Joint records are emitted in locale-independent Unicode code-point order, independent of the host's default locale. Only plain records with enumerable data properties and dense native arrays are admitted; accessors and sparse/extended arrays are rejected without invoking getters. Inputs are copied into detached frozen records. Frames are not sorted or interpolated: input order is authoritative and gaps, duplicate sequence numbers, reordering, time rollback, epoch changes and changing joint inventories fail closed.
 
 ## API
 
