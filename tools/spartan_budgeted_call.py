@@ -27,6 +27,14 @@ def _is_async_callable(callback: Callable[..., object]) -> bool:
     )
 
 
+def _reject_awaitable(value: object, callback_name: str) -> None:
+    """Reject an accidentally returned awaitable without leaking an unawaited coroutine."""
+    if inspect.isawaitable(value):
+        if inspect.iscoroutine(value):
+            value.close()
+        raise BudgetedCallError(f"{callback_name} must be synchronous")
+
+
 @dataclass(frozen=True)
 class DispatchResult:
     """Metadata result; response is in-memory only and is never persisted here."""
@@ -82,10 +90,10 @@ def dispatch(
     # This callback is the only provider invocation point. It is deliberately
     # outside any automatic retry loop: timeout ambiguity must not double-spend.
     response = invoke()
-    if inspect.isawaitable(response):
-        raise BudgetedCallError("provider callback must be synchronous")
+    _reject_awaitable(response, "provider callback")
 
     receipt = receipt_extractor(response)
+    _reject_awaitable(receipt, "receipt extractor")
     expected = {"actual_tokens", "actual_micro_usd"}
     if (type(receipt) is not dict or len(receipt) != 2
             or any(type(key) is not str for key in receipt)
