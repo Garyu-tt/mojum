@@ -165,14 +165,18 @@ printf 'Hello world!\n' > "$out.txt"
         for script in (
             "#!/bin/sh\nexit 19\n",
             "#!/bin/sh\nexit 0\n",
-            "#!/bin/sh\nfor x in \"$@\"; do out=\"$x\"; done\nprintf '\\377' > \"$out.txt\"\n",
+            "#!/bin/sh\nout=''\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-of\" ]; then shift; out=\"$1\"; fi\n  shift\ndone\nprintf '\\377' > \"$out.txt\"\n",
         ):
             with self.subTest(script=script):
                 self._fake_cli(script)
                 with self.assertRaises(WhisperCPPProbeError):
                     self._run()
         self._fake_cli("""#!/bin/sh
-for x in "$@"; do out="$x"; done
+out=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-of" ]; then shift; out="$1"; fi
+  shift
+done
 i=0
 : > "$out.txt"
 while [ "$i" -lt 5000 ]; do
