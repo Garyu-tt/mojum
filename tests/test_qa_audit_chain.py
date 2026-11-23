@@ -199,7 +199,7 @@ class AuditChainTests(unittest.TestCase):
         oversized_digest = dict(chain[0])
         oversized_digest["digest"] = "0" * 1_000_000
         with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
-            hex_pattern.fullmatch.side_effect = AssertionError("oversized digest reached regex")
+            hex_pattern.fullmatch.return_value = object()
             with self.assertRaisesRegex(AuditChainError, "digest"):
                 verify_audit_chain([oversized_digest])
             hex_pattern.fullmatch.assert_called_once_with(GENESIS)
