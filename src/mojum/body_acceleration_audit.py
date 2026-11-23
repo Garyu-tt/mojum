@@ -58,9 +58,11 @@ def _native_dict(value: object, expected: set[str], field: str) -> dict:
     # mappings before scanning their keys or constructing a set snapshot.
     if len(value) != len(expected):
         raise BodyAccelerationError(f"{field} has missing or unknown fields")
-    # Check keys before equality/set operations to reject hostile key subclasses.
-    if any(type(key) is not str for key in value):
-        raise BodyAccelerationError(f"{field} keys must be native strings")
+    # Fixed schema keys are short. Bound caller-controlled strings before
+    # hashing them in the set comparison, even when cardinality already matches.
+    max_key_length = max((len(key) for key in expected), default=0)
+    if any(type(key) is not str or len(key) > max_key_length for key in dict.keys(value)):
+        raise BodyAccelerationError(f"{field} keys must be bounded native strings")
     if set(value) != expected:
         raise BodyAccelerationError(f"{field} has missing or unknown fields")
     return value
