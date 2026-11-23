@@ -114,7 +114,8 @@ class WorldClimateTests(unittest.TestCase):
     def test_rejects_obstructed_and_noncanonical_inputs(self):
         blocked_room = Room(5, 5, ((1, 1, 2, 2),))
         blocked_state = initial_state(blocked_room, 0, 0)
-        blocked_state = replace(blocked_state, x=1.5)
+        from mojum.world_room import _revision
+        blocked_state = RoomState(0, 1.5, 0, _revision(blocked_room, 0, 1.5, 0))
         with self.assertRaises(ClimateError):
             sample_room_climate(
                 blocked_room, blocked_state, base_temperature_millic=20_000,
