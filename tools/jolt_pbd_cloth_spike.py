@@ -112,9 +112,13 @@ def _project_contacts(point):
     target = BALL_RADIUS + RADIUS
     if dist < target:
         if dist < 1e-12:
-            delta, dist = [0.0, 0.0, 1.0], 1.0
-        for k in range(3):
-            point[k] += delta[k] * ((target - dist) / dist)
+            # An exactly centered vertex needs an explicit separating axis.
+            point[2] += target
+        else:
+            for k in range(3):
+                point[k] += delta[k] * ((target - dist) / dist)
+    if point[2] < RADIUS:
+        point[2] = RADIUS
     if not all(math.isfinite(x) and abs(x) < 10000 for x in point):
         raise RuntimeError("nonfinite or unbounded cloth vertex")
 
