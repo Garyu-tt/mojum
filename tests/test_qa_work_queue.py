@@ -200,3 +200,14 @@ def test_payload_text_budget_precedes_serialization(tmp_path, monkeypatch):
         monkeypatch.setattr("mojum.qa_work_queue.json.dumps", forbidden_serialize)
         with pytest.raises(QueueError, match="text exceeds byte budget"):
             q.enqueue("oversized", "review", {"data": "x" * 65_537})
+
+
+
+def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
+    with QAWorkQueue(str(tmp_path / "unicode-bounds.db")) as q:
+        with pytest.raises(QueueError, match="valid UTF-8"):
+            q.enqueue("bad-unicode", "review", {"value": "\\ud800"})
+        with pytest.raises(QueueError, match="valid UTF-8"):
+            q.enqueue("bad-key", "review", {"\\ud800": "value"})
+        with pytest.raises(QueueError, match="integer exceeds bit budget"):
+            q.enqueue("big-int", "review", {"value": 1 << 4096})
