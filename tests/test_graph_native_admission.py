@@ -200,7 +200,7 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         # Below the preflight bit-length cap but above Python's default
         # decimal-conversion digit limit.
         graph["nodes"][0]["kind"] = 1 << 20_000
-        with self.assertRaisesRegex(GraphError, "Unsupported node kind"):
+        with self.assertRaisesRegex(GraphError, "integer exceeds byte budget"):
             validate(graph)
 
     def test_schema_mismatch_still_uses_graph_error(self):
