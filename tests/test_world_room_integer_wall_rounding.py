@@ -56,8 +56,10 @@ class IntegerWallRoundingQATests(unittest.TestCase):
 
     def test_larger_integer_wall_is_guarded(self):
         edge = 2**100
-        room = Room(edge + 1024, 1.0)
-        initial, final, frame = self._step(room, edge, 0.5, dx=2048.0)
+        # Keep the requested displacement within the fixture's 1000 m cap
+        # while still crossing the non-representable integer wall exactly.
+        room = Room(edge + 512, 1.0)
+        initial, final, frame = self._step(room, edge, 0.5, dx=1000.0)
         self.assertTrue(frame["blocked"])
         self.assertEqual((final.x, final.y), (initial.x, initial.y))
 
