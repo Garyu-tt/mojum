@@ -132,10 +132,12 @@ def _simulate_annarchy(frames, spec):
     # ANNarchy builds C++: bound the PROCESS outside Python, not just this data.
     with tempfile.TemporaryDirectory(prefix="mojum-annarchy-probe-") as work:
         neuron = ann.Neuron(
-            parameters={"tau": float(spec.tau_ms), "drive": 0.0},
+            parameters={"tau": float(spec.tau_ms),
+                        "drive": ann.Parameter(0.0, locality="local")},
             equations="tau * dr/dt + r = drive : explicit",
         )
-        net = ann.Network()
+        # Match the Euler reference: ANNarchy defaults to a 1 ms network dt.
+        net = ann.Network(dt=float(spec.dt_ms))
         pop = net.create(spec.neurons, neuron)
         net.compile(directory=work)
         result = []
