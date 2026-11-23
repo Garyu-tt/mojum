@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 export const VRM_BINDING_SCHEMA = 'mojum.vrm-binding-manifest/1';
 const MAX_JOINTS = 128;
 const MAX_BONES = 22;
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S]);
 const AXES = new Set(['x', 'y', 'z']);
 const BONES = new Set([
   'hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
