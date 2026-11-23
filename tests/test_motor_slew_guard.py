@@ -184,6 +184,22 @@ class MotorSlewGuardTests(unittest.TestCase):
                 gate.advance({"elbow": 1, "wrist": 1}, tick=1, expected_revision=0)
         self.assertEqual(gate.receipt(), guard().receipt())
 
+    def test_reject_str_subclass_keys_before_dict_key_equality(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("elbow")
+            def __eq__(self, other):
+                raise RuntimeError("hostile key equality must not execute")
+
+        key = HostileKey("elbow")
+        with self.assertRaises(MotorSlewError):
+            MotorSlewGuard({"elbow": (-1.0, 1.0, 0.5)}, {key: 0.0})
+
+        gate = guard()
+        with self.assertRaises(MotorSlewError):
+            gate.advance({key: 0.1, "wrist": 1.0}, tick=1, expected_revision=0)
+        self.assertEqual(gate.receipt(), guard().receipt())
+
     def test_reject_non_dict_frame(self):
         gate = guard()
         for item in ([], (), None, "", (("elbow", 0.1), ("wrist", 1.0))):
