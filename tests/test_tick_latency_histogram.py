@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import unittest
+from unittest import mock
 from pathlib import Path
 
 MODULE = Path(__file__).resolve().parents[1] / "tools" / "tick_latency_histogram.py"
@@ -59,6 +60,18 @@ class HistogramTests(unittest.TestCase):
     def test_reject_invalid_unicode_from_direct_api(self):
         with self.assertRaises(mod.TraceError):
             mod.analyze(["\ud800"])
+
+    def test_deeply_nested_json_is_bounded_rejection(self):
+        # Fits the per-line byte budget; parser recursion ceilings vary by Python.
+        deeply_nested = "[" * 1500 + "0" + "]" * 1500
+        with self.assertRaises(mod.TraceError):
+            mod.analyze([deeply_nested])
+
+    def test_json_parser_recursion_error_is_normalized(self):
+        with mock.patch.object(mod.json, "loads", side_effect=RecursionError("too deep")):
+            with self.assertRaises(mod.TraceError) as caught:
+                mod.analyze([row(0, 1)])
+        self.assertIn("invalid JSON", str(caught.exception))
 
     def test_limits(self):
         with self.assertRaises(mod.TraceError):
