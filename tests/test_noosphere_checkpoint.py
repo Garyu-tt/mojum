@@ -87,6 +87,16 @@ class CheckpointTests(unittest.TestCase):
         with self.assertRaises(CheckpointError):
             create_checkpoint("dante", "c", True, refs())
 
+    def test_rejects_hostile_schema_value_before_equality(self):
+        class HostileValue:
+            def __eq__(self, _other):
+                raise RuntimeError("hostile schema equality must not escape")
+
+        manifest = self.make()
+        manifest["schema"] = HostileValue()
+        with self.assertRaises(CheckpointError):
+            verify_checkpoint(manifest)
+
     def test_manifest_tampering_is_detected(self):
         manifest = self.make()
         tampered = copy.deepcopy(manifest)
