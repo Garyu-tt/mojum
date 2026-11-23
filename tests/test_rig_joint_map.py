@@ -142,7 +142,7 @@ class JointMapTests(unittest.TestCase):
 
     def test_invalid_utf8_surrogate_rejected(self):
         with self.assertRaises(JointMapError):
-            build_joint_map(src(["hip\\ud800"]), dst(), links())
+            build_joint_map(src(["hip\ud800"]), dst(), links())
 
     def test_canonical_receipt_is_json_serializable(self):
         import json
