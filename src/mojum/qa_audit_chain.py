@@ -74,9 +74,9 @@ def verify_audit_chain(records: Any, *, max_records: int = MAX_RECORDS) -> dict[
             raise AuditChainError("sequence must be contiguous and start at 1")
         if at_ms < previous_at:
             raise AuditChainError("timestamps must be nondecreasing")
-        if item["kind"] not in KINDS or type(item["kind"]) is not str:
+        if type(item["kind"]) is not str or item["kind"] not in KINDS:
             raise AuditChainError("unsupported event kind")
-        if item["state"] not in STATES or type(item["state"]) is not str:
+        if type(item["state"]) is not str or item["state"] not in STATES:
             raise AuditChainError("unsupported task state")
         if type(item["task_key"]) is not str or not _TOKEN.fullmatch(item["task_key"]):
             raise AuditChainError("task_key is malformed")
