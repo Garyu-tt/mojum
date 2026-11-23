@@ -76,7 +76,7 @@ class VirtualKinematicsTests(unittest.TestCase):
             evaluate_forward_kinematics(rig)
 
     def test_angle_limits_are_enforced(self):
-        for field, value in (("angle_rad", 2.0), ("min_rad", 3.0), ("max_rad", -3.0)):
+        for field, value in (("angle_rad", 4.0), ("min_rad", 3.0), ("max_rad", -3.0)):
             rig = sample()
             rig["joints"][1][field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
