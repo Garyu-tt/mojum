@@ -161,6 +161,14 @@ class RigDOFLimitsTests(unittest.TestCase):
         data["dofs"][0]["extra"] = 1
         with self.assertRaises(DOFLimitsError):
             validate_dof_limits(data)
+        data = valid_payload()
+        data[7] = "non-string key"
+        with self.assertRaises(DOFLimitsError):
+            validate_dof_limits(data)
+        data = valid_payload()
+        data["dofs"][0][7] = "non-string key"
+        with self.assertRaises(DOFLimitsError):
+            validate_dof_limits(data)
 
     def test_caller_mutation_does_not_change_result(self):
         data = valid_payload()
