@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
-from mojum.genesis_codec import GenesisCodecError, dumps, loads
+from mojum.genesis_codec import GenesisCodecError, _fits_utf8_budget, dumps, loads
 
 
 SEED = json.loads(
@@ -100,6 +100,14 @@ class GenesisCodecTests(unittest.TestCase):
             # its code-point count is below the preflight threshold.
             with self.assertRaisesRegex(GenesisCodecError, "byte limit"):
                 loads("é" * 5)
+
+    def test_utf8_preflight_counts_multibyte_code_points_without_encoding(self):
+        self.assertTrue(_fits_utf8_budget("café", 5))
+        self.assertFalse(_fits_utf8_budget("💡" * 3, 8))
+        self.assertFalse(_fits_utf8_budget("\\ud800", 8))
+        with patch("mojum.genesis_codec.MAX_SNAPSHOT_BYTES", 8):
+            with self.assertRaisesRegex(GenesisCodecError, "byte limit"):
+                loads("💡" * 3)
 
     def test_oversized_output_rejected(self):
         with patch("mojum.genesis_codec.MAX_SNAPSHOT_BYTES", 8):
