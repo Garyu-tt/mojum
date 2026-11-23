@@ -2,7 +2,8 @@
 
 No hub access, no video decode, no robot commands, no Noosphere reads.
 pyarrow is an *optional* dependency used only by load_parquet_shard().
-A shard is accepted only if it contains complete ordered episodes.
+A shard is accepted only if it begins each episode segment at frame zero.
+The trailing segment may be incomplete; full v3 episode-metadata checks are pending.
 """
 from __future__ import annotations
 
@@ -277,7 +278,7 @@ def load_parquet_shard(root, *, shard, dataset_id, dataset_revision,
 
 
 def heldout_zero_baseline(trajectory, *, seed=0):
-    """Deterministic episodic train/holdout split vs frozen zero-action control.
+    """Deterministic episode-ID split over shard segments vs frozen zero action.
 
     Diagnostic only: a train-set constant action mean is NOT a learned policy.
     """
