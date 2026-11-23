@@ -42,7 +42,7 @@ def _json_string_wire_size(value):
         elif code < 0x20:
             size += 2 if code in short_escapes else 6
         elif 0xD800 <= code <= 0xDFFF:
-            raise GraphError("Graph JSON text must be valid UTF-8")
+            raise GraphError("Graph requires lossless UTF-8 JSON values: text must be valid UTF-8")
         elif code <= 0x7F:
             size += 1
         elif code <= 0x7FF:
@@ -89,7 +89,7 @@ def _require_native_json_tree(value):
             if kind is dict:
                 identity = id(current)
                 if identity in seen_containers:
-                    raise GraphError("Graph JSON tree contains a cycle or shared container")
+                    raise GraphError("Graph requires lossless UTF-8 JSON values: cycle or shared container")
                 seen_containers.add(identity)
                 if len(current) > MAX_GRAPH_TREE_NODES:
                     raise GraphError("Graph JSON object exceeds node budget")
@@ -101,7 +101,7 @@ def _require_native_json_tree(value):
                     if node_count > MAX_GRAPH_TREE_NODES:
                         raise GraphError("Graph JSON tree exceeds node budget")
                     if type(key) is not str:
-                        raise GraphError("Graph JSON object keys must be exact strings")
+                        raise GraphError("Graph requires lossless UTF-8 JSON values: object keys must be exact strings")
                     add_wire_bytes(_json_string_wire_size(key))
                     pending.append((child, depth + 1))
             elif kind is list:
@@ -128,14 +128,14 @@ def _require_native_json_tree(value):
                     raise GraphError("Graph JSON integer exceeds byte budget") from exc
             elif kind is float:
                 if not math.isfinite(current):
-                    raise GraphError("Graph JSON numbers must be finite")
+                    raise GraphError("Graph requires lossless UTF-8 JSON values: numbers must be finite")
                 add_wire_bytes(len(repr(current)))
             elif kind is bool:
                 add_wire_bytes(4 if current else 5)
             elif current is None:
                 add_wire_bytes(4)
             else:
-                raise GraphError("Graph contains a non-native JSON value")
+                raise GraphError("Graph requires lossless UTF-8 JSON values: non-native value")
     except GraphError as exc:
         # Keep one stable public diagnostic category for native-tree admission
         # while retaining the concrete reason for operators and tests.
