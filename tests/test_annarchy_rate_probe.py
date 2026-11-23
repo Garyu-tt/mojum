@@ -77,7 +77,7 @@ class RateShadowProofTests(unittest.TestCase):
     def test_nan_bool_and_invalid_values_refused(self):
         for bad in (None, True, False, math.nan, math.inf, -1, 1.01,
                     "0.2", {}, 10**5000):
-            with self.subTest(bad=str(bad)[:20]), self.assertRaises(ProbeError):
+            with self.subTest(bad_type=type(bad).__name__), self.assertRaises(ProbeError):
                 compare_rate_traces([[bad, 0, 0]], enabled=True)
 
     def test_no_unknown_or_ragged_or_extra_data(self):
