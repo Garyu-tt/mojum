@@ -110,11 +110,17 @@ class RotationChainTests(unittest.TestCase):
 
     def test_record_rejects_string_subclass_key_before_set(self):
         class HostileString(str):
+            active = False
+
             def __eq__(self, other):
-                raise AssertionError("hostile equality must not run")
+                if self.active:
+                    raise AssertionError("hostile equality must not run")
+                return super().__eq__(other)
 
         r = make_rotation(1, self.k0, self.k1)
-        r[HostileString("schema")] = r.pop("schema")
+        hostile_key = HostileString("schema")
+        r[hostile_key] = r.pop("schema")
+        hostile_key.active = True
         with self.assertRaises(RotationError):
             verify_rotation_chain(self.k0, 0, [r], {}, key_fingerprint(self.k1))
 
