@@ -16,6 +16,8 @@ PROVENANCE = "synthetic-point-room-airflow/v1"
 MAX_SOURCES = 32
 MAX_SOURCE_SPEED_MM_S = 20_000
 MAX_RESULT_SPEED_MM_S = 100_000
+MAX_TICK = (1 << 63) - 1
+_REVISION = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
 MAX_ROOM_EDGE_MM = 1_000_000
 ATTENUATION_RANGE_MM = 10_000
 WEIGHT_SCALE = 1_000_000
@@ -168,10 +170,15 @@ def sample_room_airflow(room, state, *, tick, expected_revision,
         raise AirflowError("explicit PUBLIC_SYNTHETIC assertion is required")
     if type(room) is not Room or type(state) is not RoomState:
         raise AirflowError("canonical Room and RoomState instances are required")
-    if (type(state.tick) is not int or state.tick < 0
-            or type(tick) is not int or tick < 0 or tick != state.tick):
-        raise AirflowError("sample tick must equal the current room-state tick")
-    if (type(expected_revision) is not str or len(expected_revision) != 64
+    if (type(state.tick) is not int or not 0 <= state.tick <= MAX_TICK
+            or type(tick) is not int or not 0 <= tick <= MAX_TICK
+            or tick != state.tick):
+        raise AirflowError("sample tick must equal the bounded current room-state tick")
+    # RoomState is a frozen dataclass but does not validate its fields; reject
+    # subclasses before equality can dispatch their custom comparison hooks.
+    if (type(state.revision) is not str or _REVISION.fullmatch(state.revision) is None
+            or type(expected_revision) is not str
+            or _REVISION.fullmatch(expected_revision) is None
             or expected_revision != state.revision
             or state.revision != _revision(room, state.tick, state.x, state.y)):
         raise AirflowError("stale or corrupted room revision")
@@ -222,7 +229,12 @@ def sample_room_airflow(room, state, *, tick, expected_revision,
         vy_total += _round_div(vy * weight, WEIGHT_SCALE)
         contributing.append(source_id)
 
-    magnitude = math.isqrt(vx_total * vx_total + vy_total * vy_total)
+    magnitude_sq = vx_total * vx_total + vy_total * vy_total
+    # Compare squared magnitude exactly: isqrt() floors, so checking only its
+    # result would admit vectors microscopically above the configured limit.
+    if magnitude_sq > MAX_RESULT_SPEED_MM_S * MAX_RESULT_SPEED_MM_S:
+        raise AirflowError("combined airflow exceeds the bounded output speed")
+    magnitude = math.isqrt(magnitude_sq)
     if magnitude > MAX_RESULT_SPEED_MM_S:
         raise AirflowError("combined airflow exceeds the bounded output speed")
     digest_payload = {
