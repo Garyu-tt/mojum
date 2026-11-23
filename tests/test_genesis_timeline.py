@@ -2,6 +2,7 @@ import copy
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.genesis import GenomeLedger, ACQUISITION_SCHEMA, GenesisError
 from mojum.genesis_timeline import audit_timeline, TIMELINE_SCHEMA
@@ -92,6 +93,13 @@ class GenesisTimelineTests(unittest.TestCase):
         snap["events"] = HostileList(snap["events"])
         with self.assertRaises(GenesisError):
             audit_timeline(snap)
+
+    def test_oversized_event_list_rejected_before_content_scan(self):
+        snap = populated().snapshot()
+        snap["events"] = [{}] * (GenomeLedger.MAX_EVENTS + 1)
+        with patch("mojum.genesis_timeline.any", side_effect=AssertionError("oversized list was scanned"), create=True):
+            with self.assertRaisesRegex(GenesisError, "event limit"):
+                audit_timeline(snap)
 
     def test_boundary_limit_rejected_before_report(self):
         with self.assertRaisesRegex(GenesisError, "boundary limit"):
