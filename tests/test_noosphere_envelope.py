@@ -45,6 +45,14 @@ class EnvelopeTests(unittest.TestCase):
         self.assertNotIn(original, sealed)
         self.assertIn(b"mojum.noosphere.encrypted-envelope/1", sealed)
 
+    def test_maximum_one_mib_plaintext_round_trips(self):
+        # AES-GCM adds a 16-byte tag and JSON base64 adds approximately 4/3
+        # expansion. The advertised plaintext maximum must still be usable.
+        original = b"x" * 1_048_576
+        sealed = self.seal(original)
+        self.assertLessEqual(len(sealed), 4 * ((len(original) + 16 + 2) // 3) + 8192)
+        self.assertEqual(self.open(sealed), original)
+
     def test_random_nonce_changes_envelope(self):
         with patch("mojum.noosphere_envelope.secrets.token_bytes",
                    side_effect=[b"1" * 12, b"2" * 12]):
