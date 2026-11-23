@@ -118,7 +118,7 @@ class MeshRevocationAuditTests(unittest.TestCase):
     def test_lone_surrogate_identifiers_rejected_with_public_error(self):
         with self.assertRaises(RevocationAuditError):
             audit_peer_revocations(document(queries=[
-                {"peer_id": "\\ud800", "capability": "memory.read"}
+                {"peer_id": "\ud800", "capability": "memory.read"}
             ]))
 
     def test_unbounded_values_rejected(self):
