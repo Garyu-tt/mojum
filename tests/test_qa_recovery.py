@@ -95,6 +95,22 @@ class RecoveryTests(unittest.TestCase):
                         task("active", state, attempt=0, lease=20)
                     ], observed_at=10)
 
+    def test_oversized_identifier_rejected_before_utf8_encoding(self):
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("x" * 1_000_000)], observed_at=0)
+
+    def test_hostile_string_subclass_field_name_rejected(self):
+        class HostileKey(str):
+            def __hash__(self):
+                raise AssertionError("hostile key was hashed")
+            def __eq__(self, other):
+                raise AssertionError("hostile key was compared")
+
+        record = task("safe")
+        record[HostileKey("task_id")] = record.pop("task_id")
+        with self.assertRaises(RecoveryError):
+            plan_recovery([record], observed_at=0)
+
     def test_bounds_and_exact_types(self):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("a")] * 501, observed_at=0)
