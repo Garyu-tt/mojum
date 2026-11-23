@@ -56,6 +56,10 @@ class PointRoomEpisode:
         self.step_m = float(step_m)
         self.goal_radius_m = float(goal_radius_m)
         self.max_steps = max_steps
+        # Keep constructor budgets authoritative across a mutable Python facade.
+        self._fixed_step_m = self.step_m
+        self._fixed_goal_radius_m = self.goal_radius_m
+        self._fixed_max_steps = self.max_steps
         self._state = None
         self._done = False
         self._last_blocked = False
@@ -90,6 +94,13 @@ class PointRoomEpisode:
             raise RuntimeError("reset must precede step")
         if self._done:
             raise RuntimeError("episode ended; reset required")
+        # Do not let a policy or harness enlarge the motion/horizon/reward budget.
+        # Fail before advancing the authoritative point-room state.
+        if (type(self.step_m) is not float or self.step_m != self._fixed_step_m
+                or type(self.max_steps) is not int or self.max_steps != self._fixed_max_steps
+                or type(self.goal_radius_m) is not float
+                or self.goal_radius_m != self._fixed_goal_radius_m):
+            raise ValueError("episode configuration mutated after construction")
         if isinstance(action, bool):
             raise ValueError("invalid action")
         try:
