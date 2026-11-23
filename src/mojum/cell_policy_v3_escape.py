@@ -36,6 +36,8 @@ SCHEMA = "mojum.developmental.local-cell/3-escape"
 LEARNING_SCHEMA = "mojum.developmental.local-cell.outcome/3-escape"
 BENCHMARK_SCHEMA = "mojum.developmental.local-cell-escape.benchmark/1"
 MAX_CELLS = 512
+SNAPSHOT_VERSION = 2
+MAX_OUTCOME_TAIL = 4
 # A rest episode may never exceed this many consecutive ticks.
 MAX_CONSECUTIVE_RESTS = 3
 # Bounded re-probing: rest only after this many consecutive failed probes in
@@ -134,6 +136,8 @@ class CellExplorerV3Escape:
         self.forgotten_observations = 0
         self.consecutive_rests = 0
         self.consecutive_blocked_probes = 0
+        self.outcome_tail = []
+        self.history_complete = True
 
     @staticmethod
     def _cell(sense):
