@@ -252,6 +252,13 @@ class VirtualMassPropertiesTests(unittest.TestCase):
         with self.assertRaises(MassPropertiesError):
             build_mass_properties(raw)
 
+    def test_result_is_slotted_and_has_no_mutable_instance_dict(self):
+        result = build_mass_properties(fixture(segment("link")))
+        with self.assertRaises(AttributeError):
+            _ = result.__dict__
+        with self.assertRaises((AttributeError, TypeError)):
+            result.digest = "0" * 64
+
     def test_digest_is_sha256_shaped(self):
         result = build_mass_properties(fixture(segment("link")))
         self.assertEqual(len(result.digest), 64)
