@@ -2,6 +2,9 @@
 import copy
 import json
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, BrokenBarrierError
+from unittest.mock import patch
 
 from mojum.openxr_hand import (
     EXTENSION, INPUT_SCHEMA, JOINTS, ZERO_HEAD,
@@ -178,6 +181,51 @@ class OpenXRHandTests(unittest.TestCase):
         for frames in ([second], [first, first], [first, first, second]):
             with self.subTest(n=len(frames)), self.assertRaises(HandTrackingError):
                 verify_observation_chain(frames)
+
+    def test_non_string_wire_discriminators_rejected(self):
+        class Spoof:
+            def __eq__(self, other):
+                return True
+
+        for key in ("schema", "extension"):
+            frame = fixture()
+            frame[key] = Spoof()
+            with self.subTest(key=key), self.assertRaises(HandTrackingError):
+                self.accept(frame)
+        self.assertEqual(self.stream.head, ZERO_HEAD)
+
+    def test_concurrent_same_head_cannot_fork_chain(self):
+        # Force both callers into the former check/hash race. Without a CAS lock
+        # both can return valid-looking packets claiming the same previous head.
+        import mojum.openxr_hand as api
+        canonical = api._canonical
+        rendezvous = Barrier(2)
+
+        def overlap(packet):
+            try:
+                rendezvous.wait(timeout=0.25)
+            except BrokenBarrierError:
+                pass  # A locked single writer correctly prevents rendezvous.
+            return canonical(packet)
+
+        successes, stale = [], 0
+        with patch.object(api, "_canonical", side_effect=overlap):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                tasks = [
+                    executor.submit(self.stream.ingest, fixture(tick=i + 1),
+                                    expected_head=ZERO_HEAD)
+                    for i in range(2)
+                ]
+                for task in tasks:
+                    try:
+                        successes.append(task.result(timeout=3))
+                    except HandTrackingError as exc:
+                        self.assertIn("stale stream head", str(exc))
+                        stale += 1
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(stale, 1)
+        self.assertEqual(self.stream.head, successes[0]["sha256"])
+        self.assertEqual(verify_observation_chain(successes), self.stream.head)
 
     def test_no_actuator_or_network_functions(self):
         import mojum.openxr_hand as api
