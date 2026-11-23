@@ -82,13 +82,14 @@ def _validate_room(room: object, state: object, tick: object,
                    expected_revision: object) -> tuple[Room, RoomState]:
     if type(room) is not Room or type(state) is not RoomState:
         raise LightSensorError("room and state must be canonical Room/RoomState instances")
-    if type(tick) is not int or not 0 <= tick <= MAX_TICK or tick != state.tick:
+    if (type(tick) is not int or not 0 <= tick <= MAX_TICK
+            or type(state.tick) is not int or tick != state.tick):
         raise LightSensorError("tick must exactly match the room state")
-    if type(expected_revision) is not str or expected_revision != state.revision:
-        raise LightSensorError("stale room revision")
     if (type(state.revision) is not str or len(state.revision) != 64
             or any(ch not in "0123456789abcdef" for ch in state.revision)):
         raise LightSensorError("invalid room revision")
+    if type(expected_revision) is not str or expected_revision != state.revision:
+        raise LightSensorError("stale room revision")
     width = _number(room.width, "room.width", 0.0, MAX_ROOM_METRES)
     height = _number(room.height, "room.height", 0.0, MAX_ROOM_METRES)
     if width <= 0.0 or height <= 0.0:
