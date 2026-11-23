@@ -5,9 +5,10 @@ on:
     paths:
       - "src/mojum/mujoco_profile.py"
       - "tests/test_mujoco_profile.py"
+      - "docs/MUJOCO_PROFILE_R01.md"
       - ".github/workflows/mujoco-profile.yml"
   push:
-    branches: [main]
+    branches: ["build/689-mujoco-cpu-profile-20261123"]
     paths:
       - "src/mojum/mujoco_profile.py"
       - "tests/test_mujoco_profile.py"
