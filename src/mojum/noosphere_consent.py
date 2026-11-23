@@ -187,9 +187,10 @@ def _check_native_json_tree(value):
             if identity in seen:
                 raise ConsentError("JSON input must be a tree without cycles or shared containers")
             seen.add(identity)
-            keys = tuple(dict.keys(item))
-            if nodes + len(stack) + len(keys) > MAX_TREE_NODES:
+            # Reject oversized mappings before allocating a full key snapshot.
+            if nodes + len(stack) + len(item) > MAX_TREE_NODES:
                 raise ConsentError("JSON object exceeds the node budget")
+            keys = tuple(dict.keys(item))
             add_size(2 + max(0, len(keys) - 1))
             if any(type(key) is not str for key in keys):
                 raise ConsentError("JSON object keys must be native strings")
@@ -243,6 +244,9 @@ def _digest(value):
 
 def _exact_mapping(value, keys, field):
     if type(value) is not dict:
+        raise ConsentError(f"{field} must contain exactly the documented fields")
+    # All current schema key sets have fixed cardinality; reject before snapshot.
+    if len(value) != len(keys):
         raise ConsentError(f"{field} must contain exactly the documented fields")
     native_keys = tuple(dict.keys(value))
     if any(type(key) is not str for key in native_keys):
@@ -355,6 +359,23 @@ def _validate_dataset(dataset):
             raise ConsentError("event recorded_at_ns precedes observed_at_ns")
         if type(event["visibility"]) is not str or event["visibility"] not in _VISIBILITY:
             raise ConsentError("event has unsupported visibility")
+        # A valid digest proves projection integrity, not that the caller
+        # actually applied the filters it declares. Enforce those filters on
+        # each event before it can be considered for consent matching.
+        if filters["topic"] is not None and event["topic"] != filters["topic"]:
+            raise ConsentError(f"items[{index}] does not match the dataset topic filter")
+        if filters["source"] is not None and event["source"] != filters["source"]:
+            raise ConsentError(f"items[{index}] does not match the dataset source filter")
+        if (filters["as_of_recorded_ns"] is not None
+                and event["recorded_at_ns"] > filters["as_of_recorded_ns"]):
+            raise ConsentError(f"items[{index}] exceeds the dataset recorded-time filter")
+        if filters["valid_at_ns"] is not None:
+            valid_at = filters["valid_at_ns"]
+            if not (event["valid_from_ns"] <= valid_at
+                    and (event["valid_to_ns"] is None or valid_at < event["valid_to_ns"])):
+                raise ConsentError(f"items[{index}] does not match the dataset validity filter")
+        if not filters["include_nonpublic"] and event["visibility"] != "PUBLIC":
+            raise ConsentError(f"items[{index}] violates the PUBLIC-only dataset filter")
         if type(event["payload"]) is not dict:
             raise ConsentError("event payload must be an object")
         detached.append({
