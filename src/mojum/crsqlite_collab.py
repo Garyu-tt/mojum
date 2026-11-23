@@ -55,6 +55,19 @@ def _pairs_no_duplicates(items):
     return out
 
 
+def _check_note_text(value):
+    """Enforce the same strict, nonempty UTF-8 cell contract on local and wire writes."""
+    if type(value) is not str or not value:
+        raise CollabError('invalid public annotation text')
+    try:
+        size = len(value.encode('utf-8', 'strict'))
+    except UnicodeEncodeError as exc:
+        raise CollabError('invalid public annotation UTF-8') from exc
+    if size > MAX_TEXT:
+        raise CollabError('public annotation exceeds byte limit')
+    return value
+
+
 def _check_wire_row(row):
     if type(row) not in (tuple, list) or len(row) != 9:
         raise CollabError('CR-SQLite row must have exactly nine columns')
@@ -68,8 +81,7 @@ def _check_wire_row(row):
     if cid not in ('note', '-1') or type(cid) is not str:
         raise CollabError('unknown CR-SQLite cell column')
     if cid == 'note':
-        if type(value) is not str or len(value.encode('utf-8')) > MAX_TEXT:
-            raise CollabError('invalid note cell')
+        _check_note_text(value)
     elif value is not None:
         raise CollabError('invalid tombstone value')
     if not (_bounded_int(col_version, minimum=1) and
@@ -157,8 +169,7 @@ class Scratchpad:
 
     def put(self, note_id, note):
         _check_note_id(note_id)
-        if type(note) is not str or not note or len(note.encode('utf-8')) > MAX_TEXT:
-            raise CollabError('invalid public annotation text')
+        _check_note_text(note)
         conn = self._active()
         count = conn.execute('SELECT COUNT(*) FROM collab_notes').fetchone()[0]
         exists = conn.execute('SELECT 1 FROM collab_notes WHERE note_id = ?', (note_id,)).fetchone()
