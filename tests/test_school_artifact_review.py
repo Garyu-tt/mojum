@@ -144,6 +144,19 @@ class SchoolArtifactReviewTests(unittest.TestCase):
         self.assertNotIn("<svg", report_text)
         self.assertNotIn("artifact submitted", report_text)
 
+    def test_hostile_python_schema_value_fails_closed(self):
+        class Hostile:
+            def __ne__(self, _other):
+                raise RuntimeError("comparison must never escape")
+
+        run = art_run(
+            [{"x1": 0, "y1": 0, "x2": 1, "y2": 1}],
+            [{"x1": 0, "y1": 0, "x2": 2, "y2": 2}],
+        )
+        run["schema"] = Hostile()
+        with self.assertRaises(SchoolArtifactReviewError):
+            review_run(run)
+
     def test_input_digest_tampering_is_rejected(self):
         run = art_run(
             [{"x1": 0, "y1": 0, "x2": 1, "y2": 1}],
