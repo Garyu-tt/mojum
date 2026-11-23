@@ -186,6 +186,19 @@ class AuditChainTests(unittest.TestCase):
                 verify_audit_chain([row])
             hex_pattern.fullmatch.assert_called_once_with(GENESIS)
 
+    def test_oversized_kind_and_state_rejected_before_allowlist_lookup(self):
+        huge = "x" * 1_000_000
+        for field in ("kind", "state"):
+            with self.subTest(field=field):
+                row = make_chain([("enqueued", "queued", None, 1)])[0]
+                row[field] = huge
+                with self.assertRaises(AuditChainError):
+                    verify_audit_chain([row])
+
+                unsigned = {key: value for key, value in row.items() if key != "digest"}
+                with self.assertRaises(AuditChainError):
+                    record_digest(unsigned)
+
     def test_record_digest_bounds_task_key_and_previous_digest(self):
         row = make_chain([("enqueued", "queued", None, 1)])[0]
         unsigned = {key: value for key, value in row.items() if key != "digest"}
