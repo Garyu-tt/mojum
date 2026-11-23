@@ -63,7 +63,7 @@ def validate_split() -> None:
 
 def _seed(value: int) -> int:
     # Intentionally uint32-compatible for SB3/NumPy RNG; Gymnasium itself supports larger seeds.
-    if type(value) is not int or not 0 <= value < 2**32 - len(HELDOUT):
+    if type(value) is not int or not 0 <= value < 2**32:
         raise ValueError("invalid bounded seed")
     return value
 
@@ -113,8 +113,8 @@ def run_episode(scene: Scene, policy, *, seed: int) -> dict:
 def evaluate(policy, *, seed: int = 7) -> dict:
     _seed(seed)
     validate_split()
-    episodes = [run_episode(scene, policy, seed=seed + i)
-                for i, scene in enumerate(HELDOUT)]
+    episodes = [run_episode(scene, policy, seed=seed)
+                for scene in HELDOUT]
     return {"episodes": episodes,
             "success_count": sum(int(x["success"]) for x in episodes),
             "episode_count": len(episodes),
