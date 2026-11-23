@@ -1,0 +1,46 @@
+name: Jolt native cloth probe
+
+on:
+  pull_request:
+    paths:
+      - "benchmarks/jolt_native_cloth/**"
+      - "tests/test_jolt_native_cloth_probe.py"
+      - "docs/JOLT_NATIVE_CLOTH_PROBE_R01.md"
+      - ".github/workflows/jolt-native-cloth-probe.yml"
+  push:
+    branches: [main]
+    paths:
+      - "benchmarks/jolt_native_cloth/**"
+      - "tests/test_jolt_native_cloth_probe.py"
+      - "docs/JOLT_NATIVE_CLOTH_PROBE_R01.md"
+      - ".github/workflows/jolt-native-cloth-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jolt-native-cloth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-cloth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++
+      - name: Configure pinned Jolt build
+        run: cmake -S benchmarks/jolt_native_cloth -B build/jolt-native-cloth -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Compile native soft-body probe
+        run: cmake --build build/jolt-native-cloth --parallel 2
+      - name: Execute Jolt cloth and validate native report
+        env:
+          JOLT_NATIVE_CLOTH_PROBE: ${{ github.workspace }}/build/jolt-native-cloth/jolt_native_cloth_probe
+        run: python -m unittest discover -s tests -p "test_jolt_native_cloth_probe.py" -v
