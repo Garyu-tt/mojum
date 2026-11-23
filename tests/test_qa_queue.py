@@ -154,6 +154,22 @@ class DurableTaskQueueTests(unittest.TestCase):
         with self.assertRaisesRegex(QueueError, "unsupported or missing queue schema version"):
             DurableTaskQueue(unknown)
 
+    def test_concurrent_initialization_is_serialized(self) -> None:
+        shared = Path(self.temp.name) / "concurrent.sqlite3"
+
+        def initialize(_index: int):
+            queue = DurableTaskQueue(shared)
+            queue.enqueue("startup", "startup-event", {"ready": True}, now_ns=1)
+            queue.close()
+            return True
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(initialize, range(8)))
+        self.assertEqual(results, [True] * 8)
+        reopened = DurableTaskQueue(shared)
+        self.assertEqual(reopened.get(1).payload, {"ready": True})
+        self.assertEqual(len(reopened.events(1)), 1)
+
     def test_non_queue_database_is_not_adopted(self) -> None:
         unrelated = Path(self.temp.name) / "application.sqlite3"
         with closing(sqlite3.connect(unrelated)) as db:
