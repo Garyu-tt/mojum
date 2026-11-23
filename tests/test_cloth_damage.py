@@ -112,6 +112,28 @@ class ClothDamageTests(unittest.TestCase):
         b = audit_damage(request([{"tick": 1, "edge_id": "e", "stretch_ratio": 1.2}]))
         self.assertNotEqual(a.digest, b.digest)
 
+    def test_rejects_string_subclasses_before_comparison(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile equality executed")
+
+            __hash__ = str.__hash__
+
+        for field in ("schema", "provenance"):
+            with self.subTest(field=field):
+                value = request()
+                value[field] = HostileString(value[field])
+                with self.assertRaises(ClothDamageError):
+                    audit_damage(value)
+
+    def test_rejects_wrong_native_schema_and_provenance(self):
+        for field, value in (("schema", "wrong"), ("provenance", "PRIVATE")):
+            with self.subTest(field=field):
+                data = request()
+                data[field] = value
+                with self.assertRaises(ClothDamageError):
+                    audit_damage(data)
+
 
 if __name__ == "__main__":
     unittest.main()
