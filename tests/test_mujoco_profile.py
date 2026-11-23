@@ -185,7 +185,7 @@ class CpuProfileTests(unittest.TestCase):
             loads_profile(raw)
 
     def test_json_constants_and_non_finite_values_rejected(self):
-        raw = json.dumps(valid_profile()).replace('"steps":1000', '"steps":NaN')
+        raw = json.dumps(valid_profile()).replace('"steps": 1000', '"steps": NaN')
         with self.assertRaises(ProfileError):
             loads_profile(raw)
         value = valid_profile(timestep_ns=math.inf)
