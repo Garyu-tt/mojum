@@ -26,8 +26,8 @@ The revision must be an exact 40-character lowercase commit hex. The manifest's 
 
 ```sh
 PYTHONPATH=src python -m mojum.lerobot_trajectory \
-  --manifest ./synthetic_manifest.json --frames ./synthetic_frames.jsonl \
-  --held-out-control
+  --manifest examples/lerobot_offline/manifest.json \
+  --frames examples/lerobot_offline/frames.jsonl --held-out-control
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_lerobot_trajectory.py' -v
 ```
 
