@@ -262,19 +262,24 @@ def load_parquet_shard(root, *, shard, dataset_id, dataset_revision,
             "optional pyarrow required for Parquet; install explicitly outside Mojum core"
         ) from exc
     reader = parquet.ParquetFile(str(shard_path))
-    if reader.metadata.num_rows > MAX_FRAMES:
-        raise LeRobotImportError("Parquet row count exceeds frame budget")
-    if not set(COLUMNS).issubset(reader.schema_arrow.names):
-        raise LeRobotImportError("Parquet missing required tabular columns")
-    def rows():
-        for batch in reader.iter_batches(batch_size=BATCH_SIZE, columns=list(COLUMNS),
-                                         use_threads=False):
-            yield from batch.to_pylist()
-    return import_rows(rows(), info, dataset_id=dataset_id,
-                       dataset_revision=dataset_revision, dataset_license=dataset_license,
-                       metadata_sha256=hashlib.sha256(raw).hexdigest(),
-                       shard_sha256=_hash_file(shard_path),
-                       asset_sha256=asset_sha256, model_sha256=model_sha256)
+    try:
+        if reader.metadata.num_rows > MAX_FRAMES:
+            raise LeRobotImportError("Parquet row count exceeds frame budget")
+        if not set(COLUMNS).issubset(reader.schema_arrow.names):
+            raise LeRobotImportError("Parquet missing required tabular columns")
+        def rows():
+            for batch in reader.iter_batches(batch_size=BATCH_SIZE, columns=list(COLUMNS),
+                                             use_threads=False):
+                yield from batch.to_pylist()
+        return import_rows(rows(), info, dataset_id=dataset_id,
+                           dataset_revision=dataset_revision, dataset_license=dataset_license,
+                           metadata_sha256=hashlib.sha256(raw).hexdigest(),
+                           shard_sha256=_hash_file(shard_path),
+                           asset_sha256=asset_sha256, model_sha256=model_sha256)
+    finally:
+        close = getattr(reader, "close", None)
+        if callable(close):
+            close()
 
 
 def heldout_zero_baseline(trajectory, *, seed=0):
