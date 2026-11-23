@@ -183,6 +183,30 @@ class PettingZooBenchmarkTests(unittest.TestCase):
             frozen, online = [e for e in one["episodes"] if e["seed"] == seed]
             self.assertGreater(online["reward"], frozen["reward"])
 
+    def test_reject_forged_policy_equality_before_factory(self):
+        class ForgedPolicy(str):
+            def __eq__(self, other):
+                return True
+
+            __hash__ = str.__hash__
+
+        class ForgedObject:
+            def __eq__(self, other):
+                return True
+
+        factory = mock.Mock(side_effect=AssertionError("must reject before upstream"))
+        for policy in (ForgedPolicy("PRIVATE_should_not_be_reported"), ForgedObject()):
+            with self.subTest(policy=type(policy).__name__), self.assertRaisesRegex(
+                BenchmarkError, "unknown policy"
+            ):
+                run_episode(factory, seed=11, policy=policy, enabled=True)
+        factory.assert_not_called()
+
+        # Exact built-in policies remain usable and are safe to serialize.
+        report = run_episode(FakeRPS, seed=11, policy="frozen", enabled=True)
+        self.assertEqual(report["policy"], "frozen")
+        self.assertIs(type(report["policy"]), str)
+
     def test_import_has_no_pettingzoo_side_effect(self):
         env = dict(os.environ)
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
