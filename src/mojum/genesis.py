@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from collections.abc import Mapping
 
 GENOTYPE_SCHEMA = "mojum.genesis.genotype/1"
 PHENOTYPE_SCHEMA = "mojum.genesis.phenotype/1"
@@ -44,7 +43,12 @@ def _str(value, path, limit=128):
 
 
 def _keys(value, required, path):
-    if not isinstance(value, Mapping) or set(value) != set(required):
+    # Reject arbitrary Mapping implementations and str-subclass keys before
+    # hashing/comparing them. Dict equality and JSON round-trips alone can be
+    # spoofed by user-defined Python equality or key subclasses.
+    if (type(value) is not dict
+            or any(type(key) is not str for key in value)
+            or set(value) != set(required)):
         raise GenesisError(f"{path} must have exactly {sorted(required)}")
 
 
