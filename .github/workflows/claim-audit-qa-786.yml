@@ -1,0 +1,26 @@
+name: Mojum issue claim audit offline QA (#786)
+on:
+  pull_request:
+    paths:
+      - 'tools/issue_claim_audit.py'
+      - 'tests/test_issue_claim_audit.py'
+      - 'docs/ISSUE_CLAIM_AUDIT_R01.md'
+      - '.github/workflows/claim-audit-qa-786.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  claim-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Offline claim collision, Markdown examples, and CLI failures
+        run: python -m unittest discover -s tests -p 'test_issue_claim_audit.py' -v
