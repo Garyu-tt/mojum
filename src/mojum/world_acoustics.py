@@ -56,9 +56,10 @@ def _check_room_state(room, state, expected_revision):
 
 def _check_event(event, room, tick, max_age):
     required = {"schema", "event_id", "source_tick", "x", "y", "source_level_milli"}
-    if type(event) is not dict or set(event) != required:
+    if (type(event) is not dict or any(type(key) is not str for key in event)
+            or set(event) != required):
         raise AcousticError("event must be a plain object with exact keys")
-    if event["schema"] != EVENT_SCHEMA:
+    if type(event["schema"]) is not str or event["schema"] != EVENT_SCHEMA:
         raise AcousticError("unsupported sound event schema")
     event_id = _text(event["event_id"], "event_id", 80)
     source_tick = _int(event["source_tick"], "source_tick", 0, 2**63 - 1)
