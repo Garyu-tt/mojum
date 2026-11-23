@@ -155,6 +155,39 @@ class DelegationTests(unittest.TestCase):
                 self.db, lease, client, task_queue="approved.queue", now=22))
         self.assertEqual(len(client.calls), 1)
 
+    def test_ray_ambiguous_transport_exception_is_not_resubmitted(self):
+        class FailingRemote:
+            def __init__(self):
+                self.calls = 0
+            def remote(self, packet):
+                self.calls += 1
+                raise TimeoutError("simulated lost response")
+        remote = FailingRemote()
+        with self.assertRaises(TimeoutError):
+            d.dispatch_ray(self.db, self.lease, remote, now=21)
+        with self.assertRaises(d.DelegationRejected):
+            d.dispatch_ray(self.db, self.lease, remote, now=22)
+        self.assertEqual(remote.calls, 1)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM delegated_runs").fetchone()[0], "reserved")
+
+    def test_temporal_ambiguous_transport_exception_is_not_resubmitted(self):
+        class FailingClient:
+            def __init__(self):
+                self.calls = 0
+            async def start_workflow(self, name, arg, *, id, task_queue):
+                self.calls += 1
+                raise TimeoutError("simulated lost response")
+        client = FailingClient()
+        lease = d.DelegatedLease("issue-701", 1, 1, "temporal", "opaque.701")
+        with self.assertRaises(TimeoutError):
+            asyncio.run(d.dispatch_temporal(
+                self.db, lease, client, task_queue="approved.queue", now=21))
+        with self.assertRaises(d.DelegationRejected):
+            asyncio.run(d.dispatch_temporal(
+                self.db, lease, client, task_queue="approved.queue", now=22))
+        self.assertEqual(client.calls, 1)
+
     def test_durable_intent_after_sqlite_close_and_reopen(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "state.sqlite3")
