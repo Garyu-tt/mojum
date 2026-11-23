@@ -143,6 +143,27 @@ class LangfuseContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_event(event)
 
+    def test_status_cannot_contradict_measured_ci_or_qa(self):
+        invalid = (
+            ci(status="success", ci_passed=False),
+            ci(status="failure", ci_passed=True),
+            ci(status="blocked", ci_passed=True),
+            qa(status="success", qa_passed=False),
+            qa(status="failure", qa_passed=True),
+            qa(status="deferred", qa_passed=True),
+        )
+        for event in invalid:
+            with self.subTest(stage=event.stage, status=event.status):
+                with self.assertRaisesRegex(ValueError, "contradicts"):
+                    validate_event(event)
+                with self.assertRaises(ValueError):
+                    summarize([event])
+                client = RecordingClient()
+                self.assertFalse(publish(event, enabled=True, client=client, secret=KEY))
+                self.assertEqual(client.calls, [])
+        self.assertEqual(summarize([ci(status="failure", ci_passed=False)])["ci_fail"], 1)
+        self.assertEqual(summarize([qa(status="deferred", qa_passed=False)])["qa_fail"], 1)
+
     def test_crypto_key_is_required_no_fallback(self):
         for secret in (b"", b"x"*31, b"x"*129, "string-secret", None, True):
             with self.subTest(secret=repr(secret)):
