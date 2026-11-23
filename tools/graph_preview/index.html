@@ -76,7 +76,7 @@ h2{font-size:14px;margin:0}.muted{font-size:12px;color:#95aab7}
   const boundedText = (v, max=256) => typeof v === "string" && v.length > 0 && v.length <= max;
   const finitePosition = (p) => exactKeys(p, ["x","y"]) &&
     ["x","y"].every(k => typeof p[k] === "number" && Number.isFinite(p[k]) && Math.abs(p[k]) <= 100000);
-  function validate(envelope) {
+  function checkDepth(root) {\n    const stack=[[root,0]];\n    while(stack.length){const [value,depth]=stack.pop();if(depth>256)fail("Слишком глубокий JSON.");if(value&&typeof value==="object"){for(const child of Object.values(value))stack.push([child,depth+1]);}}\n  }\n  function validate(envelope) {
     if (!exactKeys(envelope, ["schema","backend","revision","source_sha256","canonical","nodes","edges"])) fail("Неизвестная структура envelope.");
     if (envelope.schema !== "mojum.graph-editor-envelope/1") fail("Неподдерживаемая версия envelope.");
     if (!["reactflow","rete"].includes(envelope.backend)) fail("Неизвестный backend.");
