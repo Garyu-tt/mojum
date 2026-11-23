@@ -79,6 +79,19 @@ class PCM16ChunkFramerTests(unittest.TestCase):
         self.assertFalse(result["energy_gate_open"])
         self.assertTrue(framer.finish()["finished"])
 
+    def test_start_clock_cannot_be_rebased_after_construction(self):
+        f = new_framer(start_ns=123)
+        self.assertEqual(f.start_ns, 123)
+        for invalid in (-1, MAX_TIME_NS + 1, "not-a-clock", 999):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(AttributeError):
+                    f.start_ns = invalid
+        with self.assertRaises(AttributeError):
+            del f.start_ns
+        frame, = f.feed(bytes(FRAME_BYTES), chunk_index=0, byte_offset=0)
+        self.assertEqual(frame.observed_at_ns, 123)
+        self.assertEqual(f.start_ns, 123)
+
     def test_invalid_constructor_arguments(self):
         for start in (True, -1, 2**63, 1.0, "0", None):
             with self.subTest(start=start), self.assertRaises(ValueError):
