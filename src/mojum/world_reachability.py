@@ -45,6 +45,8 @@ def _guard(room, columns, rows):
     if (room.width > MAX_ROOM_SPAN_M or room.height > MAX_ROOM_SPAN_M
             or len(room.obstacles) > MAX_OBSTACLES):
         raise ValueError("room exceeds opt-in audit budget")
+    if room.width / columns == 0.0 or room.height / rows == 0.0:
+        raise ValueError("grid resolution underflows float budget")
 
 
 def _clear(room, first, second):
