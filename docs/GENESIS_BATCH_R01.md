@@ -28,7 +28,7 @@ assert result.final_revision == new_snapshot["revision"]
 ## Contract
 
 - Input snapshot and events must be exact native JSON-shaped dictionaries/lists with bounded depth, node count and signed 64-bit integer values.
-- Compact canonical JSON size is preflighted before serialization, including escaped strings/keys and structural bytes. Batch size is 1..64; total input JSON is at most 512 KiB; each event is at most 8 KiB.
+- Compact canonical JSON size is preflighted before serialization, including escaped strings/keys and structural bytes. Batch size is 1..64; combined snapshot plus event-list JSON is at most 512 KiB under one shared preflight budget; each individual event is at most 8 KiB.
 - Base snapshot revision is checked against an explicit expected revision.
 - Each event is applied in order through `GenomeLedger.append`, using the immediately preceding revision as its CAS expectation.
 - Existing GENESIS rules remain authoritative: event identity, genome match, gene bounds, recorded-time monotonicity, effective valid-from prefixes and duplicate rejection.
