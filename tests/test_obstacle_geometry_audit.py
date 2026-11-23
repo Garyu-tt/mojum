@@ -62,6 +62,14 @@ class ObstacleGeometryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 audit_obstacles([item])
 
+    def test_oversized_field_count_rejected_before_key_iteration_or_hashing(self):
+        item = rect("a", 0, 0, 1, 1)
+        item.update({f"extra_{index}": None for index in range(20_000)})
+        from unittest.mock import patch
+        with patch("mojum.obstacle_geometry_audit.set", side_effect=AssertionError("set must not run"), create=True):
+            with self.assertRaisesRegex(ValueError, "field count"):
+                audit_obstacles([item])
+
     def test_invalid(self):
         invalid = [
             "oops", [1], [rect("a", 0, 0, 0, 1)],
