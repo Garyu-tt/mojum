@@ -107,6 +107,11 @@ class WorkflowEvidenceTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(WorkflowEvidenceError):
                 evaluate_workflow_evidence([dict(run(), **change)], expected_head_sha=HEAD, required_workflow_ids=[10])
 
+    def test_oversized_conclusion_rejected_before_membership(self):
+        item = run(conclusion="x" * 1_000_000)
+        with self.assertRaises(WorkflowEvidenceError):
+            evaluate_workflow_evidence([item], expected_head_sha=HEAD, required_workflow_ids=[10])
+
     def test_oversized_sha_rejected_before_regex(self):
         oversized = "a" * 1_000_000
         matcher = Mock()
