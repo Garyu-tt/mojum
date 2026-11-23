@@ -7,6 +7,14 @@ def rect(name, x0, y0, x1, y1):
     return {"id": name, "x_min": x0, "y_min": y0, "x_max": x1, "y_max": y1}
 
 
+class HostileKey(str):
+    def __hash__(self):
+        return hash("id")
+
+    def __eq__(self, other):
+        raise RuntimeError("hostile equality executed")
+
+
 class ObstacleGeometryTests(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(audit_obstacles([])["overlaps"], [])
@@ -23,6 +31,17 @@ class ObstacleGeometryTests(unittest.TestCase):
 
     def test_touch_is_not_overlap(self):
         self.assertEqual(audit_obstacles([rect("a", 0, 0, 1, 1), rect("b", 1, 0, 2, 1)])["overlaps"], [])
+
+    def test_reject_hostile_string_subclass_key_before_comparison(self):
+        item = {
+            HostileKey("id"): "a",
+            "x_min": 0,
+            "y_min": 0,
+            "x_max": 1,
+            "y_max": 1,
+        }
+        with self.assertRaisesRegex(ValueError, "exact native strings"):
+            audit_obstacles([item])
 
     def test_invalid(self):
         invalid = [
