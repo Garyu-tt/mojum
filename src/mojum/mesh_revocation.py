@@ -74,10 +74,16 @@ def _tick(value: Any, field: str) -> int:
     return value
 
 
-def _plain_string_keys(value: dict) -> None:
+def _exact_native_keys(value: dict, expected: set[str], field: str) -> None:
+    # Bound cardinality before enumerating caller-controlled keys.
+    if type(value) is not dict or len(value) != len(expected):
+        raise MeshRevocationError(f"{field} has an invalid shape")
+    keys = tuple(dict.keys(value))
     # Run before set/equality: hostile key objects must not execute __hash__/__eq__.
-    if type(value) is not dict or any(type(key) is not str for key in value):
-        raise MeshRevocationError("mapping must have native string keys")
+    if any(type(key) is not str for key in keys):
+        raise MeshRevocationError(f"{field} keys must be native strings")
+    if set(keys) != expected:
+        raise MeshRevocationError(f"{field} has an invalid shape")
 
 
 def _canonical(payload: dict) -> bytes:
@@ -94,10 +100,8 @@ def _canonical(payload: dict) -> bytes:
 def _validate_payload(payload: Any) -> tuple[dict, tuple[RevocationEntry, ...]]:
     if type(payload) is not dict:
         raise MeshRevocationError("snapshot payload must be a native dict")
-    _plain_string_keys(payload)
     expected = _ENVELOPE_FIELDS - {"signature"}
-    if payload.keys() != expected:
-        raise MeshRevocationError("invalid snapshot fields")
+    _exact_native_keys(payload, expected, "snapshot payload")
     if type(payload["schema"]) is not str or payload["schema"] != SNAPSHOT_SCHEMA:
         raise MeshRevocationError("unsupported snapshot schema")
     authority_id = _identifier(payload["authority_id"], "authority id")
@@ -120,9 +124,7 @@ def _validate_payload(payload: Any) -> tuple[dict, tuple[RevocationEntry, ...]]:
     for raw in raw_entries:
         if type(raw) is not dict:
             raise MeshRevocationError("revocation entry must be a native dict")
-        _plain_string_keys(raw)
-        if raw.keys() != _REVOCATION_FIELDS:
-            raise MeshRevocationError("invalid revocation entry fields")
+        _exact_native_keys(raw, _REVOCATION_FIELDS, "revocation entry")
         enrollment = _identifier(raw["enrollment_id"], "enrollment id")
         node = _identifier(raw["node_id"], "node id")
         sequence = _tick(raw["sequence"], "revocation sequence")
@@ -178,9 +180,7 @@ def verify_snapshot(envelope: Any, *, authority_keys: dict[str, bytes],
 
     if type(envelope) is not dict:
         raise MeshRevocationError("snapshot envelope must be a native dict")
-    _plain_string_keys(envelope)
-    if envelope.keys() != _ENVELOPE_FIELDS:
-        raise MeshRevocationError("invalid snapshot envelope fields")
+    _exact_native_keys(envelope, _ENVELOPE_FIELDS, "snapshot envelope")
     signature = envelope["signature"]
     if (type(signature) is not str or len(signature) != 64
             or any(c not in "0123456789abcdef" for c in signature)):
