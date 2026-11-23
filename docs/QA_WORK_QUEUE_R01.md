@@ -13,6 +13,7 @@ mojum.qa-work-queue/1 is a CPU-first storage primitive for issue #1179. It is no
 - Expired leases are requeued or failed according to the attempt budget. Work runs outside SQLite transactions; a blocked job does not retain a global lock.
 - Audit records contain event names, timestamps, worker labels and bounded error codes only. Payload contents are not copied into the audit log.
 - Payloads are exact native JSON values with bounded depth, item count and UTF-8 size. The module performs no network calls, subprocesses, host discovery, environment lookups, or PRIVATE Noosphere access.
+- Concurrent claims are serialized by SQLite transactions across independent connections and OS processes; the focused suite includes a multi-process exactly-once claim regression.
 
 ## Minimal use
 
@@ -34,4 +35,4 @@ Queue state is not CI evidence or merge authorization. A caller must independent
 
 ## Verification
 
-pytest -q tests/test_qa_work_queue.py covers idempotency, detached payloads, WAL persistence, concurrent claims, lease expiry/reclaim, stale-token fencing, retry exhaustion, bounded validation, audit provenance and filtering.
+pytest -q tests/test_qa_work_queue.py covers idempotency, detached payloads, WAL persistence, concurrent thread/process claims, lease expiry/reclaim, stale-token fencing, retry exhaustion, bounded validation, audit provenance and filtering.
