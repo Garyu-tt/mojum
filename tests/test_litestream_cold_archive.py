@@ -171,6 +171,35 @@ else:
                 self._restore(info, **kw)
             self.assertFalse(self.dest.exists())
 
+    def test_empty_directory_fanout_and_depth_are_bounded(self):
+        self._source()
+        info = self._backup()
+        # A replica containing one valid payload and hundreds of empty
+        # directories must not bypass the file/byte budget during restore.
+        empty = [self.replica / f"empty-{i:03d}" for i in range(129)]
+        for folder in empty:
+            folder.mkdir(mode=0o700)
+        with self.assertRaisesRegex(LitestreamArchiveError, "directory budget"):
+            self._restore(info)
+        self.assertFalse(self.dest.exists())
+        for folder in empty:
+            folder.rmdir()
+        nested = self.replica
+        for i in range(17):
+            nested = nested / f"depth-{i:02d}"
+            nested.mkdir(mode=0o700)
+        with self.assertRaisesRegex(LitestreamArchiveError, "directory budget"):
+            self._restore(info)
+        self.assertFalse(self.dest.exists())
+
+    def test_symlink_replica_entry_is_never_followed(self):
+        self._source()
+        info = self._backup()
+        (self.replica / "linked").symlink_to(self.source)
+        with self.assertRaisesRegex(LitestreamArchiveError, "unsafe replica entry"):
+            self._restore(info)
+        self.assertFalse(self.dest.exists())
+
     def test_source_missing_never_issues_a_successful_archive(self):
         with self.assertRaises(ValueError):
             self._backup()
