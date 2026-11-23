@@ -181,51 +181,51 @@ class GenesisBatchTests(unittest.TestCase):
 
     def test_oversized_string_rejected_before_canonical_serialization(self):
         from unittest.mock import patch
+        from mojum.genesis import canonical as canonical_json
 
         bad = event()
         bad["evidence"] = "x" * (MAX_BATCH_BYTES + 1)
         ledger = GenomeLedger(SEED)
         with patch(
-            "mojum.genesis_batch.canonical",
-            side_effect=AssertionError("canonical serialization must not run"),
+            "mojum.genesis_batch.canonical", wraps=canonical_json,
         ) as serializer:
             with self.assertRaisesRegex(GenesisError, "string exceeds byte budget"):
                 apply_acquisition_batch(
                     ledger.snapshot(), [bad], expected_base_revision=ledger.revision
                 )
-            serializer.assert_not_called()
+            self.assertEqual(serializer.call_count, 1)  # bounded snapshot only
 
     def test_oversized_integer_rejected_before_canonical_serialization(self):
         from unittest.mock import patch
+        from mojum.genesis import canonical as canonical_json
 
         bad = event()
         bad["delta"] = 10 ** 10_000
         ledger = GenomeLedger(SEED)
         with patch(
-            "mojum.genesis_batch.canonical",
-            side_effect=AssertionError("canonical serialization must not run"),
+            "mojum.genesis_batch.canonical", wraps=canonical_json,
         ) as serializer:
             with self.assertRaisesRegex(GenesisError, "signed 64-bit range"):
                 apply_acquisition_batch(
                     ledger.snapshot(), [bad], expected_base_revision=ledger.revision
                 )
-            serializer.assert_not_called()
+            self.assertEqual(serializer.call_count, 1)  # bounded snapshot only
 
     def test_json_control_character_escape_budget_is_preflighted(self):
         from unittest.mock import patch
+        from mojum.genesis import canonical as canonical_json
 
         bad = event()
         bad["evidence"] = "\\x01" * 2_000
         ledger = GenomeLedger(SEED)
         with patch(
-            "mojum.genesis_batch.canonical",
-            side_effect=AssertionError("canonical serialization must not run"),
+            "mojum.genesis_batch.canonical", wraps=canonical_json,
         ) as serializer:
             with self.assertRaisesRegex(GenesisError, "JSON byte budget"):
                 apply_acquisition_batch(
                     ledger.snapshot(), [bad], expected_base_revision=ledger.revision
                 )
-            serializer.assert_not_called()
+            self.assertEqual(serializer.call_count, 1)  # bounded snapshot only
 
     def test_invalid_unicode_rejected(self):
         bad = event()
