@@ -50,6 +50,12 @@ def dataset(events):
     }
     return {"projection": projection, "sha256": digest(projection)}
 
+ 
+def resign(source):
+    """Recompute the projection digest after deliberately changing a fixture."""
+    source["sha256"] = digest(source["projection"])
+    return source
+
 
 def grant(*, consent_id="consent-1", source="sensor-a", revision="rev-1",
           topics=None, visibility=None, valid_from=0, valid_to=100,
@@ -227,6 +233,42 @@ class NoosphereConsentTests(unittest.TestCase):
         # comparing the supplied projection hash.
         with self.assertRaises(ConsentError):
             authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_topic_filter_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["topic"] = "different-topic"
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_source_filter_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["source"] = "different-source"
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_recorded_time_filter_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["as_of_recorded_ns"] = 10
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_validity_filter_is_enforced(self):
+        source = dataset([event(valid_from=20)])
+        source["projection"]["filters"]["valid_at_ns"] = 10
+        resign(source)
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_public_only_dataset_filter_rejects_private_event_even_with_grant(self):
+        source = dataset([event(visibility="PRIVATE")])
+        source["projection"]["filters"]["include_nonpublic"] = False
+        resign(source)
+        private_grant = grant(visibility=["PRIVATE"])
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [private_grant], as_of_ns=50, purpose="research")
 
     def test_caller_mapping_is_not_mutated(self):
         original = dataset([event()])
