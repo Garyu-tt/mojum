@@ -229,6 +229,37 @@ class NoosphereConsentTests(unittest.TestCase):
         with self.assertRaises(ConsentError):
             authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
 
+    def test_oversized_schema_mappings_rejected_before_key_snapshot(self):
+        source = dataset([event()])
+        source.update({f"unexpected_{index}": None for index in range(25_000)})
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+        oversized_grant = grant()
+        oversized_grant.update({f"unexpected_{index}": None for index in range(25_000)})
+        with self.assertRaises(ConsentError):
+            validate_grant(oversized_grant)
+
+    def test_hostile_schema_keys_rejected_before_equality(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                raise RuntimeError("hostile key equality must not run")
+
+        source = dataset([event()])
+        source["schema"] = source.pop("schema")
+        source[HostileKey("schema")] = source.pop("schema")
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+        candidate = grant()
+        value = candidate.pop("schema")
+        candidate[HostileKey("schema")] = value
+        with self.assertRaises(ConsentError):
+            validate_grant(candidate)
+
     def test_oversized_payload_rejected_before_json_serialization(self):
         source = dataset([event()])
         source["projection"]["items"][0]["event"]["payload"] = {
