@@ -173,19 +173,30 @@ def main(argv=None):
         prs.sort(key=lambda p:p["number"],reverse=True)
         if not prs:raise ValueError("no backlog")
         prev=safe_load(HISTORY,{"cursor":0,"seen":{}})
-        seen=prev.get("seen") if isinstance(prev.get("seen"),dict) else {}
+        # JSON can be valid but have hostile/stale state shapes. Never let a
+        # damaged private cache prevent triage or mark jobs as already done.
+        if (type(prev.get("cursor")) is not int or
+                not 0 <= prev["cursor"] <= 10_000_000 or
+                type(prev.get("seen")) is not dict):
+            prev={"cursor":0,"seen":{}}
+        seen=prev["seen"]
         earlier=safe_load(SNAPSHOT,{})
         by_number={p["number"]:p for p in prs}
-        if earlier.get("cycle")=="completed":
-            for item in earlier.get("workers",[]):
+        previous_workers=earlier.get("workers")
+        if (earlier.get("schema")==SCHEMA and
+                earlier.get("cycle")=="completed" and
+                type(previous_workers) is list and
+                len(previous_workers)<=INITIAL_POOL):
+            for item in previous_workers:
                 if (isinstance(item,dict) and item.get("state")=="completed" and
                         type(item.get("pr")) is int and item["pr"] in by_number):
                     seen[str(item["pr"])]={"updated_at":by_number[item["pr"]].get("updated_at"),
                                           "checked_at":time.time()}
+        clock=time.time()
         seen={k:v for k,v in seen.items()
               if re.fullmatch(r"[1-9][0-9]*",str(k)) and type(v) is dict
               and type(v.get("checked_at")) in (int,float)
-              and 0<=time.time()-v["checked_at"]<=86400}
+              and 0<=v["checked_at"]<=clock and clock-v["checked_at"]<=86400}
         eligible=[p for p in prs if
                   str(p["number"]) not in seen or
                   seen[str(p["number"])].get("updated_at")!=p.get("updated_at")]
@@ -193,7 +204,7 @@ def main(argv=None):
             save(HISTORY,{"cursor":0,"seen":seen,"last_cycle":now(),"last_count":0})
             print(json.dumps({"status":"idle","reason":"all visible PRs triaged within 24h","remaining":0}))
             return 0
-        cursor=int(prev.get("cursor",0)) % len(eligible)
+        cursor=prev["cursor"] % len(eligible)
         selected=[eligible[(cursor+i)%len(eligible)] for i in range(min(args.max_workers,len(eligible)))]
         if args.dry_run:
             print(json.dumps({"status":"dry-run","slots":len(selected),"assigned":[p["number"] for p in selected]}));return 0
