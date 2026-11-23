@@ -80,8 +80,8 @@ def evaluate_holdout(frames, *, train_frames, classification,
             or not 2 <= train_frames < len(normalized)):
         raise PulseHoldoutError("train_frames must leave a nonempty holdout")
     if (type(learning_rate) not in (int, float)
-            or not math.isfinite(learning_rate)
-            or not 0.0 < learning_rate <= 0.5):
+            or not 0.0 < learning_rate <= 0.5
+            or not math.isfinite(learning_rate)):
         raise PulseHoldoutError("invalid bounded learning rate")
     if type(summation) is not str or summation not in ("ordered", "compensated"):
         raise PulseHoldoutError("explicit summation mode required")
