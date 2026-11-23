@@ -207,6 +207,16 @@ class VirtualKinematicsTests(unittest.TestCase):
         self.assertFalse(verify_kinematics_report(oversized))
 
 
+    def test_verifier_rejects_multibyte_utf8_text_over_budget(self):
+        report = evaluate_forward_kinematics(sample())
+        report["extra"] = "💡" * 70_000
+        self.assertFalse(verify_kinematics_report(report))
+
+        report = evaluate_forward_kinematics(sample())
+        report["extra"] = "é" * 140_000
+        report["second"] = "é" * 140_000
+        self.assertFalse(verify_kinematics_report(report))
+
     def test_rig_and_joint_mapping_subclasses_rejected(self):
         class Rig(dict):
             pass
