@@ -245,6 +245,8 @@ def _digest(value):
 def _exact_mapping(value, keys, field):
     if type(value) is not dict:
         raise ConsentError(f"{field} must contain exactly the documented fields")
+    if len(value) != len(keys):
+        raise ConsentError(f"{field} must contain exactly the documented fields")
     native_keys = tuple(dict.keys(value))
     if any(type(key) is not str for key in native_keys):
         raise ConsentError(f"{field} keys must be native strings")
