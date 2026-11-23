@@ -78,7 +78,7 @@ class WorldAirflowTests(unittest.TestCase):
         forged_tick = RoomState(huge_tick, 1.0, 1.0, "0" * 64)
         forged_coord = RoomState(0, huge_coord, 1.0, "0" * 64)
         for forged in (forged_tick, forged_coord):
-            with self.subTest(state=forged):
+            with self.subTest(state_type=type(forged).__name__):
                 with self.assertRaises(AirflowError):
                     self.sample(state=forged, tick=forged.tick,
                                 expected_revision=forged.revision)
