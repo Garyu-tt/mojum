@@ -53,7 +53,7 @@ def analyze(lines):
                 object_pairs_hook=_reject_duplicate_keys,
                 parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite")),
             )
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, RecursionError) as exc:
             raise TraceError(f"line {line_number}: invalid JSON") from exc
         if not isinstance(row, dict) or set(row) != {"tick", "duration_us", "visibility"}:
             raise TraceError(f"line {line_number}: invalid fields")
