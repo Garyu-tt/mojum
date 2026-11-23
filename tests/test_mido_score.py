@@ -116,6 +116,9 @@ class OfflineScoreTests(unittest.TestCase):
             [event("note_on", 0, channel=9, note=36, velocity=50)],
             [event("control_change", 0, control=64, value=127)],
             [event("pitchwheel", 0, pitch=123)],
+            [event("program_change", 0, channel=0, program=16)],
+            [event("aftertouch", 0, channel=0, value=96)],
+            [event("polytouch", 0, channel=0, note=60, value=88)],
             [event("sysex", 0, data=bytes((1, 2)))],
             [event("note_on", 0, channel=0, note=60, velocity=True)],
         ]
