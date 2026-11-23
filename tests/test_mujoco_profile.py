@@ -2,6 +2,7 @@
 import json
 import math
 import unittest
+from unittest.mock import patch
 
 from mojum.mujoco_profile import (
     MAX_CPU_THREADS, MAX_JSON_BYTES, MAX_SIMULATED_NS, MAX_STEPS,
@@ -126,6 +127,29 @@ class CpuProfileTests(unittest.TestCase):
             pass
         with self.assertRaises(ProfileError):
             validate_profile(DictSubclass(valid_profile()))
+
+    def test_oversized_direct_mapping_rejected_before_key_snapshot(self):
+        value = valid_profile()
+        value.update({f"untrusted_{index}": index for index in range(50_000)})
+        with patch(
+            "mojum.mujoco_profile.frozenset",
+            side_effect=AssertionError("key snapshot must not be allocated"),
+            create=True,
+        ):
+            with self.assertRaisesRegex(ProfileError, "missing or unknown fields"):
+                validate_profile(value)
+
+    def test_oversized_solver_string_rejected_before_allowlist_hash(self):
+        class NoContains:
+            def __iter__(self):
+                return iter(("newton", "cg"))
+
+            def __contains__(self, value):
+                raise AssertionError("allowlist hash must not run")
+
+        with patch("mojum.mujoco_profile._SOLVERS", NoContains()):
+            with self.assertRaisesRegex(ProfileError, "unsupported solver"):
+                validate_profile(valid_profile(solver="x" * 1_000_000))
 
     def test_non_string_keys_fail_closed(self):
         value = valid_profile()
