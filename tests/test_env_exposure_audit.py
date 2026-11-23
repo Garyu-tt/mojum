@@ -24,6 +24,14 @@ class EnvironmentExposureAuditTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     audit_environment_names(names)
 
+    def test_rejects_hostile_string_subclass(self):
+        class HostileString(str):
+            def upper(self):
+                raise AssertionError("caller-controlled upper() must not execute")
+
+        with self.assertRaises(TypeError):
+            audit_environment_names([HostileString("TOKEN")])
+
     def test_bound(self):
         with self.assertRaises(ValueError):
             audit_environment_names(("X%d" % i for i in range(1025)))
