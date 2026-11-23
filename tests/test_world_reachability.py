@@ -118,6 +118,9 @@ class SampledPathTests(unittest.TestCase):
                 return other == self.name
 
         class ExplodingKey(ForgedKey):
+            # Overriding __eq__ disables inherited __hash__ in Python.
+            __hash__ = ForgedKey.__hash__
+
             def __eq__(self, other):
                 raise AssertionError("untrusted key equality must not run")
 
