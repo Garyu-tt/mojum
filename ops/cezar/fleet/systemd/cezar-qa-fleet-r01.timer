@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Cezar Mojum read-only 17-slot QA triage
+
+[Timer]
+OnCalendar=*:0/30
+AccuracySec=1min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=cezar-qa-fleet-r01.service
+
+[Install]
+WantedBy=timers.target

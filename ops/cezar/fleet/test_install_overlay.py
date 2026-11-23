@@ -79,5 +79,33 @@ class InstallOverlayTests(unittest.TestCase):
         self.assertNotIn(m.MARKER,self.backup.read_text())
 
 
+    def test_legacy_immutable_asset_url_migrates_without_losing_backup(self):
+        m.install(self.dist,self.js,self.backup)
+        original_backup=self.backup.read_bytes()
+        self.index.write_text(
+            self.index.read_text().replace(m.MARKER,m.LEGACY_MARKER))
+        self.index.chmod(0o600)
+        response=m.install(self.dist,self.js,self.backup)
+        self.assertTrue(response["was_present"])
+        self.assertTrue(response["cache_version_changed"])
+        self.assertIn(m.MARKER,self.index.read_text())
+        self.assertNotIn(m.LEGACY_MARKER,self.index.read_text())
+        self.assertEqual(original_backup,self.backup.read_bytes())
+        again=m.install(self.dist,self.js,self.backup)
+        self.assertFalse(again["cache_version_changed"])
+        self.assertEqual(self.index.read_text().count(m.MARKER),1)
+
+    def test_mixed_legacy_and_current_markers_fail_closed(self):
+        m.install(self.dist,self.js,self.backup)
+        before=self.index.read_text()
+        self.index.write_text(
+            before.replace(m.MARKER,m.MARKER+"\n"+m.LEGACY_MARKER))
+        self.index.chmod(0o600)
+        with self.assertRaisesRegex(m.DeployRefused,"duplicate"):
+            m.install(self.dist,self.js,self.backup)
+        self.assertEqual(self.index.read_text().count(m.LEGACY_MARKER),1)
+
+
+
 if __name__=="__main__":
     unittest.main()

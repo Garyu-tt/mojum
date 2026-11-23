@@ -1,0 +1,167 @@
+"""Hermetic tests for bounded 17-slot Cezar QA read-only triage."""
+from __future__ import annotations
+from datetime import datetime, timezone
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+HERE=Path(__file__).resolve().parent
+SRC=HERE/"qa_fleet.py" if (HERE/"qa_fleet.py").exists() else Path("/var/lib/cezar/home/qa-fleet-r01.py")
+spec=importlib.util.spec_from_file_location("qa_fleet_tested",SRC)
+fleet=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fleet)
+
+class QAFleetTests(unittest.TestCase):
+    def setUp(self):
+        self.t=tempfile.TemporaryDirectory()
+        self.addCleanup(self.t.cleanup)
+        root=Path(self.t.name)
+        self.home=root/"fleet"
+        self.home.mkdir(mode=0o700)
+        self.mirror=root/"mirror.json"
+        self.fake_items=[{"number":n,"kind":"pull_request","title":f"fixture PR {n}",
+            "url":f"https://github.com/Garyu-tt/mojum/pull/{n}",
+            "updated_at":"2026-11-22T19:00:00Z"} for n in (1,2,3)]
+        self.write_mirror()
+        self.patch("HOME",self.home)
+        self.patch("SNAPSHOT",self.home/"current.json")
+        self.patch("HISTORY",self.home/"history.json")
+        self.patch("LOCK",self.home/"lock")
+        self.patch("MIRROR",self.mirror)
+
+    def patch(self,name,value):
+        p=patch.object(fleet,name,value)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def write_mirror(self):
+        blob={"schema":"mojum.cezar.github-public-mirror.v1",
+              "repository":"Garyu-tt/mojum","possibly_truncated":False,
+              "fetched_at_utc":datetime.now(timezone.utc).isoformat(),
+              "pull_requests_open":len(self.fake_items),"issues_open":0,
+              "items":self.fake_items}
+        self.mirror.write_text(json.dumps(blob),encoding="utf-8")
+        self.mirror.chmod(0o600)
+
+    def test_inventory_resolves_exact_public_pr_ids(self):
+        self.assertEqual({x["number"] for x in fleet.local_backlog()},{1,2,3})
+        self.assertIsNone(fleet.local_backlog()[0]["isDraft"])
+
+    def test_no_duplicate_work_after_successful_cycle(self):
+        with patch.object(fleet,"fetch_diff",return_value=("diff --git a/a b/a", "digest")), \
+             patch.object(fleet,"model",return_value=("One concrete test",{"total_tokens":20})) as model:
+            self.assertEqual(fleet.main(["--max-workers","3"]),0)
+            result=json.loads((self.home/"current.json").read_text())
+            self.assertEqual(result["assigned"],3)
+            self.assertEqual(result["completed_tasks"],3)
+            self.assertEqual(len({x["slot"] for x in result["workers"]}),17)
+            self.assertEqual(len({x["pr"] for x in result["workers"] if x["pr"]}),3)
+            self.assertEqual(fleet.main(["--max-workers","3"]),0)
+            self.assertEqual(model.call_count,3)
+            seen=json.loads((self.home/"history.json").read_text())["seen"]
+            self.assertEqual(len(seen),3)
+
+    def test_unknown_draft_is_not_falsely_marked_ready_and_model_cap_is_reported(self):
+        # The public mirror does not carry trusted draft metadata. Do not turn
+        # that unknown value into an invented "False" prompt for the LLM.
+        with patch.object(fleet,"fetch_diff",return_value=("diff --git a/a b/a","digest")), \
+             patch.object(fleet,"model",return_value=("One concrete test",{})) as model:
+            self.assertEqual(fleet.main(["--max-workers","1"]),0)
+        prompt=model.call_args.args[1]
+        self.assertIn("Draft status: unknown",prompt)
+        self.assertNotIn("Draft: False",prompt)
+        snap=json.loads((self.home/"current.json").read_text())
+        self.assertEqual(snap["configured_capacity"],17)
+        self.assertEqual(snap["max_simultaneous_model_calls"],9)
+        self.assertLessEqual(snap["max_simultaneous_model_calls"],snap["configured_capacity"])
+
+    def test_failed_pr_does_not_stop_other_workers(self):
+        def model(port,prompt):
+            if "PR #2:" in prompt: raise TimeoutError("fixture")
+            return "One concrete test",{}
+        with patch.object(fleet,"fetch_diff",return_value=("diff --git a/a b/a","digest")), \
+             patch.object(fleet,"model",side_effect=model):
+            self.assertEqual(fleet.main(["--max-workers","3"]),0)
+        snap=json.loads((self.home/"current.json").read_text())
+        self.assertEqual(snap["completed_tasks"],2)
+        self.assertEqual(snap["failed_tasks"],1)
+
+    def test_home_symlink_rejected_without_chmod_target(self):
+        # A malicious pre-existing symlink must not change the destination mode.
+        target=Path(self.t.name)/"unrelated"
+        target.mkdir(mode=0o755)
+        target.chmod(0o755)
+        self.home.rmdir()
+        self.home.symlink_to(target,target_is_directory=True)
+        before=target.stat().st_mode & 0o777
+        with self.assertRaises(RuntimeError):
+            fleet.main(["--dry-run","--max-workers","1"])
+        self.assertEqual(target.stat().st_mode & 0o777,before)
+        self.assertFalse((target/"lock").exists())
+
+    def test_corrupt_local_state_recovers_without_discarding_safety_checks(self):
+        for state_path in (self.home/"current.json", self.home/"history.json"):
+            for raw in (b"{broken", bytes([0xff]), b"[]"):
+                with self.subTest(path=state_path.name, raw=raw):
+                    state_path.write_bytes(raw)
+                    state_path.chmod(0o600)
+                    self.assertEqual(fleet.safe_load(state_path, {"cursor": 0}), {"cursor": 0})
+            state_path.write_text('{"cursor":2}', encoding="utf-8")
+            self.assertEqual(fleet.safe_load(state_path, {}), {"cursor": 2})
+            state_path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                fleet.safe_load(state_path, {})
+            state_path.chmod(0o600)
+
+    def test_malformed_history_shapes_recover_in_full_dry_run(self):
+        path=self.home/"history.json"
+        for value in (
+            {"cursor":"not-an-int","seen":{}},
+            {"cursor":True,"seen":{}},
+            {"cursor":-1,"seen":{}},
+            {"cursor":0,"seen":[]},
+            {"cursor":0,"seen":{"3":{"checked_at":10**500,
+                                    "updated_at":"2026-11-22T19:00:00Z"}}},
+        ):
+            with self.subTest(value=str(value)[:90]):
+                path.write_text(json.dumps(value),encoding="utf-8")
+                path.chmod(0o600)
+                with patch("sys.stdout",new_callable=io.StringIO) as stdout:
+                    self.assertEqual(fleet.main(["--dry-run","--max-workers","3"]),0)
+                result=json.loads(stdout.getvalue())
+                self.assertEqual(result["status"],"dry-run")
+                self.assertEqual(set(result["assigned"]),{1,2,3})
+
+    def test_malformed_snapshot_shapes_do_not_fabricate_completed_work(self):
+        path=self.home/"current.json"
+        for value in (
+            {"schema":fleet.SCHEMA,"cycle":"completed","workers":None},
+            {"schema":fleet.SCHEMA,"cycle":"completed","workers":{}},
+            {"schema":fleet.SCHEMA,"cycle":"completed","workers":
+                [{"state":"completed","pr":3}] * 18},
+            {"schema":"bad-version","cycle":"completed","workers":
+                [{"state":"completed","pr":3}]},
+        ):
+            with self.subTest(value=str(value)[:90]):
+                path.write_text(json.dumps(value),encoding="utf-8")
+                path.chmod(0o600)
+                with patch("sys.stdout",new_callable=io.StringIO) as stdout:
+                    self.assertEqual(fleet.main(["--dry-run","--max-workers","3"]),0)
+                result=json.loads(stdout.getvalue())
+                self.assertEqual(result["status"],"dry-run")
+                self.assertEqual(set(result["assigned"]),{1,2,3})
+
+    def test_mirror_symlink_rejected(self):
+        actual=self.mirror.with_name("source.json")
+        self.mirror.rename(actual)
+        self.mirror.symlink_to(actual)
+        with self.assertRaises(OSError):
+            fleet.local_backlog()
+
+if __name__=="__main__":
+    unittest.main()

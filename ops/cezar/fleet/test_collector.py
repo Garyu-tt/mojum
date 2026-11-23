@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -51,8 +54,12 @@ class FleetObserverTests(unittest.TestCase):
         if "/github?" in url:
             return {"available":True,"repo":"Garyu-tt/mojum","prsTotal":45,
                     "issuesTotal":33,
-                    "prs":[{"createdAt":"2026-11-22T20:50:00Z"},
-                           {"createdAt":"2026-11-21T18:00:00Z"}]}
+                    "prs":[{"number":712,"title":"feat: <new> & safe",
+                            "isDraft":True,"createdAt":"2026-11-22T20:50:00Z"},
+                           {"number":700,"title":"old PR",
+                            "isDraft":False,"createdAt":"2026-11-21T18:00:00Z"}],
+                    "issues":[{"number":689,"title":"MuJoCo issue",
+                               "createdAt":"2026-11-22T20:15:00Z"}]}
         if url.startswith("http://127.0.0.1:480") and url.endswith("/slots"):
             return [{"is_processing":True},{"is_processing":False}]
         raise AssertionError("unexpected URL "+url)
@@ -103,6 +110,33 @@ class FleetObserverTests(unittest.TestCase):
         self.assertFalse(out["snapshot_fresh"])
         self.assertIsNone(out["running"])
         self.assertFalse(out["agents"][0]["last_90m"])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and os.name == "posix",
+                         "POSIX named pipes required")
+    def test_fifo_schedule_snapshot_is_rejected_without_blocking(self):
+        # A blocking read-only FIFO open would freeze the whole collector.
+        # The subprocess timeout keeps this regression bounded.
+        self.schedules.unlink()
+        os.mkfifo(self.schedules, 0o600)
+        code = (
+            "import importlib.util,sys\n"
+            "from pathlib import Path\n"
+            "from datetime import datetime,timezone\n"
+            "spec=importlib.util.spec_from_file_location('cezar_schedule_check',sys.argv[1])\n"
+            "module=importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "module.SCHEDULES=Path(sys.argv[2])\n"
+            "try:\n"
+            "    module._schedule_list(datetime.now(timezone.utc))\n"
+            "except module.FleetError:\n"
+            "    sys.exit(0)\n"
+            "sys.exit(3)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(SRC), str(self.schedules)],
+            capture_output=True, text=True, timeout=3,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_untrusted_schedule_symlink_fails_closed(self):
         link=self.home/"link.json"
@@ -169,6 +203,234 @@ class FleetObserverTests(unittest.TestCase):
         self.assertFalse(snap["cezar"]["available"])
         self.assertFalse(snap["github"]["available"])
         self.assertIsNone(snap["external_running_confirmed"])
+
+
+class GitHubLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.parent = Path(temp.name) / "private"
+        self.parent.mkdir(mode=0o700)
+        self.cache = self.parent / "recent-closed.json"
+        self.now = datetime(2026, 11, 22, 21, 10, tzinfo=timezone.utc)
+        patcher = patch.object(f, "CLOSED_CACHE", self.cache)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _closed(self):
+        return [{
+            "number": 710, "state": "closed", "title": "accepted",
+            "merged_at": "2026-11-22T21:09:00Z",
+            "updated_at": "2026-11-22T21:09:01Z",
+        }, {
+            "number": 711, "state": "closed", "title": "withdrawn",
+            "merged_at": None, "updated_at": "2026-11-22T21:09:04Z",
+        }]
+
+    def test_correct_merge_vs_closed_status_and_owner_only_cache(self):
+        with patch.object(f, "_fetch_closed_rest",
+                          return_value=f._closed_from_response(self._closed())) as fetch:
+            first = f._github_closed_history(self.now)
+            again = f._github_closed_history(self.now + timedelta(minutes=10))
+        self.assertEqual(fetch.call_count, 1)
+        self.assertTrue(first["snapshot_fresh"])
+        self.assertTrue(again["snapshot_fresh"])
+        self.assertEqual(first["merged_in_visible_sample"], 1)
+        self.assertEqual(first["closed_unmerged_in_visible_sample"], 1)
+        self.assertEqual([x["outcome"] for x in first["recent"]],
+                         ["merged", "closed-unmerged"])
+        self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
+
+    def test_corrupt_private_cache_recovers_via_public_get(self):
+        # A secure regular file may contain torn JSON after a crash.
+        self.cache.write_text('{"schema":', encoding="utf-8")
+        self.cache.chmod(0o600)
+        rows = f._closed_from_response(self._closed())
+        with patch.object(f, "_fetch_closed_rest", return_value=rows) as fetch:
+            result = f._github_closed_history(self.now)
+        fetch.assert_called_once_with()
+        self.assertTrue(result["snapshot_fresh"])
+        self.assertEqual(result["merged_in_visible_sample"], 1)
+        self.assertEqual(json.loads(self.cache.read_text())["recent"], rows)
+
+    def test_corrupt_private_cache_without_network_is_unavailable(self):
+        self.cache.write_text("{", encoding="utf-8")
+        self.cache.chmod(0o600)
+        with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
+            with self.assertRaisesRegex(f.FleetError, "unavailable"):
+                f._github_closed_history(self.now)
+
+    def test_inconsistent_merge_outcome_is_rejected_and_refetched(self):
+        good = f._closed_from_response(self._closed())
+        for item in ({**good[0], "merged_at": None},
+                     {**good[1], "merged_at": "2026-11-22T21:09:00Z"}):
+            with self.subTest(item=item):
+                invalid = {"schema": "cezar.github-closed-cache/1",
+                           "observed_at": self.now.isoformat(),
+                           "recent": [item]}
+                self.cache.write_text(json.dumps(invalid), encoding="utf-8")
+                self.cache.chmod(0o600)
+                with self.assertRaises(f.CorruptClosedCache):
+                    f._load_closed_cache()
+                with patch.object(f, "_fetch_closed_rest", return_value=good) as fetch:
+                    result = f._github_closed_history(self.now)
+                fetch.assert_called_once_with()
+                self.assertEqual(result["merged_in_visible_sample"], 1)
+                self.assertEqual(result["closed_unmerged_in_visible_sample"], 1)
+
+    def test_duplicate_cached_pr_ids_are_rejected_and_refetched(self):
+        # A valid private cache must not double-count the same merged PR.
+        rows = f._closed_from_response(self._closed())
+        invalid = {"schema": "cezar.github-closed-cache/1",
+                   "observed_at": self.now.isoformat(),
+                   "recent": [rows[0], dict(rows[0])]}
+        self.cache.write_text(json.dumps(invalid), encoding="utf-8")
+        self.cache.chmod(0o600)
+        with self.assertRaisesRegex(f.CorruptClosedCache, "duplicate"):
+            f._load_closed_cache()
+        with patch.object(f, "_fetch_closed_rest", return_value=rows) as fetch:
+            result = f._github_closed_history(self.now)
+        fetch.assert_called_once_with()
+        self.assertEqual(result["merged_in_visible_sample"], 1)
+        self.assertEqual(result["closed_unmerged_in_visible_sample"], 1)
+
+    def test_stale_cache_is_labelled_stale_on_public_api_failure(self):
+        with patch.object(f, "_fetch_closed_rest",
+                          return_value=f._closed_from_response(self._closed())):
+            f._github_closed_history(self.now)
+        with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
+            status = f._github_closed_history(self.now + timedelta(minutes=17))
+        self.assertFalse(status["snapshot_fresh"])
+        self.assertEqual(status["merged_in_visible_sample"], 1)
+
+    def test_recursive_public_response_uses_stale_cache_without_crash(self):
+        with patch.object(f, "_fetch_closed_rest",
+                          return_value=f._closed_from_response(self._closed())):
+            f._github_closed_history(self.now)
+        # A bounded JSON response can still exceed the decoder recursion limit.
+        with patch.object(f, "_fetch_closed_rest",
+                          side_effect=RecursionError("deep public JSON")):
+            status = f._github_closed_history(self.now + timedelta(minutes=17))
+        self.assertFalse(status["snapshot_fresh"])
+        self.assertEqual(status["merged_in_visible_sample"], 1)
+
+    def test_recursive_private_cache_decode_does_not_take_down_other_sources(self):
+        # Decoder recursion thresholds vary across CPython versions; explicitly
+        # simulate json.loads rejecting an over-deep local cache payload.
+        with (patch.object(f, "_load_closed_cache",
+                           side_effect=RecursionError("deep private JSON")),
+              patch.object(f, "_fetch_closed_rest",
+                           side_effect=TimeoutError("offline")),
+              patch.object(f, "_cezar", return_value={"active": 1}),
+              patch.object(f, "_schedule_list", return_value={"enabled": 5}),
+              patch.object(f, "_models", return_value={"inference_busy_known": 0}),
+              patch.object(f, "_github", return_value={"open_prs": 12})):
+            snap = f.collect(self.now, include_history=True)
+        self.assertEqual(snap["cezar"]["active"], 1)
+        self.assertEqual(snap["schedules"]["enabled"], 5)
+        self.assertEqual(snap["github"]["open_prs"], 12)
+        self.assertEqual(snap["models"]["inference_busy_known"], 0)
+        self.assertEqual(snap["github_history"],
+                         {"available": False, "reason": "FleetError"})
+
+    def test_absent_cache_and_network_failure_is_unavailable(self):
+        with patch.object(f, "_fetch_closed_rest", side_effect=TimeoutError("offline")):
+            with self.assertRaises(f.FleetError):
+                f._github_closed_history(self.now)
+
+    def test_public_rest_strictly_requires_closed_and_real_numbers(self):
+        for broken in (
+            [{"number": True, "state": "closed", "title": "x",
+              "merged_at": None, "updated_at": "2026-11-22T21:09:00Z"}],
+            [{**self._closed()[0], "state": "open"}],
+            [{**self._closed()[0], "merged_at": "not-a-date"}],
+            self._closed() + [dict(self._closed()[0])],
+        ):
+            with self.subTest(broken=str(broken)[:100]):
+                with self.assertRaises(f.FleetError):
+                    f._closed_from_response(broken)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo") and os.name == "posix",
+                         "POSIX named pipes required")
+    def test_fifo_cache_is_refused_without_waiting_for_writer(self):
+        # The subprocess timeout ensures a regression cannot hang the CI worker.
+        # Exercise collect(), not only the low-level cache reader: failure must
+        # affect GitHub history alone, never healthy Cezar/agent sources.
+        os.mkfifo(self.cache, 0o600)
+        code = (
+            "import importlib.util,sys\n"
+            "from datetime import datetime,timezone\n"
+            "from pathlib import Path\n"
+            "from unittest.mock import patch\n"
+            "spec=importlib.util.spec_from_file_location('cezar_cache_check',sys.argv[1])\n"
+            "module=importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "module.CLOSED_CACHE=Path(sys.argv[2])\n"
+            "with (patch.object(module,'_cezar',return_value={'active':1}),\n"
+            "      patch.object(module,'_schedule_list',return_value={'enabled':5}),\n"
+            "      patch.object(module,'_models',return_value={'capacity_slots_known':17}),\n"
+            "      patch.object(module,'_github',return_value={'open_prs':12})):\n"
+            "    snap=module.collect(datetime(2026,11,22,21,10,tzinfo=timezone.utc),\n"
+            "                        include_history=True)\n"
+            "assert snap['github_history']=={'available':False,'reason':'FleetError'},snap\n"
+            "assert snap['cezar']['active']==1,snap\n"
+            "assert snap['schedules']['enabled']==5,snap\n"
+            "assert snap['models']['capacity_slots_known']==17,snap\n"
+            "assert snap['github']['open_prs']==12,snap\n"
+            "assert snap['external_running_confirmed'] is None,snap\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(SRC), str(self.cache)],
+            capture_output=True, text=True, timeout=3,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_symlink_or_untrusted_history_cache_is_not_read(self):
+        secret = self.parent / "secret.json"
+        secret.write_text('{"password":"stay private"}')
+        self.cache.symlink_to(secret)
+        with self.assertRaises(f.FleetError):
+            f._github_closed_history(self.now)
+        self.cache.unlink()
+        self.cache.write_text("{}")
+        self.cache.chmod(0o644)
+        with self.assertRaises(f.FleetError):
+            f._github_closed_history(self.now)
+
+    def test_live_source_separation_is_enforced(self):
+        with patch.object(f, "_get", side_effect=lambda url:
+                          [{"status":"cancelled"}] if url.endswith("/runs")
+                          else {"available": True, "repo":"Garyu-tt/mojum",
+                                "prsTotal": 12, "issuesTotal": 3,
+                                "prs":[{"number":712,"title":"new",
+                                        "createdAt":"2026-11-22T21:00:00Z"}],
+                                "issues":[]}):
+            with patch.object(f, "_models", return_value={"capacity_slots_known":17,
+                                                            "inference_busy_known":0}):
+                with patch.object(f, "_schedule_list", return_value={
+                    "enabled":5, "running":None}):
+                    with patch.object(f, "_github_closed_history",
+                                      return_value={"available":True,
+                                                    "recent":[]}) as hist:
+                        default = f.collect(self.now)
+                        self.assertFalse(default["github_history"]["available"])
+                        self.assertEqual(hist.call_count, 0)
+                        live = f.collect(self.now, include_history=True)
+                        self.assertTrue(live["github_history"]["available"])
+                        self.assertEqual(hist.call_count, 1)
+                        self.assertEqual(live["cezar"]["total"], 1)
+                        self.assertEqual(live["github"]["open_prs"], 12)
+                        self.assertEqual(len(live["github"]["latest_open_prs"]), 1)
+                        self.assertIsNone(live["external_running_confirmed"])
+
+    def test_malicious_title_is_renderable_text_only(self):
+        rows = f._public_summary([
+            {"number": 712, "title": "<script>alert(1)</script>\u0000",
+             "createdAt":"2026-11-22T20:50:00Z"}
+        ], max_items=5, kind="pr")
+        self.assertEqual(rows[0]["number"], 712)
+        self.assertNotIn("\u0000", rows[0]["title"])
+        self.assertEqual(rows[0]["title"], "<script>alert(1)</script> ")
 
 
 if __name__=="__main__":

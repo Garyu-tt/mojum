@@ -20,6 +20,10 @@ WEB = Path("/var/lib/cezar/runtime/node_modules/@open-mercato/cezar/web/dist/ass
 PRIVATE = Path("/var/lib/cezar/home/fleet/current.json")
 CEZAR = "http://127.0.0.1:4329/api/v1"
 MODEL_PORTS = (48081,48082,48083,48084,48085)
+CLOSED_CACHE = Path("/var/lib/cezar/home/fleet/github-closed-cache.json")
+CLOSED_URL = ("https://api.github.com/repos/Garyu-tt/mojum/pulls?"
+              "state=closed&sort=updated&direction=desc&per_page=20")
+CLOSED_TTL_SECONDS = 900
 MAX_BYTES = 500_000
 FRESHNESS_SECONDS = 7200
 ACTIVE = frozenset(("running","queued","starting","waiting"))
@@ -27,6 +31,11 @@ NOW = lambda: datetime.now(timezone.utc)
 
 
 class FleetError(ValueError):
+    pass
+
+
+class CorruptClosedCache(FleetError):
+    """Validated owner-only cache file contains unusable data (not unsafe I/O)."""
     pass
 
 
@@ -61,10 +70,14 @@ def _parse_time(value):
 
 
 def _schedule_list(now):
-    # Pin the inspected file: lstat() followed by read_bytes() could
-    # follow a replaced symlink and would allocate an unbounded payload.
+    # Both symlink substitution and FIFO blocking must be rejected before
+    # a source can stall the entire fleet collector.
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nonblock is None:
+        raise FleetError("nonblocking schedule snapshot validation unavailable")
     try:
-        fd=os.open(SCHEDULES,os.O_RDONLY|os.O_NOFOLLOW|getattr(os,"O_CLOEXEC",0))
+        fd=os.open(SCHEDULES,os.O_RDONLY|os.O_NOFOLLOW|
+                   getattr(os,"O_CLOEXEC",0)|nonblock)
     except OSError as exc:
         raise FleetError("schedule snapshot cannot be opened safely") from exc
     try:
@@ -172,30 +185,383 @@ def _cezar():
             "statuses":counts}
 
 
-def _github(now):
-    # Native Cezar GitHub adapter, not an independent GitHub client.
-    data=_get(CEZAR+"/github?limit=50")
-    if not isinstance(data,dict) or data.get("available") is not True or data.get("repo")!="Garyu-tt/mojum":
+def _public_summary(items, *, max_items, kind):
+    if not isinstance(items, list):
+        raise FleetError("invalid GitHub list")
+    out = []
+    for item in items[:max_items]:
+        if not isinstance(item, dict):
+            raise FleetError("invalid GitHub item")
+        number = item.get("number")
+        title = item.get("title")
+        if type(number) is not int or not 1 <= number <= 2**31 - 1:
+            raise FleetError("invalid GitHub number")
+        if type(title) is not str:
+            raise FleetError("invalid GitHub title")
+        # Titles are untrusted public content. Keep presentation short,
+        # printable, and always use textContent in the viewer.
+        clean = "".join(c if c.isprintable() else " " for c in title)[:160]
+        out.append({
+            "kind": kind,
+            "number": number,
+            "title": clean,
+            "created_at": item.get("createdAt") if _parse_time(item.get("createdAt")) else None,
+            "draft": item.get("isDraft") is True if kind == "pr" else False,
+        })
+    return out
+
+
+def _github_live(now):
+    # Existing Cezar read-only GitHub adapter. Historical Cezar runs
+    # are NOT equivalent to current GitHub Issues/PRs.
+    data = _get(CEZAR + "/github?limit=50")
+    if (not isinstance(data, dict) or data.get("available") is not True
+            or data.get("repo") != "Garyu-tt/mojum"):
         raise FleetError("Cezar GitHub tab unavailable")
-    prs=data.get("prs")
-    if not isinstance(prs,list):
+    prs = data.get("prs")
+    if not isinstance(prs, list):
         raise FleetError("invalid PR listing")
-    recent=0
+    recent = 0
     for item in prs:
-        if not isinstance(item,dict):
+        if not isinstance(item, dict):
             continue
-        created=_parse_time(item.get("createdAt"))
-        if created and timedelta(0)<=now-created<=timedelta(minutes=90):
-            recent+=1
+        created = _parse_time(item.get("createdAt"))
+        if created and timedelta(0) <= now-created <= timedelta(minutes=90):
+            recent += 1
+    count_prs, count_issues = data.get("prsTotal"), data.get("issuesTotal")
+    if (type(count_prs) is not int or count_prs < 0
+            or type(count_issues) is not int or count_issues < 0):
+        raise FleetError("invalid GitHub counts")
     return {
-        "repo":"Garyu-tt/mojum","open_prs":data.get("prsTotal"),
-        "open_issues":data.get("issuesTotal"),
-        "new_prs_last_90m_visible":recent,
-        "visibility":"open PR artifacts; NOT live agent executions",
+        "repo": "Garyu-tt/mojum",
+        "open_prs": count_prs,
+        "open_issues": count_issues,
+        "new_prs_last_90m_visible": recent,
+        "latest_open_prs": _public_summary(prs, max_items=12, kind="pr"),
+        "latest_open_issues": _public_summary(data.get("issues", []), max_items=8, kind="issue"),
+        "visibility": "public open GitHub artifacts, NOT live agent executions",
     }
 
 
-def collect(now=None):
+MIRROR_FILE = Path("/var/lib/cezar/home/github-mirror/mojum.json")
+def _github_mirror(now):
+    """Read cached public PR metadata only when live read-only adapter is unavailable."""
+    fd=os.open(MIRROR_FILE,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|
+               getattr(os,"O_CLOEXEC",0))
+    try:
+        st=os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid!=os.geteuid() or
+                st.st_nlink!=1 or st.st_mode&0o077 or st.st_size>250000):
+            raise FleetError("unsafe public GitHub mirror")
+        with os.fdopen(fd,"rb") as f:
+            fd=-1
+            raw=f.read(250001)
+    finally:
+        if fd>=0:os.close(fd)
+    if len(raw)>250000:
+        raise FleetError("GitHub mirror too large")
+    data=json.loads(raw)
+    if (type(data) is not dict or
+            data.get("schema")!="mojum.cezar.github-public-mirror.v1" or
+            data.get("repository")!="Garyu-tt/mojum" or
+            data.get("possibly_truncated") is not False):
+        raise FleetError("invalid GitHub mirror")
+    observed=_parse_time(data.get("fetched_at_utc"))
+    if observed is None or not timedelta(0)<=now-observed<=timedelta(hours=3):
+        raise FleetError("stale GitHub mirror")
+    items=data.get("items")
+    if type(items) is not list or len(items)>400:
+        raise FleetError("invalid mirror inventory")
+    prs,issues=[],[]
+    seen=set()
+    for item in items:
+        if type(item) is not dict:raise FleetError("invalid GitHub item")
+        n=item.get("number")
+        kind=item.get("kind")
+        if type(n) is not int or n<1 or n>10000000 or n in seen:
+            raise FleetError("invalid GitHub id")
+        seen.add(n)
+        if kind not in ("pull_request","issue"):raise FleetError("invalid GitHub type")
+        url="https://github.com/Garyu-tt/mojum/"+("pull/" if kind=="pull_request" else "issues/")+str(n)
+        if item.get("url")!=url:raise FleetError("unexpected GitHub path")
+        title=item.get("title")
+        if type(title) is not str:raise FleetError("invalid title")
+        clean="".join(c if c.isprintable() else " " for c in title)[:160]
+        upd=item.get("updated_at")
+        row={"kind":"pr" if kind=="pull_request" else "issue",
+             "number":n,"title":clean,"created_at":None,
+             "updated_at":upd if _parse_time(upd) else None,"draft":None}
+        (prs if kind=="pull_request" else issues).append(row)
+    if len(prs)!=data.get("pull_requests_open") or len(issues)!=data.get("issues_open"):
+        raise FleetError("GitHub mirror count mismatch")
+    prs.sort(key=lambda x:x.get("updated_at") or "",reverse=True)
+    issues.sort(key=lambda x:x.get("updated_at") or "",reverse=True)
+    return {"repo":"Garyu-tt/mojum","open_prs":len(prs),"open_issues":len(issues),
+            "new_prs_last_90m_visible":None,
+            "latest_open_prs":prs[:12],"latest_open_issues":issues[:8],
+            "source":"read-only cached public GitHub mirror",
+            "observed_at":observed.isoformat(),"snapshot_fresh":True,
+            "fallback":True,
+            "visibility":"Last known public GitHub PRs; not live worker activity"}
+
+def _github(now):
+    try:
+        return _github_live(now)
+    except (OSError, ValueError, TypeError, TimeoutError, json.JSONDecodeError):
+        return _github_mirror(now)
+
+def _closed_from_response(raw):
+    if not isinstance(raw, list) or len(raw) > 20:
+        raise FleetError("unexpected closed PR response")
+    out = []
+    for item in raw:
+        if not isinstance(item, dict) or item.get("state") != "closed":
+            raise FleetError("nonclosed PR in historical snapshot")
+        number, title = item.get("number"), item.get("title")
+        if (type(number) is not int or not 1 <= number <= 2**31 - 1
+                or type(title) is not str):
+            raise FleetError("invalid PR history item")
+        changed = item.get("updated_at")
+        if _parse_time(changed) is None:
+            raise FleetError("invalid PR updated time")
+        merged = item.get("merged_at")
+        if merged is not None and _parse_time(merged) is None:
+            raise FleetError("invalid PR merge time")
+        clean = "".join(c if c.isprintable() else " " for c in title)[:160]
+        out.append({
+            "number": number, "title": clean,
+            "outcome": "merged" if merged else "closed-unmerged",
+            "updated_at": changed, "merged_at": merged,
+        })
+    if len({x["number"] for x in out}) != len(out):
+        raise FleetError("duplicate historical PR")
+    return out
+
+
+def _fetch_closed_rest():
+    # One uncredentialed read-only GET to pinned public GitHub per 15 min.
+    # Never use Cezar/GitHub credentials or accept redirects.
+    req = Request(CLOSED_URL, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "mojum-cezar-fleet-observer/2",
+    })
+    client = build_opener(ProxyHandler({}), NoRedirect())
+    with client.open(req, timeout=6) as response:
+        if response.status != 200 or response.geturl() != CLOSED_URL:
+            raise FleetError("unexpected GitHub history response")
+        data = response.read(1_500_001)
+    if len(data) > 1_500_000:
+        raise FleetError("oversized GitHub history")
+    return _closed_from_response(json.loads(data))
+
+
+def _load_closed_cache():
+    # A FIFO can block inside open() before fstat gets to reject it.
+    # Require nonblocking open; regular files retain normal read semantics.
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nonblock is None:
+        raise FleetError("nonblocking cache validation unavailable")
+    try:
+        fd = os.open(CLOSED_CACHE, os.O_RDONLY | os.O_NOFOLLOW |
+                     getattr(os, "O_CLOEXEC", 0) | nonblock)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise FleetError("closed PR cache cannot be opened") from exc
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_nlink != 1 or st.st_mode & 0o077
+                or st.st_size > 30_000):
+            raise FleetError("unsafe closed PR cache")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            data = handle.read(30_001)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(data) > 30_000:
+        raise FleetError("oversized closed PR cache")
+    parsed = json.loads(data)
+    if (type(parsed) is not dict
+            or set(parsed) != {"schema", "observed_at", "recent"}
+            or parsed["schema"] != "cezar.github-closed-cache/1"):
+        raise CorruptClosedCache("unknown closed PR cache schema")
+    stamp = _parse_time(parsed["observed_at"])
+    recent = parsed["recent"]
+    if stamp is None or type(recent) is not list or len(recent) > 20:
+        raise CorruptClosedCache("invalid cached PR list")
+    if len(json.dumps(recent)) > 20_000:
+        raise CorruptClosedCache("oversized cached PR list")
+    seen_numbers = set()
+    for item in recent:
+        if (type(item) is not dict
+                or set(item) != {"number", "title", "outcome", "updated_at", "merged_at"}
+                or type(item["number"]) is not int
+                or not 1 <= item["number"] <= 2**31 - 1
+                or type(item["title"]) is not str or len(item["title"]) > 160
+                or item["outcome"] not in ("merged", "closed-unmerged")
+                or _parse_time(item["updated_at"]) is None
+                or (item["outcome"] == "merged") != (item["merged_at"] is not None)
+                or (item["merged_at"] is not None and
+                    _parse_time(item["merged_at"]) is None)):
+            raise CorruptClosedCache("unsafe cached PR item")
+        if item["number"] in seen_numbers:
+            raise CorruptClosedCache("duplicate cached PR number")
+        seen_numbers.add(item["number"])
+    return parsed
+
+
+def _github_closed_history(now):
+    try:
+        cache = _load_closed_cache()
+    except (CorruptClosedCache, json.JSONDecodeError, UnicodeError,
+            RecursionError):
+        # An owner-only regular cache may be truncated/corrupt. Retry the
+        # pinned bounded public GET rather than permanently disabling history.
+        # Unsafe path/type/permission errors intentionally stay fatal.
+        cache = None
+    stamp = _parse_time(cache["observed_at"]) if cache else None
+    age = (now - stamp).total_seconds() if stamp else None
+    fresh = age is not None and 0 <= age < CLOSED_TTL_SECONDS
+    if not fresh:
+        try:
+            rows = _fetch_closed_rest()
+            cache = {
+                "schema": "cezar.github-closed-cache/1",
+                "observed_at": now.isoformat(),
+                "recent": rows,
+            }
+            save(cache, CLOSED_CACHE)
+            fresh = True
+        except (OSError, ValueError, TypeError, TimeoutError,
+                json.JSONDecodeError, RecursionError):
+            if cache is None:
+                raise FleetError("GitHub history unavailable without cache")
+    recent = cache["recent"]
+    return {
+        "available": True,
+        "source": "GitHub public REST; only last 20 recently updated closed PRs",
+        "observed_at": cache["observed_at"],
+        "snapshot_fresh": fresh,
+        "recent": recent,
+        "merged_in_visible_sample": sum(x["outcome"] == "merged" for x in recent),
+        "closed_unmerged_in_visible_sample": sum(x["outcome"] == "closed-unmerged" for x in recent),
+        "not_a_live_worker_count": True,
+    }
+
+
+REPORT_DIR = Path("/var/lib/cezar/home/fleet/agent-reports")
+REPORT_AGENTS = ("qa", "peer1", "peer2", "peer3", "peer4")
+REPORT_PHASES = {"observed", "started", "progress", "completed", "blocked", "failed"}
+REPORT_ACTIONS = {"build", "qa", "ship", "observe", "sync", "other"}
+
+def _agent_reports():
+    """A connector-observed receipt is evidence of a report, not of live work."""
+    dstat=os.lstat(REPORT_DIR)
+    if not stat.S_ISDIR(dstat.st_mode) or dstat.st_uid!=os.geteuid() or dstat.st_mode & 0o077:
+        raise FleetError("unsafe report directory")
+    agents=[]
+    for agent in REPORT_AGENTS:
+        path=REPORT_DIR/(agent+".json")
+        try:
+            fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|getattr(os,"O_CLOEXEC",0))
+        except FileNotFoundError:
+            continue
+        try:
+            st=os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.geteuid() or st.st_mode & 0o077 or st.st_nlink!=1 or st.st_size>2000:
+                raise FleetError("unsafe agent report")
+            with os.fdopen(fd,"rb") as inp:
+                fd=-1
+                raw=inp.read(2001)
+        finally:
+            if fd>=0:os.close(fd)
+        if len(raw)>2000:
+            raise FleetError("oversized agent report")
+        try: item=json.loads(raw)
+        except (ValueError,UnicodeError) as exc:raise FleetError("invalid agent report") from exc
+        if (type(item) is not dict or item.get("schema")!="cezar.agent-report.v1"
+                or item.get("agent")!=agent or item.get("phase") not in REPORT_PHASES
+                or item.get("action") not in REPORT_ACTIONS
+                or item.get("source") not in ("owner-observation","self-report")
+                or _parse_time(item.get("reported_at")) is None):
+            raise FleetError("invalid report schema")
+        note=item.get("note")
+        num=item.get("pr")
+        if (type(note) is not str or not 3<=len(note)<=240 or not note.isprintable()
+                or (num is not None and (type(num) is not int or not 1<=num<=10_000_000))):
+            raise FleetError("invalid report content")
+        agents.append({k:item[k] for k in ("agent","phase","action","note","pr","source","reported_at")})
+    agents.sort(key=lambda x:x["reported_at"],reverse=True)
+    return {"available":True,"source":"owner connector reports; NOT verified live execution",
+            "agents":agents,"total_reporting":len(agents),"live_confirmed":None}
+
+
+QA_STATE = Path("/var/lib/cezar/home/qa-fleet/current.json")
+def _qa_fleet():
+    """Actual localhost model inference requests, not independent acceptance."""
+    try:
+        fd = os.open(QA_STATE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
+                     getattr(os, "O_CLOEXEC", 0))
+    except FileNotFoundError:
+        return {"available": False, "reason": "not-started"}
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_nlink != 1 or st.st_mode & 0o077 or st.st_size > 150000):
+            raise FleetError("unsafe QA state")
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            data = f.read(150001)
+    finally:
+        if fd >= 0: os.close(fd)
+    if len(data) > 150000:
+        raise FleetError("oversized QA state")
+    value = json.loads(data)
+    if type(value) is not dict or value.get("schema") != "cezar.qa-fleet.v1":
+        raise FleetError("unknown QA snapshot")
+    workers = value.get("workers")
+    if not isinstance(workers, list) or len(workers) != 17:
+        raise FleetError("bad worker list")
+    rows = []
+    for i, x in enumerate(workers):
+        if (type(x) is not dict or x.get("slot") != i
+                or x.get("port") not in (48081, 48082, 48083, 48084, 48085)
+                or x.get("state") not in ("queued", "fetching_patch", "waiting_model", "inflight", "completed", "failed")):
+            raise FleetError("bad QA worker")
+        pr = x.get("pr")
+        if pr is not None and (type(pr) is not int or not 1 <= pr <= 10000000):
+            raise FleetError("bad PR number")
+        summary = x.get("summary")
+        if summary is not None and not isinstance(summary, str):
+            raise FleetError("bad review summary")
+        rows.append({"slot": i, "port": x["port"], "state": x["state"],
+                     "pr": pr, "summary": summary[:350] if summary else None,
+                     "evidence": str(x.get("evidence") or "")[:40],
+                     "started_at": x.get("model_started_at"),
+                     "finished_at": x.get("finished_at")})
+    stamp = _parse_time(value.get("generated_at"))
+    if stamp is None:
+        raise FleetError("bad QA timestamp")
+    age = (NOW()-stamp).total_seconds()
+    fresh = 0 <= age <= 120
+    terminal = value.get("cycle") in ("completed", "idle") and all(
+        x["state"] not in ("inflight", "waiting_model", "fetching_patch") for x in rows)
+    return {"available": True,
+            "source": "live local model requests; not verified final QA",
+            "generated_at": value["generated_at"], "snapshot_fresh": fresh,
+            "cycle": value.get("cycle"), "configured_capacity": 17,
+            "assigned": value.get("assigned"),
+            "active_requests": (0 if terminal else
+                sum(x["state"] == "inflight" for x in rows) if fresh else None),
+            "completed_tasks": sum(x["state"] == "completed" for x in rows),
+            "failed_tasks": sum(x["state"] == "failed" for x in rows),
+            "workers": rows}
+
+def collect(now=None, *, include_history=False):
+    if type(include_history) is not bool:
+        raise FleetError("invalid GitHub history selector")
     now=now or NOW()
     observations={"schema":"cezar.fleet.visibility.v1","generated_at":now.isoformat()}
     sections=[
@@ -203,12 +569,19 @@ def collect(now=None):
         ("schedules",lambda:_schedule_list(now)),
         ("models",_models),
         ("github",lambda:_github(now)),
+        ("reports",_agent_reports),
+        ("qa_fleet",_qa_fleet),
     ]
+    if include_history:
+        sections.append(("github_history",lambda:_github_closed_history(now)))
+    else:
+        observations["github_history"]={"available":False,"reason":"not-requested"}
     # A temporary failure in one source is explicit, never silently zero.
     for name,run in sections:
         try:
             observations[name]=run()
-        except (OSError,ValueError,TypeError,TimeoutError,json.JSONDecodeError) as exc:
+        except (OSError,ValueError,TypeError,TimeoutError,json.JSONDecodeError,
+                RecursionError) as exc:
             observations[name]={"available":False,"reason":type(exc).__name__}
     observations["external_running_confirmed"]=None
     observations["external_running_explanation"]="No live heartbeat from ChatGPT/external executors; not equal to zero."
@@ -228,7 +601,7 @@ def _owner_dir(path):
 
 
 def save(data,path):
-    if path not in (WEB,PRIVATE):
+    if path not in (WEB,PRIVATE,CLOSED_CACHE):
         raise FleetError("unsupported output path")
     _owner_dir(path.parent)
     blob=(json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n").encode("utf-8")
@@ -250,7 +623,7 @@ def save(data,path):
 
 
 if __name__=="__main__":
-    info=collect()
+    info=collect(include_history=True)
     save(info,PRIVATE)
     save(info,WEB)
     print(json.dumps({
