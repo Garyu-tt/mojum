@@ -111,7 +111,9 @@ def evaluate_workflow_evidence(
             continue
         if head != expected_head_sha:
             stale_count += 1
-            continue
+        # Select the newest run for each required workflow BEFORE deciding
+        # whether its HEAD is acceptable. Otherwise a newer stale/pending run
+        # could be skipped and an older success incorrectly remain PASS.
         candidate = {"run_id": run_id, "run_attempt": attempt, "name": name,
                      "head_sha": head, "status": status, "conclusion": conclusion}
         previous = latest.get(workflow_id)
@@ -127,6 +129,8 @@ def evaluate_workflow_evidence(
         item = latest.get(workflow_id)
         if item is None:
             results.append(WorkflowResult(workflow_id, "", "MISSING", None, None, None))
+        elif item["head_sha"] != expected_head_sha:
+            results.append(WorkflowResult(workflow_id, item["name"], "STALE", item["run_id"], item["run_attempt"], item["head_sha"]))
         elif item["status"] != "completed":
             results.append(WorkflowResult(workflow_id, item["name"], "PENDING", item["run_id"], item["run_attempt"], item["head_sha"]))
         elif item["conclusion"] != "success":
