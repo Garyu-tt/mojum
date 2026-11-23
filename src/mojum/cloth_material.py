@@ -20,7 +20,7 @@ class ClothMaterialProfile:
     """Immutable material coefficients expressed in documented fixed-point SI units.
 
     Scales:
-      * areal_density_ug_m2: 1e-6 kg/m²
+      * areal_density_ug_m2: 1e-9 kg/m²
       * thickness_nm: 1e-9 m
       * stretch_stiffness_uN_m: 1e-6 N/m
       * bend_stiffness_uNm: 1e-6 N·m
