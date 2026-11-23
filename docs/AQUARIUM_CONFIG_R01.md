@@ -19,7 +19,7 @@
 
 `mojum.aquarium_config.validate_profile()` validates a caller-supplied, flat launch profile before a separate caller decides whether to start the Aquarium. It is an opt-in data contract, not a launcher, configuration file loader, process manager or runtime integration.
 
-The validator accepts either an exact built-in `dict` or JSON text. It returns an immutable `LaunchProfile` containing normalized scalar fields and a deterministic SHA-256 digest. The digest detects accidental changes; it is not a signature, authentication token, authorization grant or protection from rollback.
+The validator accepts either an exact built-in `dict` or JSON text. It returns an immutable, slotted `LaunchProfile` containing normalized scalar fields and a deterministic SHA-256 digest. The public value-object constructor repeats field and cross-field validation and verifies the digest, so directly constructing a profile cannot bypass preflight. The digest detects accidental changes; it is not a signature, authentication token, authorization grant or protection from rollback.
 
 ## Use
 
