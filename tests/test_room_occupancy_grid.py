@@ -98,6 +98,37 @@ class OccupancyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rasterize_occupancy(item)
 
+    def test_hostile_string_keys_rejected_before_hash(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            explode = False
+            def __hash__(self):
+                if self.explode:
+                    raise RuntimeError("hostile hash executed")
+                return str.__hash__(self)
+
+        value = payload()
+        key = HostileKey("schema")
+        value[key] = value.pop("schema")
+        key.explode = True
+        with self.assertRaises(ValueError):
+            rasterize_occupancy(value)
+
+    def test_oversized_rectangle_rejected_before_key_set(self):
+        room = dict(x0=0, y0=0, x1=10, y1=10)
+        room.update({f"extra-{i}": i for i in range(10_000)})
+        with self.assertRaises(ValueError):
+            rasterize_occupancy(payload(room=room))
+
+    def test_obstacle_cell_marking_budget_enforced(self):
+        obstacle = dict(x0=0, y0=0, x1=256, y1=256)
+        with self.assertRaisesRegex(ValueError, "marking budget"):
+            rasterize_occupancy(payload(
+                room=dict(x0=0, y0=0, x1=256, y1=256),
+                cell_mm=1,
+                obstacles=[dict(obstacle) for _ in range(16)],
+            ))
+
 
 if __name__ == "__main__":
     unittest.main()
