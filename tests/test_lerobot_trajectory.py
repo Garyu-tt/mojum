@@ -128,8 +128,14 @@ class LeRobotTrajectoryTests(unittest.TestCase):
         ):
             with self.subTest(source=source), self.assertRaises(LeRobotImportError):
                 self.imported(**source)
-        with self.assertRaises(LeRobotImportError):
-            self.imported(rows=(frames()[0] for _ in range(MAX_FRAMES + 1)))
+        def oversized_contiguous_episode():
+            for i in range(MAX_FRAMES + 1):
+                yield {"episode_index": 0, "frame_index": i,
+                       "timestamp": i / 20, "task_index": 0,
+                       "observation.state": [0.0, 0.0],
+                       "action": [0.0, 0.0]}
+        with self.assertRaisesRegex(LeRobotImportError, "frame budget"):
+            self.imported(rows=oversized_contiguous_episode())
         with self.assertRaises(LeRobotImportError):
             heldout_zero_baseline(self.imported(rows=frames(1)))
 
