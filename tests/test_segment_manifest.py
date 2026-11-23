@@ -7,6 +7,7 @@ from mojum.segment_manifest import (
     EMPTY_HEAD,
     MAX_MANIFEST_BYTES,
     SCHEMA,
+    SegmentManifest,
     SegmentManifestError,
     create_manifest,
     parse_manifest,
@@ -129,6 +130,20 @@ class SegmentManifestTests(unittest.TestCase):
     def test_exact_bytes_required_for_content_verification(self):
         with self.assertRaises(SegmentManifestError):
             verify_segment_bytes(self.make(), bytearray(self.segment))
+
+    def test_directly_constructed_invalid_manifest_is_revalidated(self):
+        valid = self.make()
+        forged = SegmentManifest(
+            schema=valid.schema, agent_id=valid.agent_id,
+            first_seq=valid.first_seq, last_seq=valid.last_seq,
+            event_count=valid.event_count,
+            previous_segment_head=valid.previous_segment_head,
+            segment_head="f" * 64, source_schema=valid.source_schema,
+            content_sha256=valid.content_sha256,
+            origin_device=valid.origin_device, created_at_ns=valid.created_at_ns,
+        )
+        with self.assertRaises(SegmentManifestError):
+            verify_segment_bytes(forged, self.segment)
 
     def test_wrong_schema_is_rejected(self):
         data = self.make().to_dict()
