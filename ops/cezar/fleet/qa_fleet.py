@@ -152,7 +152,8 @@ def main(argv=None):
     args=ap.parse_args(argv)
     if not 1<=args.max_workers<=17:ap.error("max workers must be 1..17")
     HOME.mkdir(mode=0o700,exist_ok=True)
-    os.chmod(HOME,0o700)
+    # Check the directory itself before any operation that follows symlinks.
+    # Never chmod an existing untrusted path: it may point outside HOME.
     st=os.lstat(HOME)
     if st.st_uid!=os.geteuid() or not stat.S_ISDIR(st.st_mode) or st.st_mode&0o077:raise RuntimeError("unsafe output directory")
     fd=os.open(LOCK,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
