@@ -61,7 +61,7 @@ def _sha(value: object, label: str) -> str:
 
 
 def _timestamp(value: object, label: str) -> datetime:
-    if type(value) is not str or not value or len(value) > 40:
+    if type(value) is not str or len(value) > 40 or _TIMESTAMP_RE.fullmatch(value) is None:
         raise ReviewerSnapshotError(f"{label} must be a bounded RFC 3339 timestamp")
     try:
         normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
@@ -85,6 +85,8 @@ def evaluate_review_snapshot(snapshot: object) -> ReviewerGateResult:
         "schema", "head_sha", "author_id", "last_pusher_id",
         "reviews_complete", "reviews",
     }
+    if any(type(key) is not str for key in snapshot):
+        raise ReviewerSnapshotError("snapshot keys must be native strings")
     if set(snapshot) != expected:
         raise ReviewerSnapshotError("snapshot has missing or unexpected fields")
     if type(snapshot["schema"]) is not str or snapshot["schema"] != SCHEMA:
@@ -107,7 +109,11 @@ def evaluate_review_snapshot(snapshot: object) -> ReviewerGateResult:
     seen_review_ids: set[int] = set()
     latest: dict[int, tuple[datetime, int, str, str]] = {}
     for index, review in enumerate(reviews):
-        if type(review) is not dict or set(review) != record_fields:
+        if type(review) is not dict:
+            raise ReviewerSnapshotError(f"review[{index}] must be a native object")
+        if any(type(key) is not str for key in review):
+            raise ReviewerSnapshotError(f"review[{index}] keys must be native strings")
+        if set(review) != record_fields:
             raise ReviewerSnapshotError(f"review[{index}] has an invalid shape")
         review_id = _native_int(review["review_id"], f"review[{index}].review_id")
         if review_id in seen_review_ids:
