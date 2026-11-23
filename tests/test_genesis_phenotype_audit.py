@@ -5,6 +5,13 @@ from mojum.genesis_phenotype_audit import (MAX_AUDIT_EVENTS, MAX_INPUT_BYTES,
     PhenotypeAuditError, audit_phenotype_snapshot)
 
 SEED = {"schema":"mojum.genesis.genotype/1","genome_id":"public-synthetic-test","revision":"seed-r1","inherited":{"heartbeat_bpm":60,"body_scale_milli":1000,"sensory_gain_milli":1000}}
+
+
+class HostileString(str):
+    def __hash__(self):
+        return hash("events")
+    def __eq__(self, other):
+        raise RuntimeError("hostile key equality must not run")
 def make_ledger():
     ledger = GenomeLedger(SEED)
     event = {"schema":ACQUISITION_SCHEMA,"event_id":"event-1","genome_id":SEED["genome_id"],"gene":"heartbeat_bpm","delta":4,"valid_from_tick":5,"observed_at_ns":10,"recorded_at_ns":11,"source":"test","evidence":"PUBLIC_SYNTHETIC fixture only"}
@@ -14,6 +21,16 @@ def make_ledger():
 class PhenotypeAuditTests(unittest.TestCase):
     def audit(self, ledger, phenotype):
         return audit_phenotype_snapshot(ledger.snapshot(), phenotype, source_classification="PUBLIC_SYNTHETIC")
+    def test_hostile_events_key_is_rejected_before_dictionary_lookup(self):
+        ledger = make_ledger()
+        snapshot = ledger.snapshot()
+        event_values = snapshot.pop("events")
+        snapshot[HostileString("events")] = event_values
+        with self.assertRaises(PhenotypeAuditError):
+            audit_phenotype_snapshot(
+                snapshot, ledger.phenotype(5), source_classification="PUBLIC_SYNTHETIC"
+            )
+
     def test_event_budget_rejects_before_expensive_ledger_restore(self):
         snapshot = {"events": [None] * (MAX_AUDIT_EVENTS + 1)}
         with patch("mojum.genesis_phenotype_audit.GenomeLedger.from_snapshot") as restore:
