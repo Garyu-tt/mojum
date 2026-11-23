@@ -81,6 +81,12 @@ class NoosphereValidityTests(unittest.TestCase):
             with self.subTest(item=item), self.assertRaises(ValidityAuditError):
                 audit_validity([item])
 
+    def test_rejects_oversized_fact_keysets(self):
+        item = fact("oversized")
+        item.update({f"extra-{index}": index for index in range(100_000)})
+        with self.assertRaisesRegex(ValidityAuditError, "missing or unknown fields"):
+            audit_validity([item])
+
     def test_rejects_duplicate_ids_and_oversized_fact_collections(self):
         with self.assertRaises(ValidityAuditError):
             audit_validity([fact("same"), fact("same", key="other")])
