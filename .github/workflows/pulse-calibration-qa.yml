@@ -1,0 +1,44 @@
+name: pulse-calibration-qa
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/pulse_calibration.py"
+      - "tests/test_pulse_calibration.py"
+      - ".github/workflows/pulse-calibration-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Assert tested revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$actual" = "$expected"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run focused calibration regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_pulse_calibration.py" -v
