@@ -18,8 +18,8 @@ _COUNT_FIELDS = (
     "nflexelem",
 )
 _REQUIRED_KEYS = frozenset(("schema", "engine_version", "model_sha256", *_COUNT_FIELDS))
-_SHA256_RE = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
-_VERSION_RE = re.compile(r"[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?\\Z", re.ASCII)
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?\Z", re.ASCII)
 
 # Conservative admission profiles, not promises about speed, memory or a CPU.
 _PROFILES = {
