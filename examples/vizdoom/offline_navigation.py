@@ -78,9 +78,9 @@ class OfflineNavigationEnv:
     def step(self, action: str) -> StepResult:
         if self.done:
             raise RuntimeError("episode is finished; call reset() before step()")
-        if type(action) is not str or action not in ACTIONS:
-            raise ValueError(f"action must be one of {ACTIONS}")
-        dr, dc = _DELTAS[action]
+        if type(action) is not str or (action not in ACTIONS and action != "WAIT"):
+            raise ValueError(f"action must be one of {ACTIONS + ('WAIT',)}")
+        dr, dc = (0, 0) if action == "WAIT" else _DELTAS[action]
         candidate = (self.position[0] + dr, self.position[1] + dc)
         blocked = (
             not (0 <= candidate[0] < _SIZE and 0 <= candidate[1] < _SIZE)
@@ -128,7 +128,7 @@ def run_episode(*, seed: int = 0, max_steps: int = 32, policy: str = "frozen") -
     trace = []
     total_reward = 0
     for action in actions[:max_steps]:
-        result = env.step("UP" if action == "WAIT" else action)
+        result = env.step(action)
         total_reward += result.reward
         trace.append({
             "action": action,
