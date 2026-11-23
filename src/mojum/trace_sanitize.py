@@ -15,9 +15,7 @@ SCHEMA = "mojum.trace-attributes/1"
 MAX_ATTRIBUTES = 24
 MAX_INTEGER = 2**63 - 1
 
-# String fields are identifiers/enums, never free-form text. Keep explicit
-# bounds separate from the regexes so oversized input is rejected in O(1)
-# before the regex engine scans it.
+# Explicit bounds reject oversized values in O(1) before regex scanning.
 _STRING_MAX_LENGTHS = {
     "trace_id": 64,
     "lease_id": 64,
@@ -30,15 +28,15 @@ _STRING_MAX_LENGTHS = {
     "reason_code": 48,
 }
 _STRING_PATTERNS = {
-    "trace_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
-    "lease_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
-    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\\Z"),
-    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
-    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\\Z"),
-    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
-    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\\Z"),
-    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\\Z"),
-    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
+    "trace_id": re.compile(r"[0-9a-f]{32,64}\Z"),
+    "lease_id": re.compile(r"[0-9a-f]{32,64}\Z"),
+    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z"),
+    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
+    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\Z"),
+    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
+    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\Z"),
+    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\Z"),
+    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
 }
 _INTEGER_FIELDS = {
     "fencing_epoch", "pr_number", "duration_ms", "latency_ms",
@@ -52,12 +50,7 @@ class TraceSanitizationError(ValueError):
 
 
 def sanitize_trace_attributes(attributes: Any) -> dict[str, str | int]:
-    """Validate and detach a bounded mapping of explicitly allowed metadata.
-
-    Only exact built-in dict/string/int types are accepted. bool is rejected as
-    an integer. No arbitrary objects, nested values, floats, bytes, or free-form
-    text are serialized. Callers must pass synthetic/public metadata only.
-    """
+    """Validate and detach a bounded mapping of explicitly allowed metadata."""
     if type(attributes) is not dict:
         raise TraceSanitizationError("attributes must be an exact dict")
     if len(attributes) > MAX_ATTRIBUTES:
