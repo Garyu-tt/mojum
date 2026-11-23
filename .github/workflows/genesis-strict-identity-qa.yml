@@ -1,0 +1,40 @@
+name: GENESIS strict identity stdlib QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/genesis.py"
+      - "tests/test_genesis_strict_identity.py"
+      - "tests/test_genesis.py"
+      - ".github/workflows/genesis-strict-identity-qa.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/mojum/genesis.py"
+      - "tests/test_genesis_strict_identity.py"
+      - "tests/test_genesis.py"
+      - ".github/workflows/genesis-strict-identity-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  strict-stdlib:
+    name: genesis-strict-stdlib (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout exact PR HEAD (not synthetic merge ref)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Direct-Python GENESIS identity and compatibility tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_genesis*.py' -v
