@@ -8,7 +8,7 @@
 - Each synchronous tick uses Discrete(5): 0 rest, 1 east, 2 west, 3 north, 4 south, maximum 0.25 m commanded per agent. Existing wall/obstacle collision applies, without agent-agent physical contact simulation.
 - Observation: only normalized current own/peer XY and elapsed fraction, five floats in [0,1]. No future observations, hidden geometry, IDs, hardware data or PRIVATE memory.
 - Shared reward `1.0` only on the first meeting, `0.0` otherwise. Termination on a virtual meeting; truncation on `max_cycles` (1..512). `info.blocked` is virtual wall outcome, `physical_contact` is always false.
-- Explicit uint32 seed chooses one of four mirrored initial layouts with a private RNG. Invalid options/actions are rejected without partially stepping either agent. No filesystem, network, real clock, or SQLite.
+- Explicit nonnegative built-in integer seed (without a uint32 cap) chooses one of four mirrored initial layouts with a private RNG. Invalid options/actions are rejected without partially stepping either agent. No filesystem, network, real clock, or SQLite.
 
 ## Standalone stdlib tests
 
