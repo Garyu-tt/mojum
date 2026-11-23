@@ -57,15 +57,15 @@ class GenesisBatchTests(unittest.TestCase):
                 )
             key_set.assert_not_called()
 
-    def test_base_event_budget_rejects_before_serialization_or_restore(self):
+    def test_resulting_event_budget_rejects_before_serialization_or_restore(self):
         from unittest.mock import patch
         ledger = GenomeLedger(SEED)
         snapshot = ledger.snapshot()
         snapshot["events"] = [event(f"existing-{i}", delta=0, recorded=100 + i)
-                              for i in range(MAX_BASE_EVENTS + 1)]
+                              for i in range(MAX_BASE_EVENTS)]
         with patch("mojum.genesis_batch.canonical") as serializer, \
              patch("mojum.genesis_batch.GenomeLedger.from_snapshot") as restore:
-            with self.assertRaisesRegex(GenesisError, "base ledger event budget"):
+            with self.assertRaisesRegex(GenesisError, "resulting ledger event budget"):
                 apply_acquisition_batch(
                     snapshot, [event("new-event")],
                     expected_base_revision=ledger.revision,
