@@ -74,7 +74,14 @@ def analyze_pulse_intervals(
     unanchored_high_segments = 0
 
     for index, frame in enumerate(frames):
-        if type(frame) is not dict or set(frame) != {"tick", "pulse"}:
+        if type(frame) is not dict:
+            raise PulseIntervalError(f"frames[{index}] must be an exact built-in dict")
+        # Reject caller-defined key behavior before hash/equality-based set
+        # comparison. A str subclass can execute hostile __eq__ during set().
+        keys = tuple(dict.keys(frame))
+        if any(type(key) is not str for key in keys):
+            raise PulseIntervalError(f"frames[{index}] keys must be native strings")
+        if set(keys) != {"tick", "pulse"}:
             raise PulseIntervalError(f"frames[{index}] requires exactly tick and pulse")
         tick, pulse = frame["tick"], frame["pulse"]
         if type(tick) is not int or not 0 <= tick <= max_tick:
