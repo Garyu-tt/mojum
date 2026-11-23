@@ -34,6 +34,14 @@ def _reject_constant(value):
     raise ValueError(f"Non-finite JSON number is forbidden: {value}")
 
 
+def _encode_text(payload: str) -> bytes:
+    """Encode text only after the caller has passed the cheap character cap."""
+    try:
+        return payload.encode("utf-8")
+    except UnicodeError as exc:
+        raise GenesisCodecError("Snapshot text is not valid UTF-8") from exc
+
+
 def dumps(ledger: GenomeLedger) -> bytes:
     """Return canonical UTF-8 bytes for one validated in-memory ledger.
 
@@ -60,10 +68,11 @@ def loads(payload: bytes | str) -> GenomeLedger:
     if type(payload) is bytes:
         raw = payload
     elif type(payload) is str:
-        try:
-            raw = payload.encode("utf-8")
-        except UnicodeError as exc:
-            raise GenesisCodecError("Snapshot text is not valid UTF-8") from exc
+        # UTF-8 uses at least one byte per code point. Reject obviously
+        # oversized text before allocating a second, encoded copy.
+        if len(payload) > MAX_SNAPSHOT_BYTES:
+            raise GenesisCodecError("Snapshot exceeds the byte limit")
+        raw = _encode_text(payload)
     else:
         raise GenesisCodecError("payload must be bytes or str")
 

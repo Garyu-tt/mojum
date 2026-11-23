@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
-from mojum.genesis_codec import GenesisCodecError, dumps, loads
+from mojum.genesis_codec import MAX_SNAPSHOT_BYTES, GenesisCodecError, dumps, loads
 
 
 SEED = json.loads(
@@ -91,6 +91,15 @@ class GenesisCodecTests(unittest.TestCase):
         with patch("mojum.genesis_codec.MAX_SNAPSHOT_BYTES", 8):
             with self.assertRaisesRegex(GenesisCodecError, "byte limit"):
                 loads(b" " * 9)
+
+    def test_oversized_text_rejected_before_encoding(self):
+        payload = " " * (MAX_SNAPSHOT_BYTES + 1)
+        with patch(
+            "mojum.genesis_codec._encode_text",
+            side_effect=AssertionError("oversized text must be refused before encoding"),
+        ):
+            with self.assertRaisesRegex(GenesisCodecError, "byte limit"):
+                loads(payload)
 
     def test_oversized_output_rejected(self):
         with patch("mojum.genesis_codec.MAX_SNAPSHOT_BYTES", 8):
