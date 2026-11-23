@@ -63,6 +63,10 @@ def _text(value: object, name: str, limit: int) -> str:
 def _number(value: object, name: str, low: float, high: float) -> float:
     if type(value) not in (int, float):
         raise QueueError(f"{name} must be a finite number")
+    # Reject arbitrarily wide integers before float conversion can consume
+    # unbounded CPU/memory; every accepted operational range fits 64 bits.
+    if type(value) is int and value.bit_length() > 64:
+        raise QueueError(f"{name} is outside the permitted range")
     try:
         result = float(value)
     except (OverflowError, ValueError):
