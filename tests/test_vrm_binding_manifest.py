@@ -198,6 +198,22 @@ assert.throws(
   () => validateVrmBindingManifest({...good, expected_joint_ids:arrayProxy}),
   TypeError
 );
+
+// The thrown value itself can be a hostile Proxy. Do not inspect it with instanceof.
+const hostileThrown = new Proxy({}, {
+  getPrototypeOf() { throw new Error('secondary prototype trap'); }
+});
+const recordProxyThrowingProxy = new Proxy(good, {
+  ownKeys() { throw hostileThrown; }
+});
+assert.throws(() => validateVrmBindingManifest(recordProxyThrowingProxy), TypeError);
+const arrayProxyThrowingProxy = new Proxy(['a'], {
+  getPrototypeOf() { throw hostileThrown; }
+});
+assert.throws(
+  () => validateVrmBindingManifest({...good, expected_joint_ids:arrayProxyThrowingProxy}),
+  TypeError
+);
 """)
 if __name__ == "__main__":
     unittest.main()
