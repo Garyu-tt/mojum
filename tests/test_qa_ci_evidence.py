@@ -140,6 +140,14 @@ class CIEvidenceTests(unittest.TestCase):
         with self.assertRaises(EvidenceError):
             evaluate_ci_evidence(x, now=NOW)
 
+
+    def test_oversized_sha_rejected_before_pattern_match(self):
+        x = fixture()
+        x["pr_head_sha"] = "a" * 1_000_000
+        with self.assertRaises(EvidenceError):
+            evaluate_ci_evidence(x, now=NOW)
+
+
     def test_invalid_sha_rejected(self):
         x = fixture()
         x["pr_head_sha"] = "not-a-sha"
