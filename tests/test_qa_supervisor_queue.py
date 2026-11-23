@@ -3,6 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
 import unittest
+import gc
+import warnings
 from mojum.qa_supervisor_queue import DurableQAQueue, LeaseError, TransitionError, QueueError, MAX_PAYLOAD_BYTES
 
 SHA="a"*40
@@ -84,6 +86,20 @@ class QueueTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.q.enqueue(12,SHA,{"x":"x"*MAX_PAYLOAD_BYTES})
         with self.assertRaises(ValueError): self.q.enqueue(12,SHA,{"x":float("nan")})
         with self.assertRaises(ValueError): self.q.enqueue(12,SHA,{"x":object()})
+
+
+    def test_repeated_operations_close_sqlite_connections(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            for index in range(20):
+                job = self.q.enqueue(100 + index, SHA, now=index + 1)
+                self.q.claim(f"worker-{index}", now=index + 2)
+                self.q.get(job.job_id)
+                self.q.counts()
+                gc.collect()
+        leaked = [item for item in caught if issubclass(item.category, ResourceWarning)]
+        self.assertEqual(leaked, [])
+
 
     def test_terminal_ready_is_not_claimed_automatically(self):
         self.q.enqueue(12,SHA,now=1)
