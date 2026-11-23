@@ -1,4 +1,7 @@
 import unittest
+from unittest.mock import patch
+
+import mojum.qa_recovery as recovery_module
 from mojum.qa_recovery import MAX_LOGICAL_TIME, RecoveryError, plan_recovery
 
 
@@ -96,6 +99,16 @@ class RecoveryTests(unittest.TestCase):
     def test_oversized_identifier_rejected_before_utf8_work(self):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("x" * 1_000_000)], observed_at=0)
+
+    def test_oversized_state_rejected_before_state_membership(self):
+        class NoMembership:
+            def __contains__(self, value):
+                raise AssertionError("state membership must not run")
+
+        with patch.object(recovery_module, "_STATES", NoMembership()):
+            with self.assertRaises(RecoveryError):
+                plan_recovery([task("safe", state="x" * 1_000_000)],
+                              observed_at=0)
 
     def test_hostile_string_subclass_field_key_rejected_before_hashing(self):
         class HostileKey(str):
