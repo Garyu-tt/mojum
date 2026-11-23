@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
 
 CONSENT_SCHEMA = "mojum.noosphere.source-consent/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
@@ -72,7 +71,7 @@ def _digest(value):
 
 
 def _exact_mapping(value, keys, field):
-    if not isinstance(value, Mapping) or set(value) != keys:
+    if type(value) is not dict or set(value) != keys:
         raise ConsentError(f"{field} must contain exactly the documented fields")
 
 
@@ -178,7 +177,7 @@ def _validate_dataset(dataset):
             raise ConsentError("event recorded_at_ns precedes observed_at_ns")
         if type(event["visibility"]) is not str or event["visibility"] not in _VISIBILITY:
             raise ConsentError("event has unsupported visibility")
-        if not isinstance(event["payload"], Mapping):
+        if type(event["payload"]) is not dict:
             raise ConsentError("event payload must be an object")
         detached.append({
             "seq": seq, "event": json.loads(_canonical(event)),
