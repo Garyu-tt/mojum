@@ -12,14 +12,14 @@ import re
 
 SCHEMA = "mojum.spartan.http-retry-decision/1"
 RETRYABLE_STATUSES = frozenset((408, 429, 500, 502, 503, 504))
-_DELTA_SECONDS = re.compile(r"[0-9]{1,10}\Z", re.ASCII)
+_DELTA_SECONDS = re.compile(r"[0-9]{1,10}\\Z", re.ASCII)
 _MAX_HEADER_LENGTH = 64
 # The HTTP wire grammar is English, independently of host LC_TIME settings.
 _IMF_DATE = re.compile(
     r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun), "
     r"([0-9]{2}) "
     r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
-    r"([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT\Z",
+    r"([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT\\Z",
     re.ASCII,
 )
 _MONTHS = {name: n for n, name in enumerate(
@@ -35,7 +35,10 @@ def _native_int(name: str, value: object, lower: int, upper: int) -> None:
 
 
 def _utc_datetime(name: str, value: object) -> datetime:
-    if type(value) is not datetime:
+    # datetime is exact-native, but tzinfo is caller-supplied and may override
+    # utcoffset(). Admit only the immutable stdlib timezone implementation so
+    # validation never executes an arbitrary tzinfo callback.
+    if type(value) is not datetime or type(value.tzinfo) is not timezone:
         raise ValueError(f"{name} must be a native UTC datetime")
     try:
         offset = value.utcoffset()
@@ -97,8 +100,6 @@ def _server_delay_ms(header: str, now: datetime) -> int | None:
         return None
     if _DELTA_SECONDS.fullmatch(header):
         return int(header) * 1_000
-    # Strict, canonical IMF-fixdate, rejecting obs-date, weekday mismatches,
-    # timezone offsets, whitespace and HTTP response-splitting characters.
     if len(header) != 29:
         return None
     match = _IMF_DATE.fullmatch(header)
@@ -156,8 +157,6 @@ def plan_retry(
     if failed_attempt >= policy.max_attempts:
         return _deny("attempts_exhausted")
 
-    # Bound exponent by max_attempts <= 32. The local backoff cap is separate
-    # from the server Retry-After cap; both must fit the caller's deadline.
     backoff = min(
         policy.max_backoff_ms,
         policy.initial_delay_ms * (1 << (failed_attempt - 1)),
