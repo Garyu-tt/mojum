@@ -185,6 +185,14 @@ class NestedGraphEditorTests(unittest.TestCase):
             from mojum.graph_editor_nested import _copy_json
             _copy_json(deeply_nested)
 
+    def test_preflight_rejects_aggregate_key_bytes_before_serialization(self):
+        from mojum.graph_editor_nested import _copy_json
+        from unittest.mock import patch
+        value = {"a" * 600_000: 1, "b" * 600_000: 2}
+        with patch("mojum.graph_editor_nested.json.dumps", side_effect=AssertionError("serialization must not run")):
+            with self.assertRaisesRegex(GraphError, "byte limit"):
+                _copy_json(value)
+
     def test_preflight_rejects_huge_integer_and_oversized_text(self):
         from mojum.graph_editor_nested import _copy_json
         for value in (10 ** 400, "x" * (1024 * 1024 + 1)):
