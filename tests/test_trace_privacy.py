@@ -109,6 +109,13 @@ class TracePrivacyTests(unittest.TestCase):
         with self.assertRaises(TracePrivacyError):
             sanitize_trace_event({**BASE, "cost_usd": 10**10000})
 
+    def test_rejects_oversized_integer_metadata(self):
+        huge = 10**10000
+        for field in ("fencing_token", "pr_number", "timestamp_ms",
+                      "latency_ms", "input_tokens", "output_tokens"):
+            with self.subTest(field=field), self.assertRaises(TracePrivacyError):
+                sanitize_trace_event({**BASE, field: huge})
+
     def test_offline_sink_validates_but_never_persists_or_sends(self):
         sink = OfflineTraceSink()
         self.assertIs(sink.emit(BASE), False)
