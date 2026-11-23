@@ -18,14 +18,14 @@ Required scalar fields:
 
 - `trace_id`: 32–64 lowercase hexadecimal characters
 - `lease_id`: 1–128 safe ASCII identifier characters
-- `fencing_token`: native integer >= 1 (booleans are rejected)
-- `pr_number`: native integer >= 1
+- `fencing_token`: native integer in `[1, 2^63-1]` (booleans are rejected)
+- `pr_number`: native integer in `[1, 2^31-1]`
 - `head_sha`: full 40- or 64-character lowercase Git object ID
 - `event_type`: one of the fixed operational lifecycle event names
-- `timestamp_ms`: native integer >= 0
+- `timestamp_ms`: native integer in `[0, 2^63-1]`
 
 Optional scalar metrics: `latency_ms`, `input_tokens`, `output_tokens`
-(native non-negative integers), and `cost_usd` (finite non-negative number).
+(native integers in `[0, 2^63-1]`), and `cost_usd` (finite non-negative number).
 Null optional values are omitted from the exported copy.
 
 The validator accepts only a plain Python dictionary with at most twelve
