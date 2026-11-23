@@ -45,6 +45,8 @@ class SB3BaselineTests(unittest.TestCase):
                 b.report(timesteps=steps)
         with self.assertRaises(ValueError):
             b.report(mode="remote")
+        # A max-u32 benchmark seed must not overflow on the third held-out room.
+        self.assertEqual(b.report(seed=2**32 - 1)["seed"], 2**32 - 1)
 
     def test_invalid_policy_actions(self):
         for bad in (True, -1, 5, 0.5, None):
