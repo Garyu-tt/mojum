@@ -13,7 +13,7 @@ import json
 import math
 
 from .graph import GraphError, PORTS, _check_json_depth
-from .graph_v2 import V2_SCHEMA, validate_v2
+from .graph_v2 import validate_v2
 
 NESTED_SCHEMA = "mojum.graph-editor-nested/1"
 BACKENDS = frozenset(("reactflow", "rete"))
@@ -49,6 +49,15 @@ def _sha(value):
 def _graph_nodes(graph):
     validate_v2(graph)
     return {node["id"]: node for node in graph["nodes"]}
+
+
+def _source_sha(parent, containers):
+    # Layout is intentionally excluded: it is the only editable field.
+    stable = [{
+        "id": item["id"], "parent_node": item["parent_node"],
+        "child_graph": item["child_graph"], "portals": item["portals"],
+    } for item in containers]
+    return _sha({"parent_graph": parent, "containers": stable})
 
 
 def _ports(node, direction):
@@ -172,7 +181,7 @@ def export_nested_editor(parent_graph, containers, backend):
     return {
         "schema": NESTED_SCHEMA, "backend": backend,
         "parent_revision": canonical["revision"],
-        "parent_sha256": _sha(canonical),
+        "source_sha256": _source_sha(canonical, model["containers"]),
         "parent_graph": canonical, "nodes": nodes,
     }
 
@@ -186,7 +195,7 @@ def import_nested_editor(envelope, *, expected_revision, expected_sha256):
     """
     wire = _copy_json(envelope)
     if type(wire) is not dict or set(wire) != {
-        "schema", "backend", "parent_revision", "parent_sha256",
+        "schema", "backend", "parent_revision", "source_sha256",
         "parent_graph", "nodes"
     } or wire["schema"] != NESTED_SCHEMA:
         raise GraphError("unsupported nested editor envelope")
@@ -200,8 +209,9 @@ def import_nested_editor(envelope, *, expected_revision, expected_sha256):
             or any(c not in "0123456789abcdef" for c in expected_sha256)
             or parent["revision"] != expected_revision
             or wire["parent_revision"] != expected_revision
-            or wire["parent_sha256"] != expected_sha256
-            or _sha(parent) != expected_sha256):
+            or type(wire["source_sha256"]) is not str
+            or len(wire["source_sha256"]) != 64
+            or any(c not in "0123456789abcdef" for c in wire["source_sha256"])):
         raise GraphError("nested editor parent CAS mismatch")
     if type(wire["nodes"]) is not list or len(wire["nodes"]) > MAX_CONTAINERS:
         raise GraphError("nested editor container inventory exceeds limit")
@@ -231,6 +241,9 @@ def import_nested_editor(envelope, *, expected_revision, expected_sha256):
             "position": position,
         })
     model = validate_nested(parent, normalized)
+    if (_source_sha(parent, model["containers"]) != expected_sha256
+            or wire["source_sha256"] != expected_sha256):
+        raise GraphError("nested editor source CAS mismatch")
     return {"schema": NESTED_SCHEMA, "parent_graph": copy.deepcopy(parent),
             "containers": model["containers"], "layout": layouts,
             "execution": "NOT_PERFORMED", "hot_swap": "NOT_PERFORMED"}
