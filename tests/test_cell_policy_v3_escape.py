@@ -225,6 +225,10 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         # Both early cells have two outcomes. Together they cannot finish
         # by tick two, although each count fits its individual deadline.
         snapshot["last_seen_at"].update({"0:25": 1, "1:25": 2})
+        # Isolate the pre-existing retention contradiction from the new tail
+        # chronology gate; zero terminal counters need no streak attestation.
+        snapshot["history_complete"] = False
+        snapshot["outcome_tail"] = []
         with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
