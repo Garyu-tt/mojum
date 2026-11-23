@@ -13,10 +13,12 @@ SCHEMA = "mojum.noosphere.encrypted-envelope/1"
 ALGORITHM = "AES-256-GCM"
 _ALLOWED_VISIBILITY = frozenset({"PUBLIC", "PRIVATE", "RESTRICTED"})
 _MAX_PLAINTEXT_BYTES = 1_048_576
-_MAX_ENVELOPE_BYTES = _MAX_PLAINTEXT_BYTES + 8192
 _KEY_BYTES = 32
 _NONCE_BYTES = 12
 _TAG_BYTES = 16
+# Ciphertext is base64-encoded in the JSON envelope. Reserve the exact
+# expansion for the maximum plaintext plus GCM tag, then bounded metadata.
+_MAX_ENVELOPE_BYTES = ((_MAX_PLAINTEXT_BYTES + _TAG_BYTES + 2) // 3) * 4 + 8192
 _FIELDS = frozenset({
     "schema", "algorithm", "key_id", "agent_id", "visibility",
     "content_type", "nonce", "ciphertext",
@@ -191,7 +193,6 @@ def open_bytes(
         key_id=key_id, agent_id=agent_id,
         visibility=expected_visibility, content_type=content_type,
     )
-    # Keep the optional-dependency diagnostic distinct from authentication errors.
     cipher = _aesgcm(checked_key)
     try:
         plaintext = cipher.decrypt(nonce, ciphertext, aad)
