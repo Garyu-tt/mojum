@@ -84,6 +84,19 @@ class PrivateKeyTests(unittest.TestCase):
         with self.assertRaises(SenderError):
             read_private_signing_key(self.key_file)
 
+    def test_symlinked_ancestor_directory_refused(self):
+        # O_NOFOLLOW on the leaf alone would still open this key.
+        alias = Path(self.tmp.name) / "alias"
+        alias.symlink_to(self.key_file.parent, target_is_directory=True)
+        with self.assertRaises(SenderError):
+            read_private_signing_key(alias / self.key_file.name)
+
+    def test_key_path_parent_traversal_refused(self):
+        intermediate = Path(self.tmp.name) / "intermediate"
+        intermediate.mkdir()
+        with self.assertRaises(SenderError):
+            read_private_signing_key(intermediate / ".." / self.key_file.name)
+
     def test_short_and_oversized_key_refused(self):
         for blob in (b"a" * 31, b"x" * 4097):
             self.key_file.write_bytes(blob)
