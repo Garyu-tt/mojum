@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
 import sqlite3
 
 try:
@@ -7,6 +8,20 @@ except ImportError:  # Full repository unittest discovery must remain stdlib-onl
     pytest = None
 
 from mojum.qa_work_queue import IdempotencyConflict, LeaseLost, QAWorkQueue, QueueError
+
+
+def _claim_process(path, worker_number, result_queue):
+    try:
+        claimed = []
+        with QAWorkQueue(path, busy_timeout=10) as q:
+            while True:
+                lease = q.claim(f"process-{worker_number}", lease_seconds=300, now=2)
+                if lease is None:
+                    break
+                claimed.append(lease.job.id)
+        result_queue.put(("ok", claimed))
+    except BaseException as exc:
+        result_queue.put(("error", repr(exc)))
 
 
 def test_enqueue_idempotency_and_detached_payload(tmp_path):
@@ -108,6 +123,38 @@ def test_concurrent_workers_never_double_claim(tmp_path):
         assert q.counts() == {"queued": 0, "leased": 40, "succeeded": 0, "failed": 0}
 
 
+def test_independent_processes_never_double_claim(tmp_path):
+    path = str(tmp_path / "process-race.db")
+    with QAWorkQueue(path) as q:
+        for i in range(32):
+            q.enqueue(f"process-job-{i}", "independent-process", {"i": i}, now=1)
+
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    workers = [
+        context.Process(target=_claim_process, args=(path, number, results))
+        for number in range(6)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=30)
+    for worker in workers:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join()
+            raise AssertionError("worker process did not finish within 30 seconds")
+        assert worker.exitcode == 0
+
+    batches = [results.get(timeout=5) for _ in workers]
+    errors = [value for status, value in batches if status != "ok"]
+    assert not errors, errors
+    ids = [job_id for _, batch in batches for job_id in batch]
+    assert len(ids) == 32 and len(set(ids)) == 32
+    with QAWorkQueue(path) as q:
+        assert q.counts() == {"queued": 0, "leased": 32, "succeeded": 0, "failed": 0}
+
+
 def test_strict_payload_and_option_validation(tmp_path):
     class SneakyDict(dict):
         pass
@@ -153,7 +200,6 @@ def test_expired_worker_cannot_heartbeat_before_reclaim(tmp_path):
         assert lease
         with pytest.raises(LeaseLost):
             q.heartbeat(job.id, lease.token, now=4)
-
 
 
 def test_read_apis_do_not_disclose_live_lease_token(tmp_path):
@@ -203,7 +249,6 @@ def test_payload_text_budget_precedes_serialization(tmp_path, monkeypatch):
             q.enqueue("oversized", "review", {"data": "x" * 65_537})
 
 
-
 def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
     with QAWorkQueue(str(tmp_path / "unicode-bounds.db")) as q:
         with pytest.raises(QueueError, match="valid UTF-8"):
@@ -212,6 +257,7 @@ def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
             q.enqueue("bad-key", "review", {"\ud800": "value"})
         with pytest.raises(QueueError, match="integer exceeds bit budget"):
             q.enqueue("big-int", "review", {"value": 1 << 4096})
+
 
 def test_in_memory_database_is_rejected(tmp_path):
     with pytest.raises(QueueError, match="filesystem-backed"):
