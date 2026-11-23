@@ -15,6 +15,14 @@ policy. This can reveal a genuine precision-boundary difference between
 ideal path arithmetic and rounded floating point arithmetic, not necessarily
 a production security failure.
 
+Concrete observed precision edge case: with a 1 m room, state at x=1.0 and
+an outward dx=1e-16, binary floating addition rounds back to x=1.0,
+so the canonical fixture reports no block, while the exact-input reference
+correctly reports a wall overrun. The audit flags the disagreement without
+altering simulation state; test `test_detects_actual_subulp_wall_overrun`
+locks this behavior down. This is a diagnostic precision limitation, not
+evidence of real physical motion.
+
 For a bounded deterministic exercise, call `audit_seeded(room, start,
 seed=1234, count=32)`. Output includes only counts, revision and SHA-256
 checksums; results are reproducible across runs with identical inputs. A
