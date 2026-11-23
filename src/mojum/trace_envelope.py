@@ -57,7 +57,9 @@ def admit_trace(value: object) -> AdmittedTrace:
         raise TraceEnvelopeError("invalid provenance")
     if type(clean_input["consent"]) is not bool or clean_input["consent"] is not True:
         raise TraceEnvelopeError("explicit consent required")
-    if type(clean_input["trace_id"]) is not str or _ID.fullmatch(clean_input["trace_id"]) is None:
+    trace_id = clean_input["trace_id"]
+    if (type(trace_id) is not str or not 8 <= len(trace_id) <= 64
+            or _ID.fullmatch(trace_id) is None):
         raise TraceEnvelopeError("invalid trace id")
     if type(clean_input["phase"]) is not str or clean_input["phase"] not in _PHASES:
         raise TraceEnvelopeError("invalid phase")
