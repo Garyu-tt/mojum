@@ -38,7 +38,7 @@ The provider is imported lazily. Importing Mojum core or this module does not re
 
 - Canonical UTF-8 JSON envelope, exact fields only, duplicate keys rejected.
 - AES-256-GCM, 96-bit nonce and 128-bit authentication tag.
-- Plaintext limit: 1 MiB. Envelope limit: plaintext limit plus 8 KiB.
+- Plaintext limit: 1 MiB. Envelope limit: `4 * ceil((plaintext_bytes + 16-byte GCM tag) / 3) + 8 KiB`, accounting for Base64 ciphertext expansion and bounded metadata.
 - Supported visibility strings: PUBLIC, PRIVATE, RESTRICTED.
 - No compression, file access, network access, database writes or implicit key lookup.
 - Authentication failure, malformed encoding, wrong key or context raise NoosphereEnvelopeError; unauthenticated bytes are never returned.
