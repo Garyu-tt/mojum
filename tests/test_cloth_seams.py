@@ -173,6 +173,13 @@ class ClothSeamTests(unittest.TestCase):
         with self.assertRaises(ClothSeamError):
             self.admit(vertices=v, triangles=t, seams=s)
 
+    def test_oversized_seam_mapping_rejected_by_cardinality(self):
+        v, t, s = fixture()
+        oversized = {"id": "wide", "pairs": [[1, 4], [2, 7]]}
+        oversized.update({f"extra-{index}": index for index in range(20_000)})
+        with self.assertRaisesRegex(ClothSeamError, "exactly native-string keys"):
+            self.admit(vertices=v, triangles=t, seams=[oversized])
+
     def test_non_native_mapping_key_rejected_before_comparison(self):
         class HostileKey(str):
             def __hash__(self):
