@@ -85,6 +85,27 @@ class MotorBatchTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.batch(Impostor("hip", 0, 7))
 
+    def test_forged_missing_motor_intent_fields_fail_closed(self):
+        fields = {"joint": "hip", "target": 0.1, "revision": 7}
+        for missing in fields:
+            with self.subTest(missing=missing):
+                forged = object.__new__(MotorIntent)
+                for key, value in fields.items():
+                    if key != missing:
+                        object.__setattr__(forged, key, value)
+                with self.assertRaisesRegex(ValueError, "incomplete MotorIntent"):
+                    self.batch(forged)
+
+    def test_gate_receives_snapshotted_intent_not_mutable_original(self):
+        original = MotorIntent("hip", 0.1, 7)
+        validate = MotorGate.validate
+        def mutate_original(gate, safe_intent):
+            object.__setattr__(original, "target", 1000)
+            return validate(gate, safe_intent)
+        with patch.object(MotorGate, "validate", mutate_original):
+            receipt = self.batch(original)
+        self.assertEqual(receipt.commands[0].target, 0.1)
+
     def test_joint_identifier_unicode_encoding_and_length(self):
         gate = MotorGate({"\ud800": (-1, 1)}, revision=7)
         with self.assertRaises(ValueError):
