@@ -39,7 +39,16 @@ def make_parallel_env(*, room=None, max_cycles=12):
             return self._action_spaces[agent]
 
         def reset(self, seed=None, options=None):
-            observations, infos = self._core.reset(seed=seed, options=options)
+            # PettingZoo's parallel_api_test passes arbitrary reset options.
+            # Our fixture has no configurable reset options: accept the mapping
+            # for API compliance, NEVER inspect/forward its keys or values, and
+            # explicitly report that it was ignored. Strict core stays unchanged.
+            if options is not None and type(options) is not dict:
+                raise ValueError("reset options must be a dict or None")
+            observations, infos = self._core.reset(seed=seed, options=None)
+            if options:
+                infos = {a: {**info, "reset_options_ignored": True}
+                         for a, info in infos.items()}
             self.agents = list(self._core.agents)
             return {a: np.asarray(v, dtype=np.float32)
                     for a, v in observations.items()}, infos
