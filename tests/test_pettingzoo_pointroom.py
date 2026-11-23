@@ -116,7 +116,11 @@ class ActualPettingZooAPITests(unittest.TestCase):
         from pettingzoo.test import parallel_api_test
         env = make_parallel_env()
         parallel_api_test(env, num_cycles=30)
+        options_obs, options_infos = env.reset(seed=13, options={"options": 1})
+        self.assertTrue(all(i["reset_options_ignored"] for i in options_infos.values()))
         first, _ = env.reset(seed=13)
+        for a in AGENTS:
+            self.assertTrue((options_obs[a] == first[a]).all())
         second, _ = env.reset(seed=13)
         for a in AGENTS:
             self.assertTrue((first[a] == second[a]).all())
