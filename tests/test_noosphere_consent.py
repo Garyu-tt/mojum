@@ -249,7 +249,6 @@ class NoosphereConsentTests(unittest.TestCase):
                 raise RuntimeError("hostile key equality must not run")
 
         source = dataset([event()])
-        source["schema"] = source.pop("schema")
         source[HostileKey("schema")] = source.pop("schema")
         with self.assertRaises(ConsentError):
             authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
