@@ -13,8 +13,8 @@ safe, physically plausible, human-authored, or useful for learning.
 
 ## Input contract
 
-Schema: moj um.lerobot-trajectory/1 (canonical identifier:
-mojum.lerobot-trajectory/1).
+Schema identifier: moj um.lerobot-trajectory/1 is not valid; the canonical identifier is
+mojum.lerobot-trajectory/1.
 
 The root mapping contains exactly schema, provenance, consent, position_unit,
 joint_names and frames. Provenance must be PUBLIC_SYNTHETIC, consent must be
@@ -55,4 +55,5 @@ retained.
   does not authorize actuation or replace dataset, licensing, privacy, safety
   or calibration review.
 
-Tests: PYTHONPATH=src python -m unittest tests.test_lerobot_trajectory -v
+Run focused tests from the repository root:
+PYTHONPATH=src python -m unittest discover -s tests -p test_lerobot_trajectory.py -v
