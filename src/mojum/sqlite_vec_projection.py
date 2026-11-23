@@ -93,6 +93,13 @@ def prepare_index(source_path, *, owner, trusted_head, visibility, model,
         # Verification and enumeration must share one SQLite read snapshot.
         source._db.execute("BEGIN")
         try:
+            # Preflight at most _MAX_RECORDS + 1 rows in this exact SQLite
+            # snapshot. Do not hash/parse the entire hostile journal first.
+            if source._db.execute(
+                "SELECT 1 FROM events ORDER BY seq LIMIT 1 OFFSET ?",
+                (_MAX_RECORDS,),
+            ).fetchone() is not None:
+                raise VectorIndexError("source scan exceeds CPU budget")
             proof = source.verify_chain(external_expected_head=trusted_head, strict_wire=True)
             if proof["count"] > _MAX_RECORDS:
                 raise VectorIndexError("source scan exceeds CPU budget")

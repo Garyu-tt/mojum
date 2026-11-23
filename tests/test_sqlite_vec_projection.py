@@ -121,6 +121,18 @@ class SqliteVecProjectionTests(unittest.TestCase):
             rebuild_index(self.journal, self.index, **self.args())
         self.assertFalse(self.index.exists())
 
+    def test_oversized_source_rejected_before_expensive_chain_verify(self):
+        # The fixture has three events; shrink the limit to two so the
+        # preflight exercises the same >4096 path without huge test data.
+        from unittest.mock import patch
+
+        with patch("mojum.sqlite_vec_projection._MAX_RECORDS", 2):
+            with patch.object(LocalNoosphere, "verify_chain",
+                              side_effect=AssertionError("unbounded hash scan")) as verify:
+                with self.assertRaisesRegex(VectorIndexError, "source scan exceeds"):
+                    prepare_index(self.journal, **self.args())
+                verify.assert_not_called()
+
     def test_real_vec_index_opt_in_if_installed(self):
         try:
             current = importlib.metadata.version("sqlite-vec")
