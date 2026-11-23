@@ -25,6 +25,8 @@ def make_report(**overrides):
         "peak_traced_bytes": 1024,
         "final_position_m": [1.0, 2.0],
         "trajectory_sha256": "a" * 64,
+        "config_sha256": "b" * 64,
+        "mjcf_sha256": "c" * 64,
     }
     body.update(overrides)
     report = dict(body)
@@ -46,6 +48,13 @@ class ProbeConfigTests(unittest.TestCase):
         self.assertEqual(len(root.findall(".//geom[@type='box']")), 2)
         self.assertNotIn("file=", xml_a)
         self.assertNotIn("http://", xml_a)
+
+    def test_config_digest_binds_workload_parameters(self):
+        first = benchmark._config_payload(benchmark.ProbeConfig(steps=120))
+        second = benchmark._config_payload(benchmark.ProbeConfig(steps=121))
+        first_hash = hashlib.sha256(benchmark._canonical_bytes(first)).hexdigest()
+        second_hash = hashlib.sha256(benchmark._canonical_bytes(second)).hexdigest()
+        self.assertNotEqual(first_hash, second_hash)
 
     def test_rejects_boolean_dimensions(self):
         with self.assertRaises(ValueError):
@@ -84,7 +93,7 @@ class ProbeConfigTests(unittest.TestCase):
 
 
 class ReportTests(unittest.TestCase):
-    def test_validates_and_detaches_report(self):
+    def test_validates_detaches_and_is_idempotent(self):
         source = make_report()
         result = benchmark.validate_report(source)
         self.assertEqual(result, source)
@@ -92,6 +101,23 @@ class ReportTests(unittest.TestCase):
         self.assertIsNot(result["final_position_m"], source["final_position_m"])
         result["final_position_m"][0] = 99.0
         self.assertEqual(source["final_position_m"], [1.0, 2.0])
+        self.assertEqual(benchmark.validate_report(source), source)
+
+    def test_rejects_non_native_report_keys(self):
+        report = make_report()
+        report[object()] = "not-allowed"
+        with self.assertRaisesRegex(ValueError, "native string keys"):
+            benchmark.validate_report(report)
+
+    def test_rejects_string_subclass_keys(self):
+        class Key(str):
+            pass
+
+        report = make_report()
+        value = report.pop("step_count")
+        report[Key("step_count")] = value
+        with self.assertRaisesRegex(ValueError, "native string keys"):
+            benchmark.validate_report(report)
 
     def test_rejects_boolean_integer(self):
         with self.assertRaises(ValueError):
@@ -110,6 +136,12 @@ class ReportTests(unittest.TestCase):
         report["elapsed_ns"] += 1
         with self.assertRaisesRegex(ValueError, "digest"):
             benchmark.validate_report(report)
+
+    def test_rejects_invalid_workload_hashes(self):
+        with self.assertRaisesRegex(ValueError, "config_sha256"):
+            benchmark.validate_report(make_report(config_sha256="not-a-hash"))
+        with self.assertRaisesRegex(ValueError, "mjcf_sha256"):
+            benchmark.validate_report(make_report(mjcf_sha256="g" * 64))
 
     def test_round_trips_strict_json(self):
         report = make_report()
@@ -151,6 +183,8 @@ class NativeProbeTests(unittest.TestCase):
         self.assertEqual(report["backend"], "dm_control.mujoco")
         self.assertEqual(report["step_count"], 120)
         self.assertEqual(len(report["trajectory_sha256"]), 64)
+        self.assertEqual(len(report["config_sha256"]), 64)
+        self.assertEqual(len(report["mjcf_sha256"]), 64)
         self.assertGreaterEqual(report["p95_step_ns"], report["p50_step_ns"])
         self.assertEqual(benchmark.validate_report(report), report)
 
