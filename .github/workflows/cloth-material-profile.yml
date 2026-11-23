@@ -1,0 +1,38 @@
+name: Cloth material profile
+
+on:
+  push:
+    paths:
+      - "src/mojum/cloth_material.py"
+      - "tests/test_cloth_material.py"
+      - "docs/CLOTH_MATERIAL_R01.md"
+      - ".github/workflows/cloth-material-profile.yml"
+  pull_request:
+    paths:
+      - "src/mojum/cloth_material.py"
+      - "tests/test_cloth_material.py"
+      - "docs/CLOTH_MATERIAL_R01.md"
+      - ".github/workflows/cloth-material-profile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile module
+        run: python -m py_compile src/mojum/cloth_material.py tests/test_cloth_material.py
+      - name: Run focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_cloth_material.py' -v
