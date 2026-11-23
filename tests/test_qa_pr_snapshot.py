@@ -125,6 +125,11 @@ class PRSnapshotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             admit_pr_snapshot(raw)
 
+        raw = fixture()
+        raw["x" * 33] = "oversized key"
+        with self.assertRaisesRegex(ValueError, "bounded exact native strings"):
+            admit_pr_snapshot(raw)
+
 
 if __name__ == "__main__":
     unittest.main()
