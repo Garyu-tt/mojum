@@ -48,6 +48,13 @@ From this PR branch in a directory private to the current user:
     PYTHONPATH=src python -m mojum.verified_snapshot \
       --create-key "$HOME/mojum-private/replay.hmac.key"
 
+Use a **trusted, owner-private directory tree** for both key and snapshot.
+The loader, writer and key provisioner reject a symlinked ancestor directory
+and explicit `..` traversal, not only a symlink at the filename itself.
+These static checks do **not** make a directory writable by an attacker safe
+against concurrent rename/swap races; do not place secrets under a shared,
+mutable parent path.
+
 Provisioning is a **separate one-time operation**; an existing key is
 never silently overwritten. Key bytes are never printed. On later
 restarts use the **same** key file and snapshot path:
