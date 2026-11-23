@@ -48,6 +48,12 @@ class TraceEnvelopeTests(unittest.TestCase):
                     with self.assertRaises(TraceEnvelopeError):
                         admit_trace(x)
 
+    def test_rejects_oversized_trace_id_before_regex(self):
+        value = sample()
+        value["trace_id"] = "a" * 1_000_000
+        with self.assertRaises(TraceEnvelopeError):
+            admit_trace(value)
+
     def test_hostile_containers(self):
         class DictSubclass(dict):
             pass
