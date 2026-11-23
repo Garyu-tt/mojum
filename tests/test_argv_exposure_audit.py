@@ -40,7 +40,7 @@ class ArgvExposureTests(unittest.TestCase):
 
     def test_rejects_unpaired_surrogates(self):
         with self.assertRaises(ValueError):
-            audit_argv(["bad-\\ud800"])
+            audit_argv(["bad-\ud800"])
 
     def test_digest_does_not_depend_on_secret(self):
         a = audit_argv(["--token=a"])
