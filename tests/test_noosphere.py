@@ -160,7 +160,14 @@ class NoosphereTests(unittest.TestCase):
         # parser's nesting depth. It must not escape as raw RecursionError.
         self.store.append(event(), expected_head=self.store.head())
         self.store._db.execute("DROP TRIGGER noosphere_no_update")
-        nested_wire = "[" * 2500 + "0" + "]" * 2500
+        # On some CPython builds 2,500 levels can parse successfully, so
+        # that shallow fixture passes even without the exception fix.
+        # This 24 KiB wire must genuinely exercise the parser recursion
+        # failure, not merely the ordinary invalid-event error path.
+        nested_wire = "[" * 12000 + "0" + "]" * 12000
+        self.assertLess(len(nested_wire.encode("utf-8")), 128_000)
+        with self.assertRaises(RecursionError):
+            json.loads(nested_wire)
         self.store._db.execute(
             "UPDATE events SET wire_json = ? WHERE seq = 1", (nested_wire,)
         )
