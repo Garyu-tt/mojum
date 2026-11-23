@@ -154,5 +154,59 @@ class PettingZooEpisodeTests(unittest.TestCase):
             admit_episode(value)
 
 
+    def test_rejects_aggregate_scalar_budget_before_canonicalization(self):
+        value = sample()
+        template = value["steps"][0]
+        value["steps"] = []
+        for tick in range(100):
+            step = copy.deepcopy(template)
+            step["tick"] = tick
+            for field in ("observations", "actions"):
+                step[field] = {agent: [0] * 256 for agent in value["agents"]}
+            value["steps"].append(step)
+        with self.assertRaisesRegex(ValueError, "aggregate scalar budget"):
+            admit_episode(value)
+
+    def test_rejects_hostile_string_subclass_keys_before_hashing(self):
+        class HostileKey(str):
+            armed = False
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile hash executed")
+                return str.__hash__(self)
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("hostile equality executed")
+                return str.__eq__(self, other)
+
+        for target in ("root", "step", "agent_map"):
+            value = sample()
+            if target == "root":
+                original = "schema"
+                mapping = value
+            elif target == "step":
+                original = "tick"
+                mapping = value["steps"][0]
+            else:
+                original = "a"
+                mapping = value["steps"][0]["observations"]
+            key = HostileKey(original)
+            mapping[key] = mapping.pop(original)
+            key.armed = True
+            with self.subTest(target=target):
+                with self.assertRaises(ValueError):
+                    admit_episode(value)
+
+    def test_rejects_non_native_schema_and_provenance_before_comparison(self):
+        class HostileValue:
+            def __eq__(self, other):
+                raise AssertionError("hostile equality executed")
+        for field in ("schema", "provenance"):
+            value = sample()
+            value[field] = HostileValue()
+            with self.assertRaises(ValueError):
+                admit_episode(value)
+
+
 if __name__ == "__main__":
     unittest.main()
