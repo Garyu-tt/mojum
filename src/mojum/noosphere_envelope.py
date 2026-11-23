@@ -184,12 +184,17 @@ def open_bytes(
     if len(nonce) != _NONCE_BYTES or len(ciphertext) < _TAG_BYTES:
         raise NoosphereEnvelopeError("invalid nonce or ciphertext length")
 
+    if base64.b64encode(nonce).decode("ascii") != nonce_text or base64.b64encode(ciphertext).decode("ascii") != ciphertext_text:
+        raise NoosphereEnvelopeError("noncanonical base64 in encrypted envelope")
+
     aad = _aad(
         key_id=key_id, agent_id=agent_id,
         visibility=expected_visibility, content_type=content_type,
     )
+    # Keep the optional-dependency diagnostic distinct from authentication errors.
+    cipher = _aesgcm(checked_key)
     try:
-        plaintext = _aesgcm(checked_key).decrypt(nonce, ciphertext, aad)
+        plaintext = cipher.decrypt(nonce, ciphertext, aad)
     except Exception as exc:
         raise NoosphereEnvelopeError("envelope authentication failed") from exc
     if len(plaintext) > _MAX_PLAINTEXT_BYTES:
