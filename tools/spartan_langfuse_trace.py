@@ -93,7 +93,8 @@ def _nonfinite(_):
 
 def read_events(path):
     """Open input without following a symlink; require owner-only POSIX file."""
-    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_CLOEXEC', 0)
+    flags = (os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) |
+             getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NONBLOCK', 0))
     descriptor = os.open(path, flags)
     try:
         mode = os.fstat(descriptor)
@@ -103,7 +104,12 @@ def read_events(path):
         events, seen = [], set()
         with os.fdopen(descriptor, 'rb') as source:
             descriptor = -1
-            for line in source:
+            # Never allocate an untrusted entire line before enforcing the cap.
+            # One extra bounded read detects an event after MAX_EVENTS.
+            for _ in range(MAX_EVENTS + 1):
+                line = source.readline(MAX_LINE_BYTES + 1)
+                if not line:
+                    break
                 if len(events) >= MAX_EVENTS or len(line) > MAX_LINE_BYTES:
                     raise TraceError('telemetry batch exceeds resource budget')
                 try:
