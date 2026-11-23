@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.robopianist_benchmark import (
-    BenchmarkError, compare_controls, make_task, make_trace, score_trace, validate_task, _digest,
+    BenchmarkError, TASK_SCHEMA, compare_controls, make_task, make_trace, score_trace, validate_task, _digest,
 )
 
 
