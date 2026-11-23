@@ -134,7 +134,9 @@ class ToyScene:
 
     def probe(self, state, sensor, *, occluding_obstacles=()):
         """One bounded virtual touch; respect the same wall mask as sensing."""
-        if (not isinstance(sensor, dict) or sensor != self.sense(
+        if (type(sensor) is not dict
+                or any(type(key) is not str for key in sensor)
+                or sensor != self.sense(
                 state, occluding_obstacles=occluding_obstacles)):
             raise CuriosityError("stale or forged near-field frame")
         t = self._nearest(state, occluding_obstacles)
@@ -156,7 +158,9 @@ class ContactAssociations:
 
     @staticmethod
     def _key(sensor):
-        if (type(sensor) is not dict or set(sensor) != {
+        if (type(sensor) is not dict
+                or any(type(key) is not str for key in sensor)
+                or set(sensor) != {
                 "schema", "tick", "world_revision", "visible",
                 "reflectance_rgb", "range_bucket_10cm", "source",
             } or type(sensor.get("schema")) is not str
@@ -190,6 +194,7 @@ class ContactAssociations:
     @classmethod
     def from_snapshot(cls, snapshot):
         if (type(snapshot) is not dict
+                or any(type(key) is not str for key in snapshot)
                 or set(snapshot) != {"schema", "table", "updates"}
                 or type(snapshot["schema"]) is not str
                 or snapshot["schema"] != MODEL_SCHEMA
@@ -209,7 +214,9 @@ class ContactAssociations:
             if (len(parts) != 3 or any(not v.isdecimal() or str(int(v)) != v
                                         or not 0 <= int(v) <= 255 for v in parts)):
                 raise CuriosityError("invalid numeric cue")
-            if (type(entry) is not dict or set(entry) != {"count", "mean_deflection"}
+            if (type(entry) is not dict
+                    or any(type(field) is not str for field in entry)
+                    or set(entry) != {"count", "mean_deflection"}
                     or type(entry["count"]) is not int
                     or not 1 <= entry["count"] <= snapshot["updates"]
                     or not _finite(entry["mean_deflection"])
@@ -246,7 +253,9 @@ class ContactAssociations:
                 or type(prediction["model_updates"]) is not int
                 or prediction != self.predict(sensor)):
             raise CuriosityError("stale association prediction")
-        if (type(measurement) is not dict or type(measurement.get("contact")) is not bool
+        if (type(measurement) is not dict
+                or any(type(key) is not str for key in measurement)
+                or type(measurement.get("contact")) is not bool
                 or type(measurement.get("instrument")) is not str
                 or measurement.get("instrument") != "synthetic_probe_not_material_classifier"
                 or type(measurement.get("source_tick")) is not int
