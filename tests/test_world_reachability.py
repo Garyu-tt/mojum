@@ -90,6 +90,21 @@ class SampledPathTests(unittest.TestCase):
                 find_sampled_path(room, start, goal, columns=cols, rows=rows)
         self.assertEqual(room.obstacles, baseline)
 
+    def test_subnormal_grid_cell_underflow_is_typed_rejection(self):
+        # Positive IEEE-754 minimum subnormal is legal room geometry, but
+        # dividing it by the default 16 grid slots rounds to zero.
+        tiny = float.fromhex("0x0.0000000000001p-1022")
+        self.assertGreater(tiny, 0.0)
+        self.assertEqual(tiny / 16, 0.0)
+        for width, height, start, goal in (
+            (tiny, 1, (0, 0), (0, 1)),
+            (1, tiny, (0, 0), (1, 0)),
+        ):
+            with self.subTest(width=width, height=height):
+                room = Room(width, height)
+                with self.assertRaisesRegex(ValueError, "cell span underflows"):
+                    find_sampled_path(room, start, goal)
+
     def test_audit_budgets_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "budget"):
             find_sampled_path(Room(10001, 3), (0, 0), (1, 1))
