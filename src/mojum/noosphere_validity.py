@@ -180,9 +180,14 @@ def audit_validity(facts):
     for index, fact in enumerate(facts):
         if type(fact) is not dict:
             raise ValidityAuditError(f"fact {index} must be a native object")
-        if any(type(key) is not str for key in fact):
+        # This fixed seven-field schema must be cardinality-checked before
+        # traversing caller-controlled keys or allocating a comparison set.
+        if len(fact) != len(_EXPECTED_FACT_FIELDS):
+            raise ValidityAuditError(f"fact {index} has missing or unknown fields")
+        keys = tuple(dict.keys(fact))
+        if any(type(key) is not str for key in keys):
             raise ValidityAuditError(f"fact {index} has a non-native object key")
-        if set(fact) != _EXPECTED_FACT_FIELDS:
+        if set(keys) != _EXPECTED_FACT_FIELDS:
             raise ValidityAuditError(f"fact {index} has missing or unknown fields")
 
         event_id = fact["event_id"]
@@ -301,7 +306,8 @@ def audit_json(wire):
         raise
     except (TypeError, ValueError, RecursionError, OverflowError) as exc:
         raise ValidityAuditError("invalid audit JSON") from exc
-    if (type(envelope) is not dict or set(envelope) != {"schema", "facts"}
+    if (type(envelope) is not dict or len(envelope) != 2
+            or set(dict.keys(envelope)) != {"schema", "facts"}
             or envelope["schema"] != SCHEMA):
         raise ValidityAuditError("unsupported audit envelope")
     return audit_validity(envelope["facts"])
