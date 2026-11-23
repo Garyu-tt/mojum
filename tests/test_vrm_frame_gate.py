@@ -148,5 +148,20 @@ class PoseFrameGateTests(unittest.TestCase):
         self.assertEqual(positive.digest, negative.digest)
 
 
+    def test_rejects_hostile_string_subclass_packet_keys_before_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("schema")
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not run")
+
+        candidate = packet()
+        schema = candidate.pop("schema")
+        candidate[HostileKey("schema")] = schema
+        with self.assertRaises(FrameGateError):
+            gate().admit(candidate, consent=True, source_tag=PUBLIC_SYNTHETIC)
+
+
 if __name__ == "__main__":
     unittest.main()
