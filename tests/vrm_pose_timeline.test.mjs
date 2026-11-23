@@ -88,6 +88,18 @@ test('rejects cross-epoch frames and changing joint inventory', () => {
   assert.throws(() => createVrmPoseTimeline([frame(0), otherJoints]), /inventory/);
 });
 
+test('normalizes hostile proxy reflection failures to TypeError', () => {
+  const hostileRecord = new Proxy(frame(0), {
+    ownKeys() { throw new Error('hostile ownKeys trap'); },
+  });
+  assert.throws(() => createVrmPoseTimeline([hostileRecord]), TypeError);
+
+  const hostileArray = new Proxy([frame(0)], {
+    getPrototypeOf() { throw new Error('hostile getPrototypeOf trap'); },
+  });
+  assert.throws(() => createVrmPoseTimeline(hostileArray), TypeError);
+});
+
 test('rejects aggregate frame-by-joint sample budgets', () => {
   const joints = Array.from({length: 128}, (_, index) => ({
     id: `joint.${String(index).padStart(3, '0')}`,
