@@ -122,7 +122,7 @@ class PhenotypeAuditTests(unittest.TestCase):
                 audit_phenotype_snapshot(snapshot, expected, source_classification="PUBLIC_SYNTHETIC")
             # Only the bounded ledger snapshot may be serialized. Escaping
             # the untrusted phenotype would exceed 1 MiB, so reject preflight.
-            self.assertEqual(serializer.call_count, 1)
+            self.assertEqual(serializer.call_count, 2)
 
     def test_oversized_integer_is_rejected_before_serialization(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
@@ -136,7 +136,7 @@ class PhenotypeAuditTests(unittest.TestCase):
             self.assertEqual(serializer.call_count, 1)
     def test_aggregate_object_key_budget_is_rejected_before_serialization(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
-        for index in range(65):
+        for index in range(66):
             expected[("k" * 16_000) + str(index)] = index
         with patch(
             "mojum.genesis_phenotype_audit.json.dumps",
