@@ -41,7 +41,10 @@ Run the focused suite:
   separate signing service and tightly control distribution of verification
   secrets; this module itself does not create, persist, rotate or protect keys.
 - The verifier consumes an explicit caller-supplied key map. That map is the
-  trust root. No automatic trust, network enrollment, node discovery, TLS,
+  trust root. Before lookup it rejects more than 128 entries, noncanonical
+  key IDs and any value that is not an exact 32..128-byte key. This prevents
+  custom Python key objects from running equality hooks during a dictionary
+  lookup. No automatic trust, network enrollment, node discovery, TLS,
   hardware-backed identity, replay cache, durable registry or revocation
   propagation is implemented.
 - statement_id is signed and uniquely intended by the issuer, but uniqueness
