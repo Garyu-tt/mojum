@@ -256,5 +256,36 @@ class NoosphereConsentTests(unittest.TestCase):
         self.assertEqual(original, snapshot)
 
 
+    def test_rejects_hostile_string_subclass_keys_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("projection")
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not run")
+
+        source = dataset([event()])
+        projection = source.pop("projection")
+        source[HostileKey("projection")] = projection
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_rejects_custom_mapping_before_iteration(self):
+        with self.assertRaises(ConsentError):
+            validate_grant(UserDict(grant()))
+
+    def test_rejects_cyclic_payload_before_digest_or_serialization(self):
+        payload = {}
+        payload["self"] = payload
+        source = dataset([])
+        source["projection"]["items"] = [{
+            "seq": 1, "event": event(), "event_hash": "0" * 64,
+        }]
+        source["projection"]["items"][0]["event"]["payload"] = payload
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+
+
 if __name__ == "__main__":
     unittest.main()
