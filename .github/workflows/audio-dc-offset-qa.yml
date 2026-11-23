@@ -1,0 +1,40 @@
+name: Mojum audio DC-offset exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/audio_dc_offset.py'
+      - 'tests/test_audio_dc_offset.py'
+      - '.github/workflows/audio-dc-offset-qa.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  audio-dc-offset:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact PR HEAD
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+      - name: Run bounded PCM16 DC-offset tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_audio_dc_offset.py' -v
