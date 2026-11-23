@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Final
@@ -182,7 +181,7 @@ def validate_profile(source: object) -> LaunchProfile:
     unknown = set(data) - _ALLOWED_KEYS
     if unknown:
         raise AquariumConfigError(f"unknown profile field: {sorted(unknown)[0]}")
-    if data.get("schema") != SCHEMA or type(data.get("schema")) is not str:
+    if type(data.get("schema")) is not str or data["schema"] != SCHEMA:
         raise AquariumConfigError(f"schema must be {SCHEMA}")
     if "db_path" not in data:
         raise AquariumConfigError("db_path is required")
