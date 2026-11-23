@@ -53,9 +53,10 @@ Then:
 
 The adapter implements the PettingZoo Parallel API shape, with discrete binary
 actions, per-agent observations, rewards, terminations, truncations, and infos.
-Run PettingZoo's parallel_api_test in the optional environment before using
-it as an upstream integration. This repository's required CI does not install
-either optional package and does not claim that upstream conformance test ran.
+The dedicated `optional-pettingzoo` GitHub Actions job installs these pinned
+packages and runs PettingZoo's upstream `parallel_api_test` on CPython 3.11.
+The required stdlib-only offline matrix remains dependency-free on Python 3.11,
+3.12 and 3.13.
 
 ## Limits and safety
 
