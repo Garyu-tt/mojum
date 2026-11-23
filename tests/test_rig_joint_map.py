@@ -113,6 +113,12 @@ class JointMapTests(unittest.TestCase):
         with self.assertRaises(JointMapError):
             build_joint_map(src(), bad, links())
 
+    def test_non_ascii_revision_rejected_by_identifier_contract(self):
+        bad = dst()
+        bad["revision"] = "skeleton-версия"
+        with self.assertRaises(JointMapError):
+            build_joint_map(src(), bad, links())
+
     def test_hostile_binding_value_rejected(self):
         bad = links()
         bad["knee.R"] = HostileString("right_knee")
@@ -142,7 +148,7 @@ class JointMapTests(unittest.TestCase):
 
     def test_invalid_utf8_surrogate_rejected(self):
         with self.assertRaises(JointMapError):
-            build_joint_map(src(["hip\ud800"]), dst(), links())
+            build_joint_map(src(["hip\\ud800"]), dst(), links())
 
     def test_canonical_receipt_is_json_serializable(self):
         import json
