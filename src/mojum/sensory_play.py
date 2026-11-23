@@ -156,13 +156,15 @@ class ContactAssociations:
 
     @staticmethod
     def _key(sensor):
-        if (not isinstance(sensor, dict) or set(sensor) != {
+        if (type(sensor) is not dict or set(sensor) != {
                 "schema", "tick", "world_revision", "visible",
                 "reflectance_rgb", "range_bucket_10cm", "source",
-            } or sensor.get("schema") != SENSE_SCHEMA
+            } or type(sensor.get("schema")) is not str
+                or sensor.get("schema") != SENSE_SCHEMA
+                or type(sensor.get("source")) is not str
                 or sensor.get("source") != "synthetic_local_proximity_not_camera"
                 or type(sensor.get("tick")) is not int or sensor["tick"] < 0
-                or not isinstance(sensor.get("world_revision"), str)
+                or type(sensor.get("world_revision")) is not str
                 or len(sensor["world_revision"]) != 64
                 or any(c not in "0123456789abcdef" for c in sensor["world_revision"])
                 or type(sensor.get("visible")) is not bool):
@@ -173,7 +175,7 @@ class ContactAssociations:
             return None
         rgb = sensor.get("reflectance_rgb")
         rng = sensor.get("range_bucket_10cm")
-        if (not isinstance(rgb, list) or len(rgb) != 3
+        if (type(rgb) is not list or len(rgb) != 3
                 or any(type(v) is not int or not 0 <= v <= 255 for v in rgb)
                 or type(rng) is not int or not 0 <= rng <= 6):
             raise CuriosityError("invalid sensor signal")
@@ -187,12 +189,13 @@ class ContactAssociations:
 
     @classmethod
     def from_snapshot(cls, snapshot):
-        if (not isinstance(snapshot, dict)
+        if (type(snapshot) is not dict
                 or set(snapshot) != {"schema", "table", "updates"}
+                or type(snapshot["schema"]) is not str
                 or snapshot["schema"] != MODEL_SCHEMA
                 or type(snapshot["updates"]) is not int
                 or not 0 <= snapshot["updates"] <= MAX_EVENTS
-                or not isinstance(snapshot["table"], dict)
+                or type(snapshot["table"]) is not dict
                 or len(snapshot["table"]) > MAX_CUES):
             raise CuriosityError("invalid developmental model snapshot")
         total = 0
@@ -200,13 +203,13 @@ class ContactAssociations:
             # RGB cue keys are at most "255:255:255" (11 characters).
             # Bound untrusted strings before splitting or converting to int:
             # otherwise oversized decimal segments can raise raw ValueError.
-            if not isinstance(key, str) or len(key) > 11:
+            if type(key) is not str or len(key) > 11:
                 raise CuriosityError("invalid numeric cue")
             parts = key.split(":")
             if (len(parts) != 3 or any(not v.isdecimal() or str(int(v)) != v
                                         or not 0 <= int(v) <= 255 for v in parts)):
                 raise CuriosityError("invalid numeric cue")
-            if (not isinstance(entry, dict) or set(entry) != {"count", "mean_deflection"}
+            if (type(entry) is not dict or set(entry) != {"count", "mean_deflection"}
                     or type(entry["count"]) is not int
                     or not 1 <= entry["count"] <= snapshot["updates"]
                     or not _finite(entry["mean_deflection"])
@@ -229,9 +232,22 @@ class ContactAssociations:
         }
 
     def learn(self, sensor, measurement, prediction):
-        if prediction != self.predict(sensor):
+        # A hostile value's overloaded equality must not forge prior evidence.
+        # Compare only detached, native scalar packets to recomputed prediction.
+        if (type(prediction) is not dict
+                or any(type(key) is not str for key in prediction)
+                or set(prediction) != {"cue", "predicted_deflection",
+                                      "observations", "model_updates"}
+                or (prediction["cue"] is not None
+                    and type(prediction["cue"]) is not str)
+                or (prediction["predicted_deflection"] is not None
+                    and type(prediction["predicted_deflection"]) not in (int, float))
+                or type(prediction["observations"]) is not int
+                or type(prediction["model_updates"]) is not int
+                or prediction != self.predict(sensor)):
             raise CuriosityError("stale association prediction")
-        if (not isinstance(measurement, dict) or type(measurement.get("contact")) is not bool
+        if (type(measurement) is not dict or type(measurement.get("contact")) is not bool
+                or type(measurement.get("instrument")) is not str
                 or measurement.get("instrument") != "synthetic_probe_not_material_classifier"
                 or type(measurement.get("source_tick")) is not int
                 or measurement["source_tick"] != sensor["tick"]):
