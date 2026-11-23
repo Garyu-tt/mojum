@@ -39,7 +39,7 @@ def _require_native_json_tree(value):
     """
     if type(value) is not dict:
         raise GraphError("Graph must be an exact built-in JSON object")
-    pending = [(value, 0)]
+    pending = [(value, 1)]
     seen_containers = set()
     node_count = 0
     text_bytes = 0
