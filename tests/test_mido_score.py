@@ -111,6 +111,29 @@ class OfflineScoreTests(unittest.TestCase):
             with self.subTest(events=str(events)), self.assertRaises(MidiScoreError):
                 score([events])
 
+    def test_channel_key_global_across_type1_tracks(self):
+        # MIDI channels are shared by all tracks in a format-1 file.
+        # The same channel/pitch cannot be independently active twice.
+        duplicate = [
+            [event("note_on", 0, channel=0, note=60, velocity=80),
+             event("note_off", 480, channel=0, note=60, velocity=0)],
+            [event("note_on", 240, channel=0, note=60, velocity=70),
+             event("note_off", 480, channel=0, note=60, velocity=0)],
+        ]
+        with self.assertRaisesRegex(MidiScoreError, "overlapping same-pitch"):
+            score(duplicate)
+
+        # A note-off on a different track closes the channel note, but
+        # provenance still identifies the track of its note-on.
+        cross_track_off = [
+            [event("note_on", 0, channel=0, note=60, velocity=80)],
+            [event("note_off", 480, channel=0, note=60, velocity=0)],
+        ]
+        result = score(cross_track_off)
+        self.assertEqual(result["note_count"], 1)
+        self.assertEqual(result["notes"][0]["track"], 0)
+        self.assertEqual(result["notes"][0]["duration_us"], 500_000)
+
     def test_reject_simultaneous_conflicting_tempo_and_budgets(self):
         with self.assertRaises(MidiScoreError):
             score([[event("set_tempo", 0, tempo=500000)],
