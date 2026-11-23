@@ -1,6 +1,6 @@
 """Optional dm_control CPU benchmark for a bounded synthetic point-room fixture.
 
-This is a benchmark probe, not a drop-in replacement for moj​um.world_room.
+This is a benchmark probe, not a drop-in replacement for mojum.world_room.
 The default module import path has no dm_control dependency.
 """
 from __future__ import annotations
