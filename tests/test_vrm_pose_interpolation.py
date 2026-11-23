@@ -50,6 +50,16 @@ class PoseInterpolationTests(unittest.TestCase):
         result=interpolate_measured_poses(a,b,target_timestamp_ns=150); a["joints"]["root"]=(99.0,0.0,0.0)
         self.assertEqual(result.coordinates[-1],(0.5,0.0,0.0))
         self.assertFalse(verify_interpolated_pose(dataclasses.replace(result,rig_revision=9)))
+    def test_rejects_integer_conversion_overflow_as_contract_error(self):
+        huge = 10 ** 10_000
+        a,b=frame("f-a",100,0.0),frame("f-b",200,1.0)
+        a["joints"]["root"]=(huge,0.0,0.0)
+        with self.assertRaises(PoseInterpolationError):
+            interpolate_measured_poses(a,b,target_timestamp_ns=150)
+        a,b=frame("f-a",100,0.0),frame("f-b",200,1.0)
+        with self.assertRaises(PoseInterpolationError):
+            interpolate_measured_poses(a,b,target_timestamp_ns=150,max_joint_delta=huge)
+
     def test_rejects_duplicate_ids_and_extra_fields(self):
         a,b=frame("f-a",100,0.0),frame("f-a",200,1.0)
         with self.assertRaises(PoseInterpolationError): interpolate_measured_poses(a,b,target_timestamp_ns=150)
