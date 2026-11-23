@@ -108,6 +108,47 @@ class DependencyDagTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mapping"):
             evaluate_dependency_dag([None])
 
+    def test_rejects_sequence_subclass_before_iteration(self):
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("hostile iterator executed")
+        with self.assertRaisesRegex(ValueError, "native list or tuple"):
+            evaluate_dependency_dag(HostileList())
+
+    def test_rejects_mapping_subclass_before_iteration(self):
+        class HostileDict(dict):
+            def keys(self):
+                raise AssertionError("hostile keys executed")
+        with self.assertRaisesRegex(ValueError, "native dict"):
+            evaluate_dependency_dag([HostileDict(row("a"))])
+
+    def test_rejects_dependency_container_subclass(self):
+        class HostileTuple(tuple):
+            def __iter__(self):
+                raise AssertionError("hostile iterator executed")
+        record = row("a")
+        record["depends_on"] = HostileTuple()
+        with self.assertRaisesRegex(ValueError, "native list or tuple"):
+            evaluate_dependency_dag([record])
+
+    def test_rejects_string_subclasses(self):
+        class HostileString(str):
+            def __hash__(self):
+                raise AssertionError("hostile hash executed")
+        record = row("a")
+        record["id"] = HostileString("a")
+        with self.assertRaisesRegex(ValueError, "PR id"):
+            evaluate_dependency_dag([record])
+
+    def test_rejects_non_native_dict_keys(self):
+        class HostileString(str):
+            def __hash__(self):
+                raise AssertionError("hostile hash executed")
+        record = row("a")
+        record[HostileString("extra")] = "value"
+        with self.assertRaisesRegex(ValueError, "native strings"):
+            evaluate_dependency_dag([record])
+
 
 if __name__ == "__main__":
     unittest.main()
