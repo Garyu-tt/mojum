@@ -124,6 +124,13 @@ class GarmentContractTests(unittest.TestCase):
             with self.assertRaisesRegex(GarmentContractError, 'not a directory'):
                 verify_mesh_file(garment(), regular_file)
 
+    def test_missing_or_unreadable_manifest_is_contract_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(GarmentContractError, 'manifest'):
+                load_garment(Path(folder) / 'missing.json')
+            with self.assertRaisesRegex(GarmentContractError, 'manifest'):
+                load_garment(Path(folder))
+
     def test_manifest_file_duplicate_keys_and_size_limit(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'manifest.json'
