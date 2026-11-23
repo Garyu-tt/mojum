@@ -125,10 +125,10 @@ class GenesisCodecTests(unittest.TestCase):
         with self.assertRaises(GenesisCodecError):
             dumps(object())
 
-    def test_input_mutation_does_not_alias_restored_ledger(self):
-        payload = dumps(self.ledger())
-        restored = loads(payload)
-        payload = b"{}"
+    def test_snapshot_returned_by_restored_ledger_is_detached(self):
+        restored = loads(dumps(self.ledger()))
+        exposed = restored.snapshot()
+        exposed["events"][0]["delta"] = 99
         self.assertEqual(restored.phenotype(10)["parameters"]["heartbeat_bpm"], 61)
 
     def test_round_trip_with_empty_ledger(self):
