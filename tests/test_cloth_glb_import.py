@@ -11,6 +11,7 @@ import stat
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.cloth_glb_import import (
     MAX_FILE, ClothGLBError, _parse_glb, import_glb, main,
@@ -81,6 +82,17 @@ def fixture(*, skin=False, bad_index=False, zero_area=False, external=False,
     binary.extend(b"\x00" * (-len(binary) % 4))
     length = 12 + 8 + len(encoded) + 8 + len(binary)
     return struct.pack("<4sII", b"glTF", 2, length) + struct.pack("<II", len(encoded), 0x4E4F534A) + encoded + struct.pack("<II", len(binary), 0x004E4942) + bytes(binary)
+
+
+def repack_glb(doc, binary):
+    """Re-encode a synthetic fixture after a single targeted JSON mutation."""
+    encoded = json.dumps(doc, separators=(",", ":"), allow_nan=False).encode()
+    encoded += b" " * (-len(encoded) % 4)
+    binary += b"\\x00" * (-len(binary) % 4)
+    size = 12 + 8 + len(encoded) + 8 + len(binary)
+    return (struct.pack("<4sII", b"glTF", 2, size) +
+            struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
+            struct.pack("<II", len(binary), 0x004E4942) + binary)
 
 
 def convert(raw, **kwargs):
@@ -236,6 +248,38 @@ class ClothGLBTests(unittest.TestCase):
                            struct.pack("<II", len(blob), 0x004E4942) + blob)
                 with self.assertRaises(ClothGLBError):
                     convert(changed, pinned_indices=(), anchor_joint="neck")
+
+    def test_gltf2_vertex_and_index_strides_and_mode_are_strict(self):
+        for variant, error in (
+            ("joints_stride_5", "4-byte aligned"),
+            ("indices_explicit_stride", "must not specify byteStride"),
+            ("float_triangle_mode", "only uncompressed TRIANGLES"),
+        ):
+            with self.subTest(variant=variant):
+                doc, binary = _parse_glb(fixture(skin=True))
+                primitive = doc["meshes"][0]["primitives"][0]
+                if variant == "joints_stride_5":
+                    accessor = doc["accessors"][primitive["attributes"]["JOINTS_0"]]
+                    doc["bufferViews"][accessor["bufferView"]]["byteStride"] = 5
+                elif variant == "indices_explicit_stride":
+                    accessor = doc["accessors"][primitive["indices"]]
+                    doc["bufferViews"][accessor["bufferView"]]["byteStride"] = 2
+                else:
+                    primitive["mode"] = 4.0  # JSON float is not glTF's integer enum
+                with self.assertRaisesRegex(ClothGLBError, error):
+                    convert(repack_glb(doc, binary), pinned_indices=(), anchor_joint="neck")
+        self.assertEqual(len(convert(fixture(interleaved=True))["geometry"]["vertices"]), 4)
+
+    def test_oversized_input_is_rejected_before_hash(self):
+        with mock.patch("mojum.cloth_glb_import.hashlib.sha256") as digest:
+            with self.assertRaisesRegex(ClothGLBError, "GLB file size outside bounds"):
+                import_glb(
+                    b"Z" * (MAX_FILE + 1), expected_sha256="0" * 64,
+                    asset_id="public_scarf", license_id="CC0-1.0",
+                    rig_version="dante-rig-r01", body_profile="adult",
+                    pinned_indices=(0,),
+                )
+            digest.assert_not_called()
 
     def test_accessor_byte_length_outside_view(self):
         raw = fixture()
