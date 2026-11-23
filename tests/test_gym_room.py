@@ -79,6 +79,25 @@ class PointRoomGymTests(unittest.TestCase):
         self.assertEqual(episode._state.tick, 0)
         self.assertEqual(episode.step(0)[0]["tick"], 1)
 
+    def test_mutated_episode_budgets_are_rejected_without_advancing(self):
+        episode = self.episode(step_m=0.125, max_steps=2)
+        episode.reset(seed=7)
+        for field, invalid in (
+            ("step_m", 1.0), ("step_m", float("nan")),
+            ("step_m", True), ("max_steps", 20), ("max_steps", 2.0),
+            ("goal_radius_m", 1.0), ("goal_radius_m", True),
+        ):
+            with self.subTest(field=field, invalid=invalid):
+                original = getattr(episode, field)
+                setattr(episode, field, invalid)
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.step(1)
+                setattr(episode, field, original)
+                self.assertEqual(episode._state.tick, 0)
+        observation, _, _, _, _ = episode.step(1)
+        self.assertEqual(observation["tick"], 1)
+        self.assertEqual(observation["position"], [1.125, 2.0])
+
     def test_bad_episode_inputs_fail_closed(self):
         for kwargs in ({"step_m": float("nan")}, {"step_m": 0},
                        {"max_steps": True}, {"goal": (2, 2)},
