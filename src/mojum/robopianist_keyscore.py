@@ -212,14 +212,22 @@ def read_trace(path: Path):
     """Read a small untrusted local JSON trace, not a URL or private journal."""
     if not isinstance(path, Path):
         raise PianoBenchmarkError("input must be a local Path")
-    with path.open("rb") as handle:
-        data = handle.read(MAX_BYTES + 1)
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(MAX_BYTES + 1)
+    except OSError:
+        # Do not expose a potentially sensitive local path through traceback chaining.
+        raise PianoBenchmarkError("cannot read local trace") from None
     if len(data) > MAX_BYTES:
         raise PianoBenchmarkError("oversized trace")
     try:
         trace = json.loads(data, object_pairs_hook=_unique_pairs,
                            parse_constant=_invalid_constant)
-    except (UnicodeError, RecursionError, json.JSONDecodeError) as exc:
+    except PianoBenchmarkError:
+        # Preserve specific duplicate-key and nonfinite-constant errors.
+        raise
+    except (UnicodeError, RecursionError, ValueError) as exc:
+        # Python 3.11+ also raises ValueError for overlong integer literals.
         raise PianoBenchmarkError("invalid trace JSON") from exc
     return score_trace(trace)
 
