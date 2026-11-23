@@ -196,6 +196,10 @@ def loads_profile(raw):
         except UnicodeDecodeError as exc:
             raise ProfileError("profile JSON must be UTF-8") from exc
     elif type(raw) is str:
+        # UTF-8 bytes cannot be fewer than Unicode code points; reject before
+        # allocating an encoded copy of an oversized caller-controlled string.
+        if len(raw) > MAX_JSON_BYTES:
+            raise ProfileError("profile JSON exceeds byte budget")
         try:
             encoded = raw.encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:
