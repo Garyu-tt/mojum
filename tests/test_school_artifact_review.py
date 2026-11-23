@@ -119,8 +119,9 @@ class SchoolArtifactReviewTests(unittest.TestCase):
         self.assertEqual(report["activity_kind"], "rhythm")
         self.assertEqual(report["artifacts"][0]["metrics"]["cyclic_gap_steps"], [16, 16, 16, 16])
         self.assertEqual(report["artifacts"][1]["metrics"]["cyclic_gap_steps"], [12, 12, 12, 12, 12, 4])
-        self.assertEqual(report["comparison"]["added_pulses"], 2)
-        self.assertEqual(report["comparison"]["removed_pulses"], 0)
+        # Set differences count distinct pulse positions, not the net count delta.
+        self.assertEqual(report["comparison"]["added_pulses"], 4)
+        self.assertEqual(report["comparison"]["removed_pulses"], 2)
         self.assertEqual(report["comparison"]["pulse_count_delta"], 2)
 
     def test_single_pulse_has_one_full_cycle_gap(self):
