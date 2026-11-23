@@ -12,21 +12,20 @@ import re
 
 SCHEMA = "mojum.spartan.http-retry-decision/1"
 RETRYABLE_STATUSES = frozenset((408, 429, 500, 502, 503, 504))
-_DELTA_SECONDS = re.compile(r"[0-9]{1,10}\\Z", re.ASCII)
+_DELTA_SECONDS = re.compile(r"[0-9]{1,10}\Z", re.ASCII)
 _MAX_HEADER_LENGTH = 64
-# The HTTP wire grammar is English, independently of host LC_TIME settings.
 _IMF_DATE = re.compile(
     r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun), "
     r"([0-9]{2}) "
     r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
-    r"([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT\\Z",
+    r"([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT\Z",
     re.ASCII,
 )
 _MONTHS = {name: n for n, name in enumerate(
     ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1
 )}
 _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-_MAX_DELAY_MS = 86_400_000  # 24 hours, not an unlimited server delay
+_MAX_DELAY_MS = 86_400_000
 
 
 def _native_int(name: str, value: object, lower: int, upper: int) -> None:
@@ -35,9 +34,9 @@ def _native_int(name: str, value: object, lower: int, upper: int) -> None:
 
 
 def _utc_datetime(name: str, value: object) -> datetime:
-    # datetime is exact-native, but tzinfo is caller-supplied and may override
-    # utcoffset(). Admit only the immutable stdlib timezone implementation so
-    # validation never executes an arbitrary tzinfo callback.
+    # A datetime's tzinfo is caller supplied. Restrict it to the immutable
+    # stdlib timezone implementation before calling utcoffset(), preventing
+    # arbitrary tzinfo callbacks during validation.
     if type(value) is not datetime or type(value.tzinfo) is not timezone:
         raise ValueError(f"{name} must be a native UTC datetime")
     try:
