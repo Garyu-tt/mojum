@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 from mojum.aquarium_config import (
+    LaunchProfile,
     MAX_PATH_CHARS,
     MAX_PROFILE_BYTES,
     SCHEMA,
@@ -63,6 +64,24 @@ class AquariumConfigTests(unittest.TestCase):
         options = result.runtime_options()
         options["ticks"] = 999
         self.assertEqual(result.ticks, 120)
+
+    def test_public_constructor_revalidates_fields_and_digest(self):
+        valid = validate_profile(profile())
+        with self.assertRaises(AquariumConfigError):
+            replace(valid, ticks=True)
+        with self.assertRaises(AquariumConfigError):
+            replace(valid, motor_mode="local_cell_v2", room_file="./room.json")
+        with self.assertRaisesRegex(AquariumConfigError, "digest"):
+            replace(valid, db_path="./other.sqlite3")
+        with self.assertRaisesRegex(AquariumConfigError, "digest"):
+            LaunchProfile(
+                schema=valid.schema, db_path=valid.db_path, ticks=valid.ticks,
+                dt_ns=valid.dt_ns, neural_mode=valid.neural_mode,
+                motor_mode=valid.motor_mode, brain_mode=valid.brain_mode,
+                sensory_mode=valid.sensory_mode, temporal_mode=valid.temporal_mode,
+                pulse_sum=valid.pulse_sum, read_only=valid.read_only,
+                room_file=valid.room_file, sha256="0" * 64,
+            )
 
     def test_digest_is_independent_of_input_key_order(self):
         first = profile(ticks=25, read_only=True)
