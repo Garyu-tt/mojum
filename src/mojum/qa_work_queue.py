@@ -58,7 +58,7 @@ def _text(value: object, name: str, limit: int) -> str:
 
 
 def _number(value: object, name: str, low: float, high: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if type(value) not in (int, float):
         raise QueueError(f"{name} must be a finite number")
     result = float(value)
     if not math.isfinite(result) or not low <= result <= high:
@@ -149,7 +149,7 @@ class QAWorkQueue:
         if self.database == ":memory:":
             raise QueueError("durable queue requires a filesystem-backed SQLite database")
         timeout = _number(busy_timeout, "busy_timeout", 0.01, 60)
-        if isinstance(audit_limit, bool) or not isinstance(audit_limit, int) or not 100 <= audit_limit <= MAX_AUDIT_ROWS:
+        if type(audit_limit) is not int or not 100 <= audit_limit <= MAX_AUDIT_ROWS:
             raise QueueError(f"audit_limit must be between 100 and {MAX_AUDIT_ROWS}")
         self.audit_limit = audit_limit
         self._lock = threading.RLock()
@@ -226,7 +226,7 @@ class QAWorkQueue:
 
     @staticmethod
     def _id(job_id: object) -> int:
-        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+        if type(job_id) is not int or job_id <= 0:
             raise QueueError("job_id must be a positive integer")
         return job_id
 
@@ -265,7 +265,7 @@ class QAWorkQueue:
         key = _text(idempotency_key, "idempotency_key", 200)
         work_kind = _text(kind, "kind", 100)
         encoded, _ = _payload(payload)
-        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 100:
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 100:
             raise QueueError("max_attempts must be an integer from 1 to 100")
         stamp = self._now(now)
         ready = stamp if available_at is None else _number(available_at, "available_at", 0, 10_000_000_000)
@@ -395,7 +395,7 @@ class QAWorkQueue:
                                 error_code=error_code, available_at=stamp + delay, now=stamp)
 
     def list_jobs(self, *, status: str | None = None, limit: int = 100) -> tuple[Job, ...]:
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if type(limit) is not int or not 1 <= limit <= 500:
             raise QueueError("limit must be an integer from 1 to 500")
         if status is not None and status not in {"queued", "leased", "succeeded", "failed"}:
             raise QueueError("unsupported status filter")
