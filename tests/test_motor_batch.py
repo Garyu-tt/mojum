@@ -1,4 +1,5 @@
 import dataclasses
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -93,6 +94,22 @@ class MotorBatchTests(unittest.TestCase):
         gate = MotorGate({long_name: (-1, 1)}, revision=7)
         with self.assertRaises(ValueError):
             validate_motor_batch(gate, [MotorIntent(long_name, 0, 7)], expected_revision=7)
+
+    def test_oversized_joint_name_fails_before_utf8_allocation(self):
+        # A byte-limit checked only *after* str.encode() still allocates
+        # a 2 MiB temporary object. Keep this regression about peak
+        # incremental Python allocations, not elapsed runtime or hardware.
+        name = "j" * (2 * 1024 * 1024)
+        gate = MotorGate({name: (-1, 1)}, revision=7)
+        intent = MotorIntent(name, 0, 7)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(ValueError, "identifier length"):
+                validate_motor_batch(gate, [intent], expected_revision=7)
+            _, peak_bytes = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak_bytes, 256 * 1024)
 
     def test_at_budget_batch_and_capacity_limit(self):
         limits = {f"j{i:03}": (-1, 1) for i in range(MAX_BATCH_JOINTS)}
