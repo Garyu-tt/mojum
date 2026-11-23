@@ -97,6 +97,9 @@ class PollPolicyTests(unittest.TestCase):
                 with self.assertRaises(PollPolicyError):
                     circuit_transition(circuit, "success", now_epoch=100)
 
+    def test_retry_after_rejects_integer_overflow(self):
+        self.assertIsNone(parse_retry_after(10**10000, now_epoch=0))
+
     def test_retry_after_rejects_string_subclasses(self):
         class HostileString(str):
             def strip(self):
