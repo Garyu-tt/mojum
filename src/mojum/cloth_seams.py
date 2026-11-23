@@ -1,4 +1,4 @@
-"Bounded, deterministic, read-only cloth seam admission for synthetic meshes.
+"""Bounded, deterministic, read-only cloth seam admission for synthetic meshes.
 
 This module does not simulate cloth or mutate the caller's mesh.
 """
