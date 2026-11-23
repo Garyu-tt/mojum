@@ -11,6 +11,7 @@ import stat
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.cloth_glb_import import (
     MAX_FILE, ClothGLBError, _parse_glb, import_glb, main,
@@ -275,6 +276,19 @@ class ClothGLBTests(unittest.TestCase):
                    struct.pack("<II", len(blob), 0x004E4942) + blob)
         with self.assertRaisesRegex(ClothGLBError, "outside bufferView"):
             convert(changed)
+
+    def test_oversized_direct_input_is_denied_before_sha256(self):
+        # A caller may pass >8 MiB of immutable bytes, not just a file path.
+        # This must be rejected without performing an unbounded digest first.
+        with mock.patch("mojum.cloth_glb_import.hashlib.sha256") as digest:
+            with self.assertRaisesRegex(ClothGLBError, "GLB file size outside bounds"):
+                import_glb(
+                    b"Z" * (MAX_FILE + 1), expected_sha256="0" * 64,
+                    asset_id="public_scarf", license_id="CC0-1.0",
+                    rig_version="dante-rig-r01", body_profile="adult",
+                    pinned_indices=(0,),
+                )
+            digest.assert_not_called()
 
     def test_reject_excessive_input_size_before_parser(self):
         with self.assertRaises(ClothGLBError):
