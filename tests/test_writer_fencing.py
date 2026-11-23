@@ -64,6 +64,21 @@ class WriterFenceTests(unittest.TestCase):
                 self.assertEqual(evaluate_writer_fence(candidate).reason,
                                  "REJECT_MALFORMED")
 
+    def test_oversized_native_keys_are_rejected_before_set_comparison(self):
+        from unittest.mock import patch
+
+        candidate = token()
+        candidate["x" * 1_000_000] = "ignored"
+        with patch(
+            "mojum.writer_fencing.frozenset",
+            side_effect=AssertionError("oversized key must be rejected before hashing"),
+            create=True,
+        ) as key_set:
+            result = evaluate_writer_fence(candidate)
+            self.assertFalse(result.accepted)
+            self.assertEqual(result.reason, "REJECT_MALFORMED")
+            key_set.assert_not_called()
+
     def test_malformed_high_water_fails_closed(self):
         result = evaluate_writer_fence(token(), {"not": "a high-water mark"})
         self.assertFalse(result.accepted)
