@@ -54,6 +54,15 @@ def _tick(value: object, label: str = "tick") -> int:
     return value
 
 
+def _require_native_keyset(record: dict, expected: set[str], message: str) -> None:
+    """Validate plain string keys before any hash/equality-based shape check."""
+    keys = tuple(dict.keys(record))
+    if any(type(key) is not str for key in keys):
+        raise SessionControlError(message + ": keys must be native strings")
+    if set(keys) != expected:
+        raise SessionControlError(message)
+
+
 def _canonical_digest(value: dict) -> str:
     try:
         wire = json.dumps(
@@ -163,8 +172,10 @@ class SessionController:
     @classmethod
     def from_snapshot(cls, snapshot: dict) -> "SessionController":
         """Restore only a complete, internally replayable version-1 snapshot."""
-        if type(snapshot) is not dict or set(snapshot) != _SNAPSHOT_FIELDS:
+        if type(snapshot) is not dict:
             raise SessionControlError("invalid session snapshot shape")
+        _require_native_keyset(snapshot, _SNAPSHOT_FIELDS,
+                               "invalid session snapshot shape")
         if (type(snapshot["schema"]) is not str
                 or type(snapshot["trust"]) is not str
                 or snapshot["schema"] != SCHEMA
@@ -186,8 +197,11 @@ class SessionController:
 
         controller = cls(organism_id)
         for index, raw in enumerate(events, start=1):
-            if type(raw) is not dict or set(raw) != _EVENT_FIELDS:
+            if type(raw) is not dict:
                 raise SessionControlError(f"invalid event shape at sequence {index}")
+            _require_native_keyset(
+                raw, _EVENT_FIELDS, f"invalid event shape at sequence {index}"
+            )
             seq = raw["seq"]
             if type(seq) is not int or seq != index:
                 raise SessionControlError(f"non-contiguous event sequence at {index}")
