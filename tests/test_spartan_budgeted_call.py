@@ -169,6 +169,44 @@ class BudgetedDispatchTests(unittest.TestCase):
             )
         self.assertEqual(spartan_budget.status(self.db)["requests"], 0)
 
+    def test_async_invoke_is_rejected_before_reservation(self):
+        calls = []
+
+        async def invoke():
+            calls.append("called")
+            return {"content": "not dispatched"}
+
+        def extract(_):
+            return {"actual_tokens": 1, "actual_micro_usd": 1}
+
+        with self.assertRaisesRegex(TypeError, "synchronous"):
+            dispatch(
+                self.db, request_id="async-invoke", worker=13,
+                reserve_tokens=10, reserve_micro_usd=100,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(spartan_budget.status(self.db)["requests"], 0)
+
+    def test_async_receipt_extractor_is_rejected_before_reservation(self):
+        calls = []
+
+        def invoke():
+            calls.append("called")
+            return {"content": "not dispatched"}
+
+        async def extract(_):
+            return {"actual_tokens": 1, "actual_micro_usd": 1}
+
+        with self.assertRaisesRegex(TypeError, "synchronous"):
+            dispatch(
+                self.db, request_id="async-extractor", worker=14,
+                reserve_tokens=10, reserve_micro_usd=100,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(spartan_budget.status(self.db)["requests"], 0)
+
     def test_response_is_not_written_to_budget_tables(self):
         marker = "NEVER-PERSIST-MODEL-OUTPUT-9e31"
         calls, invoke, extract = self.call(response={"content": marker})
