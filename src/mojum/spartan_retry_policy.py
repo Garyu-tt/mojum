@@ -35,7 +35,13 @@ def _native_int(name: str, value: object, lower: int, upper: int) -> None:
 
 
 def _utc_datetime(name: str, value: object) -> datetime:
-    if type(value) is not datetime or value.tzinfo is not timezone.utc:
+    if type(value) is not datetime:
+        raise ValueError(f"{name} must be a native UTC datetime")
+    try:
+        offset = value.utcoffset()
+    except (OverflowError, TypeError, ValueError):
+        raise ValueError(f"{name} must be a native UTC datetime") from None
+    if offset != timedelta(0):
         raise ValueError(f"{name} must be a native UTC datetime")
     return value
 
