@@ -87,6 +87,28 @@ class NoosphereValidityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidityAuditError, "missing or unknown fields"):
             audit_validity([item])
 
+    def test_fact_schema_rejects_long_key_before_set_hashing(self):
+        item = fact("long-key")
+        del item["visibility"]
+        item["x" * 100_000] = "PUBLIC"
+        expected = set(("event_id", "fact_key", "visibility", "provenance",
+                        "valid_from_ns", "valid_to_ns", "value"))
+        with patch("mojum.noosphere_validity.set", side_effect=AssertionError(
+            "oversized fixed-schema key reached set hashing"
+        ), create=True) as key_set:
+            with self.assertRaisesRegex(ValidityAuditError, "invalid object key"):
+                audit_validity([item])
+            key_set.assert_not_called()
+
+    def test_json_parser_rejects_oversized_object_keys_before_duplicate_lookup(self):
+        wire = json.dumps({
+            "schema": SCHEMA,
+            "facts": [fact("oversized-key")],
+            "x" * 300: "unexpected",
+        })
+        with self.assertRaisesRegex(ValidityAuditError, "bounded strings"):
+            audit_json(wire)
+
     def test_rejects_duplicate_ids_and_oversized_fact_collections(self):
         with self.assertRaises(ValidityAuditError):
             audit_validity([fact("same"), fact("same", key="other")])
