@@ -183,26 +183,34 @@ def sample_room_airflow(room, state, *, tick, expected_revision,
             or type(state.revision) is not str or len(state.revision) != 64):
         raise AirflowError("stale or corrupted room revision")
 
+    # Room is frozen only shallowly: object.__setattr__ can still forge its
+    # geometry. Validate every field before _valid/_revision, because the latter
+    # walks and JSON-serializes these caller-constructible values.
+    width_mm, height_mm = _mm(room.width, "room.width"), _mm(room.height, "room.height")
+    if not (0 < width_mm <= MAX_ROOM_EDGE_MM and 0 < height_mm <= MAX_ROOM_EDGE_MM):
+        raise AirflowError("room dimensions exceed the bounded millimetre profile")
+    if type(room.obstacles) is not tuple or len(room.obstacles) > 4096:
+        raise AirflowError("room obstacles must be a bounded native tuple")
+    for obstacle in room.obstacles:
+        if type(obstacle) is not tuple or len(obstacle) != 4:
+            raise AirflowError("room obstacle must be a native four-value tuple")
+        ox, oy, ow, oh = (
+            _mm(value, f"obstacle.{label}")
+            for value, label in zip(obstacle, ("x", "y", "width", "height"))
+        )
+        if (ox < 0 or oy < 0 or ow <= 0 or oh <= 0
+                or ox + ow > width_mm or oy + oh > height_mm):
+            raise AirflowError("room obstacle is outside the bounded millimetre geometry")
+
     # Validate caller-constructible RoomState values before hashing them.
     # Otherwise json.dumps in _revision may process an enormous integer first.
-    if not _valid(room, state.x, state.y):
-        raise AirflowError("invalid room state")
     _mm(state.x, "state.x")
     _mm(state.y, "state.y")
+    if not _valid(room, state.x, state.y):
+        raise AirflowError("invalid room state")
     if (state.revision != expected_revision
             or state.revision != _revision(room, state.tick, state.x, state.y)):
         raise AirflowError("stale or corrupted room revision")
-
-    width_mm, height_mm = _mm(room.width, "room.width"), _mm(room.height, "room.height")
-    _mm(state.x, "state.x")
-    _mm(state.y, "state.y")
-    if not (0 < width_mm <= MAX_ROOM_EDGE_MM and 0 < height_mm <= MAX_ROOM_EDGE_MM):
-        raise AirflowError("room dimensions exceed the bounded millimetre profile")
-    for obstacle in room.obstacles:
-        converted = tuple(_mm(value, f"obstacle.{label}")
-                          for label, value in zip(("x", "y", "width", "height"), obstacle))
-        if converted[2] <= 0 or converted[3] <= 0:
-            raise AirflowError("obstacles must have positive millimetre dimensions")
     px, py = x_mm, y_mm
     if type(px) is not int or type(py) is not int:
         raise AirflowError("sample coordinates must be native integer millimetres")
