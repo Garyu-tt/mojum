@@ -13,6 +13,8 @@ from tools.spartan_budgeted_call import (
 class BudgetedDispatchTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:", isolation_level=None)
+        # Match the row contract configured by spartan_budget.connect().
+        self.db.row_factory = sqlite3.Row
         self.addCleanup(self.db.close)
         spartan_budget.schema(self.db)
         spartan_budget.configure(self.db, token_limit=1000, micro_usd_limit=50000)
