@@ -70,6 +70,18 @@ class PulseCalibrationTests(unittest.TestCase):
         report = audit_calibration([row(0, 1, True)], bin_count=10)
         self.assertEqual(report.bins[-1].sample_count, 1)
 
+    def test_all_represented_internal_boundaries_stay_in_lower_bin(self):
+        bin_count = 25
+        observations = [
+            row(tick, boundary, False)
+            for tick, boundary in enumerate(index / bin_count for index in range(1, bin_count))
+        ]
+        report = audit_calibration(observations, bin_count=bin_count)
+        self.assertEqual(
+            [item.sample_count for item in report.bins],
+            [1] * (bin_count - 1) + [0],
+        )
+
     def test_deterministic_digest_for_same_values(self):
         values = [row(1, 0.25, False), row(4, 0.75, True)]
         first = audit_calibration(values, bin_count=4)
