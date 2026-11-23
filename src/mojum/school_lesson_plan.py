@@ -63,6 +63,10 @@ def plan_voluntary_lessons(
         raise LessonPlanError("invalid lesson count")
     if any(type(section_id) is not str for section_id in section_ids):
         raise LessonPlanError("section IDs must be plain strings")
+    # Catalog IDs follow school_activity._ID (at most 48 characters).
+    # Refuse long caller-owned strings before hashing or dictionary lookup.
+    if any(len(section_id) > 48 for section_id in section_ids):
+        raise LessonPlanError("section ID exceeds catalog identifier bound")
     if len(set(section_ids)) != len(section_ids):
         raise LessonPlanError("duplicate section ID")
     if type(catalog) is not dict:
