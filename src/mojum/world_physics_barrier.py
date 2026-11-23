@@ -67,7 +67,11 @@ def _check_clock(tick: object, dt_ns: object) -> int:
 
 def verify_barrier_receipt(receipt: object) -> bool:
     """Verify a receipt's exact shape, clock and self-checksum (not its origin)."""
-    if type(receipt) is not dict or set(receipt) != _FIELDS:
+    # Reject non-builtin keys *before* hashing or comparing them: an untrusted
+    # str subclass may impersonate an expected field or run arbitrary __eq__.
+    if (type(receipt) is not dict or len(receipt) != len(_FIELDS)
+            or any(type(key) is not str for key in receipt)
+            or set(receipt) != _FIELDS):
         raise ValueError("invalid barrier receipt fields")
     if type(receipt["schema"]) is not str or receipt["schema"] != SCHEMA:
         raise ValueError("unsupported barrier receipt schema")
