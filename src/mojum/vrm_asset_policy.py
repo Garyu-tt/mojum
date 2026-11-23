@@ -148,7 +148,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
             violations.append(f"dependencies[{index}].version")
         if not _token(dep_license) or dep_license not in rules["allowed_licenses"]:
             violations.append(f"dependencies[{index}].license")
-        if (_version(version) and type(dep_license) is str
+        if (_version(version) and _token(dep_license)
                 and dep_license in rules["allowed_licenses"]):
             normalized_dependencies.append({"name": name, "version": version, "license": dep_license})
 
