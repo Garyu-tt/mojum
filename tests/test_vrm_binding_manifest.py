@@ -176,6 +176,33 @@ assert.equal(result.valid, true);
 assert.equal(result.digest, expected);
 """)
 
+    def test_proxy_throwable_cannot_escape_exception_normalization(self) -> None:
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
+const good = {
+  schema:'mojum.vrm-binding-manifest/1',
+  expected_joint_ids:['a'],
+  mappings:[{id:'a',bone:'hips',axis:'x'}],
+  available_bones:['hips']
+};
+const hostileThrown = new Proxy(new Error('trap payload'), {
+  getPrototypeOf() { throw new Error('prototype inspection must not run'); }
+});
+const record = new Proxy(good, {
+  ownKeys() { throw hostileThrown; }
+});
+assert.throws(() => validateVrmBindingManifest(record), TypeError);
+const array = new Proxy(['a'], {
+  getPrototypeOf() { throw hostileThrown; }
+});
+assert.throws(
+  () => validateVrmBindingManifest({...good, expected_joint_ids:array}),
+  TypeError
+);
+""")
+
     def test_proxy_trap_failures_are_normalized_to_type_error(self) -> None:
         self.run_node(r"""
 import assert from 'node:assert/strict';
