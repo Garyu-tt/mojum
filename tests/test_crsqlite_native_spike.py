@@ -64,7 +64,7 @@ class CrSqliteNativeSpikeTests(unittest.TestCase):
                 self.assertNotEqual(Path(args[-1]), source)
                 self.assertEqual(kwargs["timeout"], 15)
                 self.assertEqual(kwargs["env"], {"PYTHONNOUSERSITE": "1"})
-                return mock.Mock(returncode=0, stdout=b'{"native_converged": true, "rows": 2}')
+                return mock.Mock(returncode=0, stdout=b'{"native_converged": true, "rows": 3, "upstream_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')
 
             with mock.patch("subprocess.run", side_effect=subprocess_fixture) as run:
                 result = run_native_probe(str(source), digest)
