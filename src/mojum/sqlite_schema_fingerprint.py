@@ -6,6 +6,7 @@ This fingerprint is NOT an integrity proof for journal content or a backup.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -25,7 +26,12 @@ class SchemaAuditError(ValueError):
 
 
 def fingerprint(path: str | os.PathLike[str]) -> dict[str, object]:
-    """Inspect only sqlite_schema through a read-only SQLite connection."""
+    """Inspect only sqlite_schema through a read-only SQLite connection.
+
+    The caller must supply a trusted directory that is not concurrently
+    modified. The pathname lstat check is not an fd-bound no-follow open and
+    therefore does not protect against an adversarial rename/symlink race.
+    """
     target = Path(path)
     try:
         info = target.lstat()
@@ -38,30 +44,32 @@ def fingerprint(path: str | os.PathLike[str]) -> dict[str, object]:
 
     uri = "file:" + quote(str(target.absolute()), safe="/") + "?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=1.0) as db:
-            db.execute("PRAGMA query_only=ON")
-            db.set_progress_handler(lambda: 1, 100000)
-            # The schema is parsed by SQLite itself; fail closed for corrupt files.
-            rows = db.execute(
-                "SELECT type,name,tbl_name,sql FROM sqlite_schema "
-                "ORDER BY type COLLATE BINARY,name COLLATE BINARY,tbl_name COLLATE BINARY"
-            )
-            digest = hashlib.sha256()
-            count = 0
-            for record in rows:
-                count += 1
-                if count > MAX_ENTRIES:
-                    raise SchemaAuditError("schema entry budget exceeded")
-                if any(value is not None and
-                       (not isinstance(value, str) or len(value.encode("utf-8")) > MAX_TEXT)
-                       for value in record):
-                    raise SchemaAuditError("invalid or oversized schema metadata")
-                encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":")).encode()
-                digest.update(len(encoded).to_bytes(4, "big"))
-                digest.update(encoded)
-            if count == 0:
-                raise SchemaAuditError("empty schema is not an accepted Mojum journal")
-            return {"schema": SCHEMA, "entries": count, "sha256": digest.hexdigest()}
+        # sqlite3.Connection's context manager controls transactions, not
+        # lifetime. closing() guarantees release on success and exceptions.
+        with closing(sqlite3.connect(uri, uri=True, timeout=1.0)) as db:
+            with db:
+                db.execute("PRAGMA query_only=ON")
+                db.set_progress_handler(lambda: 1, 100000)
+                rows = db.execute(
+                    "SELECT type,name,tbl_name,sql FROM sqlite_schema "
+                    "ORDER BY type COLLATE BINARY,name COLLATE BINARY,tbl_name COLLATE BINARY"
+                )
+                digest = hashlib.sha256()
+                count = 0
+                for record in rows:
+                    count += 1
+                    if count > MAX_ENTRIES:
+                        raise SchemaAuditError("schema entry budget exceeded")
+                    if any(value is not None and
+                           (not isinstance(value, str) or len(value.encode("utf-8")) > MAX_TEXT)
+                           for value in record):
+                        raise SchemaAuditError("invalid or oversized schema metadata")
+                    encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":")).encode()
+                    digest.update(len(encoded).to_bytes(4, "big"))
+                    digest.update(encoded)
+                if count == 0:
+                    raise SchemaAuditError("empty schema is not an accepted Mojum journal")
+                return {"schema": SCHEMA, "entries": count, "sha256": digest.hexdigest()}
     except (sqlite3.Error, UnicodeError, OverflowError) as exc:
         raise SchemaAuditError("SQLite schema inspection failed") from exc
 
