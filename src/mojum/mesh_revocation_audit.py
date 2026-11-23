@@ -66,6 +66,10 @@ def _text(value: Any, *, maximum: int, field: str) -> str:
         raise RevocationAuditError(f"{field} must be a non-empty bounded native string")
     if value.strip() != value or any(ord(ch) < 0x20 for ch in value):
         raise RevocationAuditError(f"{field} contains whitespace/control characters outside its contract")
+    try:
+        value.encode("utf-8", "strict")
+    except UnicodeEncodeError as exc:
+        raise RevocationAuditError(f"{field} contains invalid Unicode scalar values") from exc
     return value
 
 
