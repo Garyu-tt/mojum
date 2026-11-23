@@ -80,4 +80,10 @@ test('GLB guard rejects remote resources and malformed containers offline', asyn
   const broken=glb(empty);new DataView(broken).setUint32(8,0,true);
   assert.throws(()=>inspectOfflineGlb(broken), /GLB/);
   assert.throws(()=>inspectOfflineGlb(new ArrayBuffer(32 * 1024 * 1024 + 1)), /size/);
+  // A sub-4MiB manifest can contain >100k JSON children: reject with a
+  // controlled budget error instead of RangeError from push(...children).
+  assert.throws(
+    () => inspectOfflineGlb(glb({...empty, extras:{large:Array(140_000).fill(0)}})),
+    /GLB manifest too complex/
+  );
 });
