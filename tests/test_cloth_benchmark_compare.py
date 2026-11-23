@@ -109,7 +109,7 @@ class BenchmarkTests(unittest.TestCase):
     def test_deeply_nested_json_is_normalized(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "deep.json"
-            path.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
+            path.write_text("[" * 12000 + "0" + "]" * 12000, encoding="utf-8")
             with self.assertRaises(ReportError):
                 load_report(str(path))
 
