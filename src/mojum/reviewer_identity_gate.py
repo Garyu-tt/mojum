@@ -15,6 +15,7 @@ MAX_REVIEWS = 1000
 _SHA_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
 _LOGIN_RE = re.compile(r"[A-Za-z0-9-]{1,39}\Z")
 _STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"})
+_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\Z")
 
 
 class ReviewerSnapshotError(ValueError):
