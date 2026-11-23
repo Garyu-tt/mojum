@@ -154,8 +154,9 @@ class AuditChainTests(unittest.TestCase):
 
     def test_rejects_oversized_record_field_name_before_hashing(self):
         row = make_chain([("enqueued", "queued", None, 1)])[0]
-        row["x" * 1_000_000] = None
-        with self.assertRaisesRegex(AuditChainError, "missing or unknown"):
+        digest = row.pop("digest")
+        row["x" * 1_000_000] = digest
+        with self.assertRaisesRegex(AuditChainError, "bounded native strings"):
             verify_audit_chain([row])
 
 
