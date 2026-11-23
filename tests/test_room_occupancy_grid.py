@@ -1,5 +1,6 @@
 """Contract tests for the offline occupancy rasterizer."""
 import unittest
+from unittest.mock import patch
 from mojum.room_occupancy_grid import rasterize_occupancy, SCHEMA
 
 
@@ -132,6 +133,21 @@ class OccupancyTests(unittest.TestCase):
                 cell_mm=1,
                 obstacles=[dict(obstacle) for _ in range(16)],
             ))
+
+    def test_oversized_schema_key_rejected_before_set(self):
+        room = dict(x0=0, y0=0, x1=10, y1=10)
+        room["x" * 1_000_000] = room.pop("x0")
+        native_set = set
+
+        def guarded_set(values):
+            values = tuple(values)
+            if any(type(value) is str and len(value) > 32 for value in values):
+                raise AssertionError("oversized schema key reached set hashing")
+            return native_set(values)
+
+        with patch("mojum.room_occupancy_grid.set", side_effect=guarded_set, create=True):
+            with self.assertRaisesRegex(ValueError, "bounded native string keys"):
+                rasterize_occupancy(payload(room=room))
 
 
 if __name__ == "__main__":
