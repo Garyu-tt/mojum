@@ -37,8 +37,8 @@ The example produces only a short synthetic PCM buffer. It does not produce inte
 
 - Caller creates an exact immutable `TTSRequest` with explicit `consent=True`, a selected local preset `voice_id`, language tag, and a `content_class` of `PUBLIC_SYNTHETIC` or `USER_PROVIDED`.
 - No PRIVATE/RESTRICTED journal data is accepted as a documented content class. The adapter does not read records or decide whether a user's text contains sensitive information. A caller must select/authorize text and a licensed voice before calling it.
-- Backend is injected by the caller. It must declare bounded ASCII `backend_id`, `backend_version`, and `local_only=True`, and implement `iter_pcm16le(request)`.
-- Backend yields **mono signed PCM16 little-endian byte chunks**. Output is copied into immutable bytes and accompanied by an SHA-256 content digest.
+- Backend is injected by the caller. It must declare bounded ASCII `backend_id`, `backend_version`, and `local_only=True`, and implement `iter_pcm16le(request)` as a streaming iterator (for example, a generator), not a pre-materialized list.
+- Backend yields **mono signed PCM16 little-endian byte chunks** from that iterator. Output is copied into immutable bytes and accompanied by an SHA-256 content digest.
 - Output is consumed incrementally. Maximum request text is 2,000 Unicode characters; accepted sample rates are 16/24/48 kHz; duration is 1–30,000 ms; per-chunk bytes are capped at 64 KiB; total chunks are capped at 4,096; total bytes are capped by sample rate × 2 × requested duration.
 - Every chunk must be exact native `bytes`, contain complete 16-bit samples, and stay within the per-chunk and aggregate limits. No audio is returned when the backend errors or violates the contract.
 
