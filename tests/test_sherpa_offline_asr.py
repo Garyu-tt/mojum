@@ -56,7 +56,7 @@ class SherpaOfflineTests(unittest.TestCase):
         self.assertFalse(result["physical_actuation"])
         self.assertEqual(a.stream.accepted[0], 16000)
         self.assertEqual(len(a.stream.accepted[1]), 100)
-        self.assertAlmostEqual(float(a.stream.accepted[1].sum()), 0)
+        self.assertAlmostEqual(float(sum(a.stream.accepted[1])), 0)
         self.assertNotIn("audio", str(result))
 
     def test_independent_mock_inference_and_full_frame_budget(self):
