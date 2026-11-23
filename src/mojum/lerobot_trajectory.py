@@ -23,9 +23,9 @@ MAX_DIM = 128
 BATCH_SIZE = 128
 COLUMNS = ("episode_index", "frame_index", "timestamp", "task_index",
            "observation.state", "action")
-_SOURCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?\\Z")
-_REV = re.compile(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}\\Z")
-_LICENSE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,63}\\Z")
+_SOURCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?\Z")
+_REV = re.compile(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}\Z")
+_LICENSE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,63}\Z")
 
 
 class LeRobotImportError(ValueError):
