@@ -15,9 +15,9 @@ from typing import Mapping
 SCHEMA = "mojum.trace-envelope.v1"
 MAX_FIELDS = 12
 MAX_STRING_LENGTH = 128
-_SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\\Z")
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_TRACE_ID_RE = re.compile(r"[0-9a-f]{32,64}\\Z")
+_SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_TRACE_ID_RE = re.compile(r"[0-9a-f]{32,64}\Z")
 
 _ALLOWED_EVENTS = frozenset({
     "provider.admitted",
