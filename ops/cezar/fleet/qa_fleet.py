@@ -45,7 +45,13 @@ def safe_load(path, default):
     finally:
         if fd>=0:os.close(fd)
     if len(raw)>240000:raise ValueError("oversized state")
-    return json.loads(raw)
+    # Recover only malformed local QA cache data. Unsafe paths and file modes
+    # remain hard failures; never mask security or filesystem errors.
+    try:
+        decoded=json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return default
+    return decoded if isinstance(decoded,dict) else default
 def get(url,*,timeout=10):
     if url!=URL and not re.fullmatch(r"https://api.github.com/repos/Garyu-tt/mojum/pulls/[1-9][0-9]*/files\?per_page=20",url):
         raise ValueError("URL outside allowlist")
