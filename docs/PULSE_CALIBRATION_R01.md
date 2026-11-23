@@ -10,7 +10,8 @@ or evaluate a learned policy and does not claim biological or medical meaning.
 ## Contract
 
 - Schema: `mojum.neural.pulse-calibration/1`.
-- Provenance is explicitly `PUBLIC_SYNTHETIC`.
+- The caller must explicitly pass `source_classification="PUBLIC_SYNTHETIC"`;
+  missing, private, or malformed classifications fail closed.
 - Input is a native list/tuple of 1..10,000 native dictionaries containing
   exactly `tick`, `forecast`, and `observed`.
 - Ticks are exact integers in [0, 2^63-1] and strictly increase.
@@ -36,7 +37,7 @@ report = audit_calibration([
     {"tick": 10, "forecast": 0.15, "observed": False},
     {"tick": 11, "forecast": 0.22, "observed": False},
     {"tick": 12, "forecast": 0.81, "observed": True},
-], bin_count=5)
+], source_classification="PUBLIC_SYNTHETIC", bin_count=5)
 
 print(report.brier_score)
 for item in report.bins:
