@@ -40,15 +40,15 @@ test('joint ordering is stable by code point, independent of locale', () => {
   const measured = frame(0, {
     joints: [
       {id: 'a', angle_rad: 0},
-      {id: '_', angle_rad: 0},
+      {id: 'a_', angle_rad: 0},
       {id: 'A', angle_rad: 0},
-      {id: '-', angle_rad: 0},
+      {id: 'a.', angle_rad: 0},
     ],
   });
   const timeline = createVrmPoseTimeline([measured]);
   assert.deepEqual(
     timeline.current().joints.map(joint => joint.id),
-    ['-', 'A', '_', 'a'],
+    ['A', 'a', 'a.', 'a_'],
   );
 });
 
