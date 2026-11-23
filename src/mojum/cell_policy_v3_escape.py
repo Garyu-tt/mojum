@@ -135,6 +135,7 @@ class CellExplorerV3Escape:
         self.consecutive_rests = 0
         self.consecutive_blocked_probes = 0
         self.outcome_tail = []
+        self.history_complete = False
 
     @staticmethod
     def _cell(sense):
@@ -150,6 +151,7 @@ class CellExplorerV3Escape:
         return {
             "schema": SCHEMA,
             "snapshot_version": 2,
+            "history_complete": self.history_complete,
             "cell_size_m": STEP_METERS,
             "last_tick": self.last_tick,
             "updates": self.updates,
@@ -176,12 +178,14 @@ class CellExplorerV3Escape:
                 )
             state = dict(state)
             state["snapshot_version"] = 2
+            state["history_complete"] = False
             state["outcome_tail"] = []
-        mandatory = legacy_mandatory | {"snapshot_version", "outcome_tail"}
+        mandatory = legacy_mandatory | {"snapshot_version", "history_complete", "outcome_tail"}
         if (type(state) is not dict or set(state) != mandatory
                 or state["schema"] != SCHEMA
                 or type(state["snapshot_version"]) is not int
                 or state["snapshot_version"] != 2
+                or type(state["history_complete"]) is not bool
                 or type(state["outcome_tail"]) is not list
                 or len(state["outcome_tail"]) > REPROBE_BLOCKED_BEFORE_REST
                 or type(state["cell_size_m"]) is not float
@@ -274,6 +278,8 @@ class CellExplorerV3Escape:
         tail = state["outcome_tail"]
         if len(tail) > min(state["updates"], REPROBE_BLOCKED_BEFORE_REST):
             raise CellV3EscapeError("oversized measured-outcome chronology tail")
+        if state["history_complete"] != (len(tail) == REPROBE_BLOCKED_BEFORE_REST):
+            raise CellV3EscapeError("measured-outcome chronology completeness flag disagrees with tail")
         tail_counts = {}
         for offset, item in enumerate(tail):
             if (type(item) is not dict or set(item) != {"tick", "cell", "action", "blocked"}
@@ -324,6 +330,7 @@ class CellExplorerV3Escape:
         model.consecutive_rests = state["consecutive_rests"]
         model.consecutive_blocked_probes = state["consecutive_blocked_probes"]
         model.outcome_tail = copy.deepcopy(state["outcome_tail"])
+        model.history_complete = state["history_complete"]
         return model
 
     def decide(self, sense):
@@ -412,6 +419,7 @@ class CellExplorerV3Escape:
             "tick": sense.tick, "cell": cell, "action": action, "blocked": blocked,
         })
         del self.outcome_tail[:-REPROBE_BLOCKED_BEFORE_REST]
+        self.history_complete = len(self.outcome_tail) == REPROBE_BLOCKED_BEFORE_REST
         return {
             "schema": LEARNING_SCHEMA,
             "action": action,
