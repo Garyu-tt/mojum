@@ -159,11 +159,12 @@ class ArchiveEncryptionProfileTests(unittest.TestCase):
         with self.assertRaises(ArchiveEncryptionProfileError):
             verify_profile(changed)
 
-    def test_rejects_oversized_profile_key_before_hashing(self):
+    def test_rejects_oversized_profile_mapping_before_key_iteration(self):
         raw = fixture()
         raw["x" * 1_000_000] = None
-        # The oversized key must be rejected before schema-set hashing.
-        with self.assertRaisesRegex(ArchiveEncryptionProfileError, "at most 32"):
+        # Cardinality must reject the oversized mapping before scanning or
+        # hashing its attacker-controlled key inventory.
+        with self.assertRaisesRegex(ArchiveEncryptionProfileError, "exact schema"):
             admit_profile(raw, private_opt_in=True)
 
 
