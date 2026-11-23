@@ -1,7 +1,7 @@
 """Hermetic, stdlib-only adversarial tests for independent Spartan retry policy."""
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -101,6 +101,15 @@ class RetryPolicyTests(unittest.TestCase):
         for arg in wrong:
             with self.subTest(arg=arg), self.assertRaises(ValueError):
                 self.decide(**arg)
+
+    def test_custom_tzinfo_is_rejected_without_executing_callback(self):
+        class HostileTimezone(tzinfo):
+            def utcoffset(self, dt):
+                raise AssertionError("untrusted tzinfo callback executed")
+
+        hostile = datetime(2026, 11, 23, 16, 0, tzinfo=HostileTimezone())
+        with self.assertRaisesRegex(ValueError, "native UTC datetime"):
+            self.decide(now_utc=hostile)
 
     def test_equivalent_zero_offset_utc_timezone_is_accepted(self):
         utc_alias = timezone(timedelta(0), name="UTC-alias")
