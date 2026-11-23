@@ -1,6 +1,7 @@
 """Offline, dependency-free #717 receipt admission and readback proofs."""
 
 import os
+import sqlite3
 from pathlib import Path
 import stat
 import tempfile
@@ -36,7 +37,9 @@ class HeartbeatTests(unittest.TestCase):
         self.keys = {("chatgpt", "peer-1", "Garyu-tt/mojum"): KEY,
                      ("legion", "peer-2", "Garyu-tt/mojum"): OTHER_KEY}
         self.journal = ReceiptJournal(self.path, self.keys)
-        self.addCleanup(self.journal.close)
+        # Resolve self.journal at cleanup time: restart/reopen tests replace it.
+        # Capturing the original bound .close would leak the reopened SQLite DB.
+        self.addCleanup(lambda: self.journal.close())
 
     def add(self, receipt, secret=KEY, now=1_000_000):
         return self.journal.ingest(receipt, sign_receipt(receipt, secret), observed_ms=now)
@@ -159,6 +162,14 @@ class HeartbeatTests(unittest.TestCase):
         self.assertFalse(self.add(event(), now=1_040_000))
         self.assertTrue(self.add(event(kind="agent.heartbeat", seq=2, timestamp_ms=1_040_000), now=1_040_000))
         self.assertEqual(self.journal.status("chatgpt", "peer-1", "run-1", observed_ms=1_050_000)["state"], "active")
+
+    def test_unittest_cleanup_closes_reopened_journal(self):
+        """Regression: cleanup must close the replacement, not only the old DB."""
+        self.journal.close()
+        self.journal = ReceiptJournal(self.path, self.keys)
+        self.doCleanups()
+        with self.assertRaises(sqlite3.ProgrammingError):
+            self.journal.readback(observed_ms=1_000_000)
 
     def test_multi_source_and_parallel_runs_isolated(self):
         self.add(event())
