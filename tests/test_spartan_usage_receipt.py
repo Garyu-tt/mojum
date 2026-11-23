@@ -1,10 +1,15 @@
 import unittest
 from dataclasses import replace
+
 from mojum.spartan_usage_receipt import make_usage_receipt, within_budget
+
 
 class UsageReceiptTests(unittest.TestCase):
     def test_deterministic_budget(self):
-        kw = dict(request_id="issue478:1", provider="local", model="small-v1", input_tokens=5, output_tokens=8, usd="0.000125")
+        kw = dict(
+            request_id="issue478:1", provider="local", model="small-v1",
+            input_tokens=5, output_tokens=8, usd="0.000125",
+        )
         a = make_usage_receipt(**kw)
         self.assertEqual(a, make_usage_receipt(**kw))
         self.assertEqual(a.usd_micros, 125)
@@ -12,10 +17,15 @@ class UsageReceiptTests(unittest.TestCase):
         self.assertFalse(within_budget((a, a), limit_usd="0.000249"))
 
     def test_fail_closed(self):
-        kw = dict(request_id="r1", provider="p", model="m", input_tokens=1, output_tokens=2, usd="0.1")
-        for key, value in (("request_id", "token secret"), ("provider", "../../x"),
-                           ("input_tokens", True), ("output_tokens", -1),
-                           ("usd", "1e2"), ("usd", "NaN"), ("usd", "0.0000001")):
+        kw = dict(
+            request_id="r1", provider="p", model="m",
+            input_tokens=1, output_tokens=2, usd="0.1",
+        )
+        for key, value in (
+            ("request_id", "token secret"), ("provider", "../../x"),
+            ("input_tokens", True), ("output_tokens", -1),
+            ("usd", "1e2"), ("usd", "NaN"), ("usd", "0.0000001"),
+        ):
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 make_usage_receipt(**(kw | {key: value}))
         a = make_usage_receipt(**kw)
@@ -25,8 +35,46 @@ class UsageReceiptTests(unittest.TestCase):
             within_budget([a], limit_usd="1")
 
     def test_no_sensitive_fields(self):
-        a = make_usage_receipt(request_id="r", provider="p", model="m", input_tokens=0, output_tokens=0, usd="0")
-        self.assertEqual(set(a.__dataclass_fields__), {"request_id", "provider", "model", "input_tokens", "output_tokens", "usd_micros", "fingerprint"})
+        a = make_usage_receipt(
+            request_id="r", provider="p", model="m",
+            input_tokens=0, output_tokens=0, usd="0",
+        )
+        self.assertEqual(
+            set(a.__dataclass_fields__),
+            {"request_id", "provider", "model", "input_tokens",
+             "output_tokens", "usd_micros", "fingerprint"},
+        )
+
+    def test_bool_usd_micros_is_not_accepted_as_integer(self):
+        a = make_usage_receipt(
+            request_id="bool-micros", provider="p", model="m",
+            input_tokens=0, output_tokens=0, usd="0.000001",
+        )
+        with self.assertRaisesRegex(ValueError, "native bounded integer"):
+            within_budget((replace(a, usd_micros=True),), limit_usd="1")
+
+    def test_non_integer_usd_micros_fails_with_public_error(self):
+        a = make_usage_receipt(
+            request_id="bad-micros", provider="p", model="m",
+            input_tokens=0, output_tokens=0, usd="0.000001",
+        )
+        for bad in ("1", 1.0, -1, 1_000_000_000_000):
+            with self.subTest(value=bad), self.assertRaises(ValueError):
+                within_budget((replace(a, usd_micros=bad),), limit_usd="1")
+
+    def test_non_native_fingerprint_is_rejected_before_comparison(self):
+        class HostileFingerprint(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+
+        a = make_usage_receipt(
+            request_id="bad-fingerprint", provider="p", model="m",
+            input_tokens=0, output_tokens=0, usd="0",
+        )
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            within_budget((replace(a, fingerprint=HostileFingerprint(a.fingerprint)),),
+                          limit_usd="1")
+
 
 if __name__ == "__main__":
     unittest.main()
