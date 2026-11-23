@@ -170,6 +170,12 @@ class RigDOFLimitsTests(unittest.TestCase):
         with self.assertRaises(DOFLimitsError):
             validate_dof_limits(data)
 
+    def test_oversized_mapping_rejected_before_key_snapshot(self):
+        data = valid_payload()
+        data.update({f"unexpected_{index}": None for index in range(25_000)})
+        with self.assertRaisesRegex(DOFLimitsError, "keys mismatch"):
+            validate_dof_limits(data)
+
     def test_caller_mutation_does_not_change_result(self):
         data = valid_payload()
         result = validate_dof_limits(data)
