@@ -5,7 +5,7 @@ Status: **experimental, opt-in, NOT integrated into Aquarium, body controller or
 ## Reproducible CPU fixture
 
 ```bash
-PYTHONPATH=src python -m unittest tests.test_optional_pinocchio_benchmark -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_optional_pinocchio_benchmark.py' -v
 PYTHONPATH=src python -m mojum.optional_pinocchio_benchmark --backend analytic --seed 702 --cases 32
 ```
 
@@ -19,7 +19,7 @@ python -m venv /tmp/mojum-pin-702
 PYTHONPATH=src /tmp/mojum-pin-702/bin/python -m mojum.optional_pinocchio_benchmark --backend pinocchio --seed 702 --cases 32
 ```
 
-`pin` is the distribution, `pinocchio` the Python import. Pinocchio loads only the static locally generated in-memory URDF; a model with anything other than 2 configuration/velocity DOFs or an absent tool frame aborts. The optional path rejects versions other than `pin==4.1.0` and has not been exercised in the stdlib CI. Pinocchio FK must match independent analytic FK to 1e-8 m, and the independently solved IK must match Pinocchio FK to the same tolerance. The **IK solver is analytic**, not a Pinocchio iterative solver. The Python package install and its transitive wheels are **not yet accepted for distribution**.
+`pin` is the distribution, `pinocchio` the Python import. Pinocchio loads only the static locally generated in-memory URDF; a model with anything other than 2 configuration/velocity DOFs or an absent tool frame aborts. The optional path rejects versions other than `pin==4.1.0` and is skipped in stdlib CI when absent; running the suite in an isolated environment with `pin==4.1.0` exercises the real engine. Pinocchio FK must match independent analytic FK to 1e-8 m, and the independently solved IK must match Pinocchio FK to the same tolerance. The **IK solver is analytic**, not a Pinocchio iterative solver. The Python package install and its transitive wheels are **not yet accepted for distribution**.
 
 ## Failure/acceptance boundaries
 
