@@ -5,7 +5,8 @@ import tempfile
 import unittest
 
 from mojum.crsqlite_collab import (AUDIENCE, SCHEMA, MAX_OPS, MetadataBoundaryError,
-                                   native_partition_probe, reduce_fixture, validate_operation)
+                                   native_partition_probe, reduce_fixture, validate_operation,
+                                   _checked_native_projection)
 
 
 def op(replica="alice", counter=1, key="label.box", value="start", kind="put", **extra):
@@ -37,6 +38,24 @@ class CRSQLiteMetadataFixtureTests(unittest.TestCase):
                        {"workspace": "demo_../bad"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(MetadataBoundaryError):
                 validate_operation(op(**kwargs))
+
+    def test_schema_and_audience_reject_equality_spoofing(self):
+        class SpoofTag:
+            def __eq__(self, other):
+                return other in (SCHEMA, AUDIENCE)
+
+        for field in ("schema", "audience"):
+            with self.subTest(field=field), self.assertRaises(MetadataBoundaryError):
+                validate_operation(op(**{field: SpoofTag()}))
+
+    def test_native_output_rejects_nonpublic_cells(self):
+        self.assertEqual(_checked_native_projection({"label.good": "public ASCII"}),
+                         {"label.good": "public ASCII"})
+        for data in ({"label.good": ""}, {"label.good": "secret\\nvalue"},
+                     {"note.a": "snowman \u2603"}, {"layout.x": "x" * 257},
+                     {"motor.gate": "x"}, {123: "numeric-key"}):
+            with self.subTest(data=data), self.assertRaises(MetadataBoundaryError):
+                _checked_native_projection(data)
 
     def test_rejects_actuator_and_authority_namespaces(self):
         for key in ("brain.plan", "journal.head", "lease.owner", "motor.gate", "node.addr",
