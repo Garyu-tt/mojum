@@ -74,6 +74,17 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate(graph)
 
+    def test_oversized_root_key_is_rejected_before_set_hashing(self):
+        graph = self.fresh()
+        graph["x" * (MAX_GRAPH_BYTES + 1)] = graph.pop("id")
+        with patch(
+            "mojum.graph.set",
+            side_effect=AssertionError("root key set hashing must not run"),
+            create=True,
+        ):
+            with self.assertRaisesRegex(GraphError, "root keys"):
+                validate(graph)
+
     def test_hostile_string_subclass_key_is_rejected_before_set_comparison(self):
         graph = self.fresh()
         graph[HostileString("untrusted-extra")] = "x"
