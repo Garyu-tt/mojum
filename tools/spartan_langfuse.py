@@ -177,8 +177,10 @@ def summarize(events: Iterable[SafeEvent]) -> dict[str, int | str]:
         "ci_false_success": 0,
     }
     seen: dict[tuple[str, int, int, int], SafeEvent] = {}
+    processed = 0
     for event in events:
-        if len(seen) >= MAX_EVENTS:
+        processed += 1
+        if processed > MAX_EVENTS:
             raise ValueError("observability summary event budget exceeded")
         validate_event(event)
         identity = (event.lease_id, event.attempt, event.fencing_epoch, event.sequence)
