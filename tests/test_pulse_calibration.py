@@ -128,6 +128,11 @@ class PulseCalibrationTests(unittest.TestCase):
             with self.subTest(observed=observed), self.assertRaises(CalibrationError):
                 audit_calibration([row(1, 0.5, observed)])
 
+    def test_tick_bounds_are_explicit(self):
+        self.assertEqual(audit_calibration([row(MAX_TICK, 0.5, True)]).sample_count, 1)
+        with self.assertRaises(CalibrationError):
+            audit_calibration([row(MAX_TICK + 1, 0.5, True)])
+
     def test_rejects_invalid_bin_count(self):
         for count in (True, False, 0, -1, 101, 1.0, "10", None):
             with self.subTest(count=count), self.assertRaises(CalibrationError):
