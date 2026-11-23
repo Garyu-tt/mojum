@@ -14,7 +14,7 @@ import unittest
 from unittest import mock
 
 from mojum.cloth_glb_import import (
-    MAX_FILE, ClothGLBError, _parse_glb, import_glb, main,
+    MAX_FILE, ClothGLBError, _accessor, _parse_glb, import_glb, main,
 )
 
 
@@ -289,6 +289,16 @@ class ClothGLBTests(unittest.TestCase):
                     pinned_indices=(0,),
                 )
             digest.assert_not_called()
+
+    def test_vertex_uint8_accessor_offset_requires_four_byte_alignment(self):
+        # An explicit uint8 JOINTS_0 offset of 1 satisfies its component
+        # alignment but violates glTF 2.0 vertex-attribute alignment.
+        doc, blob = _parse_glb(fixture(skin=True))
+        joints = doc["meshes"][0]["primitives"][0]["attributes"]["JOINTS_0"]
+        doc["accessors"][joints]["byteOffset"] = 1
+        doc["bufferViews"][2]["byteLength"] = 17
+        with self.assertRaisesRegex(ClothGLBError, "offset must be 4-byte aligned"):
+            _accessor(doc, blob, joints, semantic="JOINTS_0", count=4)
 
     def test_reject_excessive_input_size_before_parser(self):
         with self.assertRaises(ClothGLBError):
