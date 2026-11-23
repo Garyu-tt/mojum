@@ -266,8 +266,15 @@ class SignedReplayCacheQA(unittest.TestCase):
         if os.name == "posix":
             self.snapshot.chmod(0o600)
         self.assertFalse(self.db.exists())
-        with self.assertRaisesRegex(SnapshotError, "invalid UTF-8 JSON snapshot"):
-            self.aquarium()
+        # The combined Aquarium test runner can increase recursion_limit for
+        # other deep-replay fixtures; pin it to exercise this exact boundary.
+        original_limit = sys.getrecursionlimit()
+        try:
+            sys.setrecursionlimit(1000)
+            with self.assertRaisesRegex(SnapshotError, "invalid UTF-8 JSON snapshot"):
+                self.aquarium()
+        finally:
+            sys.setrecursionlimit(original_limit)
         self.assertFalse(self.db.exists())
 
     def test_deeply_nested_python_state_rejected_as_snapshot_error(self):
@@ -276,9 +283,14 @@ class SignedReplayCacheQA(unittest.TestCase):
         state = 0
         for _ in range(1500):
             state = [state]
-        with self.assertRaisesRegex(
-                SnapshotError, "snapshot must be canonical finite JSON"):
-            canonical(state)
+        original_limit = sys.getrecursionlimit()
+        try:
+            sys.setrecursionlimit(1000)
+            with self.assertRaisesRegex(
+                    SnapshotError, "snapshot must be canonical finite JSON"):
+                canonical(state)
+        finally:
+            sys.setrecursionlimit(original_limit)
 
     def test_invalid_key_and_missing_file_never_birth_new_organism(self):
         other = self.root / "new.sqlite3"
