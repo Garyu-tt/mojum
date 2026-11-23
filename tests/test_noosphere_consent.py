@@ -1,4 +1,5 @@
 import copy
+from collections import UserDict
 import hashlib
 import json
 import unittest
@@ -214,6 +215,10 @@ class NoosphereConsentTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ConsentError):
                     validate_grant(value)
+
+    def test_non_json_mapping_implementations_rejected(self):
+        with self.assertRaises(ConsentError):
+            validate_grant(UserDict(grant()))
 
     def test_non_json_payload_rejected(self):
         source = dataset([event()])
