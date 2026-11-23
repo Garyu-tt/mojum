@@ -71,6 +71,13 @@ class CanonicalRoomRayLearningTests(unittest.TestCase):
                     DevelopmentError, "invalid virtual world state"):
                 sense_room_rays(room, forged)
 
+    def test_ray_sensor_saturates_valid_huge_room_distances(self):
+        room = Room(1e308, 1e308)
+        at_corner = initial_state(room, 0., 0.)
+        self.assertEqual(sense_room_rays(room, at_corner), (12, 0, 12, 0))
+        at_center = initial_state(room, 5e307, 5e307)
+        self.assertEqual(sense_room_rays(room, at_center), (12, 12, 12, 12))
+
     def test_real_a_b_collision_evidence_changes_action_on_identical_numeric_input(self):
         blocked_room = Room(4, 4, ((.965, 1.98, .01, .04),))
         clear_room = Room(4, 4, ((.945, 1.98, .01, .04),))
