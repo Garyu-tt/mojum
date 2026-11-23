@@ -34,7 +34,7 @@ positions, row-major local-to-world rotation matrices, source schema, joint
 count and a SHA-256 self-consistency digest. It explicitly sets
 `synthetic=true`, `physical_contact=false`, and
 `physical_actuation=false`. `verify_kinematics_report` recomputes the digest;
-it does not authenticate the caller or provide tamper-proof storage.
+it does not authenticate the caller or provide tamper-proof storage. The verifier accepts only an acyclic tree of exact built-in JSON types, bounded to 8,192 values, depth 16 and 256 KiB of UTF-8 text; malformed or over-budget reports return `false` before canonical serialization.
 
 ## Example
 
