@@ -146,6 +146,17 @@ class JointMapTests(unittest.TestCase):
         with self.assertRaises(JointMapError):
             build_joint_map(src(["j" + str(i) for i in range(257)]), dst(), links())
 
+    def test_unicode_c1_control_characters_rejected(self):
+        # C1 controls are Unicode category Cc even though they are above ASCII DEL.
+        for control in ("\u0085", "\u009f"):
+            with self.subTest(control=hex(ord(control))):
+                with self.assertRaises(JointMapError):
+                    build_joint_map(src(["hip" + control]), dst(), links())
+                bad_revision = dst()
+                bad_revision["revision"] = "rev" + control
+                with self.assertRaises(JointMapError):
+                    build_joint_map(src(), bad_revision, links())
+
     def test_invalid_utf8_surrogate_rejected(self):
         with self.assertRaises(JointMapError):
             build_joint_map(src(["hip\\ud800"]), dst(), links())
