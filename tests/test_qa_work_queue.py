@@ -38,8 +38,9 @@ def test_claim_heartbeat_complete_and_stale_token_fencing(tmp_path):
 def test_expired_lease_reclaimed_and_old_worker_fenced(tmp_path):
     with QAWorkQueue(str(tmp_path / "q.db")) as q:
         job, _ = q.enqueue("reclaim", "review", {}, max_attempts=3, now=1)
-        old = q.claim("slow", lease_seconds=5, now=2)
-        new = q.claim("replacement", lease_seconds=10, now=8)
+        old = q.claim("worker-A", lease_seconds=5, now=2)
+        # Simulate a restarted process reusing the same worker identity.
+        new = q.claim("worker-A", lease_seconds=10, now=8)
         assert old and new and new.job.id == job.id and new.job.attempts == 2
         with pytest.raises(LeaseLost):
             q.heartbeat(job.id, old.token, now=9)
