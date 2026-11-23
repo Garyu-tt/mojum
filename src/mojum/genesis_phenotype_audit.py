@@ -89,6 +89,21 @@ def _canonical_bytes(value: Any) -> bytes:
     return encoded
 
 
+def _same_json_value(left: Any, right: Any) -> bool:
+    """Compare JSON trees without Python's bool/int or int/float coercions."""
+    if type(left) is not type(right):
+        return False
+    if type(left) is dict:
+        if left.keys() != right.keys():
+            return False
+        return all(_same_json_value(left[key], right[key]) for key in left)
+    if type(left) is list:
+        return len(left) == len(right) and all(
+            _same_json_value(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
 def _digest(encoded: bytes) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
@@ -150,7 +165,7 @@ def audit_phenotype_snapshot(
         for key in fields
         if key not in computed
         or key not in phenotype_snapshot
-        or computed[key] != phenotype_snapshot[key]
+        or not _same_json_value(computed[key], phenotype_snapshot[key])
     )
     return PhenotypeAudit(
         SCHEMA,
