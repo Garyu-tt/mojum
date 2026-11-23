@@ -88,17 +88,23 @@ class MuJoCoModelBudgetTests(unittest.TestCase):
                 with self.assertRaises(ModelBudgetError):
                     audit_model_budget(packet)
 
+    def test_rejects_large_extra_key_cardinality(self):
+        packet = sample()
+        packet.update({f"unexpected_{index}": index for index in range(20_000)})
+        with self.assertRaises(ModelBudgetError):
+            audit_model_budget(packet)
+
     def test_rejects_bool_float_negative_and_oversized_counts(self):
         for value in (True, 1.0, -1, 10_000_001, 10**1000):
             with self.subTest(value=str(value)[:16]):
                 with self.assertRaises(ModelBudgetError):
                     audit_model_budget(sample(ngeom=value))
 
-    def test_rejects_invalid_version_and_model_digest(self):
+    def test_rejects_invalid_or_unbounded_version_and_model_digest(self):
         invalid = (
-            sample(engine_version="3.17"), sample(engine_version="3.17.0\n"),
-            sample(engine_version=3), sample(model_sha256="A" * 64),
-            sample(model_sha256="x" * 64),
+            sample(engine_version="3.17"), sample(engine_version="3.17.0\\n"),
+            sample(engine_version=3), sample(engine_version="1" * 129),
+            sample(model_sha256="A" * 64), sample(model_sha256="x" * 64),
         )
         for packet in invalid:
             with self.subTest(packet=packet):
