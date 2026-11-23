@@ -81,7 +81,11 @@ class PointRoomExercise:
     def step(self, actions):
         if not self.agents or self._states is None:
             raise RuntimeError("reset before stepping; completed episodes cannot advance")
-        if type(actions) is not dict or set(actions) != set(self.agents):
+        # Reject subclassed keys before set equality: str subclasses can run
+        # hostile __eq__ implementations during hash-table comparison.
+        if type(actions) is not dict or any(type(key) is not str for key in actions):
+            raise ValueError("actions must be a plain dict with native string keys")
+        if set(actions) != set(self.agents):
             raise ValueError("actions must match exactly the two live agents")
         if any(type(a) is not int or a not in ACTION_DELTAS for a in actions.values()):
             raise ValueError("each action must be a native integer from 0 to 4")

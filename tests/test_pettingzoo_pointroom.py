@@ -70,6 +70,30 @@ class IsolatedPointRoomTests(unittest.TestCase):
         else:
             self.fail("seed did not place any agent left of obstacle")
 
+    def test_hostile_action_keys_rejected_before_set_comparison(self):
+        class HostileKey(str):
+            comparisons = 0
+
+            def __hash__(self):
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                type(self).comparisons += 1
+                raise RuntimeError("hostile action-key equality must not run")
+
+        env = PointRoomExercise()
+        env.reset(seed=17)
+        before = env._observations()
+        hostile_actions = {
+            HostileKey("agent_0"): 1,
+            HostileKey("agent_1"): 2,
+        }
+        with self.assertRaisesRegex(ValueError, "native string keys"):
+            env.step(hostile_actions)
+        self.assertEqual(HostileKey.comparisons, 0)
+        self.assertEqual(env.tick, 0)
+        self.assertEqual(env._observations(), before)
+
     def test_bad_action_is_atomic(self):
         env = PointRoomExercise()
         before = env.reset(seed=3)

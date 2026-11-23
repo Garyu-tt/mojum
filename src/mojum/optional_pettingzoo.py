@@ -56,7 +56,10 @@ def make_parallel_env(*, room=None, max_cycles=12):
         def step(self, actions):
             if not self.agents:
                 return {}, {}, {}, {}, {}
-            if type(actions) is not dict or set(actions) != set(self.agents):
+            # Validate primitive keys before set equality can invoke caller code.
+            if type(actions) is not dict or any(type(key) is not str for key in actions):
+                raise ValueError("actions must be a plain dict with native string keys")
+            if set(actions) != set(self.agents):
                 raise ValueError("actions must match exactly the live agents")
             if any(not self.action_space(a).contains(v) for a, v in actions.items()):
                 raise ValueError("invalid PettingZoo discrete action")
