@@ -53,7 +53,7 @@ def _parse_svg(content: str) -> dict:
         raise SchoolArtifactReviewError("SVG declarations are not supported")
     try:
         root = ET.fromstring(raw)
-    except (ET.ParseError, ValueError, UnicodeError) as exc:
+    except (ET.ParseError, ValueError, UnicodeError, RecursionError) as exc:
         raise SchoolArtifactReviewError("invalid SVG document") from exc
 
     if root.tag != f"{{{SVG_NS}}}svg" or root.attrib != {
@@ -81,7 +81,8 @@ def _parse_svg(content: str) -> dict:
 
     length = 0
     for path in paths:
-        if path.tag != f"{{{SVG_NS}}}path" or set(path.attrib) != {"d"} or list(path):
+        if (path.tag != f"{{{SVG_NS}}}path" or set(path.attrib) != {"d"} or list(path)
+                or path.text is not None or path.tail is not None):
             raise SchoolArtifactReviewError("unsupported SVG element")
         match = _PATH.fullmatch(path.attrib["d"])
         if match is None:
@@ -134,7 +135,8 @@ def review_run(run: dict) -> dict:
     """
     try:
         _check_private_fixture_run(run)
-    except SchoolError as exc:
+    except Exception as exc:
+        # Normalize caller-defined comparison/hash failures at the trust boundary.
         raise SchoolArtifactReviewError("school run contract rejected") from exc
 
     activity_id = run["activity_id"]
