@@ -123,9 +123,11 @@ def restore_state(snapshot: dict, config: ClothLODConfig) -> ClothLODState:
         raise ClothLODError("invalid LOD snapshot or configuration")
     expected = {"schema", "policy_sha256", "next_tick", "effective",
                 "safe_samples", "pending_measurement", "fault_latched"}
-    if set(snapshot) != expected or snapshot["schema"] != SCHEMA:
+    if (set(snapshot) != expected or type(snapshot["schema"]) is not str
+            or snapshot["schema"] != SCHEMA):
         raise ClothLODError("unknown LOD snapshot schema or fields")
-    if snapshot["policy_sha256"] != config.fingerprint():
+    if (type(snapshot["policy_sha256"]) is not str
+            or snapshot["policy_sha256"] != config.fingerprint()):
         raise ClothLODError("LOD policy mismatch; explicit restart required")
     _integer(snapshot["next_tick"], "next_tick", 0, MAX_TICK)
     _integer(snapshot["safe_samples"], "safe_samples", 0, RECOVERY_SAMPLES - 1)
@@ -141,6 +143,26 @@ def restore_state(snapshot: dict, config: ClothLODConfig) -> ClothLODState:
             or (snapshot["next_tick"] == 0 and (
                 snapshot["pending_measurement"] or snapshot["safe_samples"] != 0))):
         raise ClothLODError("inconsistent LOD state")
+    # State is a receipt of the previous decision, not an instruction to run.
+    # A receipt must be present iff that immediately preceding tick was due.
+    # In particular, skipped ticks cannot fabricate a completed solver step.
+    previous_tick = snapshot["next_tick"] - 1
+    cadence = CADENCE[snapshot["effective"]]
+    expected_pending = (previous_tick >= 0 and cadence > 0
+                        and previous_tick % cadence == 0)
+    if snapshot["pending_measurement"] != expected_pending:
+        raise ClothLODError("inconsistent previous cloth step receipt")
+    if (snapshot["next_tick"] == 0 and
+            (snapshot["effective"] != config.admitted()
+             or snapshot["fault_latched"])):
+        raise ClothLODError("impossible initial LOD state")
+    if (snapshot["effective"] == "off" and config.admitted() != "off"
+            and not snapshot["fault_latched"]):
+        raise ClothLODError("unlatched OFF state")
+    if snapshot["safe_samples"] and (
+            snapshot["effective"] == config.admitted()
+            or snapshot["fault_latched"]):
+        raise ClothLODError("inconsistent safe-sample streak")
     return ClothLODState(snapshot["policy_sha256"], snapshot["next_tick"],
                          snapshot["effective"], snapshot["safe_samples"],
                          snapshot["pending_measurement"], snapshot["fault_latched"])
