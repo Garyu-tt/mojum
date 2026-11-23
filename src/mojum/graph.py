@@ -250,7 +250,7 @@ def validate(graph):
     # Check individual key wire sizes before the short-name rule so a malicious
     # multi-megabyte key still receives the byte-budget diagnostic.
     if len(graph) != 5:
-        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
+        raise GraphError("Unsupported graph schema or exact v1 root fields")
     root_keys = tuple(dict.keys(graph))
     for key in root_keys:
         if type(key) is not str:
