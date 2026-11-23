@@ -76,6 +76,55 @@ class SampledPathTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 verify_witness(room, forged)
 
+    def test_forged_tags_fail_closed_before_hostile_equality(self):
+        room = Room(5, 5)
+        original = find_sampled_path(room, (0, 0), (4, 4))
+
+        class HostileEquality:
+            def __eq__(self, other):
+                raise RuntimeError("unexpected attacker equality")
+            def __ne__(self, other):
+                raise RuntimeError("unexpected attacker inequality")
+
+        class AlwaysEqual:
+            def __eq__(self, other):
+                return True
+            def __ne__(self, other):
+                return False
+
+        for field in ("schema", "status", "start_revision"):
+            for value in (HostileEquality(), AlwaysEqual()):
+                report = copy.deepcopy(original)
+                report[field] = value
+                with self.subTest(field=field, kind=type(value).__name__):
+                    with self.assertRaises(ValueError):
+                        verify_witness(room, report)
+
+    def test_non_native_mapping_keys_fail_closed(self):
+        room = Room(5, 5)
+        original = find_sampled_path(room, (0, 0), (4, 4))
+
+        class StringSubclass(str):
+            pass
+
+        for location in ("report", "grid", "frame"):
+            report = copy.deepcopy(original)
+            if location == "report":
+                report = {StringSubclass(key) if key == "schema" else key: value
+                          for key, value in report.items()}
+            elif location == "grid":
+                report["grid"] = {
+                    StringSubclass(key) if key == "columns" else key: value
+                    for key, value in report["grid"].items()
+                }
+            else:
+                report["path"][0] = {
+                    StringSubclass(key) if key == "revision" else key: value
+                    for key, value in report["path"][0].items()
+                }
+            with self.subTest(location=location), self.assertRaises(ValueError):
+                verify_witness(room, report)
+
     def test_invalid_inputs_rejected_without_mutating_geometry(self):
         room = Room(3, 3, ((1, 1, .5, .5),))
         baseline = room.obstacles
