@@ -102,7 +102,10 @@ def evaluate_workflow_evidence(
         if status not in _PENDING | {"completed"}:
             raise WorkflowEvidenceError(f"runs[{index}].status is unsupported")
         if status == "completed":
-            if type(conclusion) is not str or conclusion not in _FAILURES | {"success", "neutral", "skipped"}:
+            # Bound caller-controlled conclusion text before hashing it in set membership.
+            if type(conclusion) is not str or not conclusion or len(conclusion) > 32:
+                raise WorkflowEvidenceError(f"runs[{index}].conclusion is unsupported")
+            if conclusion not in _FAILURES | {"success", "neutral", "skipped"}:
                 raise WorkflowEvidenceError(f"runs[{index}].conclusion is unsupported")
         elif conclusion is not None:
             raise WorkflowEvidenceError(f"runs[{index}].conclusion must be null for a pending run")
