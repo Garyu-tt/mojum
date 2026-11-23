@@ -102,7 +102,7 @@ class MuJoCoModelBudgetTests(unittest.TestCase):
 
     def test_rejects_invalid_or_unbounded_version_and_model_digest(self):
         invalid = (
-            sample(engine_version="3.17"), sample(engine_version="3.17.0\\n"),
+            sample(engine_version="3.17"), sample(engine_version="3.17.0\n"),
             sample(engine_version=3), sample(engine_version="1" * 129),
             sample(model_sha256="A" * 64), sample(model_sha256="x" * 64),
         )
