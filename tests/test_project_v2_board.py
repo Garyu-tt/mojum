@@ -6,11 +6,13 @@ from copy import deepcopy
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from mojum.project_v2_board import BoardError, main, reconcile
+from mojum.project_v2_board import BoardError, MAX_BYTES, _load_json, main, reconcile
 
 
 def item(kind="Issue", number=23, iid="PVTI_23", repo="Garyu-tt/mojum", status="opt-dev"):
@@ -131,6 +133,42 @@ class ProjectBoardAuditTests(unittest.TestCase):
         wrong["data"]["user"]["projectV2"]["items"]["nodes"][0]["content"]["url"] += "?secret=1"
         with self.assertRaisesRegex(BoardError, "URL/repository mismatch"):
             reconcile([wrong])
+
+    def test_file_swap_after_preflight_cannot_bypass_read_budget(self):
+        # A deterministic stand-in for a concurrent rename between stat and
+        # open. The original unbounded Path.read_text accepted >2 MiB JSON.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "small.json"
+            replacement = Path(tmp) / "large.json"
+            path.write_text("{}", encoding="utf-8")
+            replacement.write_bytes(b" " * (MAX_BYTES + 2) + b"{}")
+            original_open = Path.open
+            swapped = [False]
+
+            def replace_at_open(self, *args, **kwargs):
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if self == path and "r" in mode and not swapped[0]:
+                    os.replace(replacement, path)
+                    swapped[0] = True
+                return original_open(self, *args, **kwargs)
+
+            with patch.object(Path, "open", replace_at_open):
+                with self.assertRaisesRegex(BoardError, "oversized"):
+                    _load_json(path)
+            self.assertTrue(swapped[0])
+
+    def test_file_removed_at_open_raises_typed_board_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "existing.json"
+            path.write_text("{}", encoding="utf-8")
+            original_open = Path.open
+            def removed_at_open(self, *args, **kwargs):
+                if self == path:
+                    raise FileNotFoundError("raced unlink")
+                return original_open(self, *args, **kwargs)
+            with patch.object(Path, "open", removed_at_open):
+                with self.assertRaisesRegex(BoardError, "unreadable input JSON"):
+                    _load_json(path)
 
     def test_offline_cli_and_duplicate_exit_code(self):
         with tempfile.TemporaryDirectory() as tmp:
