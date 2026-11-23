@@ -141,11 +141,41 @@ def _preflight_json(value):
             raise ConsentError("value contains a non-native JSON type")
 
 
+def _json_string_size(value):
+    """Exact compact JSON string size, without allocating the encoded result."""
+    if len(value) > MAX_WIRE_BYTES:
+        raise ConsentError("JSON text exceeds the byte budget")
+    size = 2
+    short_escapes = {8, 9, 10, 12, 13}
+    for char in value:
+        code = ord(char)
+        if code in (34, 92):
+            size += 2
+        elif code < 32:
+            size += 2 if code in short_escapes else 6
+        else:
+            try:
+                size += len(char.encode("utf-8", errors="strict"))
+            except UnicodeEncodeError as exc:
+                raise ConsentError("JSON text must be valid UTF-8") from exc
+        if size > MAX_WIRE_BYTES:
+            raise ConsentError("JSON text exceeds the byte budget")
+    return size
+
+
 def _check_native_json_tree(value):
     """Bound an untrusted JSON tree before equality, hashing, or serialization."""
     stack = [(value, 0)]
     seen = set()
     nodes = 0
+    wire_bytes = 0
+
+    def add_size(amount):
+        nonlocal wire_bytes
+        wire_bytes += amount
+        if wire_bytes > MAX_WIRE_BYTES:
+            raise ConsentError("canonical JSON exceeds the 16 MiB byte budget")
+
     while stack:
         item, depth = stack.pop()
         nodes += 1
@@ -158,41 +188,39 @@ def _check_native_json_tree(value):
                 raise ConsentError("JSON input must be a tree without cycles or shared containers")
             seen.add(identity)
             keys = tuple(dict.keys(item))
-            if len(keys) > MAX_TREE_NODES - nodes:
+            if nodes + len(stack) + len(keys) > MAX_TREE_NODES:
                 raise ConsentError("JSON object exceeds the node budget")
+            add_size(2 + max(0, len(keys) - 1))
             if any(type(key) is not str for key in keys):
                 raise ConsentError("JSON object keys must be native strings")
             for key in keys:
-                if len(key) > MAX_WIRE_BYTES:
-                    raise ConsentError("JSON object key exceeds the byte budget")
-                try:
-                    key.encode("utf-8", errors="strict")
-                except UnicodeEncodeError as exc:
-                    raise ConsentError("JSON object key must be valid UTF-8") from exc
+                add_size(_json_string_size(key) + 1)
                 stack.append((item[key], depth + 1))
         elif kind is list:
             identity = id(item)
             if identity in seen:
                 raise ConsentError("JSON input must be a tree without cycles or shared containers")
             seen.add(identity)
-            if len(item) > MAX_TREE_NODES - nodes:
+            if nodes + len(stack) + len(item) > MAX_TREE_NODES:
                 raise ConsentError("JSON array exceeds the node budget")
+            add_size(2 + max(0, len(item) - 1))
             for child in item:
                 stack.append((child, depth + 1))
         elif kind is str:
-            if len(item) > MAX_WIRE_BYTES:
-                raise ConsentError("JSON text exceeds the byte budget")
-            try:
-                item.encode("utf-8", errors="strict")
-            except UnicodeEncodeError as exc:
-                raise ConsentError("JSON text must be valid UTF-8") from exc
+            add_size(_json_string_size(item))
         elif kind is int:
             if not -(2**63) <= item <= 2**63 - 1:
                 raise ConsentError("JSON integer exceeds the signed 64-bit limit")
+            add_size(len(str(item)))
         elif kind is float:
             if not math.isfinite(item):
                 raise ConsentError("JSON numbers must be finite")
-        elif kind not in (bool, type(None)):
+            add_size(len(repr(item)))
+        elif kind is bool:
+            add_size(4 if item else 5)
+        elif item is None:
+            add_size(4)
+        else:
             raise ConsentError("input must contain native JSON values")
 
 
