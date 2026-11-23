@@ -3,6 +3,7 @@ import copy
 import json
 import unittest
 from unittest.mock import patch
+from unittest.mock import patch
 from pathlib import Path
 
 from mojum.graph import (
@@ -11,6 +12,7 @@ from mojum.graph import (
     MAX_GRAPH_TREE_NODES,
     SCHEMA,
     validate,
+    _require_native_json_tree,
 )
 from mojum.sim import digest
 
@@ -124,6 +126,17 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         graph["nodes"][0]["notes"] = shared
         with self.assertRaises(GraphError):
             validate(graph)
+
+    def test_pending_work_is_bounded_before_expanding_nested_aliases(self):
+        shared = []
+        for _ in range(16):
+            shared = [shared] * 16
+        value = {"nested": shared}
+        with patch("mojum.graph.MAX_GRAPH_TREE_NODES", 128):
+            # The budget guard rejects scheduled work before walking down the
+            # repeated-reference chain and accumulating a large pending stack.
+            with self.assertRaisesRegex(GraphError, "node budget"):
+                _require_native_json_tree(value)
 
     def test_direct_input_obeys_json_depth_budget(self):
         graph = self.fresh()
