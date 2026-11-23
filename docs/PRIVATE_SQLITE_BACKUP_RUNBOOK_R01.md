@@ -27,8 +27,9 @@ import sqlite3
 
 source = Path("dante_PRIVATE.sqlite3")
 destination = Path("dante_PRIVATE.backup.sqlite3")
-if not source.is_file():
-    raise SystemExit("source missing")
+# Match Mojum's journal admission: do not follow a source symlink.
+if source.is_symlink() or not source.is_file():
+    raise SystemExit("source must be an existing regular, non-symlink file")
 if os.name != "posix":
     raise SystemExit("this example requires POSIX; use an ACL-hardened Windows procedure")
 # O_EXCL prevents overwriting an existing backup; mode 0600 protects it
@@ -68,14 +69,39 @@ with path.open("rb") as f:
 print(digest.hexdigest())
 ```
 
-A digest alone does not prove who produced the backup. The database must also pass **Mojum's own full journal replay / chain validation** with the exact recorded runtime selectors. Consult the current checkout's CLI help and journal verification tests for the supported read-only validation route. Do not run a ticking CLI against the only backup: a normal Aquarium launch can append events. If no read-only application verifier is available for this revision, mark the backup **SQLite-verified only; application replay unverified**.
+A digest alone does not prove who produced the backup. Mojum exposes a **read-only Aquarium replay API** even though the CLI does not currently expose a read-only flag. For a journal created with the default packaged genome/graph and default runtime selectors, run this against the backup (or a separate restore copy), from the matching Mojum checkout:
+
+```python
+import json
+from pathlib import Path
+from importlib.resources import files
+from mojum.aquarium import Aquarium
+
+data = files("mojum").joinpath("data")
+seed = json.loads(data.joinpath("genesis_seed.json").read_text(encoding="utf-8"))
+graph = json.loads(data.joinpath("first_loop.json").read_text(encoding="utf-8"))
+
+with Aquarium(
+    Path("dante_PRIVATE.backup.sqlite3"),
+    seed,
+    graph,
+    read_only=True,
+    motor_mode="scripted",
+    sensory_mode="none",
+    temporal_mode="none",
+    neural_mode="shadow",
+) as aquarium:
+    print(aquarium.checkpoint())
+```
+
+The example's selectors and packaged inputs are only for a journal created with those exact settings. For any other journal, pass the original genome, graph, room and runtime selectors recorded in step 1; do not guess or silently fall back to defaults. `read_only=True` opens the journal without appending events; Aquarium construction replays and validates the journal before the checkpoint is returned. The CLI's ordinary launch is **not** a substitute: it may append events. If the matching inputs are unavailable, mark the backup **SQLite-verified only; application replay unverified**.
 
 ## 4. Restore without destroying the source
 
 1. Stop every writer and identify the exact commit/configuration used to create the journal.
 2. Copy the verified backup to a **new** restore path on a private volume; do not overwrite an existing journal or place it under a public web root.
 3. Verify the restored file's SHA-256 against the recorded backup digest, and run `PRAGMA integrity_check` using a read-only SQLite connection.
-4. Perform the supported **read-only** Mojum event-chain/replay validation with the pinned modes, if available. Fail closed on missing events, manifest mismatch, stale journal head, or corruption. Never silently repair or truncate history.
+4. Perform the supported **read-only** Mojum event-chain/replay validation with the pinned inputs and modes shown in step 3. Fail closed on missing events, manifest mismatch, stale journal head, or corruption. Never silently repair or truncate history.
 5. Only after checks pass, designate the restored file as the sole canonical writer target. Keep the original quarantined and read-only until operator sign-off. Do not alternate writes between original and restore.
 
 ## 5. Failure drills and limits
