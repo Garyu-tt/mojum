@@ -45,12 +45,23 @@ class PCM16ChunkFramer:
     It is a single-owner object; concurrent callers must synchronize externally.
     """
 
+    def __setattr__(self, name: str, value: object) -> None:
+        # The admitted clock origin is immutable through the public Python API.
+        if name == "_start_ns" and hasattr(self, "_start_ns"):
+            raise AttributeError("start clock origin is immutable")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name == "_start_ns":
+            raise AttributeError("start clock origin is immutable")
+        object.__delattr__(self, name)
+
     def __init__(self, *, start_ns: int = 0, provenance: str):
         if type(start_ns) is not int or not 0 <= start_ns <= MAX_TIME_NS:
             raise ValueError("start_ns must be a bounded native integer")
         if type(provenance) is not str or provenance != PROVENANCE:
             raise ValueError("explicit PUBLIC_SYNTHETIC provenance required")
-        self._start_ns = start_ns
+        object.__setattr__(self, "_start_ns", start_ns)
         self._pending = b""
         self._chunks_seen = 0
         self._bytes_seen = 0
