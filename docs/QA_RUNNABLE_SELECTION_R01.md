@@ -55,7 +55,7 @@ Python 3.11+ standard library only. No mandatory dependencies or network access.
 Run:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_qa_runnable_selection -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_qa_runnable_selection.py' -v
 ```
 
 Coverage includes blocked-task non-interference, deterministic order regardless
