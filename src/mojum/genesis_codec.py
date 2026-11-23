@@ -52,7 +52,7 @@ def dumps(ledger: GenomeLedger) -> bytes:
         raise GenesisCodecError("ledger must be an exact GenomeLedger instance")
     try:
         encoded = canonical(ledger.snapshot()).encode("utf-8")
-    except (GenesisError, TypeError, ValueError, UnicodeError) as exc:
+    except (GenesisError, TypeError, ValueError, UnicodeError, RecursionError) as exc:
         raise GenesisCodecError("Ledger snapshot is not canonical JSON") from exc
     if len(encoded) > MAX_SNAPSHOT_BYTES:
         raise GenesisCodecError("Ledger snapshot exceeds the byte limit")
