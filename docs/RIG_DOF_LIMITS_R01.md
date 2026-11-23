@@ -41,7 +41,7 @@ dependency, private data, database or production device is accessed.
 Run from repository root:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_rig_dof_limits -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_rig_dof_limits.py' -v
 ```
 
 The suite covers deterministic digesting, detached immutable output, strict
