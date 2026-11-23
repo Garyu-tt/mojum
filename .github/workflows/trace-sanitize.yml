@@ -1,0 +1,35 @@
+name: Trace metadata sanitizer
+on:
+  pull_request:
+    paths:
+      - "src/mojum/trace_sanitize.py"
+      - "tests/test_trace_sanitize.py"
+      - "docs/TRACE_SANITIZE_R01.md"
+      - ".github/workflows/trace-sanitize.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify exact checked-out commit
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Compile and run focused tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m py_compile src/mojum/trace_sanitize.py
+          python -m unittest discover -s tests -p 'test_trace_sanitize.py' -v
