@@ -72,6 +72,30 @@ class MeshAttestationTests(unittest.TestCase):
         with self.assertRaises(AttestationDenied):
             verify_attestation(statement, {}, now=1_500)
 
+    def test_hostile_authority_key_subclass_rejected_before_lookup(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return str.__hash__(self)
+            def __eq__(self, other):
+                raise RuntimeError("hostile authority key equality executed")
+
+        statement = attestation()
+        forged = {HostileKey("root-2026"): KEY}
+        with self.assertRaisesRegex(AttestationError, "native strings"):
+            verify_attestation(statement, forged, now=1_500)
+
+    def test_authority_map_cardinality_is_bounded(self):
+        statement = attestation()
+        oversized = {f"root-{index}": KEY for index in range(129)}
+        with self.assertRaisesRegex(AttestationError, "entry budget"):
+            verify_attestation(statement, oversized, now=1_500)
+
+    def test_invalid_authority_key_id_rejected(self):
+        statement = attestation()
+        for mapping in ({"bad key": KEY}, {1: KEY}):
+            with self.subTest(mapping=mapping), self.assertRaises(AttestationError):
+                verify_attestation(statement, mapping, now=1_500)
+
     def test_expiry_and_future_issue_time(self):
         statement = attestation()
         with self.assertRaises(AttestationDenied):
