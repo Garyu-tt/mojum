@@ -79,13 +79,22 @@ class VrmResourceBudgetTests(unittest.TestCase):
 
     def test_rejects_string_subclass_key_before_hashing(self):
         class HostileString(str):
-            __hash__ = str.__hash__
+            active = False
+
+            def __hash__(self):
+                if self.active:
+                    raise AssertionError("hostile hash must not run")
+                return str.__hash__(self)
 
             def __eq__(self, other):
-                raise AssertionError("hostile equality must not run")
+                if self.active:
+                    raise AssertionError("hostile equality must not run")
+                return str.__eq__(self, other)
 
         candidate = inventory()
-        candidate[HostileString("schema")] = candidate.pop("schema")
+        key = HostileString("schema")
+        candidate[key] = candidate.pop("schema")
+        key.active = True
         with self.assertRaises(ResourceBudgetError):
             assess_vrm_resource_budget(candidate)
 
