@@ -144,6 +144,24 @@ class RunnableSelectionTests(unittest.TestCase):
         with self.assertRaises(SelectionError):
             select_runnable_tasks([item], now_tick=0)
 
+    def test_oversized_state_and_aggregate_dependency_budget(self):
+        oversized_state = {"task_id": "x", "state": "s" * 1_000_000,
+                           "priority": 0, "sequence": 0}
+        with self.assertRaises(SelectionError):
+            select_runnable_tasks([oversized_state], now_tick=0)
+
+        tasks = []
+        for index in range(400):
+            tasks.append({
+                "task_id": f"task-{index}",
+                "state": "DISCOVERED",
+                "priority": 0,
+                "sequence": index,
+                "dependencies": [f"parent-{index}-{dep}" for dep in range(256)],
+            })
+        with self.assertRaisesRegex(SelectionError, "aggregate dependency budget"):
+            select_runnable_tasks(tasks, now_tick=0)
+
     def test_input_is_not_mutated(self):
         item = {"task_id": "x", "state": "DISCOVERED", "priority": 1,
                 "sequence": 0, "dependencies": []}
