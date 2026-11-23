@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import re
-from typing import Iterable, Protocol
+from typing import Iterator, Protocol
 
 REQUEST_SCHEMA = "mojum.audio.tts-request/1"
 RESULT_SCHEMA = "mojum.audio.tts-result/1"
@@ -36,7 +36,7 @@ class TTSBackend(Protocol):
     backend_version: str
     local_only: bool
 
-    def iter_pcm16le(self, request: "TTSRequest") -> Iterable[bytes]:
+    def iter_pcm16le(self, request: "TTSRequest") -> Iterator[bytes]:
         """Yield mono signed PCM16LE chunks; do not download models or use a network."""
 
 
