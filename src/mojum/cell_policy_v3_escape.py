@@ -134,6 +134,7 @@ class CellExplorerV3Escape:
         self.forgotten_observations = 0
         self.consecutive_rests = 0
         self.consecutive_blocked_probes = 0
+        self.outcome_tail = []
 
     @staticmethod
     def _cell(sense):
@@ -148,6 +149,7 @@ class CellExplorerV3Escape:
     def snapshot(self):
         return {
             "schema": SCHEMA,
+            "snapshot_version": 2,
             "cell_size_m": STEP_METERS,
             "last_tick": self.last_tick,
             "updates": self.updates,
@@ -157,17 +159,31 @@ class CellExplorerV3Escape:
             "forgotten_observations": self.forgotten_observations,
             "consecutive_rests": self.consecutive_rests,
             "consecutive_blocked_probes": self.consecutive_blocked_probes,
+            "outcome_tail": copy.deepcopy(self.outcome_tail),
         }
 
     @classmethod
     def from_snapshot(cls, state):
-        mandatory = {
+        legacy_mandatory = {
             "schema", "cell_size_m", "last_tick", "updates", "records",
             "last_seen_at", "evictions", "forgotten_observations",
             "consecutive_rests", "consecutive_blocked_probes",
         }
+        if type(state) is dict and set(state) == legacy_mandatory:
+            if state.get("consecutive_rests") or state.get("consecutive_blocked_probes"):
+                raise CellV3EscapeError(
+                    "legacy snapshot lacks chronology evidence for strict streak attestation"
+                )
+            state = dict(state)
+            state["snapshot_version"] = 2
+            state["outcome_tail"] = []
+        mandatory = legacy_mandatory | {"snapshot_version", "outcome_tail"}
         if (type(state) is not dict or set(state) != mandatory
                 or state["schema"] != SCHEMA
+                or type(state["snapshot_version"]) is not int
+                or state["snapshot_version"] != 2
+                or type(state["outcome_tail"]) is not list
+                or len(state["outcome_tail"]) > REPROBE_BLOCKED_BEFORE_REST
                 or type(state["cell_size_m"]) is not float
                 or state["cell_size_m"] != STEP_METERS
                 or type(state["last_tick"]) is not int
@@ -232,6 +248,46 @@ class CellExplorerV3Escape:
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
         _check_streak_counters(state)
+        tail = state["outcome_tail"]
+        expected_tail_length = min(state["updates"], REPROBE_BLOCKED_BEFORE_REST)
+        if len(tail) != expected_tail_length:
+            raise CellV3EscapeError("incomplete measured-outcome chronology tail")
+        tail_counts = {}
+        for offset, item in enumerate(tail):
+            if (type(item) is not dict or set(item) != {"tick", "cell", "action", "blocked"}
+                    or type(item["tick"]) is not int
+                    or item["tick"] != state["last_tick"] - len(tail) + 1 + offset
+                    or type(item["cell"]) is not str
+                    or _ZONE.fullmatch(item["cell"]) is None
+                    or item["cell"] not in state["records"]
+                    or item["action"] not in ACTIONS
+                    or type(item["blocked"]) is not bool
+                    or (item["action"] == "rest" and item["blocked"])
+                    or state["last_seen_at"][item["cell"]] < item["tick"]):
+                raise CellV3EscapeError("invalid measured-outcome chronology tail")
+            key = (item["cell"], item["action"])
+            counts = tail_counts.setdefault(key, [0, 0])
+            counts[0] += 1
+            counts[1] += int(item["blocked"])
+        for (cell, action), counts in tail_counts.items():
+            stored = state["records"][cell][action]
+            if stored[0] < counts[0] or stored[1] < counts[1]:
+                raise CellV3EscapeError("chronology tail exceeds measured aggregates")
+        rest_suffix = 0
+        for item in reversed(tail):
+            if item["action"] == "rest" and not item["blocked"]:
+                rest_suffix += 1
+            else:
+                break
+        blocked_suffix = 0
+        for item in reversed(tail):
+            if item["action"] != "rest" and item["blocked"]:
+                blocked_suffix += 1
+            else:
+                break
+        if (rest_suffix != state["consecutive_rests"]
+                or blocked_suffix != state["consecutive_blocked_probes"]):
+            raise CellV3EscapeError("terminal streak counters disagree with ordered outcomes")
 
         # Each observation belongs to exactly one cell and tick. A live
         # snapshot must retain the latest observed cell, and an eviction can
@@ -265,6 +321,7 @@ class CellExplorerV3Escape:
         model.forgotten_observations = state["forgotten_observations"]
         model.consecutive_rests = state["consecutive_rests"]
         model.consecutive_blocked_probes = state["consecutive_blocked_probes"]
+        model.outcome_tail = copy.deepcopy(state["outcome_tail"])
         return model
 
     def decide(self, sense):
@@ -349,6 +406,10 @@ class CellExplorerV3Escape:
             self.consecutive_blocked_probes = (
                 self.consecutive_blocked_probes + 1 if blocked else 0
             )
+        self.outcome_tail.append({
+            "tick": sense.tick, "cell": cell, "action": action, "blocked": blocked,
+        })
+        del self.outcome_tail[:-REPROBE_BLOCKED_BEFORE_REST]
         return {
             "schema": LEARNING_SCHEMA,
             "action": action,
