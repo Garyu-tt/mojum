@@ -482,5 +482,49 @@ class ComparisonTests(unittest.TestCase):
         )
 
 
+class OrderedOutcomeTailTests(unittest.TestCase):
+    def test_snapshot_v2_carries_bounded_ordered_tail_and_roundtrips(self):
+        room, start = sealed_cell()
+        policy = CellExplorerV3Escape()
+        _tick_room(policy, room, start, 12)
+        snapshot = policy.snapshot()
+        self.assertEqual(snapshot["snapshot_version"], 2)
+        self.assertEqual(len(snapshot["outcome_tail"]), 4)
+        self.assertEqual(
+            [item["tick"] for item in snapshot["outcome_tail"]],
+            list(range(8, 12)),
+        )
+        restored = CellExplorerV3Escape.from_snapshot(snapshot)
+        self.assertEqual(restored.snapshot(), snapshot)
+
+    def test_rejects_blocked_success_blocked_forged_as_two_terminal_probes(self):
+        room, start = sealed_cell()
+        policy = CellExplorerV3Escape()
+        _tick_room(policy, room, start, 3)
+        forged = policy.snapshot()
+        tail = forged["outcome_tail"]
+        self.assertEqual(len(tail), 3)
+        # Keep aggregate counts internally consistent with the alleged middle
+        # successful probe. Only the chronology witness exposes the false
+        # terminal streak claim.
+        middle = tail[1]
+        self.assertNotEqual(middle["action"], "rest")
+        middle["blocked"] = False
+        counts = forged["records"][middle["cell"]][middle["action"]]
+        counts[1] -= 1
+        forged["consecutive_blocked_probes"] = 2
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "terminal streak counters disagree"
+        ):
+            CellExplorerV3Escape.from_snapshot(forged)
+
+    def test_rejects_legacy_snapshot_without_explicit_chronology_version(self):
+        legacy = CellExplorerV3Escape().snapshot()
+        legacy.pop("snapshot_version")
+        legacy.pop("outcome_tail")
+        with self.assertRaisesRegex(CellV3EscapeError, "invalid escape retention envelope"):
+            CellExplorerV3Escape.from_snapshot(legacy)
+
+
 if __name__ == "__main__":
     unittest.main()
