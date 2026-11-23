@@ -88,7 +88,8 @@ def _identifiers(hand, base_space, calibration_sha256):
 
 def _validate_frame(raw):
     _exact(raw, _INPUT_KEYS, "hand frame")
-    if raw["schema"] != INPUT_SCHEMA or raw["extension"] != EXTENSION:
+    if (type(raw["schema"]) is not str or raw["schema"] != INPUT_SCHEMA
+            or type(raw["extension"]) is not str or raw["extension"] != EXTENSION):
         raise HandTrackingError("unsupported hand input schema/extension")
     _identifiers(raw["hand"], raw["base_space"], raw["calibration_sha256"])
     for key in ("frame_index", "time_ns"):
@@ -234,10 +235,12 @@ def verify_observation_chain(frames):
             "joints", "previous_sha256", "sha256",
         }:
             raise HandTrackingError("invalid observation packet fields")
-        if (frame["schema"] != OBSERVATION_SCHEMA
+        if (type(frame["schema"]) is not str or frame["schema"] != OBSERVATION_SCHEMA
+                or type(frame["provenance"]) is not str
                 or frame["provenance"] != "untrusted-openxr-readonly/1"
                 or frame["external_actuator"] is not None
-                or not _sha(frame["sha256"]) or frame["previous_sha256"] != previous):
+                or not _sha(frame["sha256"]) or not _sha(frame["previous_sha256"])
+                or frame["previous_sha256"] != previous):
             raise HandTrackingError("invalid observation chain/schema")
         raw = {key: frame[key] for key in _INPUT_KEYS if key not in ("schema", "extension")}
         raw.update(schema=INPUT_SCHEMA, extension=EXTENSION)
