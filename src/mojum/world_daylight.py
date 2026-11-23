@@ -84,8 +84,14 @@ def _check_state(cycle: DaylightCycle, state: DaylightState) -> None:
     _check_cycle(cycle)
     if type(state) is not DaylightState:
         raise ValueError("expected native daylight state")
-    _check_tick(state.tick)
-    if type(state.revision) is not str or state.revision != _state_revision(cycle, state.tick):
+    # Native dataclass identity alone does not guarantee initialized fields:
+    # object.__new__(DaylightState) bypasses __init__ entirely.
+    try:
+        tick, revision = state.tick, state.revision
+    except AttributeError as exc:
+        raise ValueError("malformed daylight state") from exc
+    _check_tick(tick)
+    if type(revision) is not str or revision != _state_revision(cycle, tick):
         raise ValueError("daylight revision does not match the cycle and tick")
 
 

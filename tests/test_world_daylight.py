@@ -96,6 +96,18 @@ class DaylightTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             snapshot(cycle, state)
 
+    def test_uninitialized_native_state_fails_closed(self):
+        # Constructor bypass retains exact DaylightState type but lacks fields.
+        empty = object.__new__(DaylightState)
+        with self.assertRaisesRegex(ValueError, "malformed daylight state"):
+            snapshot(self.cycle, empty)
+        with self.assertRaisesRegex(ValueError, "malformed daylight state"):
+            advance(self.cycle, empty, tick=1, expected_revision="x")
+        partial = object.__new__(DaylightState)
+        object.__setattr__(partial, "tick", 0)
+        with self.assertRaisesRegex(ValueError, "malformed daylight state"):
+            snapshot(self.cycle, partial)
+
     def test_snapshot_tamper_rejected(self):
         state = initial_state(self.cycle)
         baseline = json.loads(snapshot(self.cycle, state))
