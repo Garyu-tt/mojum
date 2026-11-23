@@ -125,6 +125,13 @@ def replica_plan(source: str, replica_dir: str) -> tuple[Path, Path]:
     return db, replica
 
 
+def _reject_existing_target_sidecars(target: Path) -> None:
+    """Refuse stale SQLite sidecars that could change the published image's meaning."""
+    for suffix in ("-wal", "-shm", "-journal"):
+        if os.path.lexists(str(target) + suffix):
+            raise SafetyError("restore target has an existing SQLite sidecar")
+
+
 def restore_plan(replica_dir: str, output: str) -> tuple[Path, Path]:
     replica = _absolute_path(replica_dir, kind="replica")
     _private_directory(replica)
@@ -132,6 +139,7 @@ def restore_plan(replica_dir: str, output: str) -> tuple[Path, Path]:
     if target.exists() or target.is_symlink():
         raise SafetyError("restore target already exists; refusing to overwrite")
     _private_directory(target.parent)
+    _reject_existing_target_sidecars(target)
     if target in replica.parents or replica in target.parents or target == replica:
         raise SafetyError("restore target overlaps replica")
     if len(str(target)) > 4096:
@@ -237,6 +245,8 @@ def restore_verified(executable: str, replica_dir: str, output: str, *,
         if digest != expected_sha256:
             raise SafetyError("restored database SHA-256 did not match trusted anchor")
         os.chmod(staged, 0o600)
+        # Recheck immediately before publication, not only at plan time.
+        _reject_existing_target_sidecars(target)
         try:
             os.link(staged, target, follow_symlinks=False)
         except OSError as exc:

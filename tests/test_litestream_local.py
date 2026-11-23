@@ -118,6 +118,30 @@ else: sys.exit(9)
             mod.restore_verified(str(self.binary), str(self.replica), str(target),
                                  expected_sha256=self.expected, timeout=5)
 
+    def test_restore_rejects_stale_target_sidecars(self):
+        target = self.private / "restored.db"
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                sidecar = Path(str(target) + suffix)
+                sidecar.write_bytes(b"stale SQLite sidecar")
+                try:
+                    with self.assertRaises(mod.SafetyError):
+                        mod.restore_plan(str(self.replica), str(target))
+                    with self.assertRaises(mod.SafetyError):
+                        mod.restore_verified(str(self.binary), str(self.replica),
+                                             str(target), expected_sha256=self.expected,
+                                             timeout=5)
+                    self.assertFalse(target.exists())
+                finally:
+                    sidecar.unlink()
+        dangling = Path(str(target) + "-wal")
+        dangling.symlink_to(self.private / "missing-sidecar")
+        try:
+            with self.assertRaises(mod.SafetyError):
+                mod.restore_plan(str(self.replica), str(target))
+        finally:
+            dangling.unlink()
+
     def test_restore_requires_independent_anchor(self):
         target = self.private / "restored.db"
         with self.assertRaises(mod.SafetyError):
