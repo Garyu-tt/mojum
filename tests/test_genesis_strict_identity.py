@@ -149,6 +149,52 @@ class StrictGenesisIdentityTests(unittest.TestCase):
                 with self.assertRaises(GenesisError):
                     GenomeLedger.from_snapshot(snapshot)
 
+    def test_noncanonical_dict_keys_rejected_before_lookup_or_equality(self):
+        # String subclasses can compare/hash exactly like the expected field
+        # names and silently survive a JSON/dict equality round-trip.
+        for location in ("seed", "inherited", "acquisition", "snapshot"):
+            with self.subTest(location=location):
+                seed = copy.deepcopy(SEED)
+                if location == "seed":
+                    value = seed.pop("schema")
+                    seed[PretendString("schema")] = value
+                    with self.assertRaises(GenesisError):
+                        validate_seed(seed)
+                elif location == "inherited":
+                    value = seed["inherited"].pop("heartbeat_bpm")
+                    seed["inherited"][PretendString("heartbeat_bpm")] = value
+                    with self.assertRaises(GenesisError):
+                        validate_seed(seed)
+                elif location == "acquisition":
+                    item = event()
+                    value = item.pop("event_id")
+                    item[PretendString("event_id")] = value
+                    ledger = GenomeLedger(seed)
+                    before = ledger.revision
+                    with self.assertRaises(GenesisError):
+                        ledger.append(item, before)
+                    self.assertEqual(ledger.revision, before)
+                else:
+                    snapshot = GenomeLedger(seed).snapshot()
+                    value = snapshot.pop("revision")
+                    snapshot[PretendString("revision")] = value
+                    with self.assertRaises(GenesisError):
+                        GenomeLedger.from_snapshot(snapshot)
+
+    def test_nonbuiltin_dict_subclasses_rejected(self):
+        class ForgedDict(dict):
+            pass
+
+        with self.assertRaises(GenesisError):
+            validate_seed(ForgedDict(copy.deepcopy(SEED)))
+        with self.assertRaises(GenesisError):
+            validate_seed({**copy.deepcopy(SEED),
+                           "inherited": ForgedDict(SEED["inherited"])})
+        with self.assertRaises(GenesisError):
+            validate_acquisition(ForgedDict(event()), SEED["genome_id"])
+        with self.assertRaises(GenesisError):
+            GenomeLedger.from_snapshot(ForgedDict(GenomeLedger(SEED).snapshot()))
+
     def test_valid_seed_acquisition_and_snapshot_remain_compatible(self):
         ledger = GenomeLedger(SEED)
         ledger.append(event(), ledger.revision)
