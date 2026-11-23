@@ -80,7 +80,7 @@ def _component(ref: Any, name: str, agent_id: str, tick: int) -> dict:
         "agent_id": _text(ref["agent_id"], f"{name}.agent_id"),
         "tick": _tick(ref["tick"], f"{name}.tick"),
     }
-    if checked["visibility"] not in VISIBILITIES or type(checked["visibility"]) is not str:
+    if type(checked["visibility"]) is not str or checked["visibility"] not in VISIBILITIES:
         raise CheckpointError(f"{name}.visibility is unsupported")
     if checked["agent_id"] != agent_id:
         raise CheckpointError(f"{name} belongs to another organism")
