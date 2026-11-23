@@ -220,6 +220,31 @@ class SignedReplayCacheQA(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotError, "refusing to replace"):
             create_key_file(self.key)
 
+    def test_directory_symlink_cannot_redirect_private_key_or_snapshot(self):
+        self.make_snapshot(ticks=2)
+        alias = self.root / "redirected-parent"
+        try:
+            alias.symlink_to(self.root, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable")
+        # A leaf is not itself a symlink even when its parent is one.
+        self.assertFalse((alias / self.key.name).is_symlink())
+        self.assertTrue((alias / self.key.name).exists())
+        with self.assertRaisesRegex(SnapshotError, "ancestor cannot be a symlink"):
+            load_snapshot(self.snapshot, alias / self.key.name)
+        with self.assertRaisesRegex(SnapshotError, "ancestor cannot be a symlink"):
+            load_snapshot(alias / self.snapshot.name, self.key)
+        state = load_snapshot(self.snapshot, self.key)
+        with self.assertRaisesRegex(SnapshotError, "ancestor cannot be a symlink"):
+            save_snapshot(alias / self.snapshot.name, self.key, state)
+        with self.assertRaisesRegex(SnapshotError, "ancestor cannot be a symlink"):
+            create_key_file(alias / "unwanted.key")
+        self.assertFalse((self.root / "unwanted.key").exists())
+
+    def test_parent_traversal_path_is_not_accepted_for_private_key(self):
+        with self.assertRaisesRegex(SnapshotError, "parent traversal"):
+            load_snapshot(self.snapshot, self.root / "subdir" / ".." / self.key.name)
+
     def test_snapshot_optional_old_full_replay_and_incompatible_scene(self):
         self.make_snapshot(ticks=5)
         with self.aquarium(signed=False) as q:
