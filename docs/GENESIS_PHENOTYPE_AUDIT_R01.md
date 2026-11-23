@@ -15,6 +15,7 @@ print(report.to_dict())
 - Both inputs must be exact built-in dictionaries containing JSON-native data.
 - Source classification must be explicitly PUBLIC_SYNTHETIC.
 - Maximum compact canonical JSON size: 1 MiB per input, preflighted before serialization including quoted/escaped string values, object keys, separators and scalar representations.
+- Maximum ledger events for this auditor: 128. This is stricter than the GENESIS ledger storage limit because replay revalidates every effective tick prefix while rebuilding the append-only history; the audit cap bounds CPU cost before serialization, copying or ledger restoration.
 - Integers are restricted to the signed 64-bit range before conversion or serialization; non-finite floats and unpaired Unicode surrogates are rejected.
 - Maximum nesting depth: 24; maximum traversed nodes: 20,000 per input.
 - Strings are UTF-8 encodable and at most 16,384 characters.
