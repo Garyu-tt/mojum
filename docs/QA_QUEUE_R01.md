@@ -56,7 +56,7 @@ Blocked jobs require explicit `unblock(job_id)` after the cause is resolved.
 Run the offline stdlib suite:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_qa_queue -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_qa_queue.py' -v
 ```
 
 The supervisor's poller, dependency DAG, exact-head CI collector, read-only
