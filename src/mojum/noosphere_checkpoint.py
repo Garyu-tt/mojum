@@ -107,7 +107,8 @@ def _payload(manifest: dict) -> dict:
 
 def _validate_manifest(manifest: Any) -> dict:
     _exact_keys(manifest, _ROOT_FIELDS, "checkpoint manifest")
-    if manifest["schema"] != SCHEMA:
+    schema = manifest["schema"]
+    if type(schema) is not str or schema != SCHEMA:
         raise CheckpointError("unsupported checkpoint schema")
     agent_id = _text(manifest["agent_id"], "agent_id")
     checkpoint_id = _text(manifest["checkpoint_id"], "checkpoint_id")
