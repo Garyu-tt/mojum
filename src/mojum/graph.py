@@ -246,6 +246,12 @@ def validate(graph):
     # to its id/revision field without invoking caller-controlled behavior.
     if type(graph) is not dict:
         raise GraphError("Graph v1 requires a native root object")
+    # Preserve the legacy graph-version diagnostic before enforcing the v1
+    # root shape. This lookup is safe only for a native str schema; other
+    # caller values are admitted by the bounded native-tree walk below.
+    schema_value = dict.get(graph, "schema")
+    if type(schema_value) is str and schema_value != SCHEMA:
+        raise GraphError("Unsupported or absent graph schema")
     # Inspect the bounded root shape using only exact built-in dict operations.
     # Check individual key wire sizes before the short-name rule so a malicious
     # multi-megabyte key still receives the byte-budget diagnostic.
