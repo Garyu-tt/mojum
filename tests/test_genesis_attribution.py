@@ -139,7 +139,7 @@ class GenesisAttributionTests(unittest.TestCase):
 
     def test_aggregate_text_budget_rejected_before_serialization(self):
         snap = sample_snapshot()
-        snap["padding"] = ["x" * MAX_TEXT_LENGTH for _ in range(40)]
+        snap["padding"] = ["x" * 8_192 for _ in range(40)]
         with patch(
             "mojum.genesis_attribution.json.dumps",
             side_effect=AssertionError("json.dumps must not run"),
