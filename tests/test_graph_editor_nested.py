@@ -74,6 +74,15 @@ class NestedGraphEditorTests(unittest.TestCase):
             import_nested_editor(wire, expected_revision=parent["revision"],
                                  expected_sha256=wire["source_sha256"])
 
+    def test_valid_but_replaced_child_graph_fails_source_cas(self):
+        parent, containers = fixture()
+        wire = export_nested_editor(parent, containers, "reactflow")
+        replacement = graph("child-r2")
+        wire["nodes"][0]["data"]["child_graph"] = replacement
+        with self.assertRaisesRegex(GraphError, "source CAS"):
+            import_nested_editor(wire, expected_revision=parent["revision"],
+                                 expected_sha256=wire["source_sha256"])
+
     def test_parent_cas_mismatch_rejected(self):
         parent, containers = fixture()
         wire = export_nested_editor(parent, containers, "reactflow")
