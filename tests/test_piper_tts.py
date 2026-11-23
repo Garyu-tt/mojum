@@ -80,6 +80,21 @@ else:
         with self.assertRaises(PermissionError):
             synthesize_public_wav("hello", p, enabled=True, provenance="PRIVATE")
 
+    def test_provenance_selector_must_be_exact_string(self):
+        class ForgedProvenance:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        with self.assertRaises(PermissionError):
+            synthesize_public_wav("hello", self._profile(), enabled=True,
+                                  provenance=ForgedProvenance())
+        with self.assertRaises(PermissionError):
+            synthesize_public_wav("hello", self._profile(), enabled=True,
+                                  provenance=type("StrAlias", (str,), {})("PUBLIC_SYNTHETIC"))
+
     def test_valid_fake_wav_and_pinned_provenance(self):
         out = synthesize_public_wav("Привет, Данте", self._profile(), enabled=True)
         self.assertEqual(out.schema, SCHEMA)
