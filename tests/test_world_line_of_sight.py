@@ -104,6 +104,20 @@ class TargetLineOfSightTests(unittest.TestCase):
             with self.subTest(opt_in=opt_in, label=label), self.assertRaises(ValueError):
                 self.read(opt_in=opt_in, visibility=label)
 
+    def test_hostile_visibility_comparisons_never_run(self):
+        class HostileLabel:
+            def __ne__(self, other):
+                raise AssertionError("hostile comparator executed")
+
+        class HostileString(str):
+            def __ne__(self, other):
+                raise AssertionError("str subclass comparator executed")
+
+        for label in (HostileLabel(), HostileString('PUBLIC_SYNTHETIC')):
+            with self.subTest(kind=type(label).__name__):
+                with self.assertRaisesRegex(ValueError, 'explicit PUBLIC_SYNTHETIC'):
+                    self.read(visibility=label)
+
     def test_reject_stale_expected_tick_and_revision(self):
         for kw in ({'expected_tick': 1}, {'expected_tick': True},
                    {'expected_tick': None}, {'expected_revision': 'bad'},
