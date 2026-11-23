@@ -38,6 +38,8 @@ def admit_trace(value: object) -> AdmittedTrace:
     """
     if type(value) is not dict:
         raise TraceEnvelopeError("expected plain object")
+    if len(value) != len(_ALLOWED):
+        raise TraceEnvelopeError("invalid field count")
 
     # Do not hash, compare, or look up caller-supplied keys until their exact
     # native type and bounded length have been established.
