@@ -124,6 +124,24 @@ class OccupancyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_raster(room, candidate)
 
+    def test_forged_envelope_keys_rejected_before_key_equality(self):
+        room = Room(2, 2)
+        baseline = rasterize(room, columns=2, rows=2)
+
+        class HostileKey(str):
+            def __eq__(self, other):
+                raise RuntimeError("untrusted key equality executed")
+
+            __hash__ = str.__hash__
+
+        for field in ("schema", "geometry_sha256", "columns"):
+            with self.subTest(field=field):
+                forged = dict(baseline)
+                value = forged.pop(field)
+                forged[HostileKey(field)] = value
+                with self.assertRaises(ValueError):
+                    verify_raster(room, forged)
+
     def test_malformed_rows_rejected_before_full_raster_recomputation(self):
         room = Room(2, 2)
         baseline = rasterize(room, columns=2, rows=2)
