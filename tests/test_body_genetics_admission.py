@@ -90,6 +90,43 @@ class BodyGeneticsAdmissionTests(unittest.TestCase):
         with self.assertRaises(BodyContractError):
             compile_body(bad, CHROMOSOME, 6)
 
+    def test_rejects_nested_container_subclasses_before_serialization(self):
+        class HostileDict(dict):
+            def items(self):
+                raise AssertionError("nested dict.items() hook must not execute")
+
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("nested list.__iter__ hook must not execute")
+
+        bad_chromosome = dict(CHROMOSOME)
+        bad_chromosome["inherited"] = HostileDict(CHROMOSOME["inherited"])
+        with self.assertRaisesRegex(BodyContractError, "native JSON value"):
+            validate_chromosome(bad_chromosome)
+
+        bad_chromosome = dict(CHROMOSOME)
+        bad_chromosome["inherited"] = HostileList([1, 2, 3])
+        with self.assertRaisesRegex(BodyContractError, "native JSON value"):
+            validate_chromosome(bad_chromosome)
+
+        bad_phenotype = dict(self.phenotype)
+        bad_phenotype["parameters"] = HostileDict(self.phenotype["parameters"])
+        with self.assertRaisesRegex(BodyContractError, "native JSON value"):
+            compile_body(bad_phenotype, CHROMOSOME, 6)
+
+    def test_rejects_aggregate_oversized_strings_before_json_encoding(self):
+        from unittest.mock import patch
+
+        oversized = dict(CHROMOSOME)
+        oversized["first_extra"] = "a" * 600_000
+        oversized["second_extra"] = "b" * 600_000
+        with patch(
+            "mojum.body_genetics.json.dumps",
+            side_effect=AssertionError("serialization must not run for oversized input"),
+        ):
+            with self.assertRaisesRegex(BodyContractError, "1 MiB JSON budget"):
+                validate_chromosome(oversized)
+
     def test_normal_compilation_is_deterministic_and_inputs_unchanged(self):
         original_phenotype = copy.deepcopy(self.phenotype)
         original_chromosome = copy.deepcopy(CHROMOSOME)
