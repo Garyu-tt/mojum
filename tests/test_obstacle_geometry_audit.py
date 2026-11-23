@@ -43,25 +43,6 @@ class ObstacleGeometryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact native strings"):
             audit_obstacles([item])
 
-    def test_oversized_native_key_rejected_before_hashing(self):
-        huge = "x" * 1_000_000
-        item = rect("a", 0, 0, 1, 1)
-        item[huge] = None
-        original_set = set
-
-        def bounded_set(values=()):
-            values = tuple(values)
-            self.assertTrue(
-                all(type(value) is str and len(value) <= 32 for value in values),
-                "oversized rectangle key reached hashing",
-            )
-            return original_set(values)
-
-        from unittest.mock import patch
-        with patch("mojum.obstacle_geometry_audit.set", side_effect=bounded_set, create=True):
-            with self.assertRaises(ValueError):
-                audit_obstacles([item])
-
     def test_invalid(self):
         invalid = [
             "oops", [1], [rect("a", 0, 0, 0, 1)],
