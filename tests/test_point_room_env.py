@@ -52,6 +52,16 @@ class PointRoomEnvTests(unittest.TestCase):
             trajectories.append([env.step((0.1, 0.0))[0] for _ in range(3)])
         self.assertEqual(trajectories[0], trajectories[1])
 
+    def test_large_nonnegative_seed_is_accepted_and_replayed(self):
+        for seed in (2**32, 2**64 + 17, 2**128):
+            with self.subTest(seed=seed):
+                env = self.make_env()
+                initial = env.reset(seed=seed)
+                self.assertEqual(initial[1]["seed"], seed)
+                action = env.step((0.1, 0.0))
+                self.assertEqual(env.reset(seed=seed), initial)
+                self.assertEqual(env.step((0.1, 0.0)), action)
+
     def test_invalid_action_never_advances_state(self):
         env = self.make_env()
         first, _ = env.reset()
@@ -65,7 +75,7 @@ class PointRoomEnvTests(unittest.TestCase):
 
     def test_empty_options_and_strict_seed(self):
         env = self.make_env()
-        for bad_seed in (True, -1, 2**64, "5"):
+        for bad_seed in (True, -1, 1.5, "5"):
             with self.assertRaises(ValueError):
                 env.reset(seed=bad_seed)
         for options in ({"unknown": 1}, [], ""):
