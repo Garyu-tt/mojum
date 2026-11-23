@@ -130,8 +130,10 @@ def _admit_json_tree(
         return
     raise GenesisError("Batch input must contain only native JSON values")
 
-def _bounded_json(value: Any, *, limit: int, label: str) -> str:
-    _admit_json_tree(value, max_bytes=limit)
+def _bounded_json(
+    value: Any, *, limit: int, label: str, budget: list[int] | None = None
+) -> str:
+    _admit_json_tree(value, max_bytes=limit, budget=budget)
     try:
         encoded = canonical(value)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -181,8 +183,17 @@ def apply_acquisition_batch(
         raise GenesisError(
             f"resulting ledger event budget exceeded (maximum {MAX_BASE_EVENTS})"
         )
-    snapshot_json = _bounded_json(snapshot, limit=MAX_BATCH_BYTES, label="snapshot")
-    events_json = _bounded_json(events, limit=MAX_BATCH_BYTES, label="events")
+    # The advertised 512 KiB limit covers the complete transaction input,
+    # not one independently-sized snapshot plus one independently-sized batch.
+    # Share both node and byte accounting so neither input can consume a second
+    # full allowance before canonical serialization.
+    batch_budget = [0, 0]
+    snapshot_json = _bounded_json(
+        snapshot, limit=MAX_BATCH_BYTES, label="snapshot", budget=batch_budget
+    )
+    events_json = _bounded_json(
+        events, limit=MAX_BATCH_BYTES, label="events", budget=batch_budget
+    )
     for index, event in enumerate(events):
         if type(event) is not dict:
             raise GenesisError(f"events[{index}] must be a native dict")
