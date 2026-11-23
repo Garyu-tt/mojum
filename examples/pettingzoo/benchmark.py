@@ -50,7 +50,13 @@ class DeterministicCoordinationEnv:
     def step(self, actions: dict[str, int]):
         if self._done:
             raise RuntimeError("step() called outside an active episode; call reset()")
-        if type(actions) is not dict or set(actions) != set(self.agents):
+        if type(actions) is not dict or len(actions) != len(self.agents):
+            raise ValueError("actions must contain exactly one action for each active agent")
+        # Bound cardinality and reject hostile/oversized keys before set hashing.
+        for agent in actions:
+            if type(agent) is not str or len(agent) > 16:
+                raise ValueError("action keys must be bounded native agent identifiers")
+        if set(actions) != set(self.agents):
             raise ValueError("actions must contain exactly one action for each active agent")
         if any(type(action) is not int or action not in (0, 1) for action in actions.values()):
             raise ValueError("each action must be the integer 0 or 1 (bool is not accepted)")
