@@ -102,8 +102,8 @@ def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
     # Inspect key types before constructing a set: hashing a str subclass can
     # execute caller code. Iterating dict.keys() does not hash the keys again.
     raw_keys = tuple(raw.keys())
-    if any(type(key) is not str for key in raw_keys):
-        raise ValueError("snapshot keys must be exact native strings")
+    if any(type(key) is not str or len(key) > 32 for key in raw_keys):
+        raise ValueError("snapshot keys must be bounded exact native strings")
     keys = set(raw_keys)
     forbidden = keys & _FORBIDDEN
     if forbidden:
