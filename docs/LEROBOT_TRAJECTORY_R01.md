@@ -40,11 +40,13 @@ tasks text, unknown columns or local absolute paths are copied into output.
 - Tabular columns: `episode_index`, `frame_index`, `timestamp`,
   `task_index`, `observation.state`, `action`. No default camera/video
   loading, even when image columns exist in the file.
-- Each accepted shard must have **complete contiguous episodes** starting at
+- Each accepted shard must have **contiguous episode segments starting at**
   `frame_index=0`, and strictly ordered episode IDs. LeRobot v3.0 permits
   multi-episode shards and episodes spanning shards. **Shards with an incomplete
-  leading episode are refused**; this is intentionally a conservative first
-  slice, not a full LeRobotDataset API replacement or multi-shard assembler.
+  leading episode are refused**. A final segment **may be incomplete**, because
+  episode-length metadata is not yet joined in this first slice; metrics are
+  only shard-segment diagnostics, **not** full-episode evaluations. This is
+  not a full LeRobotDataset API replacement or multi-shard assembler.
 - Timestamp drift from `frame_index/fps` must be within the documented
   tolerance in code. Atypical irregularly sampled datasets are refused.
 - Hard bounds: at most 128 KiB metadata, 128 MiB compressed shard, 8192 frame
@@ -55,7 +57,9 @@ tasks text, unknown columns or local absolute paths are copied into output.
 - Local paths only under the explicitly provided root: no `..`, absolute
   paths or symlinks. Only the `data/*.parquet` subtree is eligible.
 - Digest pins: SHA-256 of local metadata and compressed shard are included
-  in the replay provenance, alongside an immutable 40/64-hex dataset revision.
+  in replay provenance, alongside an immutable 40/64-hex dataset revision.
+  Optional `--asset-sha256` and `--model-sha256` pin independently obtained
+  asset/model content digests; neither models nor assets are loaded.
   Digests prove byte *consistency*, not license, consent or authenticity.
 - The held-out benchmark chooses disjoint episode IDs with SHA-256(seed, id);
   it compares a truly frozen **zero-action** baseline against a constant action
