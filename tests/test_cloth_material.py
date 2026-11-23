@@ -12,7 +12,7 @@ def valid_profile():
     return {
         "schema": "mojum.cloth.material-profile/1",
         "classification": "PUBLIC_SYNTHETIC",
-        "areal_density_ug_m2": 180_000,
+        "areal_density_ug_m2": 180_000_000,
         "thickness_nm": 250_000,
         "stretch_stiffness_uN_m": 12_000_000,
         "bend_stiffness_uNm": 75,
@@ -47,7 +47,7 @@ class HostileString(str):
 class ClothMaterialProfileTests(unittest.TestCase):
     def test_valid_profile_and_fixed_point_units(self):
         profile = validate_material_profile(valid_profile())
-        self.assertEqual(profile.areal_density_ug_m2, 180_000)
+        self.assertEqual(profile.areal_density_ug_m2, 180_000_000)
         self.assertEqual(profile.thickness_nm, 250_000)
         self.assertEqual(profile.schema, ClothMaterialProfile.SCHEMA)
         self.assertEqual(len(profile.fingerprint), 64)
