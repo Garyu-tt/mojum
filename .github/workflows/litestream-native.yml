@@ -1,0 +1,48 @@
+name: Litestream native local archive R0.1
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/litestream_cold_archive.py"
+      - "tests/test_litestream_*.py"
+      - "docs/LITESTREAM_COLD_ARCHIVE_R01.md"
+      - ".github/workflows/litestream-native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  litestream-native:
+    name: Litestream v0.5.18 real LTX (Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install only SHA-verified pinned upstream binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/litestream"
+          cd "$RUNNER_TEMP/litestream"
+          base="https://github.com/benbjohnson/litestream/releases/download/v0.5.18"
+          curl --fail --location --silent --show-error --retry 3 "$base/checksums.txt" -o checksums.txt
+          echo "0de6aceb1fc2096f4f7c08aa0a046005fa767378497f4fe4913442999ad69ce2  checksums.txt" | sha256sum -c -
+          curl --fail --location --silent --show-error --retry 3 "$base/litestream-0.5.18-linux-x86_64.tar.gz" -o litestream-0.5.18-linux-x86_64.tar.gz
+          grep -E '[[:space:]]litestream-0\.5\.18-linux-x86_64\.tar\.gz$' checksums.txt | sha256sum -c -
+          tar -xzf litestream-0.5.18-linux-x86_64.tar.gz litestream
+          chmod 0700 litestream
+          echo "MOJUM_LITESTREAM_BIN=$RUNNER_TEMP/litestream/litestream" >> "$GITHUB_ENV"
+          echo "MOJUM_LITESTREAM_SHA=$(sha256sum litestream | awk '{print $1}')" >> "$GITHUB_ENV"
+          ./litestream version
+      - name: Offline fake-runner and real native LTX replay
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p test_litestream_cold_archive.py -v
+          python -m unittest discover -s tests -p test_litestream_real_optional.py -v
