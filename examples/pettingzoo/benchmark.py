@@ -5,6 +5,7 @@ import argparse
 import json
 import random
 from itertools import islice
+from numbers import Integral
 from typing import Iterable
 
 
@@ -132,7 +133,16 @@ def make_pettingzoo_env(horizon: int = 10):
             return observations, infos
 
         def step(self, actions):
-            result = self._core.step(actions)
+            # Gymnasium Discrete.sample() returns NumPy integer scalars;
+            # normalize those at the optional adapter boundary while keeping
+            # the stdlib core's exact-native-int contract strict.
+            if type(actions) is not dict:
+                return self._core.step(actions)
+            if any(isinstance(action, bool) or not isinstance(action, Integral)
+                   for action in actions.values()):
+                raise ValueError("each action must be an integer scalar")
+            normalized_actions = {agent: int(action) for agent, action in actions.items()}
+            result = self._core.step(normalized_actions)
             self.agents = list(self._core.agents)
             return result
 
