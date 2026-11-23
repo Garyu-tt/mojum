@@ -24,7 +24,7 @@ def samples(raw: bytes) -> tuple[int, ...]:
 
 class PCM16GainTests(unittest.TestCase):
     def call(self, raw=pcm(1), **overrides):
-        opts = {"sample_rate_hz": 16000, "gain_numerator": 1}
+        opts = {"sample_rate_hz": 16000, "gain_numerator": 1, "visibility": VISIBILITY}
         opts.update(overrides)
         return apply_pcm16_gain(raw, **opts)
 
@@ -106,6 +106,17 @@ class PCM16GainTests(unittest.TestCase):
             with self.subTest(num=str(num)[:12], den=str(den)[:12]):
                 with self.assertRaises(AudioGainError):
                     self.call(gain_numerator=num, gain_denominator=den)
+
+    def test_omitted_visibility_fails_closed(self):
+        with self.assertRaisesRegex(AudioGainError, "PUBLIC_SYNTHETIC"):
+            apply_pcm16_gain(pcm(0), sample_rate_hz=16000,
+                             gain_numerator=1)
+        with self.assertRaises(AudioGainError):
+            apply_pcm16_gain(pcm(0), sample_rate_hz=16000,
+                             gain_numerator=1, visibility=None)
+        accepted = apply_pcm16_gain(pcm(0), sample_rate_hz=16000,
+                                    gain_numerator=1, visibility=VISIBILITY)
+        self.assertEqual(accepted.pcm, pcm(0))
 
     def test_reject_forged_provenance(self):
         class StrChild(str):
