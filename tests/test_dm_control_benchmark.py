@@ -43,11 +43,20 @@ class ProbeConfigTests(unittest.TestCase):
         self.assertEqual(xml_a, xml_b)
         root = ET.fromstring(xml_a)
         self.assertEqual(root.tag, "mujoco")
-        self.assertEqual(len(root.findall(".//joint")), 2)
+        self.assertEqual(len(root.findall("./worldbody/body/joint")), 2)
         self.assertEqual(len(root.findall(".//actuator/motor")), 2)
         self.assertEqual(len(root.findall(".//geom[@type='box']")), 2)
         self.assertNotIn("file=", xml_a)
         self.assertNotIn("http://", xml_a)
+
+    def test_config_is_slotted_and_room_dimensions_are_bounded(self):
+        config = benchmark.ProbeConfig()
+        with self.assertRaises(AttributeError):
+            config.__dict__
+        with self.assertRaises(AttributeError):
+            config.steps = benchmark.MAX_STEPS + 1
+        with self.assertRaisesRegex(ValueError, "bounded point-body profile"):
+            benchmark.ProbeConfig(width_m=benchmark.MAX_ROOM_EDGE_M + 1)
 
     def test_config_digest_binds_workload_parameters(self):
         first = benchmark._config_payload(benchmark.ProbeConfig(steps=120))
