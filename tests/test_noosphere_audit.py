@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from io import StringIO
 import json
 import sqlite3
@@ -124,7 +124,7 @@ class NoosphereAuditTests(unittest.TestCase):
             audit_noosphere(path, "synthetic-dante")
 
     def test_noncanonical_wire_fails_even_when_hash_matches(self):
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("DROP TRIGGER noosphere_no_update")
             raw = db.execute("SELECT wire_json FROM events WHERE seq=1").fetchone()[0]
             # Same object/hash, different raw wire: strict_wire must catch it.
@@ -133,14 +133,14 @@ class NoosphereAuditTests(unittest.TestCase):
             audit_noosphere(self.db, "synthetic-dante")
 
     def test_broken_index_cannot_be_claimed_clean(self):
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("DROP TRIGGER noosphere_no_update")
             db.execute("UPDATE events SET visibility='PUBLIC' WHERE seq=1")
         with self.assertRaises(NoosphereAuditError):
             audit_noosphere(self.db, "synthetic-dante")
 
     def test_giant_foreign_wire_is_rejected_before_json_parsing(self):
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("DROP TRIGGER noosphere_no_update")
             db.execute("UPDATE events SET wire_json=? WHERE seq=1", ("z" * 128001,))
         with patch("mojum.noosphere._loads_wire",
@@ -165,7 +165,7 @@ class NoosphereAuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "PASS")
 
     def test_failure_output_is_fixed_and_payload_free(self):
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("DROP TRIGGER noosphere_no_update")
             db.execute("UPDATE events SET wire_json=? WHERE seq=1",
                        ("PRIVATE_SECRET_NEVER_PRINT",))
