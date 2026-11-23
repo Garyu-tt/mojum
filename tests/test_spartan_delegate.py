@@ -44,6 +44,32 @@ class DelegationTests(unittest.TestCase):
             ticket.routing_packet("http://external")
         self.assertEqual(sd.states(self.db)["pending"], 1)
 
+    def test_manual_ticket_cannot_export_unvalidated_dispatch_or_deadline(self):
+        valid = self.ticket()
+        forged = (
+            sd.Ticket(valid.task_id, valid.worker_id, valid.attempt,
+                      "SECRET PRIVATE TOKEN", valid.lease_until),
+            sd.Ticket(valid.task_id, valid.worker_id, valid.attempt,
+                      "f" * 64, valid.lease_until),
+            sd.Ticket(valid.task_id, 301, valid.attempt,
+                      valid.dispatch_id, valid.lease_until),
+            sd.Ticket(valid.task_id, valid.worker_id, 4,
+                      valid.dispatch_id, valid.lease_until),
+            sd.Ticket(valid.task_id, valid.worker_id, valid.attempt,
+                      valid.dispatch_id, -1),
+        )
+        for ticket in forged:
+            with self.subTest(ticket=ticket), self.assertRaises(sd.DelegationError):
+                ticket.routing_packet("ray")
+        class SpoofBackend(int):
+            def __eq__(self, other):
+                return other == "ray"
+            def __ne__(self, other):
+                return not self.__eq__(other)
+        with self.assertRaises(sd.DelegationError):
+            valid.routing_packet(SpoofBackend(7))
+        self.assertEqual(valid.routing_packet("fixture")["dispatch_id"], valid.dispatch_id)
+
     def test_start_report_and_single_pr_intent(self):
         ticket = self.ticket()
         self.assertTrue(sd.start(self.db, ticket, 112))
