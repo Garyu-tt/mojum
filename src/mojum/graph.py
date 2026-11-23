@@ -237,7 +237,9 @@ def validate(graph):
             raise GraphError("Duplicate node ID: " + n["id"])
         kind = n.get("kind")
         if type(kind) is not str or kind not in PORTS:
-            raise GraphError("Unsupported node kind: " + str(kind))
+            # Do not stringify malformed caller data: a bounded but very large
+            # native integer can make int.__str__ raise before GraphError escapes.
+            raise GraphError("Unsupported node kind")
         if type(n.get("config")) is not dict or type(n.get("notes")) is not dict:
             raise GraphError("Every node needs config and notes objects")
         purpose = n["notes"].get("purpose")
