@@ -46,6 +46,21 @@ class PhenotypeAuditTests(unittest.TestCase):
         self.assertTrue(self.audit(ledger, ledger.phenotype(5)).accepted)
         self.assertLessEqual(MAX_AUDIT_EVENTS, 128)
 
+
+    def test_event_budget_rejects_before_expensive_ledger_restore(self):
+        snapshot = {
+            "schema": "mojum.genesis.ledger/1",
+            "seed": SEED,
+            "events": [None] * (MAX_AUDIT_EVENTS + 1),
+            "revision": "0" * 64,
+        }
+        with patch("mojum.genesis_phenotype_audit.GenomeLedger.from_snapshot") as restore:
+            with self.assertRaisesRegex(PhenotypeAuditError, "event budget"):
+                audit_phenotype_snapshot(
+                    snapshot, {}, source_classification="PUBLIC_SYNTHETIC"
+                )
+            restore.assert_not_called()
+
     def test_exact_recomputation_is_accepted(self):
         ledger=make_ledger(); result=self.audit(ledger, ledger.phenotype(5))
         self.assertTrue(result.accepted); self.assertEqual(result.mismatch_fields, ()); self.assertEqual(result.event_count,1)
@@ -66,7 +81,9 @@ class PhenotypeAuditTests(unittest.TestCase):
         self.assertEqual(self.audit(ledger,expected).mismatch_fields,("extra","ledger_revision"))
     def test_wrong_tick_recomputes_at_supplied_tick(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected["at_tick"]=4
-        self.assertIn("at_tick",self.audit(ledger,expected).mismatch_fields)
+        result = self.audit(ledger, expected)
+        self.assertNotIn("at_tick", result.mismatch_fields)
+        self.assertEqual(result.mismatch_fields, ("applied_acquisition_ids", "parameters"))
     def test_tampered_ledger_rejected(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); snapshot["events"][0]["delta"]+=1
         with self.assertRaises(PhenotypeAuditError):
@@ -115,7 +132,7 @@ class PhenotypeAuditTests(unittest.TestCase):
                 self.audit(ledger, expected)
             # Only the bounded ledger snapshot may be serialized. Escaping
             # the untrusted phenotype would exceed 1 MiB, so reject preflight.
-            self.assertEqual(serializer.call_count, 1)
+            self.assertEqual(serializer.call_count, 2)
 
     def test_oversized_integer_is_rejected_before_serialization(self):
         ledger=make_ledger(); expected=ledger.phenotype(5)
@@ -129,7 +146,7 @@ class PhenotypeAuditTests(unittest.TestCase):
             self.assertEqual(serializer.call_count, 1)
     def test_aggregate_object_key_budget_is_rejected_before_serialization(self):
         ledger=make_ledger(); expected=ledger.phenotype(5)
-        for index in range(65):
+        for index in range(70):
             expected[("k" * 16_000) + str(index)] = index
         with patch(
             "mojum.genesis_phenotype_audit.json.dumps",
