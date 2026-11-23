@@ -209,9 +209,9 @@ class NestedGraphEditorTests(unittest.TestCase):
         # Quotes and backslashes also require escaping; both keys and values
         # must be charged before json.dumps can allocate the encoded form.
         cases = (
-            {"value": "\\x00" * 180_000},
-            {"key\\\\": "safe"},
-            {"safe": "\\\\" * 300_000},
+            {"value": chr(0) * 180_000},
+            {("key" + chr(92) * 180_000): "safe"},
+            {"safe": chr(92) * 300_000},
         )
         for value in cases:
             with self.subTest(case=list(value)):
