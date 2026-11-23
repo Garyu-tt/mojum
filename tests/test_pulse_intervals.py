@@ -2,15 +2,23 @@ import hashlib
 import json
 import unittest
 
-from mojum.pulse_intervals import PulseIntervalError, analyze_pulse_intervals
+from mojum.pulse_intervals import (
+    PulseIntervalError,
+    analyze_pulse_intervals,
+)
 
 
 class PulseIntervalsTests(unittest.TestCase):
     def analyze(self, pulses, *, ticks=None, dt_ns=10_000_000):
         if ticks is None:
             ticks = list(range(len(pulses)))
-        frames = [{"tick": tick, "pulse": pulse} for tick, pulse in zip(ticks, pulses)]
-        return analyze_pulse_intervals(frames, dt_ns=dt_ns, classification="PUBLIC_SYNTHETIC")
+        frames = [
+            {"tick": tick, "pulse": pulse}
+            for tick, pulse in zip(ticks, pulses)
+        ]
+        return analyze_pulse_intervals(
+            frames, dt_ns=dt_ns, classification="PUBLIC_SYNTHETIC"
+        )
 
     def test_repeated_regular_edges_and_exact_statistics(self):
         report = self.analyze([False, True, True, False, False, True, False, False, True])
@@ -34,7 +42,10 @@ class PulseIntervalsTests(unittest.TestCase):
         self.assertEqual(report["intervals_ns"], [20_000_000])
 
     def test_gap_splits_continuity_and_excludes_cross_gap_interval(self):
-        report = self.analyze([False, True, False, True, False, True], ticks=[0, 1, 2, 3, 8, 9])
+        report = self.analyze(
+            [False, True, False, True, False, True],
+            ticks=[0, 1, 2, 3, 8, 9],
+        )
         self.assertEqual(report["missing_frame_count"], 4)
         self.assertEqual(report["rising_edge_count"], 3)
         self.assertEqual(report["intervals_ns"], [20_000_000])
@@ -73,6 +84,17 @@ class PulseIntervalsTests(unittest.TestCase):
                 with self.assertRaises(PulseIntervalError):
                     analyze_pulse_intervals(frames, dt_ns=10_000_000, classification="PUBLIC_SYNTHETIC")
 
+    def test_rejects_string_subclass_keys_before_key_set_comparison(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise RuntimeError("hostile equality must not run")
+
+        frames = [{HostileKey("tick"): 0, "pulse": False}]
+        with self.assertRaises(PulseIntervalError):
+            analyze_pulse_intervals(frames, dt_ns=10_000_000, classification="PUBLIC_SYNTHETIC")
+
     def test_rejects_duplicate_or_decreasing_ticks(self):
         with self.assertRaises(PulseIntervalError):
             self.analyze([False, True, False], ticks=[0, 1, 1])
@@ -80,8 +102,7 @@ class PulseIntervalsTests(unittest.TestCase):
             self.analyze([False, True, False], ticks=[2, 1, 3])
 
     def test_rejects_empty_oversized_and_wrong_container(self):
-        cases = [[], {}, [{"tick": i, "pulse": False} for i in range(10_001)]]
-        for frames in cases:
+        for frames in ([], {}, [{"tick": i, "pulse": False} for i in range(10_001)]):
             with self.subTest(length=(len(frames) if hasattr(frames, "__len__") else None)):
                 with self.assertRaises(PulseIntervalError):
                     analyze_pulse_intervals(frames, dt_ns=10_000_000, classification="PUBLIC_SYNTHETIC")
