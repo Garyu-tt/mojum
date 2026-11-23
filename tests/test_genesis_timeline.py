@@ -2,6 +2,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.genesis import ACQUISITION_SCHEMA, GENOTYPE_SCHEMA, GenesisError, GenomeLedger, sha256
 from mojum.genesis_timeline import SCHEMA, attest_timeline
@@ -130,9 +131,45 @@ class GenesisTimelineTests(unittest.TestCase):
         ledger = GenomeLedger(SEED)
         for i in range(260):
             ledger.append(acquisition(str(i), i+1, "heartbeat_bpm", 0, 200+i), ledger.revision)
-        with self.assertRaisesRegex(GenesisError, "boundary budget"):
-            attest_timeline(ledger.snapshot(), start_tick=0,
-                            through_tick=300, public_synthetic=True)
+        # The quota must reject before expensive per-event replay, rather
+        # than spending unbounded CPU validating a result it cannot emit.
+        with patch.object(GenomeLedger, "from_snapshot",
+                          side_effect=AssertionError("replay should not run")):
+            with self.assertRaisesRegex(GenesisError, "boundary budget"):
+                attest_timeline(ledger.snapshot(), start_tick=0,
+                                through_tick=300, public_synthetic=True)
+
+    def test_oversized_event_list_uses_canonical_bounded_rejection(self):
+        snap = self.ledger.snapshot()
+        # The refusal-only fast path must not linearly scan an arbitrarily
+        # oversized untrusted list ahead of GenomeLedger's O(1) size gate.
+        snap["events"] = [{"valid_from_tick": 1}] * (GenomeLedger.MAX_EVENTS + 1)
+        with self.assertRaisesRegex(GenesisError, "bounded list"):
+            attest_timeline(snap, start_tick=0, through_tick=100,
+                            public_synthetic=True)
+
+    def test_preflight_never_compares_hostile_snapshot_or_event_keys(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                raise AssertionError("preflight invoked hostile key equality")
+
+        event_keys = self.ledger.snapshot()
+        event_keys["events"] = [{HostileKey("valid_from_tick"): 7}]
+        snapshot_keys = self.ledger.snapshot()
+        original_events = snapshot_keys.pop("events")
+        snapshot_keys[HostileKey("events")] = original_events
+        # Ambiguous key types are not interpreted by the optimization. They
+        # must continue to the authoritative validator for rejection.
+        for snap in (event_keys, snapshot_keys):
+            with self.subTest(snapshot=snap is snapshot_keys):
+                with patch.object(GenomeLedger, "from_snapshot",
+                                  side_effect=GenesisError("canonical verifier reached")):
+                    with self.assertRaisesRegex(GenesisError, "canonical verifier reached"):
+                        attest_timeline(snap, start_tick=0, through_tick=30,
+                                        public_synthetic=True)
 
     def test_dense_same_tick_events_count_as_one_boundary(self):
         ledger = GenomeLedger(SEED)
