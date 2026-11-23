@@ -36,6 +36,10 @@ def _window(samples: Sequence[float], sample_rate_hz: int) -> tuple[list[float],
     pcm = []
     energy = 0.0
     for sample in samples:
+        # __len__ can lie (or a generator can change during iteration).
+        # Never feed more samples to native code than the admitted budget.
+        if len(pcm) >= count:
+            raise SpeechBridgeError("PCM sample count changed during iteration")
         if isinstance(sample, (str, bytes, bool)):
             raise SpeechBridgeError("invalid PCM sample")
         try:
@@ -46,6 +50,8 @@ def _window(samples: Sequence[float], sample_rate_hz: int) -> tuple[list[float],
             raise SpeechBridgeError("PCM must be finite normalized [-1, 1]")
         pcm.append(number)
         energy += number * number
+    if len(pcm) != count:
+        raise SpeechBridgeError("PCM sample count changed during iteration")
     duration_ms = (count * 1000 + SAMPLE_RATE_HZ - 1) // SAMPLE_RATE_HZ
     return pcm, math.sqrt(energy / count), duration_ms
 
