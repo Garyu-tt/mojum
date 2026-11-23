@@ -46,6 +46,16 @@ class InterpolatedPose:
 def _fail(message: str) -> None:
     raise PoseInterpolationError(message)
 
+def _bounded_finite_float(value: int | float, label: str, maximum: float) -> float:
+    """Convert a native number without leaking conversion overflow."""
+    try:
+        converted = float(value)
+    except (OverflowError, ValueError):
+        _fail(f"{label} must be finite and within its numeric bound")
+    if not math.isfinite(converted) or abs(converted) > maximum:
+        _fail(f"{label} must be finite and within its numeric bound")
+    return converted
+
 def _exact_keys(value: Any, expected: frozenset[str], label: str) -> dict[str, Any]:
     if type(value) is not dict:
         _fail(f"{label} must be an exact built-in dict")
@@ -88,9 +98,10 @@ def _validate_frame(raw: Any, label: str) -> dict[str, Any]:
             _fail(f"{label} joint coordinates must be exact 3-tuples")
         if any(type(component) not in (int, float) for component in vector):
             _fail(f"{label} coordinates must be native numbers (bool is not numeric)")
-        point = tuple(float(component) for component in vector)
-        if any(not math.isfinite(component) or abs(component) > _MAX_ABS_COORDINATE for component in point):
-            _fail(f"{label} coordinates must be finite and within the world bound")
+        point = tuple(
+            _bounded_finite_float(component, f"{label} coordinate", _MAX_ABS_COORDINATE)
+            for component in vector
+        )
         detached[name] = point
     frame["joints"] = detached
     return frame
@@ -106,7 +117,10 @@ def interpolate_measured_poses(frame_a: Any, frame_b: Any, *, target_timestamp_n
     b = _validate_frame(frame_b, "frame_b")
     if type(target_timestamp_ns) is not int or not 0 <= target_timestamp_ns <= 2**63 - 1:
         _fail("target_timestamp_ns must be a bounded native integer")
-    if type(max_joint_delta) not in (int, float) or not math.isfinite(float(max_joint_delta)) or not 0 < max_joint_delta <= 100.0:
+    if type(max_joint_delta) not in (int, float):
+        _fail("max_joint_delta must be a finite positive native number <= 100")
+    max_delta = _bounded_finite_float(max_joint_delta, "max_joint_delta", 100.0)
+    if not 0 < max_delta <= 100.0:
         _fail("max_joint_delta must be a finite positive native number <= 100")
     if a["frame_id"] == b["frame_id"]:
         _fail("source frame identifiers must differ")
@@ -122,7 +136,6 @@ def interpolate_measured_poses(frame_a: Any, frame_b: Any, *, target_timestamp_n
     if names_a != names_b:
         _fail("source frames must have identical joint inventories")
     names = tuple(sorted(names_a))
-    max_delta = float(max_joint_delta)
     ratio = (target_timestamp_ns - a["timestamp_ns"]) / (b["timestamp_ns"] - a["timestamp_ns"])
     interpolated: list[tuple[float, float, float]] = []
     for name in names:
