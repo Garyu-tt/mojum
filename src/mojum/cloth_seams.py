@@ -141,8 +141,11 @@ def validate_seams(vertices: list, triangles: list, seams: list, *,
     ids, endpoints, reports, all_gaps = set(), set(), [], []
     total_pairs = 0
     for si, seam in enumerate(seams):
-        if type(seam) is not dict or set(seam) != {"id", "pairs"}:
-            raise ClothSeamError(f"seam {si} must have exactly id and pairs")
+        if type(seam) is not dict:
+            raise ClothSeamError(f"seam {si} must be a native dictionary")
+        keys = list(seam.keys())
+        if len(keys) != 2 or any(type(key) is not str for key in keys) or set(keys) != {"id", "pairs"}:
+            raise ClothSeamError(f"seam {si} must have exactly native-string keys id and pairs")
         sid, pairs = seam["id"], seam["pairs"]
         if type(sid) is not str or not _ID.fullmatch(sid) or sid in ids:
             raise ClothSeamError(f"seam {si} has an invalid or duplicate id")
