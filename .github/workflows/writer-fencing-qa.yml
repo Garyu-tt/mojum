@@ -1,0 +1,46 @@
+name: Writer fencing QA regression
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/writer_fencing.py"
+      - "tests/test_writer_fencing.py"
+      - ".github/workflows/writer-fencing-qa.yml"
+  push:
+    branches:
+      - "qa/1070-max-counter-regression-20261123"
+    paths:
+      - "src/mojum/writer_fencing.py"
+      - "tests/test_writer_fencing.py"
+      - ".github/workflows/writer-fencing-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    name: CPython ${{ matrix.python-version }} writer-fencing tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Compile implementation and tests
+        env:
+          PYTHONPATH: src
+        run: python -m py_compile src/mojum/writer_fencing.py tests/test_writer_fencing.py
+      - name: Run focused standard-library tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_writer_fencing.py' -v
