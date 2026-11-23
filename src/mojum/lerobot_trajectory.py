@@ -76,6 +76,10 @@ def _integer(value: Any, field: str, minimum: int, maximum: int) -> int:
 def _position(value: Any, field: str) -> float:
     if type(value) not in (int, float):
         raise TrajectoryError(f"{field} must be a native int or float")
+    if type(value) is int and value.bit_length() > 20:
+        # The allowed magnitude is below 2**20; reject giant native integers
+        # before asking Python to convert them to binary floating point.
+        raise TrajectoryError(f"{field} must be finite and within the supported magnitude")
     try:
         number = float(value)
     except (OverflowError, ValueError):
