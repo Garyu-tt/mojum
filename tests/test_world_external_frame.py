@@ -1,5 +1,6 @@
 """Offline external-world observation admission: no network or device use."""
 import copy
+import hashlib
 import json
 import unittest
 
@@ -114,6 +115,45 @@ class ExternalFrameTests(unittest.TestCase):
         frame["objects"][0] = {"id": "x", "x_m": 0, "y_m": 0, "visible": True, 7: 3}
         with self.assertRaises(ValueError):
             self.admit(frame)
+
+    def test_rehashed_predecessor_still_needs_valid_lineage(self):
+        # Hash-consistent receipts are NOT authenticated; even their own shape
+        # must be rejected unless genesis/non-genesis lineage is coherent.
+        def rehash(receipt):
+            def digest(value):
+                wire = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=True, allow_nan=False).encode("ascii")
+                return hashlib.sha256(wire).hexdigest()
+
+            receipt["frame_sha256"] = digest(receipt["frame"])
+            receipt["admission_sha256"] = digest({
+                key: value for key, value in receipt.items()
+                if key != "admission_sha256"
+            })
+            return receipt
+
+        first = self.admit()
+        second = self.admit(previous=first, tick=1)
+        third = self.admit(previous=second, tick=2)
+        self.assertEqual(third["parent_sha256"], second["admission_sha256"])
+
+        forged_genesis = copy.deepcopy(first)
+        forged_genesis["parent_sha256"] = "a" * 64
+        rehash(forged_genesis)
+        with self.assertRaisesRegex(ValueError, "predecessor"):
+            self.admit(previous=forged_genesis, tick=1)
+
+        orphan_second = copy.deepcopy(second)
+        orphan_second["parent_sha256"] = None
+        rehash(orphan_second)
+        with self.assertRaisesRegex(ValueError, "predecessor"):
+            self.admit(previous=orphan_second, tick=2)
+
+        wrong_sequence = copy.deepcopy(first)
+        wrong_sequence["frame"]["sequence"] = 7
+        rehash(wrong_sequence)
+        with self.assertRaisesRegex(ValueError, "predecessor"):
+            self.admit(self.frame(1, 8), previous=wrong_sequence, tick=1)
 
     def test_tampered_previous_digest_and_frame(self):
         first = self.admit()
