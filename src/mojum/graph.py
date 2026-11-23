@@ -30,6 +30,32 @@ class GraphError(ValueError):
     pass
 
 
+
+def _json_string_wire_size(value):
+    """Exact UTF-8 size of a compact JSON string with ensure_ascii=False."""
+    size = 2
+    short_escapes = {8, 9, 10, 12, 13}
+    for char in value:
+        code = ord(char)
+        if code in (34, 92):
+            size += 2
+        elif code < 0x20:
+            size += 2 if code in short_escapes else 6
+        elif 0xD800 <= code <= 0xDFFF:
+            raise GraphError("Graph JSON text must be valid UTF-8")
+        elif code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > MAX_GRAPH_BYTES:
+            raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+    return size
+
+
 def _require_native_json_tree(value):
     """Admit only a bounded, detached-shape JSON tree made from exact built-ins.
 
@@ -42,7 +68,13 @@ def _require_native_json_tree(value):
     pending = [(value, 1)]
     seen_containers = set()
     node_count = 0
-    text_bytes = 0
+    wire_bytes = 0
+
+    def add_wire_bytes(amount):
+        nonlocal wire_bytes
+        wire_bytes += amount
+        if wire_bytes > MAX_GRAPH_BYTES:
+            raise GraphError("Graph JSON exceeds 256 KiB byte limit")
 
     try:
         while pending:
@@ -61,18 +93,14 @@ def _require_native_json_tree(value):
                 seen_containers.add(identity)
                 if len(current) > MAX_GRAPH_TREE_NODES:
                     raise GraphError("Graph JSON object exceeds node budget")
+                add_wire_bytes(2 + max(0, len(current) - 1) + len(current))
                 for key, child in current.items():
                     node_count += 1
                     if node_count > MAX_GRAPH_TREE_NODES:
                         raise GraphError("Graph JSON tree exceeds node budget")
                     if type(key) is not str:
                         raise GraphError("Graph JSON object keys must be exact strings")
-                    try:
-                        text_bytes += len(key.encode("utf-8", errors="strict"))
-                    except UnicodeEncodeError as exc:
-                        raise GraphError("Graph JSON text must be valid UTF-8") from exc
-                    if text_bytes > MAX_GRAPH_BYTES:
-                        raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+                    add_wire_bytes(_json_string_wire_size(key))
                     pending.append((child, depth + 1))
             elif kind is list:
                 identity = id(current)
@@ -81,24 +109,27 @@ def _require_native_json_tree(value):
                 seen_containers.add(identity)
                 if len(current) > MAX_GRAPH_TREE_NODES:
                     raise GraphError("Graph JSON array exceeds node budget")
+                add_wire_bytes(2 + max(0, len(current) - 1))
                 pending.extend((child, depth + 1) for child in current)
             elif kind is str:
-                try:
-                    text_bytes += len(current.encode("utf-8", errors="strict"))
-                except UnicodeEncodeError as exc:
-                    raise GraphError("Graph JSON text must be valid UTF-8") from exc
-                if text_bytes > MAX_GRAPH_BYTES:
-                    raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+                add_wire_bytes(_json_string_wire_size(current))
             elif kind is int:
-                # Keep decimal conversion/serialization bounded even for a
-                # direct caller that bypasses load_graph()'s byte limit.
+                # Keep decimal conversion bounded even if an embedding process
+                # disables Python's default integer-to-string digit limit.
                 if current.bit_length() > MAX_GRAPH_BYTES * 3:
                     raise GraphError("Graph JSON integer exceeds byte budget")
+                try:
+                    add_wire_bytes(len(str(current)))
+                except ValueError as exc:
+                    raise GraphError("Graph JSON integer exceeds byte budget") from exc
             elif kind is float:
                 if not math.isfinite(current):
                     raise GraphError("Graph JSON numbers must be finite")
-            elif kind is bool or current is None:
-                pass
+                add_wire_bytes(len(repr(current)))
+            elif kind is bool:
+                add_wire_bytes(4 if current else 5)
+            elif current is None:
+                add_wire_bytes(4)
             else:
                 raise GraphError("Graph contains a non-native JSON value")
     except GraphError:
