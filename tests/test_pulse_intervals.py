@@ -73,6 +73,20 @@ class PulseIntervalsTests(unittest.TestCase):
                 with self.assertRaises(PulseIntervalError):
                     analyze_pulse_intervals(frames, dt_ns=10_000_000, classification="PUBLIC_SYNTHETIC")
 
+    def test_rejects_hostile_string_subclass_keys_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("tick")
+
+            def __eq__(self, _other):
+                raise RuntimeError("hostile key equality must not run")
+
+        frame = {HostileKey("tick"): 0, "pulse": False}
+        with self.assertRaises(PulseIntervalError):
+            analyze_pulse_intervals(
+                [frame], dt_ns=10_000_000, classification="PUBLIC_SYNTHETIC"
+            )
+
     def test_rejects_duplicate_or_decreasing_ticks(self):
         with self.assertRaises(PulseIntervalError):
             self.analyze([False, True, False], ticks=[0, 1, 1])
