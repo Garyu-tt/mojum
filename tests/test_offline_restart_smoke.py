@@ -102,6 +102,16 @@ class RestartAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(SmokeFailure, "could not complete"):
             run_audit(runner=timeout)
 
+    @unittest.skipUnless(
+        (Path(__file__).resolve().parents[1] / "src/mojum/aquarium.py").is_file(),
+        "full Mojum source checkout is required",
+    )
+    def test_real_aquarium_cli_cold_restart(self):
+        report = run_audit(first_ticks=2, second_ticks=1, timeout=60)
+        self.assertEqual(report["result"], "PASS")
+        self.assertEqual(report["final_tick"], 3)
+        self.assertEqual(report["stored_events"], 4)
+
     def test_real_stdout_shape(self):
         state = _checkpoint(_fixture(3), tick=3, events=4)
         self.assertEqual(state["stored_events"], 4)
