@@ -1,4 +1,5 @@
-import copy, unittest
+import copy, unittest, json
+from unittest.mock import patch
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
 from mojum.genesis_phenotype_audit import MAX_INPUT_BYTES, PhenotypeAuditError, audit_phenotype_snapshot
 
@@ -67,6 +68,32 @@ class PhenotypeAuditTests(unittest.TestCase):
             expected[f"padding_{index}"]="x"*16_384
         with self.assertRaisesRegex(PhenotypeAuditError,"byte budget"):
             self.audit(ledger,expected)
+
+    def test_json_escape_expansion_is_bounded_before_serialization(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        control = "\\x01" * 16_384
+        for index in range(11):
+            expected[f"control_{index}"] = control
+        with patch(
+            "mojum.genesis_phenotype_audit.json.dumps",
+            wraps=json.dumps,
+        ) as serializer:
+            with self.assertRaisesRegex(PhenotypeAuditError, "JSON byte budget"):
+                self.audit(ledger, expected)
+            # Only the bounded ledger snapshot may be serialized. Escaping
+            # the untrusted phenotype would exceed 1 MiB, so reject preflight.
+            self.assertEqual(serializer.call_count, 1)
+
+    def test_oversized_integer_is_rejected_before_serialization(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        expected["oversized_integer"] = 10 ** 10_000
+        with patch(
+            "mojum.genesis_phenotype_audit.json.dumps",
+            wraps=json.dumps,
+        ) as serializer:
+            with self.assertRaisesRegex(PhenotypeAuditError, "integer is out of range"):
+                self.audit(ledger, expected)
+            self.assertEqual(serializer.call_count, 1)
     def test_result_detached_from_caller_mutations(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
         result=audit_phenotype_snapshot(snapshot,expected,source_classification="PUBLIC_SYNTHETIC")
