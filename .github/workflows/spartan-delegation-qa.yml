@@ -1,0 +1,38 @@
+name: Spartan delegated lease CPU QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/spartan_delegate.py'
+      - 'tools/spartan_delegate_bench.py'
+      - 'tools/spartan_coordinator.py'
+      - 'tests/test_spartan_delegate.py'
+      - '.github/workflows/spartan-delegation-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delegated-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Confirm exact source ref
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Check lease fencing and forged route packets
+        run: python -m unittest discover -s tests -p test_spartan_delegate.py -v
+      - name: Exercise 300 synthetic CPU-only leases
+        run: python -m tools.spartan_delegate_bench
