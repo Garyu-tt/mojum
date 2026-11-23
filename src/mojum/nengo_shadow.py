@@ -33,7 +33,9 @@ def validate_fixture(fixture):
     keys = {"schema", "source", "seed", "dt_ns", "inputs_milli", "gain_milli", "bias_milli"}
     if type(fixture) is not dict or set(fixture) != keys:
         raise NengoShadowError("fixture keys are missing or unexpected")
-    if fixture["schema"] != INPUT_SCHEMA or fixture["source"] != "PUBLIC_SYNTHETIC":
+    if (type(fixture["schema"]) is not str or fixture["schema"] != INPUT_SCHEMA
+            or type(fixture["source"]) is not str
+            or fixture["source"] != "PUBLIC_SYNTHETIC"):
         raise NengoShadowError("only versioned PUBLIC_SYNTHETIC fixtures are permitted")
     seed, dt_ns = fixture["seed"], fixture["dt_ns"]
     if type(seed) is not int or not 0 <= seed < 2**32 or type(dt_ns) is not int or dt_ns != DT_NS:
