@@ -20,6 +20,17 @@ _MAX_LINKS = 256
 _MAX_MASS_KG = 1_000_000.0
 _MAX_COM_M = 1_000.0
 _MAX_INERTIA_KG_M2 = 1_000_000_000_000.0
+_TOP_FIELDS = frozenset({"schema", "scope", "unit_system", "links"})
+_LINK_FIELDS = frozenset({"id", "mass_kg", "com_m", "inertia_kg_m2"})
+
+
+def _has_exact_keys(value: object, expected: frozenset[str]) -> bool:
+    if type(value) is not dict or len(value) != len(expected):
+        return False
+    keys = tuple(value.keys())
+    if any(type(key) is not str for key in keys):
+        return False
+    return set(keys) == expected
 
 
 class RigInertiaError(ValueError):
@@ -163,15 +174,13 @@ def validate_rig_inertia(payload: object) -> RigInertia:
     Link order is normalized by ASCII link ID, so input ordering does not
     affect the digest.  The digest is a consistency checksum, not a signature.
     """
-    if type(payload) is not dict or set(payload) != {
-        "schema", "scope", "unit_system", "links",
-    }:
+    if not _has_exact_keys(payload, _TOP_FIELDS):
         raise RigInertiaError("invalid top-level fields")
-    if payload["schema"] != _SCHEMA or type(payload["schema"]) is not str:
+    if type(payload["schema"]) is not str or payload["schema"] != _SCHEMA:
         raise RigInertiaError("unsupported schema")
-    if payload["scope"] != _SCOPE or type(payload["scope"]) is not str:
+    if type(payload["scope"]) is not str or payload["scope"] != _SCOPE:
         raise RigInertiaError("explicit PUBLIC_SYNTHETIC scope is required")
-    if payload["unit_system"] != "SI" or type(payload["unit_system"]) is not str:
+    if type(payload["unit_system"]) is not str or payload["unit_system"] != "SI":
         raise RigInertiaError("SI units are required")
     raw_links = payload["links"]
     if type(raw_links) is not list or not 1 <= len(raw_links) <= _MAX_LINKS:
@@ -180,9 +189,7 @@ def validate_rig_inertia(payload: object) -> RigInertia:
     links: list[InertialLink] = []
     seen: set[str] = set()
     for raw in raw_links:
-        if type(raw) is not dict or set(raw) != {
-            "id", "mass_kg", "com_m", "inertia_kg_m2",
-        }:
+        if not _has_exact_keys(raw, _LINK_FIELDS):
             raise RigInertiaError("invalid link fields")
         link_id = raw["id"]
         if type(link_id) is not str or _LINK_ID.fullmatch(link_id) is None:
