@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+from itertools import islice
 import json
 from pathlib import Path
 import re
@@ -105,7 +106,7 @@ def _unique_keys(pairs):
 
 def pack_changes(rows):
     """Bounded non-authenticated test envelope, never a network security token."""
-    rows = list(rows)
+    rows = list(islice(rows, MAX_CHANGES + 1))
     if len(rows) > MAX_CHANGES:
         raise ValueError("too many changes")
     payload = json.dumps({"schema": SCHEMA, "changes": [_encode_change(row) for row in rows]},
@@ -159,16 +160,16 @@ def checked_extension(path, sha256):
     if type(sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", sha256) is None:
         raise ValueError("explicit lowercase SHA-256 pin required")
     path = Path(path)
-    if not path.is_absolute() or path.is_symlink():
+    if not path.is_absolute() or path.is_symlink() or path.resolve(strict=True) != path:
         raise ValueError("extension must be an absolute non-symlink path")
-    before = path.stat(follow_symlinks=False)
+    before = path.lstat()
     if not stat.S_ISREG(before.st_mode) or before.st_size > 128 * 1024 * 1024:
         raise ValueError("unsafe extension file")
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
-    after = path.stat(follow_symlinks=False)
+    after = path.lstat()
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
             after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
         raise ValueError("extension changed while hashing")
