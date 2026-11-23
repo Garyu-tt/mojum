@@ -12,7 +12,8 @@ import hmac
 import json
 import re
 
-from .placement import NodeBudget, PlacementError, PlacementPlan, StatelessJob
+from .placement import (MAX_JOBS, MAX_NODES, NodeBudget, PlacementError,
+                        PlacementPlan, StatelessJob)
 from .placement_verify import verify_placement
 
 SCHEMA = "mojum.mesh-placement-receipt/1"
@@ -54,8 +55,10 @@ def _receipt_hash(epoch: int, inputs_sha256: str, plan_sha256: str) -> str:
 def _snapshots(candidate, jobs, nodes, *, local_node_id, trusted_remote_ids):
     # Reconstruct immutable records so even a forged dataclass instance cannot
     # skip the constructor's budget/capability checks. No resources are probed.
-    if type(jobs) not in (tuple, list) or type(nodes) not in (tuple, list):
-        raise PlacementError("invalid placement snapshot collections")
+    if (type(jobs) not in (tuple, list) or len(jobs) > MAX_JOBS
+            or type(nodes) not in (tuple, list)
+            or not 1 <= len(nodes) <= MAX_NODES):
+        raise PlacementError("invalid or oversized placement snapshot")
     if any(type(job) is not StatelessJob for job in jobs):
         raise PlacementError("invalid job snapshot")
     if any(type(node) is not NodeBudget for node in nodes):
