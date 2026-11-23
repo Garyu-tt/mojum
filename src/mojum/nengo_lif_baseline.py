@@ -56,7 +56,7 @@ def _float(value: object, name: str, lo: float, hi: float) -> float:
 
 def validate(spec: LIFSpec) -> tuple[int, int]:
     """Fail closed before allocating arrays or importing third-party code."""
-    if type(spec) is not LIFSpec or spec.schema != SCHEMA:
+    if type(spec) is not LIFSpec or type(spec.schema) is not str or spec.schema != SCHEMA:
         raise ValueError("unsupported Nengo fixture schema")
     dt = _float(spec.dt_s, "dt_s", 0.0005, 0.002)
     tau_rc = _float(spec.tau_rc_s, "tau_rc_s", 0.004, 0.1)
