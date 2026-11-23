@@ -1,0 +1,30 @@
+name: Rig DOF limits (stdlib)
+on:
+  pull_request:
+    paths:
+      - "src/mojum/rig_dof_limits.py"
+      - "tests/test_rig_dof_limits.py"
+      - "docs/RIG_DOF_LIMITS_R01.md"
+      - ".github/workflows/rig-dof-limits.yml"
+  push:
+    branches:
+      - "build/5-rig-dof-limits-20261123-r01"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stdlib-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_rig_dof_limits.py' -v
