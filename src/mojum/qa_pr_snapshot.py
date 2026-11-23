@@ -56,6 +56,21 @@ def _text(value: Any, field: str, pattern: re.Pattern[str] | None = None) -> str
     return value
 
 
+def _branch(value: Any, field: str) -> str:
+    branch = _text(value, field, _BRANCH_RE)
+    parts = branch.split("/")
+    if (
+        branch.startswith(("/", "-"))
+        or branch.endswith(("/", "."))
+        or "//" in branch
+        or ".." in branch
+        or "@{" in branch
+        or any(part in {"", ".", ".."} or part.endswith(".lock") for part in parts)
+    ):
+        raise ValueError(f"{field} is not a valid branch ref")
+    return branch
+
+
 def _timestamp(value: Any, field: str) -> str:
     value = _text(value, field)
     try:
@@ -99,8 +114,8 @@ def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
     mergeable = raw["mergeable"]
     if mergeable is not None and type(mergeable) is not bool:
         raise ValueError("mergeable must be boolean or null")
-    base_ref = _text(raw["base_ref"], "base_ref", _BRANCH_RE)
-    head_ref = _text(raw["head_ref"], "head_ref", _BRANCH_RE)
+    base_ref = _branch(raw["base_ref"], "base_ref")
+    head_ref = _branch(raw["head_ref"], "head_ref")
     base_sha = _text(raw["base_sha"], "base_sha", _SHA_RE)
     head_sha = _text(raw["head_sha"], "head_sha", _SHA_RE)
     created_at = _timestamp(raw["created_at"], "created_at")
