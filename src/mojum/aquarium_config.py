@@ -15,7 +15,7 @@ from typing import Final
 SCHEMA: Final = "mojum.aquarium.launch-profile/1"
 MAX_PROFILE_BYTES: Final = 16_384
 MAX_PATH_CHARS: Final = 512
-MAX_TICKS: Final = 100_000
+MAX_TICKS: Final = 1_000
 MIN_DT_NS: Final = 1_000
 MAX_DT_NS: Final = 1_000_000_000
 
@@ -23,6 +23,10 @@ MOTOR_MODES: Final = frozenset({
     "scripted", "developmental_fixture", "local_cell_v2b",
     "local_cell_v3", "local_cell_v3_escape", "local_cell_v4",
     "local_cell_v2", "local_cell_v2_a_archive",
+})
+_FIXED_ROOM_MODES: Final = frozenset({
+    "local_cell_v2b", "local_cell_v3", "local_cell_v3_escape",
+    "local_cell_v4", "local_cell_v2", "local_cell_v2_a_archive",
 })
 NEURAL_MODES: Final = frozenset({"shadow", "disabled"})
 BRAIN_MODES: Final = frozenset({"placeholder", "developmental_controller"})
@@ -191,7 +195,7 @@ def validate_profile(source: object) -> LaunchProfile:
 
     db_path = _text_path(data["db_path"], "db_path")
     room_file = _text_path(values["room_file"], "room_file", optional=True)
-    ticks = _exact_int(values["ticks"], "ticks", 1, MAX_TICKS)
+    ticks = _exact_int(values["ticks"], "ticks", 0, MAX_TICKS)
     dt_ns = _exact_int(values["dt_ns"], "dt_ns", MIN_DT_NS, MAX_DT_NS)
     read_only = values["read_only"]
     if type(read_only) is not bool:
@@ -216,6 +220,14 @@ def validate_profile(source: object) -> LaunchProfile:
         raise AquariumConfigError("range_guided requires toy_probe sensory mode")
     if pulse_sum != "auto" and neural_mode == "disabled":
         raise AquariumConfigError("explicit pulse_sum requires neural shadow mode")
+    if motor_mode == "local_cell_v2_a_archive" and ticks != 0:
+        raise AquariumConfigError("local_cell_v2_a_archive requires exactly zero ticks")
+    if motor_mode in _FIXED_ROOM_MODES and room_file is not None:
+        raise AquariumConfigError("fixed-geometry local-cell modes do not accept room_file")
+    # The archive selector is intrinsically read-only in Aquarium, regardless
+    # of the caller's requested flag. Keep the normalized profile truthful.
+    if motor_mode == "local_cell_v2_a_archive":
+        read_only = True
 
     normalized: dict[str, object] = {
         "schema": SCHEMA,
