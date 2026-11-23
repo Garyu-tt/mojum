@@ -213,7 +213,7 @@ def _main() -> int:
     except (ManifestError, OSError) as exc:
         print(f"annarchy-build-attestation: {exc}", file=sys.stderr)
         return 2
-    sys.stdout.write(json.dumps(result, sort_keys=True, indent=2) + "\\n")
+    sys.stdout.write(json.dumps(result, sort_keys=True, indent=2) + "\n")
     return 0
 
 
