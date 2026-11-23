@@ -148,5 +148,23 @@ class PoseFrameGateTests(unittest.TestCase):
         self.assertEqual(positive.digest, negative.digest)
 
 
+    def test_rejects_integer_coordinate_that_overflows_float(self):
+        with self.assertRaises(FrameGateError):
+            gate().admit(
+                packet(joints={"root": [10 ** 10000, 0, 0]}),
+                consent=True, source_tag=PUBLIC_SYNTHETIC,
+            )
+
+    def test_rejects_hostile_schema_value_without_comparing_it(self):
+        class Hostile:
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+
+        candidate = packet()
+        candidate["schema"] = Hostile()
+        with self.assertRaises(FrameGateError):
+            gate().admit(candidate, consent=True, source_tag=PUBLIC_SYNTHETIC)
+
+
 if __name__ == "__main__":
     unittest.main()
