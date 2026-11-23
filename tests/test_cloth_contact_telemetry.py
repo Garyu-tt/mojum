@@ -11,7 +11,7 @@ def sample(tick=0, contact="body", force=100, strain=25):
             "normal_force_mn": force, "strain_ue": strain}
 
 
-class ClothContactTelemetryTests(unittest.TestCase):
+class DictChild(dict):\n    pass\n\n\nclass ClothContactTelemetryTests(unittest.TestCase):
     def test_reduces_categories_and_returns_no_raw_samples(self):
         report = reduce_contacts([
             sample(1, "body", 120, -9),
@@ -64,7 +64,7 @@ class ClothContactTelemetryTests(unittest.TestCase):
         for item in (
             {**sample(), "extra": 1},
             {"tick": 0, "contact": "body", "normal_force_mn": 1},
-            sample().__class__(sample()),
+            DictChild(sample()),
         ):
             with self.subTest(item=item), self.assertRaises(ClothTelemetryError):
                 reduce_contacts([item])
@@ -85,7 +85,7 @@ class ClothContactTelemetryTests(unittest.TestCase):
 
     def test_total_force_overflow_budget_is_rejected(self):
         with self.assertRaises(ClothTelemetryError):
-            reduce_contacts([sample(force=MAX_SAMPLES and 1_000_000_000)
+            reduce_contacts([sample(force=1_000_000_000)
                              for _ in range(MAX_SAMPLES)])
 
     def test_sample_limit_is_enforced(self):
