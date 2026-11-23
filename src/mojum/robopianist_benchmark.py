@@ -178,8 +178,6 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
         raise BenchmarkError("invalid event budget")
     unsigned = {k: trace[k] for k in ("schema", "provenance", "consent",
                                        "task_sha256", "mode", "events")}
-    if trace["sha256"] != _digest(unsigned):
-        raise BenchmarkError("trace digest mismatch")
     hits = 0
     duration_hits = 0
     timing_error = 0
@@ -204,6 +202,10 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
         timing_error += min(abs(tick - target_tick), MAX_ABS_ERROR_TICKS)
         if duration == target_duration:
             duration_hits += 1
+    # Validate every nested event envelope and scalar before canonical
+    # serialization, so hostile mapping keys cannot execute from json.dumps.
+    if trace["sha256"] != _digest(unsigned):
+        raise BenchmarkError("trace digest mismatch")
     count = len(events)
     result = {"schema": RESULT_SCHEMA, "provenance": PROVENANCE,
               "task_sha256": checked["sha256"], "trace_sha256": trace["sha256"],
