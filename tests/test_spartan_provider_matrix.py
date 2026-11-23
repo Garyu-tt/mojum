@@ -104,6 +104,15 @@ class ProviderMatrixTests(unittest.TestCase):
             with self.subTest(raw=raw[:12]), self.assertRaises(pm.AdmissionError):
                 pm.parse_snapshot(raw)
 
+    def test_overlong_json_integer_is_normalized_to_admission_error(self):
+        # CPython 3.11+ may raise bare ValueError before schema validation.
+        # The public parser must expose only its fail-closed AdmissionError.
+        raw = (b'{"schema":' + b'9' * 5000
+               + b',"evidence":"synthetic-fixture","models":[]}')
+        self.assertLessEqual(len(raw), pm.MAX_PROFILE_BYTES)
+        with self.assertRaises(pm.AdmissionError):
+            pm.parse_snapshot(raw)
+
     def test_host_traversal_and_unpinned_rejected(self):
         for changes in ({"endpoint": "http://localhost:18182"},
                         {"endpoint": "http://127.0.0.1:18182/path"},
