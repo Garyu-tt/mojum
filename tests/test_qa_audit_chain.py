@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.qa_audit_chain import (
     AuditChainError, GENESIS, SCHEMA, record_digest, verify_audit_chain,
@@ -158,6 +159,50 @@ class AuditChainTests(unittest.TestCase):
         row["x" * 1_000_000] = digest
         with self.assertRaisesRegex(AuditChainError, "bounded native strings"):
             verify_audit_chain([row])
+
+
+    def test_oversized_tokens_and_digests_are_rejected_before_regex(self):
+        chain = make_chain([("enqueued", "queued", None, 1)])
+
+        oversized_key = dict(chain[0])
+        oversized_key["task_key"] = "x" * 1_000_000
+        with patch("mojum.qa_audit_chain._TOKEN") as token_pattern:
+            token_pattern.fullmatch.side_effect = AssertionError("oversized token reached regex")
+            with self.assertRaisesRegex(AuditChainError, "task_key"):
+                verify_audit_chain([oversized_key])
+            token_pattern.fullmatch.assert_not_called()
+
+        unsigned = {key: value for key, value in chain[0].items() if key != "digest"}
+        unsigned["task_key"] = "x" * 1_000_000
+        with patch("mojum.qa_audit_chain._TOKEN") as token_pattern:
+            token_pattern.fullmatch.side_effect = AssertionError("oversized token reached regex")
+            with self.assertRaisesRegex(AuditChainError, "task_key"):
+                record_digest(unsigned)
+            token_pattern.fullmatch.assert_not_called()
+
+        oversized_previous = dict(chain[0])
+        oversized_previous["previous_digest"] = "0" * 1_000_000
+        with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
+            hex_pattern.fullmatch.side_effect = AssertionError("oversized digest reached regex")
+            with self.assertRaisesRegex(AuditChainError, "previous_digest"):
+                verify_audit_chain([oversized_previous])
+            hex_pattern.fullmatch.assert_not_called()
+
+        unsigned = {key: value for key, value in chain[0].items() if key != "digest"}
+        unsigned["previous_digest"] = "0" * 1_000_000
+        with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
+            hex_pattern.fullmatch.side_effect = AssertionError("oversized digest reached regex")
+            with self.assertRaisesRegex(AuditChainError, "previous_digest"):
+                record_digest(unsigned)
+            hex_pattern.fullmatch.assert_not_called()
+
+        oversized_digest = dict(chain[0])
+        oversized_digest["digest"] = "0" * 1_000_000
+        with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
+            hex_pattern.fullmatch.side_effect = AssertionError("oversized digest reached regex")
+            with self.assertRaisesRegex(AuditChainError, "digest"):
+                verify_audit_chain([oversized_digest])
+            hex_pattern.fullmatch.assert_not_called()
 
 
 if __name__ == "__main__":
