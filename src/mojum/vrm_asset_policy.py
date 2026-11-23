@@ -15,6 +15,9 @@ _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$")
 _VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 
 
+_MEDIA_TYPE = re.compile(r"^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$")
+
+
 class AssetPolicyError(ValueError):
     """Raised when the policy document itself is malformed."""
 
@@ -83,9 +86,9 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
         violations.append("provenance")
 
     asset = manifest["asset"]
-    if not _exact_dict(asset) or set(asset) != {
+    if not _exact_dict(asset) or not _has_keys(asset, {
         "path", "sha256", "size_bytes", "media_type", "source", "license"
-    }:
+    }):
         raise AssetPolicyError("asset must have the exact metadata keys")
     path, digest = asset["path"], asset["sha256"]
     size, media_type = asset["size_bytes"], asset["media_type"]
