@@ -90,21 +90,39 @@ def test_expired_last_attempt_fails_closed(tmp_path):
 
 
 def test_expired_lease_reclamation_is_batched(tmp_path):
-    with QAWorkQueue(str(tmp_path / "expiry-batch.db")) as q:
+    path = str(tmp_path / "expiry-batch.db")
+    with QAWorkQueue(path) as q:
         jobs = []
-        for index in range(501):
+        for index in range(1001):
             job, _ = q.enqueue(f"batch-{index}", "review", {}, max_attempts=3, now=1)
             jobs.append(job)
-        for index in range(501):
+        for index in range(1001):
             assert q.claim(f"worker-{index}", lease_seconds=1, now=1) is not None
-        # The next claim expires every lease through bounded 500-row batches,
-        # then claims one of the requeued jobs.
-        assert q.claim("reclaimer", now=3) is not None
-        counts = q.counts()
-        assert counts == {"queued": 500, "leased": 1, "succeeded": 0, "failed": 0}
-        for job in jobs:
-            assert q.get(job.id).status in {"queued", "leased"}
 
+        # A single claim transaction reclaims at most 500 expired leases and
+        # then completes an unrelated queued job. A second connection can
+        # enqueue and claim more work before the remaining expiry backlog is
+        # processed by a later transaction.
+        independent, _ = q.enqueue("independent-a", "unrelated", {}, now=0)
+        first = q.claim("reclaimer-a", now=3)
+        assert first and first.job.id == independent.id
+        assert q._db.execute(
+            "SELECT COUNT(*) FROM qa_jobs WHERE status='leased' AND lease_until<=3"
+        ).fetchone()[0] == 501
+
+        with QAWorkQueue(path) as other:
+            second_independent, _ = other.enqueue("independent-b", "unrelated", {}, now=0)
+            second = other.claim("reclaimer-b", now=3)
+            assert second and second.job.id == second_independent.id
+
+        # The second transaction also reclaimed only one 500-row batch.
+        assert q._db.execute(
+            "SELECT COUNT(*) FROM qa_jobs WHERE status='leased' AND lease_until<=3"
+        ).fetchone()[0] == 1
+        assert q.claim("reclaimer-c", now=3) is not None
+        assert q._db.execute(
+            "SELECT COUNT(*) FROM qa_jobs WHERE status='leased' AND lease_until<=3"
+        ).fetchone()[0] == 0
 
 def test_retry_delay_and_attempt_budget(tmp_path):
     with QAWorkQueue(str(tmp_path / "q.db")) as q:
