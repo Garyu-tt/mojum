@@ -142,6 +142,29 @@ class GraphV1FlowAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphV1FlowAuditError, "256 KiB"):
             audit_graph_v1_flow(graph, labels_for(valid_graph()))
 
+        # A raw string below the byte limit can expand 6x in compact JSON.
+        # Admission must reject it before JSONEncoder allocates the escaped token.
+        from unittest.mock import patch
+        graph = valid_graph()
+        graph["escaped_control_text"] = "\x01" * 50_000
+        with patch(
+            "mojum.graph_v1_flow_audit.json.JSONEncoder",
+            side_effect=AssertionError("encoder must not be constructed"),
+        ) as encoder:
+            with self.assertRaisesRegex(GraphV1FlowAuditError, "256 KiB"):
+                audit_graph_v1_flow(graph, labels_for(valid_graph()))
+            encoder.assert_not_called()
+
+        graph = valid_graph()
+        graph["escaped_key_" + "\x01" * 50_000] = None
+        with patch(
+            "mojum.graph_v1_flow_audit.json.JSONEncoder",
+            side_effect=AssertionError("encoder must not be constructed"),
+        ) as encoder:
+            with self.assertRaisesRegex(GraphV1FlowAuditError, "256 KiB"):
+                audit_graph_v1_flow(graph, labels_for(valid_graph()))
+            encoder.assert_not_called()
+
         graph = valid_graph()
         graph["oversized_key"] = "ok"
         graph["k" * (256 * 1024 + 1)] = None
