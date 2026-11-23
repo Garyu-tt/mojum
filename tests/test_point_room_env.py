@@ -126,6 +126,25 @@ class PointRoomEnvTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             env.step((0, 0))
 
+    def test_mutating_room_or_start_cannot_change_fixed_episode(self):
+        env = self.make_env()
+        original_room = env.room
+        initial, info = env.reset(seed=4)
+        env.start = (1.75, 2.0)
+        with self.assertRaisesRegex(ValueError, "geometry mutated"):
+            env.reset(seed=4)
+        with self.assertRaisesRegex(ValueError, "geometry mutated"):
+            env.step((0.0, 0.0))
+        env.start = (1, 2)
+        env.room = Room(4, 4)
+        with self.assertRaisesRegex(ValueError, "geometry mutated"):
+            env.reset(seed=4)
+        with self.assertRaisesRegex(ValueError, "geometry mutated"):
+            env.step((0.0, 0.0))
+        env.room = original_room
+        self.assertEqual(env.reset(seed=4), (initial, info))
+        self.assertEqual(env.step((0.0, 0.0))[0]["tick"], 1)
+
     def test_step_before_reset_refused(self):
         with self.assertRaises(RuntimeError):
             self.make_env().step((0, 0))

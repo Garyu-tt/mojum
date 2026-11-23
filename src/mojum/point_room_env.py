@@ -48,6 +48,9 @@ class PointRoomEnv:
         initial_state(room, start[0], start[1])
         self.room = room
         self.start = (start[0], start[1])
+        # Caller-visible attributes are not a way to change a fixed episode.
+        self._configured_room = room
+        self._configured_start = self.start
         self.max_steps = max_steps
         # Keep the constructor's episode budget as a hard upper bound.
         self._configured_max_steps = max_steps
@@ -55,6 +58,12 @@ class PointRoomEnv:
         self._configured_max_step_m = max_step_m
         self._state = None
         self._steps = 0
+
+    def _assert_fixed_geometry(self) -> None:
+        if (self.room is not self._configured_room
+                or type(self.start) is not tuple
+                or self.start != self._configured_start):
+            raise ValueError("episode room/start geometry mutated after construction")
 
     def _observation(self) -> dict:
         state = self._state
@@ -72,6 +81,7 @@ class PointRoomEnv:
             raise ValueError("seed must be a nonnegative integer")
         if options is not None and (type(options) is not dict or options):
             raise ValueError("only empty reset options are supported")
+        self._assert_fixed_geometry()
         self._state = initial_state(self.room, *self.start)
         self._steps = 0
         return self._observation(), {
@@ -83,6 +93,7 @@ class PointRoomEnv:
     def step(self, action: tuple[float, float]) -> tuple[dict, float, bool, bool, dict]:
         if self._state is None:
             raise RuntimeError("reset required before step")
+        self._assert_fixed_geometry()
         if (type(self.max_steps) is not int
                 or not 1 <= self.max_steps <= self._configured_max_steps):
             raise ValueError("episode step budget cannot exceed configured limit")
