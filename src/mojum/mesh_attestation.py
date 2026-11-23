@@ -16,6 +16,7 @@ MAX_TTL_SECONDS = 30 * 24 * 60 * 60
 CLOCK_SKEW_SECONDS = 300
 _MIN_KEY_BYTES = 32
 _MAX_KEY_BYTES = 128
+_MAX_AUTHORITY_KEYS = 128
 _KEY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
 _STATEMENT_ID = re.compile(r"[0-9a-f]{32}", re.ASCII)
 _HEX_MAC = re.compile(r"[0-9a-f]{64}", re.ASCII)
@@ -56,6 +57,18 @@ def _validate_key(key, *, what="authority key"):
     if type(key) is not bytes or not (_MIN_KEY_BYTES <= len(key) <= _MAX_KEY_BYTES):
         raise AttestationError(what + " must be 32..128 raw bytes")
     return key
+
+
+def _validated_authority_keys(authority_keys):
+    """Validate a bounded trust map before any attacker-controlled key lookup."""
+    if type(authority_keys) is not dict:
+        raise AttestationError("authority_keys must be an exact dict")
+    if len(authority_keys) > _MAX_AUTHORITY_KEYS:
+        raise AttestationError("authority key map exceeds maximum entry count")
+    for key_id, key in authority_keys.items():
+        _require_text(key_id, _KEY_ID, "authority key id")
+        _validate_key(key, what="authority key map value")
+    return authority_keys
 
 
 def _payload(attestation):
@@ -132,9 +145,8 @@ def verify_attestation(attestation, authority_keys, *, now):
         raise AttestationDenied("attestation is not yet valid")
     if attestation.expires_at <= now:
         raise AttestationDenied("attestation has expired")
-    if type(authority_keys) is not dict:
-        raise AttestationError("authority_keys must be an exact dict")
-    key = authority_keys.get(attestation.key_id)
+    trusted_keys = _validated_authority_keys(authority_keys)
+    key = trusted_keys.get(attestation.key_id)
     if key is None:
         raise AttestationDenied("unknown authority key")
     _validate_key(key)
