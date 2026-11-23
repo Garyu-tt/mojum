@@ -41,7 +41,7 @@ class FingerprintTests(unittest.TestCase):
 
     def test_rejects_unpaired_surrogate_episode_id(self):
         with self.assertRaises(FingerprintError):
-            fingerprint_episode([frame()], episode_id="bad-\\ud800")
+            fingerprint_episode([frame()], episode_id="bad-\ud800")
 
     def test_rejects_oversized_integer_reward_without_overflow(self):
         with self.assertRaises(FingerprintError):
