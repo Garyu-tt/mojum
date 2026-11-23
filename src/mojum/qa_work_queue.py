@@ -163,31 +163,38 @@ class QAWorkQueue:
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
-        has_jobs = self._db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_jobs'"
-        ).fetchone() is not None
-        has_meta = self._db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_meta'"
-        ).fetchone() is not None
-        if has_jobs and not has_meta:
-            self._db.close()
-            raise QueueError("unversioned queue database; refusing implicit adoption")
-        self._db.execute(
-            "CREATE TABLE IF NOT EXISTS qa_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-        )
-        version = self._db.execute(
-            "SELECT value FROM qa_meta WHERE key='schema_version'"
-        ).fetchone()
-        if version is None:
-            if has_jobs:
-                self._db.close()
-                raise QueueError("queue schema version is missing; refusing implicit adoption")
+        # Serialize first-open schema admission across processes. Without this
+        # write lock, two constructors can both observe a missing version row
+        # and race to insert the unique schema_version key.
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            has_jobs = self._db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_jobs'"
+            ).fetchone() is not None
+            has_meta = self._db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_meta'"
+            ).fetchone() is not None
+            if has_jobs and not has_meta:
+                raise QueueError("unversioned queue database; refusing implicit adoption")
             self._db.execute(
-                "INSERT INTO qa_meta(key,value) VALUES('schema_version',?)", (SCHEMA,)
+                "CREATE TABLE IF NOT EXISTS qa_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
-        elif version["value"] != SCHEMA:
+            version = self._db.execute(
+                "SELECT value FROM qa_meta WHERE key='schema_version'"
+            ).fetchone()
+            if version is None:
+                if has_jobs:
+                    raise QueueError("queue schema version is missing; refusing implicit adoption")
+                self._db.execute(
+                    "INSERT INTO qa_meta(key,value) VALUES('schema_version',?)", (SCHEMA,)
+                )
+            elif version["value"] != SCHEMA:
+                raise QueueError("unsupported queue schema version")
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
             self._db.close()
-            raise QueueError("unsupported queue schema version")
+            raise
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS qa_jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
