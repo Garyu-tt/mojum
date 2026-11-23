@@ -46,7 +46,7 @@ class PhenotypeAuditTests(unittest.TestCase):
     def test_nonfinite_and_surrogate_rejected(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected["bad"]=float("nan")
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
-        expected=ledger.phenotype(5); expected["bad"]="\ud800"
+        expected=ledger.phenotype(5); expected["bad"]="\\ud800"
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
     def test_depth_and_byte_budgets(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); cursor=expected
@@ -54,6 +54,12 @@ class PhenotypeAuditTests(unittest.TestCase):
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
         expected=ledger.phenotype(5); expected["padding"]="x"*MAX_INPUT_BYTES
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
+    def test_aggregate_utf8_budget_is_rejected_during_admission(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        for index in range(MAX_INPUT_BYTES // 16_384 + 1):
+            expected[f"padding_{index}"]="x"*16_384
+        with self.assertRaisesRegex(PhenotypeAuditError,"byte budget"):
+            self.audit(ledger,expected)
     def test_result_detached_from_caller_mutations(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
         result=audit_phenotype_snapshot(snapshot,expected,source_classification="PUBLIC_SYNTHETIC")
