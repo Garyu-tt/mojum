@@ -224,10 +224,15 @@ def restore_verified(executable: str, replica_dir: str, output: str, *,
                      max_bytes=max_bytes)
         if staged.is_symlink() or not staged.is_file() or staged.stat().st_size > max_bytes:
             raise SafetyError("restored database missing, invalid or oversized")
-        with sqlite3.connect(staged.as_uri() + "?mode=ro&immutable=1", uri=True) as db:
-            result = db.execute("PRAGMA integrity_check").fetchall()
-            if result != [("ok",)]:
-                raise SafetyError("SQLite integrity check failed")
+        if any(Path(str(staged) + suffix).exists() for suffix in ("-wal", "-shm")):
+            raise SafetyError("restore produced unverified SQLite sidecars")
+        try:
+            with sqlite3.connect(staged.as_uri() + "?mode=ro&immutable=1", uri=True) as db:
+                result = db.execute("PRAGMA integrity_check").fetchall()
+                if result != [("ok",)]:
+                    raise SafetyError("SQLite integrity check failed")
+        except sqlite3.DatabaseError as exc:
+            raise SafetyError("restored SQLite image invalid") from exc
         digest = _sha256(staged)
         if digest != expected_sha256:
             raise SafetyError("restored database SHA-256 did not match trusted anchor")
