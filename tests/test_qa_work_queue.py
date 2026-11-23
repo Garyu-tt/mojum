@@ -97,11 +97,15 @@ def test_expired_lease_reclamation_is_batched(tmp_path):
             jobs.append(job)
         for index in range(501):
             assert q.claim(f"worker-{index}", lease_seconds=1, now=1) is not None
-        # The next claim expires every lease through bounded 500-row batches,
-        # then claims one of the requeued jobs.
+        # Each claim reclaims at most 500 expired leases in its transaction.
+        # One old lease must remain untouched until the next claim.
         assert q.claim("reclaimer", now=3) is not None
         counts = q.counts()
-        assert counts == {"queued": 500, "leased": 1, "succeeded": 0, "failed": 0}
+        assert counts == {"queued": 499, "leased": 2, "succeeded": 0, "failed": 0}
+        assert q.get(jobs[-1].id).status == "leased"
+        assert q.claim("next-reclaimer", now=3) is not None
+        counts = q.counts()
+        assert counts == {"queued": 499, "leased": 2, "succeeded": 0, "failed": 0}
         for job in jobs:
             assert q.get(job.id).status in {"queued", "leased"}
 
