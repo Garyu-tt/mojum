@@ -279,6 +279,7 @@ class CellExplorerV3Escape:
                     or item["cell"] not in state["records"]
                     or type(item["action"]) is not str
                     or item["action"] not in ACTIONS
+                    or item["action"] not in state["records"].get(item["cell"], {})
                     or type(item["blocked"]) is not bool
                     or (item["action"] == "rest" and item["blocked"])
                     or state["last_seen_at"][item["cell"]] < item["tick"]):
