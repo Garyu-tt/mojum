@@ -59,6 +59,11 @@ class DelegatedLease:
                 "backend": self.backend, "opaque_ref": self.opaque_ref}
 
 
+def _require_lease(lease):
+    if type(lease) is not DelegatedLease:
+        raise DelegationRejected("lease object required")
+
+
 def encode_wire(lease):
     if type(lease) is not DelegatedLease:
         raise DelegationRejected("lease object required")
@@ -165,6 +170,7 @@ def reserve(db, lease, *, now):
 
 def acknowledge(db, lease, external_id, *, now):
     """Record receipt, not successful execution."""
+    _require_lease(lease)
     _clock(now)
     _name(external_id, "external id")
 
@@ -191,6 +197,7 @@ def acknowledge(db, lease, external_id, *, now):
 
 def request_cancel(db, lease, *, now):
     """Durable cancellation INTENT; remote termination must be proved separately."""
+    _require_lease(lease)
     _clock(now)
 
     def work():
@@ -232,6 +239,7 @@ def mark_orphans(db, *, now):
 
 def prepare_pr(db, lease, branch, head_sha, *, now):
     """Permit one PR create request for a task; ambiguous writes need reconciliation."""
+    _require_lease(lease)
     _clock(now)
     if (type(branch) is not str or _BRANCH.fullmatch(branch) is None
             or branch.startswith("/") or branch.endswith("/")
@@ -293,6 +301,7 @@ def confirm_pr(db, task_id, attempt, head_sha, url):
 
 def dispatch_ray(db, lease, approved_remote_function, *, now):
     """Explicit Ray .remote() call on trusted preconfigured function only."""
+    _require_lease(lease)
     if lease.backend != "ray":
         raise DelegationRejected("not a ray ticket")
     if not reserve(db, lease, now=now):
@@ -302,6 +311,7 @@ def dispatch_ray(db, lease, approved_remote_function, *, now):
 
 async def dispatch_temporal(db, lease, client, *, task_queue, now):
     """Explicit Temporal Client.start_workflow; caller provisions workflow/queue."""
+    _require_lease(lease)
     if lease.backend != "temporal":
         raise DelegationRejected("not a temporal ticket")
     _name(task_queue, "task queue")
