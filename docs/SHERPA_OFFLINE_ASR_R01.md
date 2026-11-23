@@ -39,7 +39,7 @@ used for offline stub tests when NumPy is absent.
 
 ## Security/budget boundaries
 
-- Default invocation is refused; only literal `enabled=True` and explicit
+- Default invocation is refused; omitting `visibility` is also refused.\n  Classification is never inferred from the opt-in switch.\n- Only literal `enabled=True` and explicit
   `PUBLIC_SYNTHETIC` are accepted, never PRIVATE input.
 - WAV is supplied as bytes, max 400 kB, 10 seconds / 160,000 frames, mono,
   uncompressed 16-kHz 16-bit PCM. Invalid format, truncation and empty
