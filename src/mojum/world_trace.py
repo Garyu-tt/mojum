@@ -65,7 +65,7 @@ def _json_equal(left, right):
 def make_trace(room: Room, start: tuple, actions) -> dict:
     """Record authoritative synthetic outcomes from deterministic actions.
 
-    \`\`actions\`\` is a bounded list/tuple of (dx, dy) pairs. The resulting
+    ``actions`` is a bounded list/tuple of (dx, dy) pairs. The resulting
     object has no external integrity anchor; callers must not treat its
     unkeyed revisions as cryptographic provenance.
     """
