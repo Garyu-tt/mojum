@@ -8,6 +8,11 @@ from mojum.session_control import (
 )
 
 
+class _HostileEquality:
+    def __eq__(self, _other):
+        raise AssertionError("untrusted equality must not be evaluated")
+
+
 class SessionControlTests(unittest.TestCase):
     def setUp(self):
         self.session = SessionController("dante-fixture")
@@ -118,6 +123,19 @@ class SessionControlTests(unittest.TestCase):
             json.dumps(record, sort_keys=True, ensure_ascii=True,
                        separators=(",", ":"), allow_nan=False).encode("ascii")
         ).hexdigest()
+        with self.assertRaisesRegex(SessionControlError, "invalid transition"):
+            SessionController.from_snapshot(snapshot)
+
+    def test_non_string_schema_is_rejected_before_comparison(self):
+        snapshot = self.session.snapshot()
+        snapshot["schema"] = _HostileEquality()
+        with self.assertRaisesRegex(SessionControlError, "schema or trust"):
+            SessionController.from_snapshot(snapshot)
+
+    def test_non_string_transition_state_is_rejected_before_comparison(self):
+        self.apply("start", "start-1", 0)
+        snapshot = self.session.snapshot()
+        snapshot["events"][0]["from_state"] = _HostileEquality()
         with self.assertRaisesRegex(SessionControlError, "invalid transition"):
             SessionController.from_snapshot(snapshot)
 
