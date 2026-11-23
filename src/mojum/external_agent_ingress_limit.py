@@ -57,7 +57,7 @@ class IngressRateLimiter:
 
     def admit(self, source_id: str, now_ns: int) -> Admission:
         """Record one already-authenticated attempt and return its decision."""
-        if type(source_id) is not str or _SOURCE_RE.fullmatch(source_id) is None:
+        if type(source_id) is not str or not 1 <= len(source_id) <= 128 or _SOURCE_RE.fullmatch(source_id) is None:
             return Admission(False, "invalid_source", 0, 0)
         if type(now_ns) is not int or not 0 <= now_ns <= 2**63 - 1:
             return Admission(False, "invalid_clock", 0, 0)
