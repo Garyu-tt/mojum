@@ -176,6 +176,25 @@ class MeshRevocationTests(unittest.TestCase):
                 operation="read", now_tick=150
             ).__dict__
 
+    def test_object_setattr_cannot_change_verified_revocation_state(self):
+        verified = verify_snapshot(
+            envelope(revocations=[revoked()]), authority_keys=KEYS, now_tick=150
+        )
+        # frozen=True is bypassable with object.__setattr__; the public object
+        # must be rejected rather than allowed to erase the verified revocation.
+        object.__setattr__(verified, "entries", ())
+        with self.assertRaisesRegex(MeshRevocationError, "modified"):
+            check_peer_access(verified, node_id="node-17", enrollment_id="enroll-17",
+                              operation="write", now_tick=150)
+
+        verified = verify_snapshot(
+            envelope(revocations=[revoked()]), authority_keys=KEYS, now_tick=150
+        )
+        object.__setattr__(verified.entries[0], "node_id", "node-forged")
+        with self.assertRaisesRegex(MeshRevocationError, "modified"):
+            check_peer_access(verified, node_id="node-17", enrollment_id="enroll-17",
+                              operation="write", now_tick=150)
+
     def test_copied_or_replaced_snapshot_is_not_verification_provenance(self):
         verified = verify_snapshot(envelope(revocations=[revoked()]),
                                    authority_keys=KEYS, now_tick=150)
