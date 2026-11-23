@@ -82,6 +82,18 @@ class KinematicsBenchmarkTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unreviewed pin version"):
                 PinocchioFK(PlanarRig())
 
+    def test_installed_pinocchio_crosscheck_if_explicitly_available(self):
+        from importlib import metadata
+        try:
+            version = metadata.version("pin")
+        except metadata.PackageNotFoundError:
+            self.skipTest("pin==4.1.0 not installed; optional engine unverified")
+        if version != "4.1.0":
+            self.skipTest("optional engine pinned at pin==4.1.0")
+        result = run_benchmark(backend="pinocchio", seed=702, cases=16)
+        self.assertLessEqual(result["max_fk_error_m"], TOLERANCE_M)
+        self.assertLessEqual(result["max_ik_error_m"], TOLERANCE_M)
+
     def test_cli_emits_machine_readable_evidence_and_nonzero_on_error(self):
         capture = io.StringIO()
         with contextlib.redirect_stdout(capture):
