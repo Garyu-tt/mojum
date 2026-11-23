@@ -48,6 +48,16 @@ class FingerprintTests(unittest.TestCase):
                     fingerprint(path)
                     gc.collect()
 
+    def test_reject_oversized_schema_sql_before_encoding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "oversized-schema.sqlite3"
+            long_name = "x" * 70_000
+            with self._connect(path) as db:
+                with db:
+                    db.execute(f'CREATE TABLE "{long_name}" (value INTEGER)')
+            with self.assertRaisesRegex(SchemaAuditError, "oversized schema metadata"):
+                fingerprint(path)
+
     def test_reject_non_database(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "not-sqlite"
