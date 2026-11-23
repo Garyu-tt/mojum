@@ -80,6 +80,18 @@ class ClaimAuditTests(unittest.TestCase):
         report = claim_audit.audit(raw)
         self.assertEqual(report["issues"][0]["active_claims"][0]["source_id"], 0)
 
+    def test_partial_issue_body_provenance_fails_closed(self):
+        fields = {"body": marker("agent-a", "scope-a"),
+                  "author": "bot", "created_at": "2026-11-23T11:00:00Z"}
+        for subset in (("body",), ("author",), ("created_at",),
+                       ("body", "author"), ("body", "created_at"),
+                       ("author", "created_at")):
+            with self.subTest(fields=subset):
+                raw = snapshot()
+                raw["issues"][0].update({name: fields[name] for name in subset})
+                with self.assertRaisesRegex(claim_audit.ClaimAuditError, "must appear together"):
+                    claim_audit.audit(raw)
+
     def test_duplicate_claim_by_same_worker_is_idempotent(self):
         raw = snapshot(comment(1, "bot", marker("agent-a", "scope-a")),
                        comment(2, "bot", marker("agent-a", "scope-a")))
