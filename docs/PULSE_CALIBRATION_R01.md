@@ -18,7 +18,8 @@ or evaluate a learned policy and does not claim biological or medical meaning.
 - Forecasts are exact native integers/floats in [0, 1]; booleans, NaN and
   infinities are rejected.
 - Outcomes must be exact booleans. Container subclasses, unknown keys and
-  malformed shapes fail closed.
+  malformed shapes fail closed. Field names are bounded to the longest valid
+  schema key before set-based schema comparison.
 - Bin count is an exact integer in [1, 100]. Empty bins are included and have
   null statistics.
 
