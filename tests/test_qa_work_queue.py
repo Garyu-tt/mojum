@@ -2,9 +2,10 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 import sqlite3
 
+from unittest.mock import patch
+
 try:
     import pytest
-from unittest.mock import patch
 except ImportError:  # Full repository unittest discovery must remain stdlib-only.
     pytest = None
 
