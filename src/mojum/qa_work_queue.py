@@ -72,11 +72,36 @@ def _number(value: object, name: str, low: float, high: float) -> float:
     return result
 
 
-def _utf8_size(value: str) -> int:
-    try:
-        return len(value.encode("utf-8"))
-    except UnicodeEncodeError as exc:
-        raise QueueError("payload text must be valid UTF-8") from exc
+def _json_string_size(value: str) -> int:
+    """Count the exact UTF-8 JSON string size without allocating encoded output."""
+    if len(value) > MAX_PAYLOAD_BYTES:
+        raise QueueError("payload text exceeds byte budget")
+    size = 2  # JSON quotes
+    for char in value:
+        codepoint = ord(char)
+        if codepoint < 0x20:
+            size += 2 if codepoint in (8, 9, 10, 12, 13) else 6
+        elif codepoint in (0x22, 0x5C):
+            size += 2
+        elif codepoint <= 0x7F:
+            size += 1
+        elif codepoint <= 0x7FF:
+            size += 2
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            raise QueueError("payload text must be valid UTF-8")
+        elif codepoint <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > MAX_PAYLOAD_BYTES:
+            raise QueueError("payload serialized JSON exceeds byte budget")
+    return size
+
+
+def _charge_json_budget(budget: list[int], size: int) -> None:
+    budget[0] -= size
+    if budget[0] < 0:
+        raise QueueError("payload serialized JSON exceeds byte budget")
 
 
 def _validate(
@@ -93,43 +118,38 @@ def _validate(
     if budget[0] < 0 or depth > 32:
         raise QueueError("payload exceeds structural limits")
     if type(value) is str:
-        # Check character count first: UTF-8 bytes can never be fewer than
-        # code points, so oversized strings are rejected before encoding.
-        if len(value) > text_budget[0]:
-            raise QueueError("payload text exceeds byte budget")
-        size = _utf8_size(value)
-        if size > text_budget[0]:
-            raise QueueError("payload text exceeds byte budget")
-        text_budget[0] -= size
+        _charge_json_budget(text_budget, _json_string_size(value))
         return
-    if value is None or type(value) is bool:
+    if value is None:
+        _charge_json_budget(text_budget, 4)
+        return
+    if type(value) is bool:
+        _charge_json_budget(text_budget, 4 if value else 5)
         return
     if type(value) is int:
         if value.bit_length() > 4096:
             raise QueueError("payload integer exceeds bit budget")
+        _charge_json_budget(text_budget, len(str(value)))
         return
     if type(value) is float:
         if not math.isfinite(value):
             raise QueueError("payload numbers must be finite")
+        _charge_json_budget(text_budget, len(repr(value)))
         return
     if type(value) is list:
+        _charge_json_budget(text_budget, 2 + max(0, len(value) - 1))
         for item in value:
             _validate(item, depth + 1, budget, text_budget)
         return
     if type(value) is dict:
+        _charge_json_budget(text_budget, 2 + max(0, len(value) - 1))
         for key, item in value.items():
             if type(key) is not str:
                 raise QueueError("payload keys must be plain strings")
-            if len(key) > text_budget[0]:
-                raise QueueError("payload text exceeds byte budget")
-            key_size = _utf8_size(key)
-            if key_size > text_budget[0]:
-                raise QueueError("payload text exceeds byte budget")
-            text_budget[0] -= key_size
+            _charge_json_budget(text_budget, _json_string_size(key) + 1)
             _validate(item, depth + 1, budget, text_budget)
         return
     raise QueueError("payload must contain exact native JSON values")
-
 
 def _payload(value: object) -> tuple[str, dict[str, Any]]:
     if type(value) is not dict:
