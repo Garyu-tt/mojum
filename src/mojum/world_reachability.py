@@ -45,6 +45,10 @@ def _guard(room, columns, rows):
     if (room.width > MAX_ROOM_SPAN_M or room.height > MAX_ROOM_SPAN_M
             or len(room.obstacles) > MAX_OBSTACLES):
         raise ValueError("room exceeds opt-in audit budget")
+    # Valid positive subnormal dimensions can become 0.0 after grid division.
+    # Reject before _near_cells divides by a zero-width sampled cell.
+    if room.width / columns == 0.0 or room.height / rows == 0.0:
+        raise ValueError("sampled-grid cell span underflows floating-point precision")
 
 
 def _clear(room, first, second):
