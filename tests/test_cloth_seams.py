@@ -56,6 +56,14 @@ class ClothSeamTests(unittest.TestCase):
         result = self.admit(vertices=v, triangles=t, seams=seams)
         self.assertEqual([x.seam_id for x in result.seams], ["a-side", "z-side"])
 
+    def test_oversized_seam_mapping_rejected_before_key_copy(self):
+        vertices, triangles, seams = fixture()
+        seams[0].update({f"extra_{index}": index for index in range(25_000)})
+        with self.assertRaisesRegex(ClothSeamError, "exactly native-string keys"):
+            validate_seams(
+                vertices, triangles, seams, provenance="PUBLIC_SYNTHETIC"
+            )
+
     def test_report_is_immutable(self):
         report = self.admit()
         with self.assertRaises(dataclasses.FrozenInstanceError):
