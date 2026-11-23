@@ -88,9 +88,14 @@ def rasterize(room: Room, *, columns: int = 32, rows: int = 32) -> dict:
 
 def verify_raster(room: Room, frame: dict) -> bool:
     """Fail closed if a saved QA preview differs from current geometry."""
-    if (type(frame) is not dict or set(frame) != {
+    # Only built-in string keys may reach set/dict equality: a str subclass
+    # can execute arbitrary __eq__ even in an otherwise ordinary dict.
+    if (type(frame) is not dict
+            or any(type(key) is not str for key in frame)):
+        raise ValueError("invalid occupancy preview envelope")
+    if set(frame) != {
             "schema", "geometry_sha256", "columns", "rows", "row_order",
-            "blocked_rows", "provenance"}):
+            "blocked_rows", "provenance"}:
         raise ValueError("invalid occupancy preview envelope")
     # Equality on untrusted objects can invoke arbitrary __eq__ methods, or
     # accept malformed fields through forged always-true comparisons. Validate
