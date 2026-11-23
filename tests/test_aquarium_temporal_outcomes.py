@@ -283,6 +283,43 @@ class TemporalOutcomeAquariumTests(unittest.TestCase):
             })
         self.assertEqual(model.snapshot(), RangeOutcomeMemory().snapshot())
 
+    def test_hostile_snapshot_and_prior_dict_keys_fail_closed(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise RuntimeError("hostile key equality executed")
+
+            def __ne__(self, other):
+                raise RuntimeError("hostile key inequality executed")
+
+        model = RangeOutcomeMemory()
+        before = model.snapshot()
+        # The container is a real built-in dict. A str subclass with a
+        # colliding hash can execute attacker-supplied equality during set
+        # comparison unless keys are type-checked first.
+        for hostile in ("schema", "updates", "histograms"):
+            bad = {
+                (HostileKey(key) if key == hostile else key): copy.deepcopy(value)
+                for key, value in before.items()
+            }
+            with self.subTest(snapshot_key=hostile):
+                with self.assertRaises(TemporalOutcomeError):
+                    RangeOutcomeMemory.from_snapshot(bad)
+
+        prior = {"observations": 0, "next_bucket": None, "blocked": None}
+        for hostile in prior:
+            bad = {
+                (HostileKey(key) if key == hostile else key): value
+                for key, value in prior.items()
+            }
+            with self.subTest(prior_key=hostile):
+                # Early admission must reject the key without ever reading
+                # the intentionally invalid sensor arguments.
+                with self.assertRaises(TemporalOutcomeError):
+                    model.observe(None, "rest", None, False, bad)
+        self.assertEqual(model.snapshot(), before)
+
     def test_cli_resume_and_preflight_validation_without_sqlite_side_effect(self):
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
         command = [sys.executable, "-m", "mojum.aquarium",
