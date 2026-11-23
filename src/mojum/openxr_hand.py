@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+from threading import Lock
 
 INPUT_SCHEMA = "mojum.openxr.hand-locations/1"
 OBSERVATION_SCHEMA = "mojum.sensor.openxr-hand/1"
@@ -182,6 +183,7 @@ class HandStream:
         self.base_space = base_space
         self.calibration_sha256 = calibration_sha256
         self.head = ZERO_HEAD
+        self._lock = Lock()
         self.last_time_ns = -1
         self.last_frame_index = -1
 
@@ -189,33 +191,35 @@ class HandStream:
         return self.ingest(decode_frame_json(data), expected_head=expected_head)
 
     def ingest(self, raw: dict, *, expected_head: str):
-        if type(expected_head) is not str or expected_head != self.head:
-            raise HandTrackingError("stale stream head")
-        joints = _validate_frame(raw)
-        if (raw["hand"] != self.hand or raw["base_space"] != self.base_space
-                or raw["calibration_sha256"] != self.calibration_sha256):
-            raise HandTrackingError("hand or reference-space calibration changed")
-        if raw["time_ns"] <= self.last_time_ns or raw["frame_index"] <= self.last_frame_index:
-            raise HandTrackingError("nonmonotonic hand stream time/frame")
-        packet = {
-            "schema": OBSERVATION_SCHEMA,
-            "provenance": "untrusted-openxr-readonly/1",
-            "external_actuator": None,
-            "hand": self.hand,
-            "base_space": self.base_space,
-            "calibration_sha256": self.calibration_sha256,
-            "frame_index": raw["frame_index"],
-            "time_ns": raw["time_ns"],
-            "is_active": raw["is_active"],
-            "joints": joints,
-            "previous_sha256": self.head,
-        }
-        packet["sha256"] = hashlib.sha256(_canonical(packet)).hexdigest()
-        # No state mutation until every validation, encoding and hashing succeeds.
-        self.head = packet["sha256"]
-        self.last_time_ns = raw["time_ns"]
-        self.last_frame_index = raw["frame_index"]
-        return packet
+        # Serialize check, packet hash and head update: one CAS winner per head.
+        with self._lock:
+            if type(expected_head) is not str or expected_head != self.head:
+                raise HandTrackingError("stale stream head")
+            joints = _validate_frame(raw)
+            if (raw["hand"] != self.hand or raw["base_space"] != self.base_space
+                    or raw["calibration_sha256"] != self.calibration_sha256):
+                raise HandTrackingError("hand or reference-space calibration changed")
+            if raw["time_ns"] <= self.last_time_ns or raw["frame_index"] <= self.last_frame_index:
+                raise HandTrackingError("nonmonotonic hand stream time/frame")
+            packet = {
+                "schema": OBSERVATION_SCHEMA,
+                "provenance": "untrusted-openxr-readonly/1",
+                "external_actuator": None,
+                "hand": self.hand,
+                "base_space": self.base_space,
+                "calibration_sha256": self.calibration_sha256,
+                "frame_index": raw["frame_index"],
+                "time_ns": raw["time_ns"],
+                "is_active": raw["is_active"],
+                "joints": joints,
+                "previous_sha256": self.head,
+            }
+            packet["sha256"] = hashlib.sha256(_canonical(packet)).hexdigest()
+            # No state mutation until every validation, encoding and hashing succeeds.
+            self.head = packet["sha256"]
+            self.last_time_ns = raw["time_ns"]
+            self.last_frame_index = raw["frame_index"]
+            return packet
 
 
 def verify_observation_chain(frames):
