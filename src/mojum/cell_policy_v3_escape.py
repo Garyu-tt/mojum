@@ -58,6 +58,16 @@ class CellV3EscapeError(ValueError):
     """Invalid snapshot, causal observation or exhausted replay envelope."""
 
 
+def _exact_native_key_set(value, label, maximum):
+    """Validate bounded native dict keys before any hashing or equality."""
+    if type(value) is not dict or len(value) > maximum:
+        raise CellV3EscapeError(f"invalid {label} mapping")
+    keys = tuple(value.keys())
+    if any(type(key) is not str or not key or len(key) > 64 for key in keys):
+        raise CellV3EscapeError(f"invalid {label} mapping keys")
+    return frozenset(keys)
+
+
 def _check_streak_counters(state):
     """Reject streak counters that no real observe() history can produce.
 
@@ -171,8 +181,14 @@ class CellExplorerV3Escape:
             "last_seen_at", "evictions", "forgotten_observations",
             "consecutive_rests", "consecutive_blocked_probes",
         }
-        if type(state) is dict and set(state) == legacy_mandatory:
-            if state.get("consecutive_rests") or state.get("consecutive_blocked_probes"):
+        legacy_keys = _exact_native_key_set(
+            state, "snapshot", len(legacy_mandatory) + 3,
+        )
+        if legacy_keys == frozenset(legacy_mandatory):
+            if (type(state.get("consecutive_rests")) is not int
+                    or type(state.get("consecutive_blocked_probes")) is not int):
+                raise CellV3EscapeError("invalid legacy streak counters")
+            if state["consecutive_rests"] or state["consecutive_blocked_probes"]:
                 raise CellV3EscapeError(
                     "legacy snapshot lacks chronology evidence for strict streak attestation"
                 )
@@ -181,7 +197,8 @@ class CellExplorerV3Escape:
             state["history_complete"] = False
             state["outcome_tail"] = []
         mandatory = legacy_mandatory | {"snapshot_version", "history_complete", "outcome_tail"}
-        if (type(state) is not dict or set(state) != mandatory
+        if (_exact_native_key_set(state, "snapshot", len(mandatory)) != frozenset(mandatory)
+                or type(state["schema"]) is not str
                 or state["schema"] != SCHEMA
                 or type(state["snapshot_version"]) is not int
                 or state["snapshot_version"] != 2
@@ -197,7 +214,8 @@ class CellExplorerV3Escape:
                 or type(state["records"]) is not dict
                 or type(state["last_seen_at"]) is not dict
                 or not 0 <= len(state["records"]) <= MAX_CELLS
-                or set(state["records"]) != set(state["last_seen_at"])
+                or _exact_native_key_set(state["records"], "records", MAX_CELLS)
+                    != _exact_native_key_set(state["last_seen_at"], "last_seen_at", MAX_CELLS)
                 or type(state["evictions"]) is not int
                 or type(state["forgotten_observations"]) is not int
                 or not 0 <= state["evictions"] <= state["forgotten_observations"]
@@ -217,7 +235,8 @@ class CellExplorerV3Escape:
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
                     or type(actions) is not dict or not actions
-                    or not set(actions) <= set(ACTIONS)):
+                    or not _exact_native_key_set(actions, "actions", len(ACTIONS))
+                        <= frozenset(ACTIONS)):
                 raise CellV3EscapeError("invalid escape cell or action records")
             last_seen = state["last_seen_at"][key]
             if (type(last_seen) is not int
@@ -282,8 +301,11 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("measured-outcome chronology completeness flag disagrees with tail")
         tail_counts = {}
         for offset, item in enumerate(tail):
-            if (type(item) is not dict or set(item) != {"tick", "cell", "action", "blocked"}
-                    or type(item["tick"]) is not int
+            if _exact_native_key_set(item, "chronology item", 4) != frozenset(
+                {"tick", "cell", "action", "blocked"}
+            ):
+                raise CellV3EscapeError("invalid measured-outcome chronology tail")
+            if (type(item["tick"]) is not int
                     or item["tick"] != state["last_tick"] - len(tail) + 1 + offset
                     or type(item["cell"]) is not str
                     or _ZONE.fullmatch(item["cell"]) is None
@@ -315,12 +337,8 @@ class CellExplorerV3Escape:
                 blocked_suffix += 1
             else:
                 break
-        # The retained chronology is deliberately capped at the four-outcome
-        # evidence window. Live streak counters may continue beyond that window;
-        # compare their saturated values, while still requiring an exact suffix
-        # whenever the streak is shorter than the retained window.
-        if (rest_suffix != min(state["consecutive_rests"], REPROBE_BLOCKED_BEFORE_REST)
-                or blocked_suffix != min(state["consecutive_blocked_probes"], REPROBE_BLOCKED_BEFORE_REST)):
+        if (rest_suffix != state["consecutive_rests"]
+                or blocked_suffix != state["consecutive_blocked_probes"]):
             raise CellV3EscapeError("terminal streak counters disagree with ordered outcomes")
 
 
