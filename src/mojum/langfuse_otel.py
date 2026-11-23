@@ -66,7 +66,7 @@ def validate(event: dict) -> dict:
     if type(event) is not dict or event.keys() - FIELDS:
         raise TelemetryError("unknown field or invalid event object")
     required = {"schema", "event_id", "lease_id", "attempt", "phase", "outcome", "timestamp_ms"}
-    if not required <= event.keys() or event["schema"] != SCHEMA:
+    if not required <= event.keys() or type(event["schema"]) is not str or event["schema"] != SCHEMA:
         raise TelemetryError("event schema/required fields mismatch")
     event_id = _uuid(event["event_id"], "event_id")
     lease_id = _uuid(event["lease_id"], "lease_id")
@@ -90,9 +90,12 @@ def validate(event: dict) -> dict:
     if "pr_number" in event:
         safe["pr_number"] = _number(event["pr_number"], "pr_number", 1, 10_000_000)
     if "model_class" in event:
-        if phase not in ("provider_admission", "provider_result") or event["model_class"] not in ("cpu_local", "gpu_local", "remote"):
+        model_class = event["model_class"]
+        if (phase not in ("provider_admission", "provider_result")
+                or type(model_class) is not str
+                or model_class not in ("cpu_local", "gpu_local", "remote")):
             raise TelemetryError("model_class: invalid or out of phase")
-        safe["model_class"] = event["model_class"]
+        safe["model_class"] = model_class
     for field in MEASURED:
         if field in event:
             if phase != "provider_result":
