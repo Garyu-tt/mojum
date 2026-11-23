@@ -256,7 +256,7 @@ def validate(graph):
     # Check individual key wire sizes before the short-name rule so a malicious
     # multi-megabyte key still receives the byte-budget diagnostic.
     if len(graph) != 5:
-        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
+        raise GraphError("Graph v1 graph schema requires exact root fields (unsupported v1 field)")
     root_keys = tuple(dict.keys(graph))
     for key in root_keys:
         if type(key) is not str:
@@ -265,7 +265,7 @@ def validate(graph):
         if len(key) > len("revision"):
             raise GraphError("Graph v1 root keys must be bounded exact strings")
     if set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}:
-        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
+        raise GraphError("Graph v1 graph schema requires exact root fields (unsupported v1 field)")
 
     # Preserve the established field-specific identity diagnostics before the
     # whole-tree UTF-8 walk. These direct lookups are safe: the root is an exact
