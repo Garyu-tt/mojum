@@ -69,6 +69,8 @@ def _preflight_json(value):
                 if key_bytes > MAX_BYTES:
                     raise GraphError("nested editor JSON key exceeds byte limit")
                 estimated_bytes += key_bytes
+                if estimated_bytes > MAX_BYTES:
+                    raise GraphError("nested editor payload exceeds byte limit")
                 stack.append((child, depth + 1))
         elif kind is list:
             identity = id(item)
