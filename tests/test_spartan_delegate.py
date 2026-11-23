@@ -259,6 +259,53 @@ class DelegationTests(unittest.TestCase):
         self.assertTrue(d.reserve(self.db, self.lease, now=21))
         self.assertFalse(self.db.in_transaction)
 
+    def test_invalid_lease_objects_fail_closed_at_all_public_boundaries(self):
+        # Public API must reject malformed caller values with a typed error,
+        # without raising AttributeError or starting coordinator transactions.
+        class Forged:
+            backend = "ray"
+            task_id = "issue-701"
+            worker_id = 1
+            attempt = 1
+            opaque_ref = "opaque.701"
+
+        class NeverRemote:
+            calls = 0
+            def remote(self, _):
+                self.calls += 1
+                raise AssertionError("remote dispatch must never happen")
+
+        class NeverTemporal:
+            calls = 0
+            async def start_workflow(self, *args, **kwargs):
+                self.calls += 1
+                raise AssertionError("remote dispatch must never happen")
+
+        ray = NeverRemote()
+        temporal = NeverTemporal()
+        for invalid in (None, object(), {"task_id": "issue-701"}, Forged()):
+            with self.subTest(lease=type(invalid).__name__):
+                for call in (
+                    lambda: d.acknowledge(self.db, invalid, "remote.1", now=21),
+                    lambda: d.request_cancel(self.db, invalid, now=21),
+                    lambda: d.prepare_pr(self.db, invalid, "feat/701", "a" * 40,
+                                         now=21),
+                    lambda: d.dispatch_ray(self.db, invalid, ray, now=21),
+                    lambda: asyncio.run(d.dispatch_temporal(
+                        self.db, invalid, temporal,
+                        task_queue="approved.queue", now=21)),
+                ):
+                    with self.assertRaisesRegex(d.DelegationRejected,
+                                                "lease object required"):
+                        call()
+                self.assertFalse(self.db.in_transaction)
+        self.assertEqual(ray.calls, 0)
+        self.assertEqual(temporal.calls, 0)
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM delegated_runs").fetchone()[0], 0)
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM delegated_pr_intents").fetchone()[0], 0)
+
     def test_install_needs_existing_lease_authority(self):
         empty = sqlite3.connect(":memory:", isolation_level=None)
         empty.row_factory = sqlite3.Row
