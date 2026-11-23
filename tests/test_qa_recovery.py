@@ -1,5 +1,5 @@
 import unittest
-from mojum.qa_recovery import RecoveryError, plan_recovery
+from mojum.qa_recovery import MAX_LOGICAL_TIME, RecoveryError, plan_recovery
 
 
 def task(task_id, state="DISCOVERED", *, attempt=0, maximum=3,
@@ -78,7 +78,6 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("bad" + chr(0xD800) + "id")], observed_at=0)
 
-
     def test_exhausted_retry_is_failed_before_readiness(self):
         report = plan_recovery([
             task("spent", "RETRY", attempt=3, maximum=3, not_before=0)
@@ -91,9 +90,8 @@ class RecoveryTests(unittest.TestCase):
         for state in ("CLAIMED", "RUNNING"):
             with self.subTest(state=state):
                 with self.assertRaises(RecoveryError):
-                    plan_recovery([
-                        task("active", state, attempt=0, lease=20)
-                    ], observed_at=10)
+                    plan_recovery([task("active", state, attempt=0, lease=20)],
+                                  observed_at=10)
 
     def test_oversized_identifier_rejected_before_utf8_work(self):
         with self.assertRaises(RecoveryError):
@@ -102,46 +100,20 @@ class RecoveryTests(unittest.TestCase):
     def test_hostile_string_subclass_field_key_rejected_before_hashing(self):
         class HostileKey(str):
             active = False
-
             def __hash__(self):
                 if self.active:
                     raise AssertionError("hostile hash must not run")
                 return str.__hash__(self)
-
             def __eq__(self, other):
                 if self.active:
                     raise AssertionError("hostile equality must not run")
                 return str.__eq__(self, other)
-
         item = task("safe")
         key = HostileKey("task_id")
         item[key] = item.pop("task_id")
         key.active = True
         with self.assertRaises(RecoveryError):
             plan_recovery([item], observed_at=0)
-
-
-    def test_rejects_oversized_identifier_before_utf8_encoding(self):
-        with self.assertRaises(RecoveryError):
-            plan_recovery([task("x" * 1_000_000)], observed_at=0)
-
-    def test_rejects_hostile_string_keys_before_hashing(self):
-        class HostileKey(str):
-            armed = False
-            def __hash__(self):
-                if self.armed:
-                    raise AssertionError("hostile hash executed")
-                return super().__hash__()
-            def __eq__(self, other):
-                if self.armed:
-                    raise AssertionError("hostile equality executed")
-                return super().__eq__(other)
-
-        ordinary = task("safe")
-        hostile = {HostileKey(key): value for key, value in ordinary.items()}
-        HostileKey.armed = True
-        with self.assertRaises(RecoveryError):
-            plan_recovery([hostile], observed_at=0)
 
     def test_bounds_and_exact_types(self):
         with self.assertRaises(RecoveryError):
@@ -150,6 +122,16 @@ class RecoveryTests(unittest.TestCase):
             pass
         with self.assertRaises(RecoveryError):
             plan_recovery([HostileDict(task("a"))], observed_at=0)
+
+    def test_rejects_out_of_range_logical_timestamps(self):
+        too_large = MAX_LOGICAL_TIME + 1
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("a")], observed_at=too_large)
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("active", "RUNNING", attempt=1, lease=too_large)],
+                          observed_at=0)
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("later", not_before=too_large)], observed_at=0)
 
 
 if __name__ == "__main__":
