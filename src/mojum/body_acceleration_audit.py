@@ -14,6 +14,7 @@ from typing import Final
 SCHEMA: Final = "mojum.body.joint-trajectory/1"
 PUBLIC_SYNTHETIC: Final = "PUBLIC_SYNTHETIC"
 MAX_SAMPLES: Final = 4096
+MAX_POSITION_VALUES: Final = 65_536
 MAX_JOINTS: Final = 256
 MAX_NAME_LENGTH: Final = 64
 MAX_STREAM_ID_LENGTH: Final = 64
@@ -127,6 +128,8 @@ def audit_joint_acceleration(trajectory: object, acceleration_limits: object) ->
     samples = data["samples"]
     if type(samples) is not list or not 3 <= len(samples) <= MAX_SAMPLES:
         raise BodyAccelerationError("samples must be a native list of 3..4096 frames")
+    if len(samples) * len(clean_names) > MAX_POSITION_VALUES:
+        raise BodyAccelerationError("trajectory exceeds the total position-value budget")
 
     timestamps: list[int] = []
     positions: list[tuple[float, ...]] = []
