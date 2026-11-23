@@ -231,11 +231,20 @@ def reconcile(pages: list[dict], candidates: list[dict] | None = None) -> dict:
 
 
 def _load_json(path: Path) -> Any:
-    if not path.is_file() or path.stat().st_size > MAX_BYTES:
-        raise BoardError("missing or oversized input JSON")
+    """Bound the bytes actually read, not a racy pre-open metadata snapshot.
+
+    A concurrent writer can grow a file after stat(), so size checking before
+    read_text() is insufficient. Reject oversized data before UTF-8/JSON work.
+    """
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (UnicodeError, ValueError, OSError) as exc:
+        with path.open("rb") as stream:
+            payload = stream.read(MAX_BYTES + 1)
+        if len(payload) > MAX_BYTES:
+            raise BoardError("missing or oversized input JSON")
+        return json.loads(payload.decode("utf-8", errors="strict"))
+    except BoardError:
+        raise
+    except (UnicodeError, ValueError, OSError, RecursionError) as exc:
         raise BoardError("invalid input JSON") from exc
 
 
