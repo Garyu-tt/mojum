@@ -132,6 +132,23 @@ class PlacementReceiptTests(unittest.TestCase):
         with self.assertRaises(PlacementError):
             self.seal(nodes=(self.nodes[0], forged))
 
+    def test_incomplete_forged_snapshot_records_raise_placement_error(self):
+        # type(x) is the exact dataclass class even when object.__new__
+        # bypasses __init__ / __post_init__ and leaves fields absent.
+        variants = (
+            {"jobs": (object.__new__(StatelessJob),)},
+            {"nodes": (self.nodes[0], object.__new__(NodeBudget))},
+            {"plan": object.__new__(PlacementPlan)},
+            {"plan": PlacementPlan((object.__new__(Assignment),), ("b",))},
+        )
+        original = self.seal()
+        for index, kwargs in enumerate(variants):
+            with self.subTest(index=index):
+                with self.assertRaisesRegex(PlacementError, "snapshot fields"):
+                    self.seal(**kwargs)
+                with self.assertRaisesRegex(PlacementError, "snapshot fields"):
+                    self.verify(original, **kwargs)
+
     def test_immutable_receipt_and_mismatched_or_forged_digest(self):
         original = self.seal()
         with self.assertRaises(dataclasses.FrozenInstanceError):
