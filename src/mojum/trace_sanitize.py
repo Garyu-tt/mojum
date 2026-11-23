@@ -15,7 +15,8 @@ SCHEMA = "mojum.trace-attributes/1"
 MAX_ATTRIBUTES = 24
 MAX_INTEGER = 2**63 - 1
 
-# Explicit bounds reject oversized values in O(1) before regex scanning.
+# Explicit bounds reject oversized keys and values before hashing/regex work.
+MAX_KEY_LENGTH = 32
 _STRING_MAX_LENGTHS = {
     "trace_id": 64,
     "lease_id": 64,
@@ -28,15 +29,15 @@ _STRING_MAX_LENGTHS = {
     "reason_code": 48,
 }
 _STRING_PATTERNS = {
-    "trace_id": re.compile(r"[0-9a-f]{32,64}\Z"),
-    "lease_id": re.compile(r"[0-9a-f]{32,64}\Z"),
-    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z"),
-    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
-    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\Z"),
-    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
-    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\Z"),
-    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\Z"),
-    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\Z"),
+    "trace_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
+    "lease_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
+    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\\Z"),
+    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
+    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\\Z"),
+    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
+    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\\Z"),
+    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\\Z"),
+    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
 }
 _INTEGER_FIELDS = {
     "fencing_epoch", "pr_number", "duration_ms", "latency_ms",
@@ -58,7 +59,10 @@ def sanitize_trace_attributes(attributes: Any) -> dict[str, str | int]:
 
     clean: dict[str, str | int] = {}
     for key, value in attributes.items():
-        if type(key) is not str or key not in _ALLOWED_FIELDS:
+        # Bound exact native keys before hashing them in the allowlist lookup.
+        if type(key) is not str or len(key) > MAX_KEY_LENGTH:
+            raise TraceSanitizationError("trace attribute keys must be short native strings")
+        if key not in _ALLOWED_FIELDS:
             raise TraceSanitizationError("unknown or unsafe trace attribute")
         if key in _STRING_PATTERNS:
             if type(value) is not str:
