@@ -165,7 +165,10 @@ class SessionController:
         """Restore only a complete, internally replayable version-1 snapshot."""
         if type(snapshot) is not dict or set(snapshot) != _SNAPSHOT_FIELDS:
             raise SessionControlError("invalid session snapshot shape")
-        if snapshot["schema"] != SCHEMA or snapshot["trust"] != TRUST:
+        if (type(snapshot["schema"]) is not str
+                or type(snapshot["trust"]) is not str
+                or snapshot["schema"] != SCHEMA
+                or snapshot["trust"] != TRUST):
             raise SessionControlError("unsupported session schema or trust claim")
         organism_id = _identifier(snapshot["organism_id"], "organism_id")
         declared_state = snapshot["state"]
@@ -197,11 +200,13 @@ class SessionController:
                 raise SessionControlError(f"non-monotonic tick at sequence {index}")
             if event_id in controller._event_ids:
                 raise SessionControlError(f"duplicate event ID at sequence {index}")
+            from_state = raw["from_state"]
+            to_state = raw["to_state"]
+            if type(from_state) is not str or type(to_state) is not str:
+                raise SessionControlError(f"invalid transition at sequence {index}")
             next_state = _TRANSITIONS.get((controller._state, action))
-            if (next_state is None or raw["from_state"] != controller._state
-                    or raw["to_state"] != next_state
-                    or type(raw["from_state"]) is not str
-                    or type(raw["to_state"]) is not str):
+            if (next_state is None or from_state != controller._state
+                    or to_state != next_state):
                 raise SessionControlError(f"invalid transition at sequence {index}")
             controller._events.append({
                 "seq": seq,
