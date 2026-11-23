@@ -82,7 +82,7 @@ class ManifestTests(unittest.TestCase):
             parse_manifest(raw.encode())
 
     def test_invalid_utf8_nested_json_nonfinite_and_trailing(self):
-        for raw in (b"\\xff", b"[]", b"{}{}", b'{"v":NaN}', b"[" * 1100 + b"]" * 1100):
+        for raw in (bytes((255,)), b"[]", b"{}{}", b'{"v":NaN}', b"[" * 1100 + b"]" * 1100):
             with self.subTest(data=raw[:20]), self.assertRaises(ManifestError):
                 parse_manifest(raw)
 
