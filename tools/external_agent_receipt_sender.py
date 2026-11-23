@@ -54,15 +54,27 @@ def read_private_signing_key(path: str | os.PathLike[str]) -> bytes:
             or not 32 <= before.st_size <= MAX_KEY_BYTES):
         raise SenderError("private key must be owner-only, single-link, 32-4096 bytes")
 
-    # O_NOFOLLOW is a necessary condition for atomic key-file admission.
-    if not hasattr(os, "O_NOFOLLOW"):
-        raise SenderError("O_NOFOLLOW is required for private key admission")
-    flags = os.O_RDONLY | os.O_NOFOLLOW
+    # O_NOFOLLOW on the leaf alone still follows symlinks in ancestor
+    # directories. Traverse from / with directory FDs, rejecting each
+    # symlink and refusing ".." before opening the final key leaf.
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise SenderError("secure POSIX nofollow directory traversal required")
+    if ".." in target.parts:
+        raise SenderError("parent traversal in key file path")
+    leaf_flags = os.O_RDONLY | os.O_NOFOLLOW
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     if hasattr(os, "O_CLOEXEC"):
-        flags |= os.O_CLOEXEC
+        leaf_flags |= os.O_CLOEXEC
+        directory_flags |= os.O_CLOEXEC
     fd = None
+    directory_fd = None
     try:
-        fd = os.open(target, flags)
+        directory_fd = os.open(target.anchor, directory_flags)
+        for component in target.parts[1:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        fd = os.open(target.name, leaf_flags, dir_fd=directory_fd)
         after = os.fstat(fd)
         if (not stat.S_ISREG(after.st_mode)
                 or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
@@ -85,6 +97,8 @@ def read_private_signing_key(path: str | os.PathLike[str]) -> bytes:
     finally:
         if fd is not None:
             os.close(fd)
+        if directory_fd is not None:
+            os.close(directory_fd)
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
