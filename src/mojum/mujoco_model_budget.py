@@ -11,14 +11,15 @@ import re
 METADATA_SCHEMA = "mojum.mujoco-model-metadata/1"
 REPORT_SCHEMA = "mojum.mujoco-model-budget-report/1"
 _MAX_COUNT = 10_000_000
+_MAX_ENGINE_VERSION_LENGTH = 128
 _COUNT_FIELDS = (
     "nbody", "njnt", "ngeom", "nsite", "nsensor", "nactuator", "ntendon",
     "nmesh", "nmeshvert", "nmeshface", "nflex", "nflexvert", "nflexedge",
     "nflexelem",
 )
 _REQUIRED_KEYS = frozenset(("schema", "engine_version", "model_sha256", *_COUNT_FIELDS))
-_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
-_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?\Z", re.ASCII)
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
+_VERSION_RE = re.compile(r"[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?\\Z", re.ASCII)
 
 # Conservative admission profiles, not promises about speed, memory or a CPU.
 _PROFILES = {
@@ -56,6 +57,10 @@ def available_profiles() -> tuple[str, ...]:
 def _validate_metadata(metadata: object) -> dict:
     if type(metadata) is not dict:
         raise ModelBudgetError("metadata must be a built-in dict")
+    # Check cardinality before materializing the key view. An exact built-in
+    # dict can still contain an attacker-sized number of unexpected entries.
+    if len(metadata) != len(_REQUIRED_KEYS):
+        raise ModelBudgetError("metadata keys do not match schema")
     keys = list(metadata.keys())
     if any(type(key) is not str for key in keys):
         raise ModelBudgetError("metadata keys must be built-in strings")
@@ -64,8 +69,13 @@ def _validate_metadata(metadata: object) -> dict:
     if type(metadata["schema"]) is not str or metadata["schema"] != METADATA_SCHEMA:
         raise ModelBudgetError("unsupported metadata schema")
     version = metadata["engine_version"]
-    if type(version) is not str or _VERSION_RE.fullmatch(version) is None:
-        raise ModelBudgetError("engine_version must be a numeric semantic version")
+    if (type(version) is not str
+            or len(version) > _MAX_ENGINE_VERSION_LENGTH
+            or _VERSION_RE.fullmatch(version) is None):
+        raise ModelBudgetError(
+            f"engine_version must be a semantic version of at most "
+            f"{_MAX_ENGINE_VERSION_LENGTH} characters"
+        )
     model_sha = metadata["model_sha256"]
     if type(model_sha) is not str or _SHA256_RE.fullmatch(model_sha) is None:
         raise ModelBudgetError("model_sha256 must be lowercase SHA-256 hex")
