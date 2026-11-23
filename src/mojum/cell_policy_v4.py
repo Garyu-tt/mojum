@@ -76,7 +76,10 @@ class CellExplorerV4:
             "schema", "cell_size_m", "last_tick", "last_epoch_index", "updates",
             "records", "last_seen_at", "evictions", "forgotten_observations",
         }
-        if (type(state) is not dict or set(state) != mandatory
+        if (type(state) is not dict
+                or any(type(key) is not str for key in state)
+                or set(state) != mandatory
+                or type(state["schema"]) is not str
                 or state["schema"] != SCHEMA
                 or type(state["cell_size_m"]) is not float
                 or state["cell_size_m"] != STEP_METERS
@@ -90,6 +93,8 @@ class CellExplorerV4:
                 or type(state["records"]) is not dict
                 or type(state["last_seen_at"]) is not dict
                 or not 0 <= len(state["records"]) <= MAX_CELLS
+                or any(type(key) is not str for key in state["records"])
+                or any(type(key) is not str for key in state["last_seen_at"])
                 or set(state["records"]) != set(state["last_seen_at"])
                 or type(state["evictions"]) is not int
                 or type(state["forgotten_observations"]) is not int
@@ -101,6 +106,7 @@ class CellExplorerV4:
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
                     or type(actions) is not dict or not actions
+                    or any(type(name) is not str for name in actions)
                     or not set(actions) <= set(ACTIONS)):
                 raise CellV4Error("invalid v4 cell or action records")
             last_seen = state["last_seen_at"][key]
