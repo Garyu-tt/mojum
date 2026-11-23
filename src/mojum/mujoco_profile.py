@@ -6,7 +6,6 @@ solver, opens paths, accesses a journal, or grants actuator authority.
 from dataclasses import dataclass
 import hashlib
 import json
-import math
 
 SCHEMA = "mojum.mujoco.cpu-profile/1"
 MAX_JSON_BYTES = 8 * 1024
@@ -71,7 +70,7 @@ def _validate_depth(text):
         if in_string:
             if escaped:
                 escaped = False
-            elif char == "\\\\":
+            elif char == chr(92):
                 escaped = True
             elif char == '"':
                 in_string = False
@@ -106,7 +105,7 @@ def _normalize(value):
         raise ProfileError("profile keys must be native strings")
     if frozenset(value) != _FIELDS:
         raise ProfileError("profile has missing or unknown fields")
-    if value["schema"] != SCHEMA or type(value["schema"]) is not str:
+    if type(value["schema"]) is not str or value["schema"] != SCHEMA:
         raise ProfileError("unsupported profile schema")
     if type(value["enabled"]) is not bool:
         raise ProfileError("enabled must be a native bool")
