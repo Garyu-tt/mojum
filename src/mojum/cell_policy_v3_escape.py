@@ -249,9 +249,8 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("unobserved stored escape cells")
         _check_streak_counters(state)
         tail = state["outcome_tail"]
-        expected_tail_length = min(state["updates"], REPROBE_BLOCKED_BEFORE_REST)
-        if len(tail) != expected_tail_length:
-            raise CellV3EscapeError("incomplete measured-outcome chronology tail")
+        if len(tail) > min(state["updates"], REPROBE_BLOCKED_BEFORE_REST):
+            raise CellV3EscapeError("oversized measured-outcome chronology tail")
         tail_counts = {}
         for offset, item in enumerate(tail):
             if (type(item) is not dict or set(item) != {"tick", "cell", "action", "blocked"}
@@ -260,7 +259,9 @@ class CellExplorerV3Escape:
                     or type(item["cell"]) is not str
                     or _ZONE.fullmatch(item["cell"]) is None
                     or item["cell"] not in state["records"]
+                    or type(item["action"]) is not str
                     or item["action"] not in ACTIONS
+                    or item["action"] not in state["records"][item["cell"]]
                     or type(item["blocked"]) is not bool
                     or (item["action"] == "rest" and item["blocked"])
                     or state["last_seen_at"][item["cell"]] < item["tick"]):
