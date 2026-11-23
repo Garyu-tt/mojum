@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from dataclasses import FrozenInstanceError
 
 from mojum.body_acceleration_audit import (
@@ -101,6 +102,17 @@ class BodyAccelerationAuditTests(unittest.TestCase):
         self.assertEqual(report.sample_count, 3)
         with self.assertRaises(FrozenInstanceError):
             report.stream_id = "changed"
+
+    def test_oversized_fixed_schema_key_rejected_before_set_hashing(self):
+        value = trajectory()
+        value.pop("schema")
+        value["s" * 100_000] = "mojum.body.joint-trajectory/1"
+        with patch("mojum.body_acceleration_audit.set", side_effect=AssertionError(
+            "oversized schema key reached set hashing"
+        ), create=True) as key_set:
+            with self.assertRaisesRegex(BodyAccelerationError, "bounded native strings"):
+                self.audit(value)
+            key_set.assert_not_called()
 
     def test_rejects_wrong_schema(self):
         value = trajectory()
