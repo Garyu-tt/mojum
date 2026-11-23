@@ -19,6 +19,7 @@ SCHEMA = "mojum.sqlite.schema-fingerprint/1"
 MAX_BYTES = 1024 * 1024 * 1024
 MAX_ENTRIES = 4096
 MAX_TEXT = 65536
+MAX_TOTAL_TEXT = 4 * 1024 * 1024
 
 
 class SchemaAuditError(ValueError):
@@ -56,14 +57,24 @@ def fingerprint(path: str | os.PathLike[str]) -> dict[str, object]:
                 )
                 digest = hashlib.sha256()
                 count = 0
+                total_text = 0
                 for record in rows:
                     count += 1
                     if count > MAX_ENTRIES:
                         raise SchemaAuditError("schema entry budget exceeded")
-                    if any(value is not None and
-                           (not isinstance(value, str) or len(value.encode("utf-8")) > MAX_TEXT)
-                           for value in record):
-                        raise SchemaAuditError("invalid or oversized schema metadata")
+                    for value in record:
+                        if value is None:
+                            continue
+                        # Character count is a cheap lower bound on UTF-8 size;
+                        # reject before allocating an encoded copy of huge SQL.
+                        if type(value) is not str or len(value) > MAX_TEXT:
+                            raise SchemaAuditError("invalid or oversized schema metadata")
+                        text_size = len(value.encode("utf-8"))
+                        if text_size > MAX_TEXT:
+                            raise SchemaAuditError("invalid or oversized schema metadata")
+                        total_text += text_size
+                        if total_text > MAX_TOTAL_TEXT:
+                            raise SchemaAuditError("aggregate schema text budget exceeded")
                     encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":")).encode()
                     digest.update(len(encoded).to_bytes(4, "big"))
                     digest.update(encoded)
