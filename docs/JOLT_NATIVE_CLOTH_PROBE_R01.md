@@ -23,6 +23,7 @@ The CI workflow performs the same native build and executes the binary as part o
 
 - Synthetic cloth only; no user assets, avatar, PRIVATE Noosphere records, network services, or actuators.
 - CPU headless probe; no renderer, GPU dependency, or mandatory application integration.
+- Native worker pool is capped at eight threads, independent of how many logical CPUs the host exposes.
 - Output deliberately omits source paths, host identifiers and raw physics internals.
 - `self_collision=false` and `external_contact=false` are hard-coded capability limits, not implied features.
 - This verifies only that this tiny pinned soft body compiles, advances and deforms under gravity while its pinned row remains stable. It does not establish garment fit, body collision, self-collision, material calibration, stable long-run behavior, mobile performance, or production integration.
