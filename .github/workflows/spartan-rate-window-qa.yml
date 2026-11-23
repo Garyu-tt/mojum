@@ -1,0 +1,47 @@
+name: Spartan rate-window focused QA
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/mojum/spartan_rate_window.py"
+      - "tests/test_spartan_rate_window.py"
+      - ".github/workflows/spartan-rate-window-qa.yml"
+  push:
+    branches:
+      - build/478-spartan-rate-window-peer1-20261123
+    paths:
+      - "src/mojum/spartan_rate_window.py"
+      - "tests/test_spartan_rate_window.py"
+      - ".github/workflows/spartan-rate-window-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: focused-unit-tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact head SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused rate-window regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_spartan_rate_window.py' -v
