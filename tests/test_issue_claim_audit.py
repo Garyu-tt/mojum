@@ -112,6 +112,25 @@ class ClaimAuditTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(claim_audit.ClaimAuditError):
                 claim_audit.audit(snapshot(comment(1, "bot", raw)))
 
+    def test_markdown_fenced_or_indented_markers_are_not_claims(self):
+        active = marker("agent-a", "issue-478/provider")
+        examples = [
+            "```text\n" + active + "\n```",
+            "~~~json\n" + active + "\n~~~",
+            "````markdown\n" + active + "\n````",
+            "    " + active,  # four spaces are Markdown indented code
+            "\t" + active,  # a tab is also code indentation
+        ]
+        for example in examples:
+            with self.subTest(example=example), self.assertRaises(claim_audit.ClaimAuditError):
+                claim_audit.audit(snapshot(comment(1, "bot", example)))
+
+    def test_real_claim_after_unrelated_code_fence_remains_valid(self):
+        body = "```python\nprint(42)\n```\n" + marker("agent-a", "scope-a")
+        report = claim_audit.audit(snapshot(comment(1, "bot", body)))
+        self.assertEqual(report["status"], "clear")
+        self.assertEqual(report["issues"][0]["active_claims"][0]["worker"], "agent-a")
+
     def test_rejects_duplicate_json_issue_number_comment_id_and_bool_id(self):
         for raw in [
             {"schema": claim_audit.INPUT_SCHEMA, "repository": "x/y", "issues": [
