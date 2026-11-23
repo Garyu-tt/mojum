@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The schema moj um.physics-benchmark/1 (wire identifier: mojum.physics-benchmark/1) is a solver-neutral input contract for comparing separately produced CPU physics measurements. It does not install, select, call, attest, or benchmark a solver. Pinocchio, Jolt, MuJoCo, PBD, and analytic fixtures remain independent opt-in experiments.
+The schema mojum.physics-benchmark/1 (wire identifier: mojum.physics-benchmark/1) is a solver-neutral input contract for comparing separately produced CPU physics measurements. It does not install, select, call, attest, or benchmark a solver. Pinocchio, Jolt, MuJoCo, PBD, and analytic fixtures remain independent opt-in experiments.
 
 Both reports must declare PUBLIC_SYNTHETIC and match the exact workload digest, rig digest, seed, timestep, warm-up count, measured-step count, and generic execution-platform tuple. Solver name and compiled model digest may differ. The comparator refuses envelope mismatch instead of producing a misleading speed ranking.
 
