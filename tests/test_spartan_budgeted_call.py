@@ -162,6 +162,19 @@ class BudgetedDispatchTests(unittest.TestCase):
             )
         self.assertEqual(calls, ["called"])
 
+    def test_raw_tuple_row_connection_rejected_before_provider_call(self):
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(db.close)
+        calls = []
+        with self.assertRaisesRegex(TypeError, "sqlite3.Row"):
+            dispatch(
+                db, request_id="wrong-row-factory", worker=1,
+                reserve_tokens=10, reserve_micro_usd=100,
+                invoke=lambda: calls.append("called"),
+                receipt_extractor=lambda _: {"actual_tokens": 0, "actual_micro_usd": 0},
+            )
+        self.assertEqual(calls, [])
+
     def test_invalid_callbacks_are_rejected_before_reservation(self):
         with self.assertRaises(TypeError):
             dispatch(
