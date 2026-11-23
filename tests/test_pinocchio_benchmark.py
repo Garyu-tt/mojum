@@ -52,6 +52,28 @@ class PinocchioReferenceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "required"):
                 probe.run_benchmark(backend="pinocchio")
 
+    def test_native_ik_rejects_invalid_targets_before_native_access(self):
+        # Validation happens before any numpy/Pinocchio object is touched.
+        solver = object.__new__(probe._Pinocchio2R)
+        for target in ((10**1000, 0), (-(10**1000), 0),
+                       (float("nan"), 0), (0, float("inf")), (True, 0)):
+            with self.subTest(target=type(target[0]).__name__):
+                with self.assertRaises(ValueError):
+                    solver.ik(target, (0.0, 0.0))
+        for steps in (False, 0, 257):
+            with self.subTest(steps=steps), self.assertRaises(ValueError):
+                solver.ik((0.3, 0.0), (0.0, 0.0), max_steps=steps)
+
+    def test_backend_selector_requires_exact_string(self):
+        class EqualToReference:
+            def __eq__(self, other):
+                return other == "reference"
+
+        for backend in (EqualToReference(), object(), None):
+            with self.subTest(backend=type(backend).__name__):
+                with self.assertRaises(ValueError):
+                    probe.run_benchmark(backend=backend, samples=1)
+
     def test_deterministic_fields_without_timing(self):
         a = probe.run_benchmark(backend="reference", samples=8)
         b = probe.run_benchmark(backend="reference", samples=8)
