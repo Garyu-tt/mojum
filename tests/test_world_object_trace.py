@@ -169,6 +169,29 @@ class ObjectTraceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     record_trace(self.room, 1, 1, self.fixtures, [entry])
 
+    def test_direct_api_rejects_forged_command_keys(self):
+        class SpoofedKey:
+            def __init__(self, literal):
+                self.literal = literal
+
+            def __hash__(self):
+                return hash(self.literal)
+
+            def __eq__(self, other):
+                return self.literal == other
+
+        class StrSubclass(str):
+            pass
+
+        for key in (SpoofedKey("dx"), StrSubclass("dx")):
+            with self.subTest(kind=type(key).__name__):
+                forged = command()
+                forged[key] = forged.pop("dx")
+                # Both cases formerly passed set(forged) == _COMMAND_KEYS.
+                self.assertEqual(set(forged), {"dx", "dy", "action", "object_id", "place"})
+                with self.assertRaisesRegex(ValueError, "invalid command keys"):
+                    record_trace(self.room, 1, 1, self.fixtures, [forged])
+
     def test_malformed_or_forged_state_geometry(self):
         bad = self.trace()
         bad["room"]["obstacles"][0][0] = 1000

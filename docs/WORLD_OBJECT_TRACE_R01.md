@@ -8,7 +8,7 @@ The exact JSON envelope is mojum.world.object-trace/1 with audience PUBLIC_SYNTH
 
 Each step contains one canonical command {dx,dy,action,object_id,place}, the room event, object event, room state and objects state. The inspector replays every step through the existing world_objects.advance_objects and world_room.advance, then compares canonical serialized JSON bytes, including numeric type distinctions. Recomputed hashes never excuse a forged event. All transitions use synthetic room/object compare-and-swap revisions.
 
-Limits: 128 steps, 128 obstacles, 16 objects, 10,000m synthetic coordinate maximum, 1,000m per command coordinate component and 256KiB serialized trace. Raw JSON decoding refuses duplicate object keys and nonfinite constants. Parsing is bounded; unknown fields, malformed types, bool-as-number, wrong audience, reordered/omitted/fabricated steps and stale revisions fail closed.
+Limits: 128 steps, 128 obstacles, 16 objects, 10,000m synthetic coordinate maximum, 1,000m per command coordinate component and 256KiB serialized trace. Raw JSON decoding refuses duplicate object keys and nonfinite constants. Parsing is bounded; unknown fields, malformed types, bool-as-number, wrong audience, reordered/omitted/fabricated steps and stale revisions fail closed. Direct Python `record_trace` command dictionaries also reject non-native string keys, including equality/hash-spoofed objects and `str` subclasses; strict decoded JSON input already applies a native-key gate.
 
 Content hashes are NOT signatures or proof of trusted origin: a malicious author controlling the entire fixture may make another consistent trace. The tool is not an actuation authority, a Noosphere journal or a policy learning component.
 
