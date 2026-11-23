@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
+from weakref import WeakValueDictionary
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -257,13 +258,36 @@ def admit(provider: Provider, observation: Observation, *, calls: int,
                   cost, observation.slot_proof)
 
 
+@dataclass
+class _ProcessGate:
+    limit: int
+    semaphore: BoundedSemaphore
+
+
+# A local server's slots are shared by every Session using the same port.
+# Weak values release unused gates; a lock serializes concurrent construction.
+_PROCESS_GATES = WeakValueDictionary()
+_PROCESS_GATES_LOCK = Lock()
+
+
 class Session:
-    """One-process guard; Cezar remains sole owner of leases/fencing."""
+    """Endpoint-wide in-process gate; Cezar still owns global lease fencing."""
 
     def __init__(self, provider: Provider, *, request=local_http):
+        if type(provider) is not Provider:
+            raise AdmissionError("validated provider required")
         self.provider = provider
         self._request = request
-        self._semaphore = BoundedSemaphore(provider.max_concurrent_calls)
+        with _PROCESS_GATES_LOCK:
+            gate = _PROCESS_GATES.get(provider.port)
+            if gate is None:
+                gate = _ProcessGate(provider.max_concurrent_calls,
+                                    BoundedSemaphore(provider.max_concurrent_calls))
+                _PROCESS_GATES[provider.port] = gate
+            elif gate.limit != provider.max_concurrent_calls:
+                raise AdmissionError("conflicting per-endpoint parallel-call cap")
+        self._gate = gate  # Keep the weak-registry entry alive for this Session.
+        self._semaphore = gate.semaphore
 
     def complete(self, prompt: str, *, prompt_tokens_cap: int,
                  completion_tokens_cap: int, headroom: Headroom) -> str:
@@ -293,9 +317,14 @@ class Session:
             choices = data.get("choices")
             if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
                 raise AdmissionError("invalid completion choices")
-            message = choices[0].get("message")
+            choice = choices[0]
+            if choice.get("finish_reason") != "stop":
+                raise AdmissionError("incomplete or tool-directed completion")
+            message = choice.get("message")
             if type(message) is not dict or type(message.get("content")) is not str:
                 raise AdmissionError("invalid completion text")
+            if message.get("tool_calls") is not None or message.get("function_call") is not None:
+                raise AdmissionError("tool/function calls are prohibited")
             output = message["content"]
             if not output.strip() or len(output.encode("utf-8")) > MAX_JSON_BYTES:
                 raise AdmissionError("empty or oversized completion")
