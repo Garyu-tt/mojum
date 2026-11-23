@@ -3,8 +3,6 @@
 This is an opt-in read-only field sampler, not a thermodynamics solver.
 """
 from dataclasses import dataclass
-import math
-
 from .world_room import Room, RoomState, _revision, _valid
 
 PUBLIC_SYNTHETIC = "PUBLIC_SYNTHETIC"
@@ -61,7 +59,7 @@ def sample_room_climate(
     humidity in permille (0..1000). All parameters are caller supplied;
     there is no clock, randomness, I/O, hidden world state or mutation.
     """
-    if provenance != PUBLIC_SYNTHETIC or type(provenance) is not str:
+    if type(provenance) is not str or provenance != PUBLIC_SYNTHETIC:
         raise ClimateError("explicit PUBLIC_SYNTHETIC provenance required")
     if type(room) is not Room or type(state) is not RoomState:
         raise ClimateError("canonical Room and RoomState instances required")
