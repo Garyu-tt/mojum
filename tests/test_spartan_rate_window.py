@@ -16,8 +16,11 @@ class RateWindowTests(unittest.TestCase):
         e = (RequestEvent(100, 7), RequestEvent(200, 2))
         self.assertEqual(admit_request(e, now_ms=200, new_tokens=4,
                                        max_requests=3, max_tokens=10), (False, 60100))
-        self.assertEqual(admit_request((), now_ms=0, new_tokens=11,
-                                       max_requests=3, max_tokens=10), (False, 60000))
+
+    def test_impossible_request_is_rejected_without_false_retry(self):
+        with self.assertRaisesRegex(ValueError, "exceeds rate window token limit"):
+            admit_request((), now_ms=0, new_tokens=11,
+                          max_requests=3, max_tokens=10)
 
     def test_reject_hostile_types_and_order(self):
         base = dict(events=(), now_ms=10, new_tokens=1, max_requests=2, max_tokens=10)
