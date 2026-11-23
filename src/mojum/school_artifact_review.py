@@ -138,6 +138,12 @@ def review_run(run: dict) -> dict:
         # Normalize caller-defined comparison/hash failures at the trust boundary.
         raise SchoolArtifactReviewError("school run contract rejected") from exc
 
+    # bool is a subclass of int, and True == 1.  The legacy fixture validator
+    # compares event ticks by equality only, so reject non-native integer ticks
+    # before any structural measurements are derived.
+    if any(type(event["sim_tick"]) is not int for event in run["events"]):
+        raise SchoolArtifactReviewError("school event ticks must be exact integers")
+
     activity_id = run["activity_id"]
     artifact_kind = "svg" if activity_id == "visual_arts.starter" else "rhythm"
     parser = _parse_svg if artifact_kind == "svg" else _parse_rhythm
