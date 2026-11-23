@@ -131,6 +131,34 @@ class PettingZooBenchmarkTests(unittest.TestCase):
             run_episode(lambda: env, seed=11, cycles=2, enabled=True)
         self.assertTrue(env.closed)
 
+    def test_index_like_inputs_are_normalized_exactly_once(self):
+        class ChangingIndex:
+            def __init__(self, first, subsequent):
+                self.first = first
+                self.subsequent = subsequent
+                self.calls = 0
+
+            def __index__(self):
+                self.calls += 1
+                return self.first if self.calls == 1 else self.subsequent
+
+            def __int__(self):
+                # A distinct __int__ must never override the validated index.
+                return 29
+
+        seed = ChangingIndex(11, 2**50)
+        cycles = ChangingIndex(15, 65)
+        result = run_episode(FakeRPS, seed=seed, cycles=cycles, enabled=True)
+        self.assertEqual(result["seed"], 11)
+        self.assertEqual(result["cycles"], 15)
+        self.assertEqual(seed.calls, 1)
+        self.assertEqual(cycles.calls, 1)
+
+        held_out = ChangingIndex(11, 2**50)
+        report = run_benchmark(FakeRPS, enabled=True, seeds=[held_out])
+        self.assertEqual(held_out.calls, 1)
+        self.assertEqual([e["seed"] for e in report["episodes"]], [11, 11])
+
     def test_missing_optional_dependency_has_explicit_error(self):
         from mojum import pettingzoo_benchmark as pz
         with mock.patch.object(pz, "version", side_effect=pz.PackageNotFoundError("pettingzoo")):
