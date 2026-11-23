@@ -6,13 +6,14 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.spartan_langfuse_trace import (TraceError, validate, read_events,
-                                          summary, build_payload, send, main)
+                                          summary, build_payload, send, main, MAX_LINE_BYTES)
 
 KEY = b'k' * 32
 
@@ -129,6 +130,51 @@ class TraceTests(unittest.TestCase):
                        'https://lf.example.org/evil', 'https://lf.example.org?x=1'):
             with self.subTest(target=target), self.assertRaises(TraceError):
                 send(payload, base_url=target, public_key='p', secret_key='s', opener=fake)
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'mkfifo'),
+                         'FIFO behavior is POSIX only')
+    def test_fifo_input_fails_closed_without_hang(self):
+        with tempfile.TemporaryDirectory() as root:
+            fifo = Path(root) / 'unexpected-fifo'
+            os.mkfifo(fifo, 0o600)
+            child = (
+                'import sys\n'
+                'from tools.spartan_langfuse_trace import read_events, TraceError\n'
+                'try:\n'
+                '    read_events(sys.argv[1])\n'
+                'except TraceError:\n'
+                '    sys.exit(0)\n'
+                'sys.exit(1)\n'
+            )
+            result = subprocess.run(
+                [sys.executable, '-c', child, str(fifo)],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_oversize_line_never_uses_unbounded_iteration(self):
+        class BoundedSource:
+            def __init__(self, fd):
+                self.fd = fd
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                os.close(self.fd)
+            def __iter__(self):
+                raise AssertionError('unbounded file iteration is prohibited')
+            def readline(self, limit=-1):
+                if limit != MAX_LINE_BYTES + 1:
+                    raise AssertionError('readline must enforce line cap')
+                return b'x' * (MAX_LINE_BYTES + 1)
+
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'bounded.jsonl'
+            path.write_bytes(b'placeholder')
+            path.chmod(0o600)
+            with patch('tools.spartan_langfuse_trace.os.fdopen',
+                       side_effect=lambda fd, mode: BoundedSource(fd)):
+                with self.assertRaises(TraceError):
+                    read_events(path)
 
     def test_event_and_payload_limits(self):
         with self.assertRaises(TraceError):
