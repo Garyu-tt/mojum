@@ -6,6 +6,8 @@ Issue #1010; parent #689. This is a **metadata-only admission check** for a futu
 
 Call `audit_model_budget(metadata, profile="cpu_small")` from `mojum.mujoco_model_budget`. The exact input schema is `mojum.mujoco-model-metadata/1` and contains `engine_version`, a lowercase SHA-256 `model_sha256`, and exact nonnegative integer counts for MuJoCo model objects (`nbody`, `njnt`, `ngeom`, `nsite`, `nsensor`, `nactuator`, `ntendon`, mesh counts and flex counts). The caller must derive the digest from the exact model source bytes and obtain counts from a separately trusted engine/parser boundary.
 
+The validator rejects metadata dictionaries with a key count different from the fixed schema before enumerating keys. The `engine_version` field is limited to 128 characters to keep the canonical report bounded.
+
 Two built-in count-only profiles are available:
 
 - `cpu_small`: conservative small-body-fixture limits; flex and actuators are disallowed.
@@ -27,4 +29,4 @@ The report returns all per-field violations in stable field order, a canonical S
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_mujoco_model_budget.py' -v
 ```
 
-The test suite covers exact thresholds, every-resource violations, malformed types/schema/digests, cross-field mesh/flex consistency, deterministic report hashing, and detached input/output behavior. This remains an opt-in preflight utility; independent review and exact-head CI are required before merge.
+The test suite covers exact thresholds, every-resource violations, malformed types/schema/digests, cardinality and version-length limits, cross-field mesh/flex consistency, deterministic report hashing, and detached input/output behavior. This remains an opt-in preflight utility; independent review and exact-head CI are required before merge.
