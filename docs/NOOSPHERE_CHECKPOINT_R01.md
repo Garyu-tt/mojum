@@ -21,7 +21,7 @@ A manifest contains exactly five uniquely named component references, all
 sharing the same organism and causal tick. The canonical manifest digest binds
 the component map, checkpoint identity, tick and optional previous checkpoint
 digest. Canonical JSON is bounded to 16 KiB; duplicate keys, non-UTF-8 strings,
-noncanonical encodings, missing/extra references and digest mismatches fail
+noncanonical encodings, non-native dictionary keys, missing/extra references and digest mismatches fail
 closed.
 
 ## Use
