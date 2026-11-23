@@ -24,7 +24,11 @@ if they act differently; this is valid causal behavior, not a shared
 trajectory replay.
 
 The runner fails the **contact-exposure QA gate** unless the FROZEN arm
-actually collides at least once in >=10 of 12 cases. This is a test of the
+actually collides at least once in >=10 of 12 cases. The CLI prints the
+summary including `passes_contact_gate=false` first, then exits nonzero so
+GitHub Actions cannot report a green stress step on inadequate contact
+exposure. `evaluate()` remains a descriptive reporting API and returns the
+full measurements even when the gate fails. This is a test of the
 *evaluation fixtures*, NOT that learning succeeded. Report separately:
 blocked attempts, successful moves, rest ticks, idle streak, unique observed
 positions, collisions / attempted moves, successful moves / total ticks,
