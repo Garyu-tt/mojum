@@ -139,7 +139,7 @@ def _validate_output(spikes: object, membranes: object, ticks: int, neurons: int
             raise ShadowError("backend returned bad neuron shape")
         if any(type(x) is not int or x not in (0, 1) for x in srow):
             raise ShadowError("invalid backend spikes")
-        if any(type(x) not in (int, float) or not math.isfinite(x) or abs(x) > 1024 for x in mrow):
+        if any(type(x) not in (int, float) or not -1024 <= x <= 1024 for x in mrow):
             raise ShadowError("invalid backend membrane")
 
 
