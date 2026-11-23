@@ -315,8 +315,12 @@ class CellExplorerV3Escape:
                 blocked_suffix += 1
             else:
                 break
-        if (rest_suffix != state["consecutive_rests"]
-                or blocked_suffix != state["consecutive_blocked_probes"]):
+        # The retained chronology is deliberately capped at the four-outcome
+        # evidence window. Live streak counters may continue beyond that window;
+        # compare their saturated values, while still requiring an exact suffix
+        # whenever the streak is shorter than the retained window.
+        if (rest_suffix != min(state["consecutive_rests"], REPROBE_BLOCKED_BEFORE_REST)
+                or blocked_suffix != min(state["consecutive_blocked_probes"], REPROBE_BLOCKED_BEFORE_REST)):
             raise CellV3EscapeError("terminal streak counters disagree with ordered outcomes")
 
 
