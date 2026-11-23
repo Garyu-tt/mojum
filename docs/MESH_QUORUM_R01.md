@@ -22,7 +22,10 @@ replicate organism state, or perform failover.
   Two matching votes plus one opposing vote is a valid 2-of-3 majority.
 - Every receipt must target the same organism and next epoch, come from a
   member, name a member candidate, have a unique 128-bit lowercase-hex vote ID,
-  and be within a caller-supplied five-minute validity window. Duplicate voters,
+  and be within a caller-supplied five-minute validity window. Receipt
+  cardinality is checked against the eight-field schema before key iteration or
+  set allocation, so unexpected-field payloads are rejected without building
+  an attacker-sized temporary key set. Duplicate voters,
   duplicate IDs, previously seen IDs, stale, future-dated or expired votes are
   rejected rather than silently ignored.
 - The returned SHA-256 digest covers canonical receipt metadata and the result.
