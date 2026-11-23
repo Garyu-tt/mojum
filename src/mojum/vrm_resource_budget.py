@@ -69,6 +69,10 @@ def assess_vrm_resource_budget(inventory, limits=None):
     limits.__post_init__()
     if type(inventory) is not dict:
         raise ResourceBudgetError("inventory must be a native dict")
+    # Enforce cardinality before iterating: otherwise tuple(inventory) can
+    # allocate in proportion to an attacker-controlled number of extra keys.
+    if len(inventory) != len(FIELDS) + 1:
+        raise ResourceBudgetError("inventory must contain exactly the documented fields")
     # Validate shape and primitive bounds BEFORE serializing caller-controlled
     # values. Serializing first can allocate an unbounded string for a huge int,
     # deeply nested value, or oversized key despite the later 16 KiB check.
