@@ -142,6 +142,12 @@ class WorldAcousticTests(unittest.TestCase):
                 expected_revision=state.revision,
             )
 
+    def test_oversized_event_mapping_rejected_before_key_enumeration(self):
+        raw = event()
+        raw.update({f"extra_{index}": 0 for index in range(25_000)})
+        with self.assertRaisesRegex(AcousticError, "exact keys"):
+            self.sense([raw])
+
     def test_inputs_are_not_mutated(self):
         events = [event()]
         before = copy.deepcopy(events)
