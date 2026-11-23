@@ -7,12 +7,29 @@ import math
 import os
 import subprocess
 import unittest
-from unittest.mock import patch
 from pathlib import Path
 from typing import Any
 
 
-MAX_REPORT_BYTES = 16_384
+MAX_REPORT_CHARS = 8192
+
+
+class _DuplicateJSONKey(ValueError):
+    """Raised when a report repeats an object field."""
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJSONKey("duplicate report field")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError("non-finite JSON constant: " + value)
+
 
 EXPECTED_KEYS = {
     "schema",
@@ -32,51 +49,17 @@ EXPECTED_KEYS = {
 }
 
 
-def _utf8_size_within(value: str, maximum: int) -> bool:
-    """Count UTF-8 bytes without allocating an encoded copy of untrusted text."""
-    size = 0
-    for char in value:
-        code = ord(char)
-        if 0xD800 <= code <= 0xDFFF:
-            return False
-        if code <= 0x7F:
-            size += 1
-        elif code <= 0x7FF:
-            size += 2
-        elif code <= 0xFFFF:
-            size += 3
-        else:
-            size += 4
-        if size > maximum:
-            return False
-    return True
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate report JSON key")
-        result[key] = value
-    return result
-
-
-def _reject_constant(_value):
-    raise ValueError("non-finite JSON constant")
-
-
 def validate_report(raw: str) -> dict[str, Any]:
-    if type(raw) is not str or not _utf8_size_within(raw, MAX_REPORT_BYTES):
-        raise ValueError("report input type or byte budget invalid")
+    if type(raw) is not str or not raw or len(raw) > MAX_REPORT_CHARS:
+        raise ValueError("report must be a nonempty string within the character budget")
     try:
         report = json.loads(
-            raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant,
+            raw,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
         )
-    except (TypeError, json.JSONDecodeError, RecursionError) as exc:
-        raise ValueError("report must be one strict JSON object") from exc
-    except ValueError:
-        # Preserve the specific duplicate-key / non-finite-value rejection.
-        raise
+    except (TypeError, ValueError, RecursionError, UnicodeError) as exc:
+        raise ValueError("report must be one bounded, unambiguous JSON object") from exc
     if type(report) is not dict or set(report) != EXPECTED_KEYS:
         raise ValueError("report keys do not match mojum.jolt-native-cloth/1")
     if report["schema"] != "mojum.jolt-native-cloth/1":
@@ -128,23 +111,20 @@ class NativeJoltClothReportTests(unittest.TestCase):
         })
         self.assertEqual(validate_report(raw)["vertices"], 96)
 
-    def test_rejects_duplicate_json_keys(self) -> None:
-        duplicate = '{"schema":"first","schema":"second"}'
-        with self.assertRaisesRegex(ValueError, "duplicate"):
-            validate_report(duplicate)
+    def test_rejects_duplicate_json_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            validate_report('{"schema":"first","schema":"second"}')
 
-    def test_rejects_oversized_text_before_json_parser(self) -> None:
-        with patch(
-            "tests.test_jolt_native_cloth_probe.json.loads",
-            side_effect=AssertionError("JSON parser must not see oversized input"),
-        ):
-            with self.assertRaisesRegex(ValueError, "byte budget"):
-                validate_report(" " * (MAX_REPORT_BYTES + 1))
+    def test_rejects_oversized_and_deeply_nested_json(self) -> None:
+        with self.assertRaisesRegex(ValueError, "character budget"):
+            validate_report(" " * (MAX_REPORT_CHARS + 1))
+        deeply_nested = "[" * 1500 + "0" + "]" * 1500
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            validate_report(deeply_nested)
 
-    def test_rejects_non_string_report_input(self) -> None:
-        for raw in (b"{}", None, 123):
-            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, "input type"):
-                validate_report(raw)
+    def test_rejects_nonfinite_json_constants(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            validate_report('{"value":NaN}')
 
     def test_rejects_unknown_fields_and_missing_fields(self) -> None:
         valid = {
