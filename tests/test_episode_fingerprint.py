@@ -88,5 +88,13 @@ class FingerprintTests(unittest.TestCase):
             with self.assertRaises(FingerprintError):
                 fingerprint_episode([frame(observation=oversized)], episode_id="demo")
 
+    def test_oversized_transition_key_rejected_before_set_lookup(self):
+        item = frame()
+        item["x" * 1_000_000] = item.pop("tick")
+        with patch("mojum.episode_fingerprint.set",
+                   side_effect=AssertionError("oversized key reached set"), create=True):
+            with self.assertRaisesRegex(FingerprintError, "bounded native strings"):
+                fingerprint_episode([item], episode_id="demo")
+
 if __name__ == "__main__":
     unittest.main()
