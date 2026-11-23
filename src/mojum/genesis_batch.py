@@ -159,10 +159,13 @@ def apply_acquisition_batch(
     # Refuse expensive existing-ledger replay before canonical serialization.
     # GenomeLedger.append re-hashes the growing history and rechecks every
     # unique valid_from_tick prefix, making large replay substantially costly.
+    # Reject an oversized mapping before materializing its keys. Otherwise
+    # tuple(dict.keys(snapshot)) itself allocates O(N) memory on hostile input.
+    if len(snapshot) != 4:
+        raise GenesisError("snapshot must have the exact native GENESIS ledger shape")
     snapshot_keys = tuple(dict.keys(snapshot))
-    # Bound caller-controlled key text before hashing it in set membership.
-    # Cardinality alone does not bound the cost of hashing a very long str.
-    if len(snapshot) != 4 or any(
+    # Cardinality is now fixed; bound caller-controlled key text before hashing.
+    if any(
         type(key) is not str or len(key) > len("revision")
         for key in snapshot_keys
     ):
