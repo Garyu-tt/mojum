@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from mojum import archive_key_rotation as rotation
 from mojum.archive_key_rotation import (
     RotationError, key_fingerprint, make_rotation, verify_rotation_chain,
 )
@@ -126,6 +128,28 @@ class RotationChainTests(unittest.TestCase):
         hostile_key.active = True
         with self.assertRaises(RotationError):
             verify_rotation_chain(self.k0, 0, [r], {}, key_fingerprint(self.k1))
+
+    def test_oversized_fingerprints_and_signature_rejected_before_regex(self):
+        valid = make_rotation(1, self.k0, self.k1)
+        oversized = "a" * 1_000_000
+
+        cases = [
+            lambda: verify_rotation_chain(self.k0, 0, [], {}, oversized),
+            lambda: verify_rotation_chain(self.k0, 0, [], {oversized: self.k1}, key_fingerprint(self.k0)),
+        ]
+        for field in ("previous_fingerprint", "next_fingerprint", "signature"):
+            record = dict(valid)
+            record[field] = oversized
+            cases.append(lambda record=record: verify_rotation_chain(
+                self.k0, 0, [record], {}, key_fingerprint(self.k1)
+            ))
+
+        for index, invoke in enumerate(cases):
+            with self.subTest(case=index):
+                with patch.object(rotation, "_HEX_256") as pattern:
+                    with self.assertRaises(RotationError):
+                        invoke()
+                    pattern.fullmatch.assert_not_called()
 
 
 if __name__ == "__main__":
