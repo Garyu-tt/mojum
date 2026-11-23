@@ -23,7 +23,8 @@ def audit_obstacles(obstacles: list[dict]) -> dict:
     if type(obstacles) is not list or len(obstacles) > MAX_OBSTACLES:
         raise ValueError("obstacles must be a bounded native list")
     validated = []
-    ids = set()
+    # A dict-backed index avoids constructing a set before record admission.
+    ids: dict[str, None] = {}
     for item in obstacles:
         if type(item) is not dict:
             raise ValueError("invalid rectangle fields")
@@ -35,14 +36,14 @@ def audit_obstacles(obstacles: list[dict]) -> dict:
         # override hashing/equality and execute arbitrary code during compares.
         if any(type(key) is not str or len(key) > 32 for key in item):
             raise ValueError("rectangle keys must be bounded exact native strings")
-        if set(item) != _EXPECTED_FIELDS:
+        if any(key not in _EXPECTED_FIELDS for key in item):
             raise ValueError("invalid rectangle fields")
         identifier = item["id"]
         if type(identifier) is not str or not (1 <= len(identifier) <= 64) or not all(c.isascii() and (c.isalnum() or c in "_-") for c in identifier):
             raise ValueError("invalid obstacle id")
         if identifier in ids:
             raise ValueError("duplicate obstacle id")
-        ids.add(identifier)
+        ids[identifier] = None
         coords = tuple(item[k] for k in ("x_min", "y_min", "x_max", "y_max"))
         if any(type(v) is not int or abs(v) > MAX_COORD for v in coords):
             raise ValueError("coordinates must be bounded native integers")
