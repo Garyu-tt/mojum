@@ -14,7 +14,7 @@ The input is an exact plain Python dictionary with exactly these keys:
 - `body_revision`: lowercase 64-character SHA-256-shaped revision identifier
 - `joints`: 1..configured-max exact joint-name keys, each mapped to three finite numeric coordinates
 
-The joint inventory defaults to at most 128 entries (hard configuration ceiling 512). Coordinates default to an absolute limit of 10,000 units (hard configuration ceiling 1,000,000). Names are bounded ASCII identifiers. Booleans, numeric subclasses, NaN, infinity, oversized integers and unknown fields are rejected.
+The joint inventory defaults to at most 128 entries (hard configuration ceiling 512). Coordinates default to an absolute limit of 10,000 units (hard configuration ceiling 1,000,000). Names are bounded ASCII identifiers and must be unique ignoring ASCII case. Booleans, numeric subclasses, NaN, infinity, oversized integers, case-insensitive duplicate names and unknown fields are rejected.
 
 ## Temporal rules
 
