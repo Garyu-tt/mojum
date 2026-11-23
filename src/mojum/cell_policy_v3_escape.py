@@ -140,15 +140,23 @@ def _validate_outcome_tail(state):
     retained_counts = {}
     retained_blocks = {}
     for offset, entry in enumerate(tail):
-        if (type(entry) is not dict
-                or set(entry) != {"tick", "cell", "action", "blocked"}
-                or type(entry["tick"]) is not int
+        if type(entry) is not dict or len(entry) != 4:
+            raise CellV3EscapeError("invalid escape outcome tail entry")
+        entry_keys = tuple(entry.keys())
+        if any(type(key) is not str or len(key) > 16 for key in entry_keys):
+            raise CellV3EscapeError("invalid escape outcome tail entry")
+        if set(entry_keys) != {"tick", "cell", "action", "blocked"}:
+            raise CellV3EscapeError("invalid escape outcome tail entry")
+        cell_value = entry["cell"]
+        action_value = entry["action"]
+        if (type(entry["tick"]) is not int
                 or entry["tick"] != first_tick + offset
-                or type(entry["cell"]) is not str
-                or _ZONE.fullmatch(entry["cell"]) is None
-                or entry["action"] not in ACTIONS
+                or type(cell_value) is not str or len(cell_value) > 11
+                or _ZONE.fullmatch(cell_value) is None
+                or type(action_value) is not str or len(action_value) > 4
+                or action_value not in ACTIONS
                 or type(entry["blocked"]) is not bool
-                or (entry["action"] == "rest" and entry["blocked"])):
+                or (action_value == "rest" and entry["blocked"])):
             raise CellV3EscapeError("invalid escape outcome tail entry")
         cell = entry["cell"]
         if cell in state["records"]:
