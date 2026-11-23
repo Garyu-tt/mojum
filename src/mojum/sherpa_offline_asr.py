@@ -70,9 +70,6 @@ def transcribe_public_wav(wav_bytes: bytes, recognizer: Any, *,
     if type(visibility) is not str or visibility != "PUBLIC_SYNTHETIC":
         raise ASRBoundaryError("PRIVATE/user audio not admitted")
     pcm = _pcm16_from_wav(wav_bytes)
-    if not callable(getattr(recognizer, "create_stream", None)) or not callable(
-            getattr(recognizer, "decode_stream", None)):
-        raise ASRBoundaryError("invalid sherpa-onnx recognizer interface")
     try:
         import numpy as np  # sherpa deployments normally ship NumPy
     except ImportError:
@@ -89,14 +86,29 @@ def transcribe_public_wav(wav_bytes: bytes, recognizer: Any, *,
         floats = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
         if not np.isfinite(floats).all():
             raise ASRBoundaryError("invalid audio samples")
-    # External model execution is trusted only inside an OS-level sandbox.
-    stream = recognizer.create_stream()
-    if not callable(getattr(stream, "accept_waveform", None)):
-        raise ASRBoundaryError("invalid sherpa-onnx stream interface")
-    stream.accept_waveform(SAMPLE_RATE, floats)
-    recognizer.decode_stream(stream)
-    result = getattr(stream, "result", None)
-    text = _checked_transcript(getattr(result, "text", None))
+    # All caller-supplied recognizer methods and properties are untrusted.
+    # Do not preserve their exception text or traceback as an outward cause:
+    # native backends may embed model paths or tokens in exception messages.
+    backend_ok = False
+    raw_text = None
+    try:
+        maker = getattr(recognizer, "create_stream", None)
+        decoder = getattr(recognizer, "decode_stream", None)
+        if callable(maker) and callable(decoder):
+            stream = maker()
+            accept = getattr(stream, "accept_waveform", None)
+            if callable(accept):
+                accept(SAMPLE_RATE, floats)
+                decoder(stream)
+                raw_text = getattr(getattr(stream, "result", None), "text", None)
+                backend_ok = True
+    except Exception:
+        # Fail closed. Raise *after* this handler, so __context__ is empty
+        # and no backend diagnostics can leak through exception chaining.
+        pass
+    if not backend_ok:
+        raise ASRBoundaryError("offline ASR backend failed")
+    text = _checked_transcript(raw_text)
     return {"schema": SCHEMA, "source": "sherpa-onnx-offline",
             "visibility": "PUBLIC_SYNTHETIC", "sample_rate": SAMPLE_RATE,
             "frames": len(pcm) // 2, "duration_ms": len(pcm) * 1000 // (2 * SAMPLE_RATE),

@@ -95,6 +95,48 @@ class SherpaOfflineTests(unittest.TestCase):
                 transcribe_public_wav(wav(), Recognizer(value), enabled=True)
         self.assertEqual(transcribe_public_wav(wav(), Recognizer(""), enabled=True)["transcript"], "")
 
+    def test_backend_failures_do_not_expose_private_diagnostics(self):
+        marker = "token=fixture-secret /private/model/path"
+
+        def explode(*_args):
+            raise RuntimeError(marker)
+
+        class ExplodingProperty:
+            @property
+            def create_stream(self):
+                explode()
+
+            def decode_stream(self, stream):
+                return None
+
+        class ExplodingResult:
+            def accept_waveform(self, rate, samples):
+                return None
+
+            @property
+            def result(self):
+                explode()
+
+        backends = (
+            SimpleNamespace(create_stream=explode, decode_stream=lambda stream: None),
+            SimpleNamespace(
+                create_stream=lambda: SimpleNamespace(accept_waveform=explode),
+                decode_stream=lambda stream: None,
+            ),
+            SimpleNamespace(create_stream=lambda: Stream(), decode_stream=explode),
+            SimpleNamespace(
+                create_stream=lambda: ExplodingResult(),
+                decode_stream=lambda stream: None,
+            ),
+            ExplodingProperty(),
+        )
+        for backend in backends:
+            with self.subTest(backend=type(backend).__name__):
+                with self.assertRaises(ASRBoundaryError) as caught:
+                    transcribe_public_wav(wav(), backend, enabled=True)
+                self.assertEqual(str(caught.exception), "offline ASR backend failed")
+                self.assertIsNone(caught.exception.__context__)
+
     def test_invalid_recognizer_denied(self):
         with self.assertRaises(ASRBoundaryError):
             transcribe_public_wav(wav(), object(), enabled=True)
