@@ -117,7 +117,7 @@ class WorkflowEvidenceTests(unittest.TestCase):
             matcher.fullmatch.reset_mock()
             with self.assertRaises(WorkflowEvidenceError):
                 evaluate_workflow_evidence([run(sha=oversized)], expected_head_sha=HEAD, required_workflow_ids=[10])
-            matcher.fullmatch.assert_not_called()
+            matcher.fullmatch.assert_called_once_with(HEAD)
 
     def test_oversized_integer_ids_rejected(self):
         huge = 1 << 1_000_000
