@@ -68,8 +68,8 @@ class PointRoomEnv:
         }
 
     def reset(self, *, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
-        if seed is not None and (type(seed) is not int or not 0 <= seed < 2**64):
-            raise ValueError("seed must be a nonnegative 64-bit integer")
+        if seed is not None and (type(seed) is not int or seed < 0):
+            raise ValueError("seed must be a nonnegative integer")
         if options is not None and (type(options) is not dict or options):
             raise ValueError("only empty reset options are supported")
         self._state = initial_state(self.room, *self.start)
