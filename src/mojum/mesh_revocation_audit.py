@@ -89,6 +89,11 @@ def audit_peer_revocations(document: str) -> RevocationAudit:
     """
     if type(document) is not str:
         raise RevocationAuditError("document must be a native JSON string")
+    # UTF-8 byte length is never smaller than the code-point count. Reject
+    # obviously oversized input before allocating an encoded copy; the byte
+    # check below still handles multibyte text at the boundary.
+    if len(document) > MAX_INPUT_BYTES:
+        raise RevocationAuditError("document exceeds the input byte budget")
     try:
         encoded = document.encode("utf-8", "strict")
     except UnicodeError as exc:
