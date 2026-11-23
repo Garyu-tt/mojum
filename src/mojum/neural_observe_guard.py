@@ -44,7 +44,8 @@ def observe_public_synthetic(predictor, sensory, *, visibility):
         raise NeuralObserveGuardError("explicit PUBLIC_SYNTHETIC declaration required")
 
     _exact_keys(sensory, _SENSORY_KEYS, "sensory frame")
-    if dict.__getitem__(sensory, "kind") != "interoception":
+    kind = dict.__getitem__(sensory, "kind")
+    if type(kind) is not str or kind != "interoception":
         raise NeuralObserveGuardError("interoception frame required")
     observed_at_ns = dict.__getitem__(sensory, "observed_at_ns")
     if type(observed_at_ns) is not int or not 0 <= observed_at_ns <= MAX_TIMESTAMP_NS:
