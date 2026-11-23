@@ -168,7 +168,7 @@ class AnnarchyBuildAttestationTests(unittest.TestCase):
 
     def test_json_parser_rejects_duplicate_keys(self):
         raw = json.dumps(valid_manifest()).replace(
-            '"package":"ANNarchy"', '"package":"ANNarchy","package":"ANNarchy"'
+            '"package": "ANNarchy"', '"package": "ANNarchy", "package": "ANNarchy"'
         ).encode()
         with self.assertRaises(ManifestError):
             parse_manifest_json(raw)
