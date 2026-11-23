@@ -166,6 +166,29 @@ class PlacementReceiptTests(unittest.TestCase):
         with self.assertRaises(PlacementError):
             receipt_bytes(missing)
 
+    def test_constructor_bypassing_missing_snapshot_fields_fail_typed(self):
+        """Raw dataclass shells must never leak AttributeError."""
+        good = self.seal()
+        missing_job = object.__new__(StatelessJob)
+        missing_node = object.__new__(NodeBudget)
+        missing_plan = object.__new__(PlacementPlan)
+        missing_assignment = object.__new__(Assignment)
+        wrong_plans = (
+            (missing_plan, self.jobs, self.nodes),
+            (PlacementPlan((missing_assignment, self.plan.assignments[1]), ()),
+             self.jobs, self.nodes),
+        )
+        for candidate, jobs, nodes in (
+            (self.plan, (missing_job, self.jobs[1]), self.nodes),
+            (self.plan, self.jobs, (self.nodes[0], missing_node)),
+            *wrong_plans,
+        ):
+            with self.subTest(candidate=type(candidate).__name__):
+                with self.assertRaises(PlacementError):
+                    self.seal(plan=candidate, jobs=jobs, nodes=nodes)
+                with self.assertRaises(PlacementError):
+                    self.verify(good, plan=candidate, jobs=jobs, nodes=nodes)
+
     def test_wire_duplicate_extra_and_malformed_fields_rejected(self):
         wire = receipt_bytes(self.seal())
         dictionary = json.loads(wire)
