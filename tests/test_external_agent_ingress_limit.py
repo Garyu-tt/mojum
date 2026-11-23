@@ -58,7 +58,7 @@ class IngressRateLimiterTests(unittest.TestCase):
 
     def test_invalid_inputs_fail_closed(self):
         limiter = IngressRateLimiter()
-        for source in ("", "../bad", "x" * 129, "white space", None, 3):
+        for source in ("", "../bad", "x" * 129, "x" * 1_000_000, "white space", None, 3):
             self.assertFalse(limiter.admit(source, 0).allowed)
         for now in (True, -1, 1.5, "1", 2**63):
             self.assertEqual(limiter.admit("agent-a", now).reason, "invalid_clock")
