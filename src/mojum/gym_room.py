@@ -15,9 +15,19 @@ SCHEMA = "mojum.gym.point-room/1"
 ACTIONS = ((0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0))
 
 
+def _finite_scalar(value):
+    """Reject bool, nonfinite and integer overflow with a stable validation result."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _point(value, label):
     if (type(value) not in (tuple, list) or len(value) != 2
-            or any(type(x) not in (int, float) or not math.isfinite(x) for x in value)):
+            or not all(_finite_scalar(x) for x in value)):
         raise ValueError(f"invalid {label}")
     return tuple(float(x) for x in value)
 
@@ -35,10 +45,10 @@ class PointRoomEpisode:
         # Validate both endpoints against the authoritative room collision rules.
         initial_state(room, *self.start)
         initial_state(room, *self.goal)
-        if (type(step_m) not in (int, float) or not math.isfinite(step_m)
+        if (not _finite_scalar(step_m)
                 or not 0 < step_m <= 1):
             raise ValueError("invalid step size")
-        if (type(goal_radius_m) not in (int, float) or not math.isfinite(goal_radius_m)
+        if (not _finite_scalar(goal_radius_m)
                 or not 0 <= goal_radius_m <= 1):
             raise ValueError("invalid goal radius")
         if type(max_steps) is not int or not 1 <= max_steps <= 10000:
@@ -46,10 +56,28 @@ class PointRoomEpisode:
         self.step_m = float(step_m)
         self.goal_radius_m = float(goal_radius_m)
         self.max_steps = max_steps
+        # Keep constructor budgets authoritative across a mutable Python facade.
+        self._fixed_step_m = self.step_m
+        self._fixed_goal_radius_m = self.goal_radius_m
+        self._fixed_max_steps = self.max_steps
+        self._fixed_start = self.start
+        self._fixed_goal = self.goal
+        self._fixed_room = self.room
         self._state = None
         self._done = False
         self._last_blocked = False
         self._seed = None
+
+    def _assert_configuration(self):
+        """Reject facade mutation before a reset or reward-producing step."""
+        if (self.room is not self._fixed_room
+                or type(self.start) is not tuple or self.start != self._fixed_start
+                or type(self.goal) is not tuple or self.goal != self._fixed_goal
+                or type(self.step_m) is not float or self.step_m != self._fixed_step_m
+                or type(self.max_steps) is not int or self.max_steps != self._fixed_max_steps
+                or type(self.goal_radius_m) is not float
+                or self.goal_radius_m != self._fixed_goal_radius_m):
+            raise ValueError("episode configuration mutated after construction")
 
     def _observation(self):
         s = self._state
@@ -68,6 +96,7 @@ class PointRoomEpisode:
         if options is not None and (type(options) is not dict or options):
             raise ValueError("reset options are not supported")
         # Seed is recorded for Gymnasium compatibility; fixed room has no RNG.
+        self._assert_configuration()
         state = initial_state(self.room, *self.start)
         self._state = state
         self._seed = seed
@@ -80,6 +109,9 @@ class PointRoomEpisode:
             raise RuntimeError("reset must precede step")
         if self._done:
             raise RuntimeError("episode ended; reset required")
+        # Do not let a policy/harness change motion, horizon, start or reward goal.
+        # Fail before advancing the authoritative point-room state.
+        self._assert_configuration()
         if isinstance(action, bool):
             raise ValueError("invalid action")
         try:

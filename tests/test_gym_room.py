@@ -79,6 +79,49 @@ class PointRoomGymTests(unittest.TestCase):
         self.assertEqual(episode._state.tick, 0)
         self.assertEqual(episode.step(0)[0]["tick"], 1)
 
+    def test_mutated_episode_budgets_are_rejected_without_advancing(self):
+        episode = self.episode(step_m=0.125, max_steps=2)
+        episode.reset(seed=7)
+        for field, invalid in (
+            ("step_m", 1.0), ("step_m", float("nan")),
+            ("step_m", True), ("max_steps", 20), ("max_steps", 2.0),
+            ("goal_radius_m", 1.0), ("goal_radius_m", True),
+        ):
+            with self.subTest(field=field, invalid=invalid):
+                original = getattr(episode, field)
+                setattr(episode, field, invalid)
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.step(1)
+                setattr(episode, field, original)
+                self.assertEqual(episode._state.tick, 0)
+        observation, _, _, _, _ = episode.step(1)
+        self.assertEqual(observation["tick"], 1)
+        self.assertEqual(observation["position"], [1.125, 2.0])
+
+    def test_mutated_goal_start_or_room_cannot_forge_reward(self):
+        # Replacing the goal with the current point must not produce a fake
+        # terminal +1 reward. Restore the config and verify the state was idle.
+        for field, replacement in (
+            ("goal", (1.0, 2.0)),
+            ("start", (3.0, 2.0)),
+            ("room", Room(4, 4)),
+        ):
+            with self.subTest(field=field):
+                episode = self.episode()
+                episode.reset()
+                original = getattr(episode, field)
+                setattr(episode, field, replacement)
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.step(0)
+                self.assertEqual(episode._state.tick, 0)
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.reset()
+                setattr(episode, field, original)
+                obs, reward, terminated, _, _ = episode.step(0)
+                self.assertEqual(obs["tick"], 1)
+                self.assertFalse(terminated)
+                self.assertEqual(reward, -0.01)
+
     def test_bad_episode_inputs_fail_closed(self):
         for kwargs in ({"step_m": float("nan")}, {"step_m": 0},
                        {"max_steps": True}, {"goal": (2, 2)},
@@ -91,6 +134,20 @@ class PointRoomGymTests(unittest.TestCase):
                 episode.reset(seed=seed)
         with self.assertRaises(ValueError):
             episode.reset(options={"start": [3, 2]})
+
+    def test_oversized_integer_geometry_rejected_as_value_error(self):
+        # math.isfinite() raises OverflowError for integer magnitudes above
+        # the platform's float range: untrusted numeric input must fail closed.
+        oversized = 10**1000
+        for kwargs in (
+            {"start": (oversized, 1)},
+            {"goal": (1, oversized)},
+            {"step_m": oversized},
+            {"goal_radius_m": oversized},
+        ):
+            with self.subTest(field=next(iter(kwargs))):
+                with self.assertRaises(ValueError):
+                    self.episode(**kwargs)
 
     def test_large_nonnegative_seed_is_accepted_and_replayed(self):
         for seed in (2**32, 2**64 + 17, 2**128):
