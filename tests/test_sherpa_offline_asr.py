@@ -65,6 +65,13 @@ class SherpaOfflineTests(unittest.TestCase):
         self.assertEqual(result["duration_ms"], 1000)
         self.assertEqual(result["transcript"], "synthetic")
 
+    def test_default_install_without_numpy_still_runs_synthetic_fixture(self):
+        import sys
+        from unittest.mock import patch
+        with patch.dict(sys.modules, {"numpy": None}):
+            result = transcribe_public_wav(wav(32), Recognizer(""), enabled=True)
+        self.assertEqual(result["frames"], 32)
+
     def test_opt_in_and_private_denied_before_backend(self):
         a = Recognizer()
         with self.assertRaisesRegex(ASRBoundaryError, "opt-in"):
