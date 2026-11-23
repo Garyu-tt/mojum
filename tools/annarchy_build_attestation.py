@@ -27,13 +27,13 @@ _KEYS = {
     "source_revision", "model_sha256", "artifact_sha256",
     "artifact_size_bytes",
 }
-_VERSION_RE = re.compile(r"^[0-9]+\\.[0-9]+\\.[0-9]+(?:[.+-][A-Za-z0-9.+-]+)?$")
+_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\\.[0-9]+(?:[.+-][A-Za-z0-9.+-]+)?$")
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _TARGETS = {"linux-x86_64", "linux-aarch64", "windows-x86_64", "macos-arm64"}
 _COMPILERS = {"gcc", "clang", "msvc"}
 _FLAG_RE = re.compile(
-    r"^(?:-O[0-3]|-std=c\\+\\+17|-fopenmp|-DNDEBUG|"
+    r"^(?:-O[0-3]|-std=c\+\+17|-fopenmp|-DNDEBUG|"
     r"-march=[A-Za-z0-9_+.-]{1,64}|-mtune=[A-Za-z0-9_+.-]{1,64}|"
     r"/O[1-2]|/openmp)$"
 )
