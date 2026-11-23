@@ -20,7 +20,7 @@ MAX_DT_NS = 1_000_000_000
 MIN_DT_NS = 1_000
 MAX_FORCE_MN = 1_000_000_000
 MAX_ABS_STRAIN_UE = 10_000_000
-MAX_TOTAL_FORCE_MN = (1 << 63) - 1
+MAX_TOTAL_FORCE_MN = 1_000_000_000_000
 _SAMPLE_KEYS = frozenset({"tick", "contact", "normal_force_mn", "strain_ue"})
 
 
