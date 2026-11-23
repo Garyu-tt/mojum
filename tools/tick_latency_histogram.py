@@ -21,6 +21,15 @@ class TraceError(ValueError):
     """Input violates the bounded public synthetic trace contract."""
 
 
+def _reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
 def analyze(lines):
     counts = [0] * (len(BUCKETS_US) + 1)
     durations = []
@@ -31,12 +40,19 @@ def analyze(lines):
             raise TraceError("row limit exceeded")
         if not isinstance(line, str):
             raise TraceError("expected UTF-8 text")
-        line_bytes = len(line.encode("utf-8"))
+        try:
+            line_bytes = len(line.encode("utf-8"))
+        except UnicodeError as exc:
+            raise TraceError(f"line {line_number}: invalid UTF-8 text") from exc
         total_bytes += line_bytes
         if line_bytes > MAX_LINE_BYTES or total_bytes > MAX_TOTAL_BYTES:
             raise TraceError("byte limit exceeded")
         try:
-            row = json.loads(line, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite")))
+            row = json.loads(
+                line,
+                object_pairs_hook=_reject_duplicate_keys,
+                parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite")),
+            )
         except (ValueError, TypeError) as exc:
             raise TraceError(f"line {line_number}: invalid JSON") from exc
         if not isinstance(row, dict) or set(row) != {"tick", "duration_us", "visibility"}:
@@ -46,7 +62,12 @@ def analyze(lines):
             raise TraceError(f"line {line_number}: non-public trace refused")
         if type(tick) is not int or tick < 0 or tick <= previous_tick:
             raise TraceError(f"line {line_number}: ticks must increase")
-        if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0 or duration > 1e9:
+        if (
+            type(duration) not in (int, float)
+            or (type(duration) is float and not math.isfinite(duration))
+            or duration < 0
+            or duration > 1_000_000_000
+        ):
             raise TraceError(f"line {line_number}: invalid duration")
         previous_tick = tick
         durations.append(duration)
