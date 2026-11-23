@@ -61,9 +61,11 @@ def _parse_svg(content: str) -> dict:
     }:
         raise SchoolArtifactReviewError("unsupported SVG root")
     children = list(root)
-    if len(children) != 2:
+    if len(children) != 2 or root.text is not None:
         raise SchoolArtifactReviewError("unsupported SVG structure")
     rect, group = children
+    if any(child.tail is not None or child.text is not None for child in children):
+        raise SchoolArtifactReviewError("SVG text nodes are not supported")
     if rect.tag != f"{{{SVG_NS}}}rect" or rect.attrib != {
         "width": "64", "height": "64", "fill": "white"
     } or list(rect):
