@@ -2,15 +2,16 @@ import copy
 import json
 import unittest
 from collections import UserDict
+from pathlib import Path
 
 from mojum.body_genetics import (
     CHROMOSOME_SCHEMA, BodyContractError, compile_body, validate_chromosome,
 )
 from mojum.genesis import GenomeLedger
 
+ROOT = Path(__file__).resolve().parent.parent
 ROOT_SEED = json.loads(
-    (__import__("pathlib").Path(__file__).resolve().parent.parent
-     / "examples" / "genesis_seed.json").read_text(encoding="utf-8")
+    (ROOT / "examples" / "genesis_seed.json").read_text(encoding="utf-8")
 )
 CHROMOSOME = {
     "schema": CHROMOSOME_SCHEMA,
