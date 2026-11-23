@@ -126,6 +126,8 @@ def plan_recovery(tasks: Any, *, observed_at: int) -> RecoveryReport:
             raise RecoveryError("dependency edge budget exceeded")
         if state in {"CLAIMED", "RUNNING"} and lease is None:
             raise RecoveryError(f"active task {task_id} has no lease expiry")
+        if state in {"CLAIMED", "RUNNING"} and attempt < 1:
+            raise RecoveryError(f"active task {task_id} must have at least one claim attempt")
         if state not in {"CLAIMED", "RUNNING"} and lease is not None:
             raise RecoveryError(f"inactive task {task_id} unexpectedly has a lease")
         by_id[task_id] = {
@@ -168,6 +170,8 @@ def plan_recovery(tasks: Any, *, observed_at: int) -> RecoveryReport:
                 decision, reason = "MARK_FAILED", "lease_expired_retry_budget_exhausted"
             else:
                 decision, reason = "REQUEUE", "lease_expired_retry_available"
+        elif state == "RETRY" and attempt >= item["maximum"]:
+            decision, reason = "MARK_FAILED", "retry_budget_exhausted"
         elif state in {"WAITING_CI", "BLOCKED_PERMISSION", "BLOCKED_CONFLICT"}:
             decision, reason = "DEFER", "external_gate_or_operator_required"
         else:
