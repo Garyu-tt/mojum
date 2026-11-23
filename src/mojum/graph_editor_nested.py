@@ -184,12 +184,12 @@ def export_nested_editor(parent_graph, containers, backend):
             nodes.append({"id": item["id"], "label": "mojum-container",
                           "position": copy.deepcopy(item["position"]),
                           "inputs": {}, "outputs": {}, "data": data})
-    return {
+    return _copy_json({
         "schema": NESTED_SCHEMA, "backend": backend,
         "parent_revision": canonical["revision"],
         "source_sha256": _source_sha(canonical, model["containers"]),
         "parent_graph": canonical, "nodes": nodes,
-    }
+    })
 
 
 def import_nested_editor(envelope, *, expected_revision, expected_sha256):
