@@ -185,7 +185,7 @@ assert.deepEqual(report.duplicate_available_bones, ['hips']);
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
-const lineTerminators = ['\\n', '\\r', '\\u2028', '\\u2029'];
+const lineTerminators = ['\n', '\r', '\u2028', '\u2029'];
 for (const suffix of lineTerminators) {
   const invalid = 'joint' + suffix;
   assert.throws(() => validateVrmBindingManifest({
