@@ -11,9 +11,10 @@ import stat
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.cloth_glb_import import (
-    MAX_FILE, ClothGLBError, _parse_glb, import_glb, main,
+    MAX_FILE, ClothGLBError, _accessor, _parse_glb, import_glb, main,
 )
 
 
@@ -254,6 +255,58 @@ class ClothGLBTests(unittest.TestCase):
     def test_reject_excessive_input_size_before_parser(self):
         with self.assertRaises(ClothGLBError):
             convert(b"x" * (MAX_FILE + 1))
+
+    def test_rejects_non_four_byte_vertex_stride_and_offset(self):
+        # Use direct accessor decoding so an accidentally invalid skin row
+        # cannot hide an unsupported glTF binary layout.
+        original, blob = _parse_glb(fixture(skin=True))
+        joints = original["meshes"][0]["primitives"][0]["attributes"]["JOINTS_0"]
+
+        import copy
+        doc = copy.deepcopy(original)
+        doc["bufferViews"][2]["byteStride"] = 5
+        doc["bufferViews"][2]["byteLength"] = 19
+        with self.assertRaisesRegex(ClothGLBError, "4-byte aligned"):
+            _accessor(doc, blob, joints, semantic="JOINTS_0", count=4)
+
+        doc = copy.deepcopy(original)
+        doc["accessors"][joints]["byteOffset"] = 1
+        doc["bufferViews"][2]["byteLength"] = 17
+        with self.assertRaisesRegex(ClothGLBError, "offset must be 4-byte aligned"):
+            _accessor(doc, blob, joints, semantic="JOINTS_0", count=4)
+
+    def test_rejects_explicit_stride_on_index_accessor(self):
+        doc, blob = _parse_glb(fixture(skin=True))
+        indices = doc["meshes"][0]["primitives"][0]["indices"]
+        doc["bufferViews"][1]["byteStride"] = 4
+        doc["bufferViews"][1]["byteLength"] = 22
+        with self.assertRaisesRegex(ClothGLBError, "index accessor.*byteStride"):
+            _accessor(doc, blob, indices, semantic="indices")
+
+    def test_rejects_noninteger_triangles_mode(self):
+        doc, blob = _parse_glb(fixture())
+        doc["meshes"][0]["primitives"][0]["mode"] = 4.0
+        encoded = json.dumps(doc, separators=(",", ":")).encode()
+        encoded += b" " * (-len(encoded) % 4)
+        blob += b"\\x00" * (-len(blob) % 4)
+        length = 12 + 8 + len(encoded) + 8 + len(blob)
+        raw = (struct.pack("<4sII", b"glTF", 2, length) +
+               struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
+               struct.pack("<II", len(blob), 0x004E4942) + blob)
+        with self.assertRaisesRegex(ClothGLBError, "TRIANGLES"):
+            convert(raw)
+
+    def test_overbudget_direct_api_rejected_before_hashing(self):
+        # The CLI checks fstat(), but import_glb() is also a public API.
+        with mock.patch("mojum.cloth_glb_import.hashlib.sha256",
+                        side_effect=AssertionError("unbounded hash executed")):
+            with self.assertRaisesRegex(ClothGLBError, "GLB file size outside bounds"):
+                import_glb(
+                    b"x" * (MAX_FILE + 1), expected_sha256="0" * 64,
+                    asset_id="synthetic", license_id="CC0-1.0",
+                    rig_version="test-rig", body_profile="test-body",
+                    pinned_indices=(0,),
+                )
 
     def test_cli_explicit_opt_in_and_no_clobber_mode(self):
         with tempfile.TemporaryDirectory() as directory:
