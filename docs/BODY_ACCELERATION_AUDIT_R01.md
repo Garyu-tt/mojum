@@ -32,6 +32,8 @@ Each sample is an exact native dictionary with exactly `time_ns` and
 ordering and contain finite native integers/floats within the documented
 bound. Boolean values are not numbers in this contract.
 
+The total position matrix is capped at 65,536 scalar values in addition to
+per-axis bounds, preventing a maximum-frame by maximum-joint Cartesian product.
 The limits argument is an exact native dictionary whose keys exactly match
 the joint names. Each limit is a positive, finite native int/float in
 position-units per second squared. The input is intentionally in-memory only;
@@ -90,7 +92,7 @@ assert report.violations[0].acceleration == 2.0
 Run the focused fixture from the repository root:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_body_acceleration_audit -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_body_acceleration_audit.py' -v
 ```
 
 Python 3.11+ and the standard library are required. Full exact-head GitHub
