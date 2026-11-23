@@ -74,6 +74,32 @@ def _timestamp(value: object) -> int:
     return value
 
 
+def _validate_json_value(value: object, depth: int = 0) -> None:
+    if depth > 32:
+        raise ValueError("payload nesting exceeds 32 levels")
+    if value is None or type(value) in (bool, str):
+        return
+    if type(value) is int:
+        if value < -9_223_372_036_854_775_808 or value > 9_223_372_036_854_775_807:
+            raise ValueError("payload integers must fit signed 64-bit range")
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("payload floats must be finite")
+        return
+    if type(value) is list:
+        for item in value:
+            _validate_json_value(item, depth + 1)
+        return
+    if type(value) is dict:
+        for key, item in value.items():
+            if type(key) is not str:
+                raise ValueError("payload object keys must be plain strings")
+            _validate_json_value(item, depth + 1)
+        return
+    raise ValueError("payload must contain only plain JSON values")
+
+
 class DurableTaskQueue:
     """A small SQLite queue with atomic claims and expiring ownership leases.
 
@@ -156,12 +182,13 @@ class DurableTaskQueue:
     def _payload_json(self, payload: object) -> str:
         if type(payload) is not dict:
             raise ValueError("payload must be a plain dict")
+        _validate_json_value(payload)
         try:
             encoded = json.dumps(
                 payload, sort_keys=True, separators=(",", ":"),
                 ensure_ascii=False, allow_nan=False,
             )
-        except (TypeError, ValueError, RecursionError) as exc:
+        except (TypeError, ValueError, RecursionError, UnicodeEncodeError) as exc:
             raise ValueError("payload must contain only finite JSON values") from exc
         if len(encoded.encode("utf-8")) > self.max_payload_bytes:
             raise ValueError("payload exceeds max_payload_bytes")
