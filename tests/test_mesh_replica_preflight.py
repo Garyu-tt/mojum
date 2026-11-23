@@ -98,6 +98,24 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(ManifestError):
             compare(good, bad)
 
+    def test_deeply_nested_direct_api_value_rejected_before_json_encoding(self):
+        # The wire parser is byte-bounded, but the direct-API dataclass
+        # previously underwent unbounded json.dumps before validation.
+        from mojum.mesh_replica_preflight import ReplicaHead
+        nested = []
+        for _ in range(15000):
+            nested = [nested]
+        good = parse()
+        forged = ReplicaHead(nested, "tower-b", 5, 44, "a" * 64, "b" * 64)
+        with self.assertRaises(ManifestError):
+            compare(good, forged)
+
+    def test_missing_in_memory_dataclass_fields_are_typed_rejection(self):
+        from mojum.mesh_replica_preflight import ReplicaHead
+        forged = object.__new__(ReplicaHead)
+        with self.assertRaises(ManifestError):
+            compare(parse(), forged)
+
     def test_file_and_cli(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
