@@ -41,6 +41,24 @@ class CpuProfileTests(unittest.TestCase):
         self.assertEqual(first.steps, 1000)
         with self.assertRaises((AttributeError, TypeError)):
             first.steps = 9
+        with self.assertRaises(AttributeError):
+            first.__dict__
+
+    def test_public_constructor_cannot_bypass_profile_validation(self):
+        with self.assertRaisesRegex(ProfileError, "timestep_ns"):
+            CpuProfile(
+                enabled=True, timestep_ns=0, steps=1000, warmup_steps=50,
+                cpu_threads=2, integrator="implicitfast", solver="newton",
+                digest="0" * 64,
+            )
+        valid = validate_profile()
+        with self.assertRaisesRegex(ProfileError, "digest"):
+            CpuProfile(
+                enabled=valid.enabled, timestep_ns=valid.timestep_ns,
+                steps=valid.steps, warmup_steps=valid.warmup_steps,
+                cpu_threads=valid.cpu_threads, integrator=valid.integrator,
+                solver=valid.solver, digest="0" * 64,
+            )
 
     def test_canonical_digest_ignores_input_key_order(self):
         source = valid_profile()
