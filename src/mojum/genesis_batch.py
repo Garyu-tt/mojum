@@ -37,23 +37,71 @@ class BatchResult:
         return json.loads(self.snapshot_json)
 
 
-def _admit_json_tree(value: Any, *, depth: int = 0, budget: list[int] | None = None) -> None:
-    """Reject hostile Python objects before invoking JSON/equality operations."""
+def _admit_json_tree(
+    value: Any,
+    *,
+    depth: int = 0,
+    budget: list[int] | None = None,
+    max_bytes: int = MAX_BATCH_BYTES,
+) -> None:
+    """Preflight compact canonical JSON size before serialization.
+
+    Counts object/array syntax, separators, quoted and escaped keys/strings,
+    and scalar representations. Oversized integers are rejected before
+    converting them to decimal text or passing them to json.dumps().
+    """
     if budget is None:
-        budget = [0]
+        budget = [0, 0]
     if depth > 12:
         raise GenesisError("Batch input nesting exceeds limit")
     budget[0] += 1
     if budget[0] > 50_000:
         raise GenesisError("Batch input node budget exceeded")
 
+    def add_bytes(amount: int) -> None:
+        budget[1] += amount
+        if budget[1] > max_bytes:
+            raise GenesisError("Batch input JSON byte budget exceeded")
+
+    def string_json_size(text: str) -> int:
+        if len(text) > max_bytes:
+            raise GenesisError("Batch input string exceeds byte budget")
+        size = 2  # JSON quotes
+        short_escapes = {8, 9, 10, 12, 13}
+        for char in text:
+            code = ord(char)
+            if code in (34, 92):
+                size += 2
+            elif code < 32:
+                size += 2 if code in short_escapes else 6
+            elif 0xD800 <= code <= 0xDFFF:
+                raise GenesisError("Batch input contains invalid UTF-8")
+            elif code <= 0x7F:
+                size += 1
+            elif code <= 0x7FF:
+                size += 2
+            elif code <= 0xFFFF:
+                size += 3
+            else:
+                size += 4
+            if size > max_bytes:
+                raise GenesisError("Batch input JSON byte budget exceeded")
+        return size
+
     kind = type(value)
-    if value is None or kind in (str, bool, int):
-        if kind is str:
-            try:
-                value.encode("utf-8")
-            except UnicodeEncodeError as exc:
-                raise GenesisError("Batch input contains invalid UTF-8") from exc
+    if kind is str:
+        add_bytes(string_json_size(value))
+        return
+    if value is None:
+        add_bytes(4)
+        return
+    if kind is bool:
+        add_bytes(4 if value else 5)
+        return
+    if kind is int:
+        if not -(2**63) <= value <= 2**63 - 1:
+            raise GenesisError("Batch input integer is outside signed 64-bit range")
+        add_bytes(len(str(value)))
         return
     if kind is float:
         # GENESIS acquisition fields are integer/string-only. Reject floats
@@ -62,23 +110,25 @@ def _admit_json_tree(value: Any, *, depth: int = 0, budget: list[int] | None = N
     if kind is list:
         if len(value) > MAX_BATCH_EVENTS * 16:
             raise GenesisError("Batch input list exceeds limit")
+        add_bytes(2 + max(0, len(value) - 1))  # brackets and commas
         for item in value:
-            _admit_json_tree(item, depth=depth + 1, budget=budget)
+            _admit_json_tree(item, depth=depth + 1, budget=budget, max_bytes=max_bytes)
         return
     if kind is dict:
         if len(value) > 128:
             raise GenesisError("Batch input object exceeds key limit")
+        add_bytes(2 + max(0, len(value) - 1))  # braces and commas
         for key, item in value.items():
             if type(key) is not str:
                 raise GenesisError("Batch input keys must be native strings")
-            _admit_json_tree(key, depth=depth + 1, budget=budget)
-            _admit_json_tree(item, depth=depth + 1, budget=budget)
+            _admit_json_tree(key, depth=depth + 1, budget=budget, max_bytes=max_bytes)
+            add_bytes(1)  # colon
+            _admit_json_tree(item, depth=depth + 1, budget=budget, max_bytes=max_bytes)
         return
     raise GenesisError("Batch input must contain only native JSON values")
 
-
 def _bounded_json(value: Any, *, limit: int, label: str) -> str:
-    _admit_json_tree(value)
+    _admit_json_tree(value, max_bytes=limit)
     try:
         encoded = canonical(value)
     except (TypeError, ValueError, OverflowError) as exc:
