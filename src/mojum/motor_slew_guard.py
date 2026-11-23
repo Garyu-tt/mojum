@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
+import threading
 from types import MappingProxyType
 
 SCHEMA = "mojum.motor.slew-guard/1"
@@ -79,7 +80,7 @@ class MotorSlewGuard:
     not a reset/restore API. It does not create, store, or forward motor commands.
     """
 
-    __slots__ = ("_limits", "_targets", "_tick", "_revision", "_estop")
+    __slots__ = ("_limits", "_targets", "_tick", "_revision", "_estop", "_lock")
 
     def __init__(
         self,
@@ -117,6 +118,7 @@ class MotorSlewGuard:
         self._tick = tick
         self._revision = revision
         self._estop = False
+        self._lock = threading.RLock()
 
     @staticmethod
     def _normalize_targets(
@@ -136,26 +138,31 @@ class MotorSlewGuard:
 
     @property
     def tick(self) -> int:
-        return self._tick
+        with self._lock:
+            return self._tick
 
     @property
     def revision(self) -> int:
-        return self._revision
+        with self._lock:
+            return self._revision
 
     @property
     def estop_latched(self) -> bool:
-        return self._estop
+        with self._lock:
+            return self._estop
 
     def trip_estop(self) -> None:
         """Irreversibly prevent any further admission by this instance."""
-        self._estop = True
+        with self._lock:
+            self._estop = True
 
     def receipt(self) -> VirtualFrameReceipt:
         """Return immutable and detached data describing the current frame."""
-        return VirtualFrameReceipt(
-            SCHEMA, self._tick, self._revision,
-            tuple(sorted(self._targets.items())),
-        )
+        with self._lock:
+            return VirtualFrameReceipt(
+                SCHEMA, self._tick, self._revision,
+                tuple(sorted(self._targets.items())),
+            )
 
     def advance(
         self,
@@ -169,21 +176,24 @@ class MotorSlewGuard:
         The caller supplies the **next** tick and the **current** revision.
         Long gaps are rejected rather than granting a larger velocity budget.
         """
-        if self._estop:
-            raise MotorSlewError("e-stop latched")
-        requested_tick = _integer(tick, "tick")
-        expected = _integer(expected_revision, "expected_revision")
-        if (self._tick == MAX_TICK or self._revision == MAX_TICK or
-                requested_tick != self._tick + 1 or
-                expected != self._revision):
-            raise MotorSlewError("stale or non-adjacent virtual frame")
-        frame = self._normalize_targets(_mapping(targets, "targets"), self._limits)
-        for name, next_target in frame.items():
-            _lo, _hi, max_change = self._limits[name]
-            if abs(next_target - self._targets[name]) > max_change:
-                raise MotorSlewError(f"slew limit exceeded: {name}")
-        # Everything validated. Commit one new immutable mapping in one step.
-        self._targets = MappingProxyType(frame)
-        self._tick = requested_tick
-        self._revision += 1
-        return self.receipt()
+        # Serialize admission and e-stop so the optimistic revision check and
+        # the state commit are one atomic operation across Python threads.
+        with self._lock:
+            if self._estop:
+                raise MotorSlewError("e-stop latched")
+            requested_tick = _integer(tick, "tick")
+            expected = _integer(expected_revision, "expected_revision")
+            if (self._tick == MAX_TICK or self._revision == MAX_TICK or
+                    requested_tick != self._tick + 1 or
+                    expected != self._revision):
+                raise MotorSlewError("stale or non-adjacent virtual frame")
+            frame = self._normalize_targets(_mapping(targets, "targets"), self._limits)
+            for name, next_target in frame.items():
+                _lo, _hi, max_change = self._limits[name]
+                if abs(next_target - self._targets[name]) > max_change:
+                    raise MotorSlewError(f"slew limit exceeded: {name}")
+            # Everything validated. Commit one new immutable mapping in one step.
+            self._targets = MappingProxyType(frame)
+            self._tick = requested_tick
+            self._revision += 1
+            return self.receipt()
