@@ -48,6 +48,20 @@ class CRSQLiteMetadataFixtureTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(MetadataBoundaryError):
                 validate_operation(op(**{field: SpoofTag()}))
 
+    def test_kind_rejects_hostile_equality_without_invocation(self):
+        class HostileKind:
+            def __eq__(self, other):
+                raise AssertionError("untrusted kind equality must not run")
+
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("str subclass equality must not run")
+
+        for kind in (HostileKind(), HostileString("put"), None, True, 1):
+            with self.subTest(kind=type(kind).__name__):
+                with self.assertRaises(MetadataBoundaryError):
+                    validate_operation(op(kind=kind))
+
     def test_native_output_rejects_nonpublic_cells(self):
         self.assertEqual(_checked_native_projection({"label.good": "public ASCII"}),
                          {"label.good": "public ASCII"})
