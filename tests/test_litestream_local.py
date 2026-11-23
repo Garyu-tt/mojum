@@ -42,7 +42,9 @@ if sys.argv[1:] == ["version"]:
 if sys.argv[1] == "restore":
     if {code!r} == "failed": sys.exit(5)
     output = Path(sys.argv[sys.argv.index("-o") + 1])
-    if {code!r} != "missing": shutil.copyfile({str(self.source)!r}, output)
+    if {code!r} == "corrupt": output.write_bytes(b"x" * 1024)
+    elif {code!r} != "missing": shutil.copyfile({str(self.source)!r}, output)
+    if {code!r} == "sidecar": Path(str(output) + "-wal").write_bytes(b"unsafe")
     sys.exit(0)
 if sys.argv[1] == "replicate":
     if {code!r} == "failed": sys.exit(3)
@@ -133,7 +135,7 @@ else: sys.exit(9)
 
     def test_restore_backend_failure_and_missing_output(self):
         target = self.private / "restored.db"
-        for code in ("failed", "missing"):
+        for code in ("failed", "missing", "corrupt", "sidecar"):
             self._write_fake(code=code)
             with self.subTest(code=code), self.assertRaises(mod.SafetyError):
                 mod.restore_verified(str(self.binary), str(self.replica), str(target),
