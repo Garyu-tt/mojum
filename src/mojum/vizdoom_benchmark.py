@@ -108,29 +108,46 @@ class _FakeState:
 
 
 class SyntheticVisualGame:
-    """Tiny stdlib-only fake, not Doom physics, for API/failure tests."""
+    """Tiny deterministic RGB fake grid; not Doom physics or a learning task.
+
+    Goal is visible only as a coarse directional brightness hint. It exposes
+    no hidden map, coordinates or goal position through the state API.
+    """
+
+    _DIRS = ((1, 0), (0, -1), (-1, 0), (0, 1))  # east, south, west, north
+    _GOAL = (6, 2)
+    _WALLS = frozenset({(3, 2)})
 
     def __init__(self, seed, steps):
         _bounded(seed, steps)
         self.seed, self.limit = seed, steps
-        self.tick, self.x, self.heading = 0, 0, 0
+        self.tick, self.pos, self.heading = 0, (0, 2), 0
         self.closed = False
         self._started = False
 
     def new_episode(self):
-        self.tick, self.x, self.heading = 0, 0, 0
+        self.tick, self.pos, self.heading = 0, (0, 2), 0
         self._started = True
 
     def is_episode_finished(self):
-        return self.tick >= self.limit or self.x >= 6
+        return self.tick >= self.limit or self.pos == self._GOAL
+
+    def _visible(self, direction):
+        dx, dy = self._DIRS[direction]
+        x, y = self.pos
+        next_pos = (x + dx, y + dy)
+        if not 0 <= next_pos[0] <= 6 or not 0 <= next_pos[1] <= 4 or next_pos in self._WALLS:
+            return 10  # closed wall; visible as a dark direction
+        before = abs(x - self._GOAL[0]) + abs(y - self._GOAL[1])
+        after = abs(next_pos[0] - self._GOAL[0]) + abs(next_pos[1] - self._GOAL[1])
+        return (185 if after < before else 125) - self.seed % 7
 
     def get_state(self):
         if not self._started or self.is_episode_finished():
             return None
-        # Stable RGB24 stripes with a dark center at synthetic x==2.
-        t = (self.seed % 13) + self.heading * 11
-        regions = (210 - t % 31, 25 if self.x == 2 else 180 - t % 21,
-                   100 + t % 37)
+        regions = (self._visible((self.heading - 1) % 4),
+                   self._visible(self.heading),
+                   self._visible((self.heading + 1) % 4))
         row = bytearray()
         for col in range(WIDTH):
             intensity = regions[min(2, 3 * col // WIDTH)]
@@ -149,8 +166,12 @@ class SyntheticVisualGame:
         if action == list(ACTIONS["right"]):
             self.heading = (self.heading + 1) % 4
             return -0.05
-        self.x += 1 if self.heading == 0 else 0
-        return 1.0 if self.heading == 0 else -0.1
+        dx, dy = self._DIRS[self.heading]
+        new_pos = (self.pos[0] + dx, self.pos[1] + dy)
+        if not 0 <= new_pos[0] <= 6 or not 0 <= new_pos[1] <= 4 or new_pos in self._WALLS:
+            return -0.2
+        self.pos = new_pos
+        return 5.0 if self.pos == self._GOAL else 1.0
 
     def close(self):
         self.closed = True
