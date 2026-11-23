@@ -120,6 +120,25 @@ class CrSqliteCollabSpikeTests(unittest.TestCase):
             with self.subTest(k=k), self.assertRaises((PermissionError, ValueError)):
                 validate_event(tampered)
 
+    def test_wire_visibility_exact_strings_no_equality_spoof(self):
+        # Python API must not admit numeric values that override equality.
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other in (WIRE, "PUBLIC_SYNTHETIC")
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+        for field in ("wire", "visibility"):
+            op = event("r1", 1, "view.v1.x", 1)
+            op[field] = PretendInt(7)
+            with self.subTest(field=field), self.assertRaises(PermissionError):
+                validate_event(op)
+            state = Replica()
+            with self.assertRaises(PermissionError):
+                state.merge([op])
+            self.assertEqual(state.events(), [])
+
     def test_duplicate_json_fields_denied(self):
         op = event("r1", 1, "view.v1.x", 1)
         raw = json.dumps(op).replace('"counter": 1', '"counter": 1, "counter": 1')
