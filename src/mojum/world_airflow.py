@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+from decimal import Decimal
 import re
 
 from .world_room import Room, RoomState, _revision, _valid
@@ -47,12 +48,17 @@ def _mm(value, name):
     if type(value) not in (int, float):
         raise AirflowError(f"{name} must be a finite native number")
     try:
+        if type(value) is int:
+            return value * 1000
         if not math.isfinite(value):
             raise AirflowError(f"{name} must be a finite native number")
-        scaled = value * 1000
-        if not math.isfinite(scaled) or scaled != round(scaled):
+        # Float multiplication can move an exactly millimetre-aligned decimal
+        # just below/above an integer (for example 1.001 * 1000). Interpret
+        # the float's shortest round-trip decimal spelling instead.
+        scaled = Decimal(str(value)) * 1000
+        if scaled != scaled.to_integral_value():
             raise AirflowError(f"{name} must align to an integer millimetre")
-        return int(round(scaled))
+        return int(scaled)
     except (OverflowError, TypeError, ValueError) as exc:
         if isinstance(exc, AirflowError):
             raise
