@@ -65,6 +65,8 @@ def _check_tree(value, path="$"):
 
         kind = type(item)
         if kind is dict:
+            if nodes + len(stack) + len(item) > MAX_TREE_NODES:
+                raise GenesisPhenotypeAuditError("input node budget exceeded")
             add_size(2 + max(0, len(item) - 1))  # braces and commas
             for key, child in item.items():
                 if type(key) is not str:
@@ -74,6 +76,8 @@ def _check_tree(value, path="$"):
                 add_size(_json_string_size(key) + 1)  # key and colon
                 stack.append((child, depth + 1))
         elif kind is list:
+            if nodes + len(stack) + len(item) > MAX_TREE_NODES:
+                raise GenesisPhenotypeAuditError("input node budget exceeded")
             add_size(2 + max(0, len(item) - 1))  # brackets and commas
             for child in item:
                 stack.append((child, depth + 1))
