@@ -6,7 +6,7 @@
 
 The SQLite connection is explicitly closed with `contextlib.closing` on success and on exceptions. Its transaction context is nested inside the closing context; `Connection.__exit__` alone does not close the handle. Regression coverage repeatedly invokes the function with `ResourceWarning` elevated.
 
-The schema query has a hard SQLite virtual-machine instruction cutoff: the progress handler interrupts execution at the first callback after 100,000 VM instructions. This is a deterministic work cutoff, **not** a wall-time or memory limit. A valid but unusually complex schema may therefore be rejected with `SchemaAuditError`; the cutoff is intentional fail-closed behavior, not a claim that every schema under the entry/text limits will be accepted.
+Each metadata text field is rejected by character count before UTF-8 encoding if it exceeds 65,536 characters; aggregate UTF-8 metadata is capped at 4 MiB. The schema query has a hard SQLite virtual-machine instruction cutoff: the progress handler interrupts execution at the first callback after 100,000 VM instructions. This is a deterministic work cutoff, **not** a wall-time or memory limit. A valid but unusually complex schema may therefore be rejected with `SchemaAuditError`; the cutoff is intentional fail-closed behavior, not a claim that every schema under the entry/text limits will be accepted.
 
 ## Filesystem trust boundary
 
