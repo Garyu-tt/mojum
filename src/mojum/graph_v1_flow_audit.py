@@ -55,24 +55,45 @@ class GraphV1FlowAudit:
 
 
 def _check_json_tree(value: Any) -> None:
-    """Admit exact JSON values without expanding beyond either resource budget."""
+    """Preflight exact compact UTF-8 JSON size before allocating encoded chunks."""
     pending = [(value, 0)]
     seen = 0
-    text_bytes = 0
+    wire_bytes = 0
+
+    def charge(amount: int) -> None:
+        nonlocal wire_bytes
+        wire_bytes += amount
+        if wire_bytes > MAX_JSON_BYTES:
+            raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
 
     def charge_text(text: str) -> None:
-        nonlocal text_bytes
-        # Check character length before encoding so one hostile huge string
-        # cannot allocate an equally huge temporary UTF-8 buffer.
+        # JSONEncoder uses ensure_ascii=False: count UTF-8 bytes for ordinary
+        # Unicode and JSON escapes for quotes, backslashes and C0 controls.
+        # Check character length first so a single hostile string cannot
+        # allocate an oversized encoded temporary buffer.
         if len(text) > MAX_JSON_BYTES:
             raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
-        try:
-            size = len(text.encode("utf-8", errors="strict"))
-        except UnicodeEncodeError as exc:
-            raise GraphV1FlowAuditError("JSON text is not valid UTF-8") from exc
-        text_bytes += size
-        if text_bytes > MAX_JSON_BYTES:
-            raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
+        size = 2  # opening and closing JSON quotes
+        short_escapes = {8, 9, 10, 12, 13}
+        for char in text:
+            code = ord(char)
+            if code in (34, 92):
+                size += 2
+            elif code < 32:
+                size += 2 if code in short_escapes else 6
+            elif 0xD800 <= code <= 0xDFFF:
+                raise GraphV1FlowAuditError("JSON text is not valid UTF-8")
+            elif code <= 0x7F:
+                size += 1
+            elif code <= 0x7FF:
+                size += 2
+            elif code <= 0xFFFF:
+                size += 3
+            else:
+                size += 4
+            if size > MAX_JSON_BYTES:
+                raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
+        charge(size)
 
     while pending:
         current, depth = pending.pop()
@@ -88,20 +109,25 @@ def _check_json_tree(value: Any) -> None:
             # rather than O(the caller's untrusted container cardinality).
             if seen + len(pending) + len(current) > MAX_JSON_ITEMS:
                 raise GraphV1FlowAuditError("JSON item budget exceeded")
+            charge(2 + max(0, len(current) - 1))  # braces and commas
             for key, child in current.items():
                 if type(key) is not str:
                     raise GraphV1FlowAuditError("JSON object keys must be exact strings")
                 charge_text(key)
+                charge(1)  # colon
                 pending.append((child, depth + 1))
         elif kind is list:
             if seen + len(pending) + len(current) > MAX_JSON_ITEMS:
                 raise GraphV1FlowAuditError("JSON item budget exceeded")
+            charge(2 + max(0, len(current) - 1))  # brackets and commas
             pending.extend((child, depth + 1) for child in current)
         elif kind is str:
             charge_text(current)
         elif kind is float:
             if not math.isfinite(current):
                 raise GraphV1FlowAuditError("Non-finite JSON number")
+            # CPython's JSON float encoder uses a bounded repr() token.
+            charge(len(repr(current)))
         elif kind is int:
             # A direct Python API caller can supply an integer far larger than
             # any bounded JSON document. Estimate decimal token size from its
@@ -109,11 +135,13 @@ def _check_json_tree(value: Any) -> None:
             decimal_digits_upper = (current.bit_length() * 30_103) // 100_000 + 1
             if current < 0:
                 decimal_digits_upper += 1
-            if decimal_digits_upper > MAX_JSON_BYTES:
-                raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
-        elif kind not in (bool, type(None)):
+            charge(decimal_digits_upper)
+        elif kind is bool:
+            charge(4 if current else 5)
+        elif current is None:
+            charge(4)
+        else:
             raise GraphV1FlowAuditError("Value is not an exact JSON primitive")
-
 
 def _canonical_bytes(value: Any) -> bytes:
     _check_json_tree(value)
