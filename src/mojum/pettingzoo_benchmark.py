@@ -38,7 +38,12 @@ def _index(value, lower, upper, name):
 
 
 def _agents(value, expected):
-    if not isinstance(value, (list, tuple)) or tuple(value) != expected:
+    # Only exact built-in sequences are admitted: subclasses can override
+    # iteration and equality and thereby spoof the live-agent inventory.
+    if type(value) not in (list, tuple):
+        raise BenchmarkError("unexpected live-agent order or count")
+    native = tuple(value)
+    if any(type(agent) is not str for agent in native) or native != expected:
         raise BenchmarkError("unexpected live-agent order or count")
 
 
@@ -53,14 +58,21 @@ def _dict(value, keys, name):
             raise BenchmarkError(f"{name}: invalid exact agent-key set")
 
 
+def _dict_value(value, key):
+    # _dict() must run first. Bypass an admitted dict subclass's __getitem__
+    # override while preserving native storage from defaultdict and peers.
+    return dict.__getitem__(value, key)
+
+
 def _observations(value):
     _dict(value, AGENTS, "observations")
-    return {name: _index(value[name], 0, 3, "observation") for name in AGENTS}
+    return {name: _index(_dict_value(value, name), 0, 3, "observation")
+            for name in AGENTS}
 
 
 def _infos(value):
     _dict(value, AGENTS, "infos")
-    if any(type(value[name]) is not dict for name in AGENTS):
+    if any(type(_dict_value(value, name)) is not dict for name in AGENTS):
         raise BenchmarkError("infos: expected mappings")
     # Never persist, return, inspect or hash info contents.
 
@@ -137,14 +149,14 @@ def run_episode(factory, *, seed, policy="frozen", cycles=MAX_CYCLES, enabled=Fa
                                 ("truncations", truncations)):
                 _dict(value, AGENTS, name)
             _infos(infos)
-            r = {a: _reward(rewards[a]) for a in AGENTS}
+            r = {a: _reward(_dict_value(rewards, a)) for a in AGENTS}
             if r[AGENTS[0]] != -r[AGENTS[1]]:
                 raise BenchmarkError("RPS game violates zero-sum reward invariant")
-            if any(type(terminations[a]) is not bool or type(truncations[a]) is not bool
+            if any(type(_dict_value(terminations, a)) is not bool or type(_dict_value(truncations, a)) is not bool
                    for a in AGENTS):
                 raise BenchmarkError("done flags must be booleans")
-            done = all(terminations[a] or truncations[a] for a in AGENTS)
-            if done != any(terminations[a] or truncations[a] for a in AGENTS):
+            done = all(_dict_value(terminations, a) or _dict_value(truncations, a) for a in AGENTS)
+            if done != any(_dict_value(terminations, a) or _dict_value(truncations, a) for a in AGENTS):
                 raise BenchmarkError("unsupported asynchronous RPS termination")
             total_reward += r[AGENTS[0]]
             transcript.update(json.dumps({"actions": actions, "rewards": r,
