@@ -58,6 +58,21 @@ class NengoShadowContractTests(unittest.TestCase):
                 with self.assertRaises(NengoShadowError):
                     validate_fixture(case)
 
+    def test_rejects_forged_schema_and_provenance_types(self):
+        class ForgedIdentity:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for field in ("schema", "source"):
+            with self.subTest(field=field):
+                case = fixture()
+                case[field] = ForgedIdentity()
+                with self.assertRaises(NengoShadowError):
+                    validate_fixture(case)
+
     def test_rejects_unknown_fields_and_non_dict(self):
         for value in [None, [], 17, {**fixture(), "secret": "token"}]:
             with self.subTest(value=repr(value)):
