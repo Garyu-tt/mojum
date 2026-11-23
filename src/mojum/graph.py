@@ -136,10 +136,14 @@ def _require_native_json_tree(value):
                 add_wire_bytes(4)
             else:
                 raise GraphError("Graph contains a non-native JSON value")
-    except GraphError:
-        raise
+    except GraphError as exc:
+        # Keep one stable public diagnostic category for native-tree admission
+        # while retaining the concrete reason for operators and tests.
+        if "lossless UTF-8 JSON" in str(exc):
+            raise
+        raise GraphError(f"Graph requires lossless UTF-8 JSON values: {exc}") from exc
     except (RuntimeError, RecursionError, OverflowError, UnicodeError, ValueError) as exc:
-        raise GraphError("Graph contains an invalid or changing JSON tree") from exc
+        raise GraphError("Graph contains an invalid or changing JSON tree (lossless UTF-8 JSON required)") from exc
 
 
 def _unique_json_object(pairs):
@@ -237,25 +241,29 @@ def load_graph(path):
 
 
 def validate(graph):
-    # Validate the complete caller-owned object tree before any dict/set
-    # comparison, membership operation, or topology lookup can invoke custom
-    # Python behavior. The same limits apply to load_graph() and direct users.
-    _require_native_json_tree(graph)
-    if type(graph) is not dict or graph.get("schema") != SCHEMA:
-        raise GraphError("Unsupported or absent graph schema")
-    # V1 graph identity and revision are part of the canonical wire format.
-    # Missing or malformed metadata must fail before Simulation hashes this
-    # object or Aquarium opens its durable SQLite journal.
-    if set(graph) != {"schema", "id", "revision", "nodes", "edges"}:
+    # Check exact root keys and identity fields with native dict operations
+    # before the general JSON walk, so a malformed surrogate can be attributed
+    # to its id/revision field without invoking caller-controlled behavior.
+    if type(graph) is not dict or len(graph) != 5:
+        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
+    root_keys = tuple(dict.keys(graph))
+    if (any(type(key) is not str for key in root_keys)
+            or set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}):
         raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
     for field in ("id", "revision"):
-        value = graph[field]
+        value = dict.__getitem__(graph, field)
         if type(value) is not str or not value.strip() or len(value) > 256:
             raise GraphError(f"Graph v1 {field} must be nonempty bounded text")
         try:
             value.encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:
             raise GraphError(f"Graph v1 {field} must be valid UTF-8") from exc
+
+    # Validate the complete caller-owned object tree before any schema set
+    # comparison or topology lookup can invoke custom Python behavior.
+    _require_native_json_tree(graph)
+    if graph.get("schema") != SCHEMA:
+        raise GraphError("Unsupported or absent graph schema")
     nodes = graph.get("nodes")
     edges = graph.get("edges")
     if type(nodes) is not list or not nodes or type(edges) is not list:
