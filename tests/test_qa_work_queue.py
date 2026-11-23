@@ -23,6 +23,15 @@ def _claim_process(path, worker_number, result_queue):
     except BaseException as exc:
         result_queue.put(("error", repr(exc)))
 
+def _initialize_process(path, barrier, result_queue):
+    try:
+        barrier.wait(timeout=15)
+        with QAWorkQueue(path, busy_timeout=15):
+            pass
+        result_queue.put(("ok", None))
+    except BaseException as exc:
+        result_queue.put(("error", repr(exc)))
+
 
 def test_huge_numeric_configuration_raises_queue_error():
     with pytest.raises(QueueError):
@@ -286,3 +295,33 @@ def test_text_and_numeric_bounds_precede_expensive_operations(tmp_path):
 def test_in_memory_database_is_rejected(tmp_path):
     with pytest.raises(QueueError, match="filesystem-backed"):
         QAWorkQueue(":memory:")
+
+def test_concurrent_first_open_initialization_is_serialized(tmp_path):
+    path = str(tmp_path / "first-open-race.db")
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    barrier = context.Barrier(6)
+    workers = [
+        context.Process(target=_initialize_process, args=(path, barrier, results))
+        for _ in range(6)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=30)
+    for worker in workers:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join()
+            raise AssertionError("initializer process did not finish within 30 seconds")
+        assert worker.exitcode == 0
+    outcomes = [results.get(timeout=5) for _ in workers]
+    errors = [value for status, value in outcomes if status != "ok"]
+    assert not errors, errors
+    with QAWorkQueue(path) as q:
+        version = q._db.execute(
+            "SELECT value FROM qa_meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        assert version == "mojum.qa-work-queue/1"
+        assert q.counts() == {"queued": 0, "leased": 0, "succeeded": 0, "failed": 0}
+
