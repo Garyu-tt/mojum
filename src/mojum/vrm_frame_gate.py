@@ -59,7 +59,10 @@ class PoseFrameGate:
             raise FrameGateError("invalid max_joints")
         if type(max_abs_coordinate) not in (int, float):
             raise FrameGateError("invalid coordinate limit")
-        limit = float(max_abs_coordinate)
+        try:
+            limit = float(max_abs_coordinate)
+        except (OverflowError, TypeError, ValueError):
+            raise FrameGateError("invalid coordinate limit") from None
         if not math.isfinite(limit) or not 0.0 < limit <= 1_000_000.0:
             raise FrameGateError("invalid coordinate limit")
         self._max_joints = max_joints
