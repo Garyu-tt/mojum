@@ -50,8 +50,21 @@ class PulseCalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(report.bins[0].absolute_gap, 0.15)
         self.assertEqual(report.bins[1].sample_count, 0)
         self.assertIsNone(report.bins[1].mean_forecast)
+        self.assertEqual(report.bins[3].sample_count, 1)
         self.assertEqual(report.bins[4].sample_count, 1)
         self.assertEqual(report.bins[4].observed_frequency, 1.0)
+
+    def test_internal_bin_boundaries_are_right_closed(self):
+        report = audit_calibration([
+            row(0, 0.2, False),
+            row(1, 0.200001, False),
+            row(2, 0.8, True),
+            row(3, 0.800001, True),
+        ], bin_count=5)
+        self.assertEqual(
+            [item.sample_count for item in report.bins],
+            [1, 1, 0, 1, 1],
+        )
 
     def test_exact_upper_probability_enters_last_bin(self):
         report = audit_calibration([row(0, 1, True)], bin_count=10)
