@@ -28,8 +28,10 @@ class PiperTTSTests(unittest.TestCase):
         program = f'''#!{sys.executable}
 import os, sys, time, wave
 if '-c' in sys.argv:
-    print('0.0.0' if {mode!r} == 'version' else '1.6.1')
-    raise SystemExit(0)
+    installed = '0.0.0' if {mode!r} == 'version' else '1.6.1'
+    if {mode!r} == 'loudversion':
+        sys.stdout.write('x' * 1_000_000)
+    raise SystemExit(0 if installed == sys.argv[-1] else 12)
 if {mode!r} == 'error':
     raise SystemExit(4)
 if {mode!r} == 'timeout':
@@ -134,6 +136,14 @@ else:
         self._script("error")
         with self.assertRaises(RuntimeError):
             synthesize_public_wav("hi", self._profile(), enabled=True)
+
+    def test_oversized_version_stdout_cannot_exhaust_capture(self):
+        # Broken/pinned child process emits excessive data despite valid metadata.
+        # The adapter must not capture it into parent memory or reject by size.
+        self._script("loudversion")
+        out = synthesize_public_wav("hi", self._profile(), enabled=True)
+        self.assertEqual(out.sample_frames, 16)
+
 
     def test_process_timeout(self):
         self._script("timeout")
