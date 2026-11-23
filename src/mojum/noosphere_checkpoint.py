@@ -29,6 +29,17 @@ class CheckpointError(ValueError):
     """Raised when a checkpoint reference set is incomplete or inconsistent."""
 
 
+def _require_exact_keys(value: Any, expected: set[str], field: str) -> None:
+    """Admit native dict keys before any set membership/equality operation."""
+    if type(value) is not dict:
+        raise CheckpointError(f"{field} must be a built-in dictionary")
+    keys = tuple(dict.keys(value))
+    if any(type(key) is not str for key in keys):
+        raise CheckpointError(f"{field} keys must be native strings")
+    if set(keys) != expected:
+        raise CheckpointError(f"{field} has unknown or missing fields")
+
+
 def _text(value: Any, field: str, limit: int = MAX_TEXT) -> str:
     if type(value) is not str or not value.strip() or len(value) > limit:
         raise CheckpointError(f"{field} must be nonempty bounded text")
@@ -70,8 +81,7 @@ def _canonical(value: Any) -> bytes:
 
 
 def _component(ref: Any, name: str, agent_id: str, tick: int) -> dict:
-    if type(ref) is not dict or set(ref) != _COMPONENT_FIELDS:
-        raise CheckpointError(f"{name} reference has unknown or missing fields")
+    _require_exact_keys(ref, _COMPONENT_FIELDS, f"{name} reference")
     checked = {
         "schema": _text(ref["schema"], f"{name}.schema", 128),
         "revision": _text(ref["revision"], f"{name}.revision"),
@@ -97,8 +107,7 @@ def _payload(manifest: dict) -> dict:
 
 
 def _validate_manifest(manifest: Any) -> dict:
-    if type(manifest) is not dict or set(manifest) != _ROOT_FIELDS:
-        raise CheckpointError("checkpoint manifest has unknown or missing fields")
+    _require_exact_keys(manifest, _ROOT_FIELDS, "checkpoint manifest")
     if manifest["schema"] != SCHEMA:
         raise CheckpointError("unsupported checkpoint schema")
     agent_id = _text(manifest["agent_id"], "agent_id")
@@ -108,8 +117,7 @@ def _validate_manifest(manifest: Any) -> dict:
     if previous is not None:
         previous = _digest(previous, "previous_checkpoint_sha256")
     raw_components = manifest["components"]
-    if type(raw_components) is not dict or set(raw_components) != set(COMPONENTS):
-        raise CheckpointError("checkpoint must reference brain, genome, body, world and memory exactly once")
+    _require_exact_keys(raw_components, set(COMPONENTS), "checkpoint components")
     components = {
         name: _component(raw_components[name], name, agent_id, tick)
         for name in COMPONENTS
@@ -149,8 +157,7 @@ def create_checkpoint(
         previous_checkpoint_sha256 = _digest(
             previous_checkpoint_sha256, "previous_checkpoint_sha256"
         )
-    if type(components) is not dict or set(components) != set(COMPONENTS):
-        raise CheckpointError("components must contain the five required names exactly")
+    _require_exact_keys(components, set(COMPONENTS), "components")
     checked = {
         name: _component(components[name], name, agent, at_tick)
         for name in COMPONENTS
