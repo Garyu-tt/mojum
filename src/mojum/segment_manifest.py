@@ -13,6 +13,7 @@ from typing import Any
 SCHEMA = "mojum.noosphere.segment-manifest/1"
 EMPTY_HEAD = "0" * 64
 MAX_MANIFEST_BYTES = 16_384
+MAX_SEGMENT_BYTES = 64 * 1024 * 1024
 _MAX_TEXT = 256
 _FIELDS = frozenset({
     "schema", "agent_id", "first_seq", "last_seq", "event_count",
@@ -244,4 +245,6 @@ def verify_segment_bytes(manifest: SegmentManifest, segment_bytes: bytes) -> boo
     validate_manifest(manifest.to_dict())
     if type(segment_bytes) is not bytes:
         raise SegmentManifestError("segment_bytes must be exact bytes")
+    if len(segment_bytes) > MAX_SEGMENT_BYTES:
+        raise SegmentManifestError("segment bytes exceed the verification budget")
     return hashlib.sha256(segment_bytes).hexdigest() == manifest.content_sha256
