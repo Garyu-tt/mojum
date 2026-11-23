@@ -3,7 +3,6 @@ import copy
 import json
 import unittest
 from unittest.mock import patch
-from unittest.mock import patch
 from pathlib import Path
 
 from mojum.graph import (
