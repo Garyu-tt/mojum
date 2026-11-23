@@ -128,6 +128,12 @@ class PCMResampleTests(unittest.TestCase):
         first, second = self.convert(pattern), self.convert(pattern)
         self.assertEqual(first, second)
         self.assertEqual(first.sha256_hex, hashlib.sha256(first.pcm16le).hexdigest())
+        # Pinned cross-version output witnesses: these depend on the signed
+        # Q20 taps, edge extension, clipping and integer rounding contract.
+        self.assertEqual(first.sha256_hex,
+                         "64e38b1a531cc3439e8a5625efe79d097a4dba8bde45f59b6e84f5c8cfd9f7c3")
+        self.assertEqual(self.convert(pattern, 32000).sha256_hex,
+                         "cc632c3a9391b70c1dd5aaba533c5809fd2f057ffb23caa8f5bd75fbb1619e39")
         with self.assertRaises((AttributeError, TypeError)):
             first.output_frames = 0
 
