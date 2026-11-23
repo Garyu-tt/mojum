@@ -95,6 +95,15 @@ else:
             synthesize_public_wav("hello", self._profile(), enabled=True,
                                   provenance=type("StrAlias", (str,), {})("PUBLIC_SYNTHETIC"))
 
+    def test_unicode_control_and_line_separators_rejected(self):
+        # These are Unicode newline/control characters, not ASCII C0/DEL.
+        for bad in ("alpha\u0085beta", "alpha\u2028beta", "alpha\u2029beta",
+                    "alpha\u009fbeta"):
+            with self.subTest(bad=repr(bad)), self.assertRaisesRegex(
+                ValueError, "control characters"
+            ):
+                synthesize_public_wav(bad, self._profile(), enabled=True)
+
     def test_valid_fake_wav_and_pinned_provenance(self):
         out = synthesize_public_wav("Привет, Данте", self._profile(), enabled=True)
         self.assertEqual(out.schema, SCHEMA)

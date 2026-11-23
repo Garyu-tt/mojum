@@ -86,7 +86,9 @@ def _public_text(text: str) -> None:
         raise ValueError("require valid UTF-8 text") from exc
     if len(encoded) > MAX_TEXT_BYTES or "[[" in text or "]]" in text:
         raise ValueError("text exceeds limits or contains phoneme markup")
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+    # Cover C0/C1 controls plus Unicode line/paragraph separators, which
+    # Python str.splitlines() also treats as line boundaries.
+    if any(unicodedata.category(ch) in {"Cc", "Zl", "Zp"} for ch in text):
         raise ValueError("text contains control characters")
 
 
