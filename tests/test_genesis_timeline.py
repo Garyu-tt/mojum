@@ -144,5 +144,81 @@ class GenesisTimelineTests(unittest.TestCase):
         self.assertEqual(len(r["boundaries"][1]["newly_effective"]), 256)
 
 
+    def test_hostile_revision_and_schema_equality_never_executes(self):
+        class Impostor:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ExplodingComparison:
+            def __eq__(self, other):
+                raise AssertionError("attacker comparison executed")
+
+            def __ne__(self, other):
+                raise AssertionError("attacker comparison executed")
+
+        class StringSubclass(str):
+            pass
+
+        original = self.ledger.snapshot()
+        for key in ("schema", "revision"):
+            for malicious in (Impostor(), ExplodingComparison(),
+                              StringSubclass(original[key])):
+                with self.subTest(key=key, malicious=type(malicious).__name__):
+                    forged = copy.deepcopy(original)
+                    forged[key] = malicious
+                    with self.assertRaises(GenesisError):
+                        attest_timeline(forged, start_tick=0, through_tick=30,
+                                        public_synthetic=True)
+
+    def test_nested_ledger_native_text_guards_precede_comparisons(self):
+        class Impostor:
+            def __ne__(self, other):
+                return False
+
+        for location, field in (("seed", "schema"), ("seed", "genome_id"),
+                                ("event", "schema"), ("event", "gene"),
+                                ("event", "genome_id")):
+            with self.subTest(location=location, field=field):
+                forged = self.ledger.snapshot()
+                if location == "seed":
+                    forged["seed"][field] = Impostor()
+                else:
+                    forged["events"][0][field] = Impostor()
+                with self.assertRaises(GenesisError):
+                    attest_timeline(forged, start_tick=0, through_tick=30,
+                                    public_synthetic=True)
+
+    def test_hostile_mapping_keys_fail_before_hash_and_equality(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key comparison executed")
+
+        for level in ("root", "seed", "inherited", "event"):
+            with self.subTest(level=level):
+                forged = self.ledger.snapshot()
+                if level == "root":
+                    forged = {HostileKey(k): v for k, v in forged.items()}
+                elif level == "seed":
+                    forged["seed"] = {HostileKey(k): v
+                                      for k, v in forged["seed"].items()}
+                elif level == "inherited":
+                    inherited = forged["seed"]["inherited"]
+                    forged["seed"]["inherited"] = {
+                        HostileKey(k): v for k, v in inherited.items()
+                    }
+                else:
+                    forged["events"][0] = {
+                        HostileKey(k): v for k, v in forged["events"][0].items()
+                    }
+                with self.assertRaises(GenesisError):
+                    attest_timeline(forged, start_tick=0, through_tick=30,
+                                    public_synthetic=True)
+
+
 if __name__ == "__main__":
     unittest.main()
