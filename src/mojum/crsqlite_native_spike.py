@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 
 MAX_EXTENSION_BYTES = 64 * 1024 * 1024
 
@@ -76,6 +77,69 @@ finally:
 '''
 
 
+def _run_bounded_child(args, *, cwd, env, timeout):
+    """Drain child pipes concurrently, killing on bounded stdout/stderr overflow.
+
+    subprocess.run(..., PIPE) accumulates output without limit before its
+    caller can check len(stdout). A faulty native extension must not be able
+    to exhaust the parent Python process's RAM through either pipe.
+    """
+    limit = 4096
+    child = subprocess.Popen(
+        args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    stdout, stderr = bytearray(), bytearray()
+    overflow = threading.Event()
+
+    def drain(stream, buffer):
+        try:
+            while True:
+                chunk = stream.read1(4096)
+                if not chunk:
+                    return
+                if len(buffer) + len(chunk) > limit:
+                    overflow.set()
+                    try:
+                        child.kill()
+                    except OSError:
+                        pass  # Child may already have exited.
+                    return
+                buffer.extend(chunk)
+        except OSError:
+            overflow.set()
+            try:
+                child.kill()
+            except OSError:
+                pass
+        finally:
+            stream.close()
+
+    threads = (
+        threading.Thread(target=drain, args=(child.stdout, stdout), daemon=True),
+        threading.Thread(target=drain, args=(child.stderr, stderr), daemon=True),
+    )
+    for thread in threads:
+        thread.start()
+    try:
+        child.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
+        raise
+    finally:
+        for thread in threads:
+            thread.join(timeout=1)
+        if any(thread.is_alive() for thread in threads):
+            # Descendants can inherit pipe handles; never trust such a result.
+            overflow.set()
+            child.stdout.close()
+            child.stderr.close()
+    if overflow.is_set():
+        raise RuntimeError("native extension probe output limit exceeded")
+    return subprocess.CompletedProcess(args, child.returncode, bytes(stdout), bytes(stderr))
+
+
 def run_native_probe(extension: str, expected_sha256: str, *, timeout_s: int = 15) -> dict:
     """Opt-in, audited extension ONLY; no network, journals, or writable paths.
 
@@ -109,11 +173,9 @@ def run_native_probe(extension: str, expected_sha256: str, *, timeout_s: int = 1
         local.write_bytes(data)
         local.chmod(0o600)
         try:
-            result = subprocess.run(
+            result = _run_bounded_child(
                 [sys.executable, "-I", "-S", "-c", _NATIVE, str(local)],
-                cwd=work, env={"PYTHONNOUSERSITE": "1"},
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=timeout_s, check=False,
+                cwd=work, env={"PYTHONNOUSERSITE": "1"}, timeout=timeout_s,
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("native extension probe timed out") from exc
