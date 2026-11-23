@@ -5,6 +5,7 @@ not contact GitHub, execute workers, or grant merge authority.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 import json
 import math
@@ -88,10 +89,12 @@ class DurableTaskQueue:
         max_payload_bytes: int = 65_536,
     ) -> None:
         if not isinstance(database, (str, Path)) or not str(database):
-            raise ValueError("database must be a path or ':memory:'")
+            raise ValueError("database must be a non-empty file-backed path")
         if type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be a finite positive number")
         self.database = str(database)
+        if self.database == ":memory:":
+            raise ValueError("file-backed SQLite is required for independent worker connections")
         self.timeout_seconds = float(timeout_seconds)
         self.max_payload_bytes = _positive_int(max_payload_bytes, "max_payload_bytes", maximum=1_048_576)
         self._initialize()
@@ -108,7 +111,7 @@ class DurableTaskQueue:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             # WAL is persistent for file-backed databases; SQLite reports
             # 'memory' for :memory:, which is the correct in-memory behavior.
             connection.execute("PRAGMA journal_mode = WAL")
