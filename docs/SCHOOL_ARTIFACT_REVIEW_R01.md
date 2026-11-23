@@ -16,7 +16,7 @@ It is deliberately **not** a teacher, aesthetic evaluator, musical critic, or le
     run = run_activity(catalog, "visual_arts.starter", script)
     report = review_run(run)
 
-The same API accepts music.starter runs. The supplied run must be a valid PRIVATE moj​um.school-run/1 object; review_run delegates the existing run/event/hash checks to school_activity._check_private_fixture_run before deriving measurements.
+The same API accepts music.starter runs. The supplied run must be a valid PRIVATE mojum.school-run/1 object; review_run delegates the existing run/event/hash checks to school_activity._check_private_fixture_run before deriving measurements.
 
 The result is also marked PRIVATE. It includes artifact phase, media type, SHA-256 digest and structural measurements only. It intentionally omits learner reference, event observations and raw artifact content. Callers remain responsible for consent and access control. Neither the run's local SHA values nor this report authenticate who created it.
 
@@ -30,7 +30,7 @@ The report counts strokes and sums Manhattan segment length in grid units. This 
 
 ### Rhythm
 
-Only the moj​um.rhythm-grid/1 JSON shape is accepted: grid_steps=64 and 1–32 unique, sorted integer pulse positions in [0, 63]. Duplicate JSON keys, non-finite values, malformed UTF-8, wrong types, unsorted/duplicate pulses and out-of-range positions are rejected.
+Only the mojum.rhythm-grid/1 JSON shape is accepted: grid_steps=64 and 1–32 unique, sorted integer pulse positions in [0, 63]. Duplicate JSON keys, non-finite values, malformed UTF-8, wrong types, unsorted/duplicate pulses and out-of-range positions are rejected.
 
 The report includes pulse count and cyclic gaps between pulses, including the wrap from the final pulse to the first pulse in the next 64-step cycle.
 
