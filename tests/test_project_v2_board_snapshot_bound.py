@@ -5,6 +5,7 @@ and the open/read. No GitHub account or network connection is required.
 """
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 import tempfile
@@ -48,6 +49,22 @@ class SnapshotByteReadTests(unittest.TestCase):
             path.write_bytes(b'{"invalid":"\xff"}')
             with self.assertRaisesRegex(BoardError, "invalid input JSON"):
                 _load_json(path)
+
+    @unittest.skipUnless(
+        hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"),
+        "POSIX FIFO safety regression requires nonblocking open",
+    )
+    def test_fifo_input_is_rejected_without_waiting_for_a_writer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hostile-fifo.json"
+            os.mkfifo(path, mode=0o600)
+            with self.assertRaisesRegex(BoardError, "missing or oversized input JSON"):
+                _load_json(path)
+
+    def test_directory_input_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(BoardError):
+                _load_json(Path(directory))
 
     def test_unavailable_file_is_a_typed_board_error(self):
         with tempfile.TemporaryDirectory() as directory:
