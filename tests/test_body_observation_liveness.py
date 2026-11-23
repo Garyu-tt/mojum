@@ -35,8 +35,8 @@ def audit(frames, **kwargs):
 class ObservationLivenessTests(unittest.TestCase):
     def test_contiguous_fresh_stream_is_live_and_deterministic(self):
         frames = [frame(1), frame(2), frame(3)]
-        first = audit(frames)
-        second = audit(copy.deepcopy(frames))
+        first = audit(frames, evaluated_at_ns=55)
+        second = audit(copy.deepcopy(frames), evaluated_at_ns=55)
         self.assertTrue(first.is_live)
         self.assertTrue(first.is_contiguous)
         self.assertTrue(first.is_fresh)
