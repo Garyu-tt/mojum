@@ -15,7 +15,9 @@ never claims about contact with actual hardware or a human body.
   capsule dimensions and positive masses. Unknown fields, bool numerics,
   duplicate joints, invalid axes and overbudget geometry fail closed.
 - `compile_mjcf(rig)`: deterministic no-assets MJCF with fixed dt, gravity,
-  ground and nested hinge/capsule bodies. No `actuator`, `freejoint`, `mocap`
+  ground and nested hinge/capsule bodies. Explicit `<compiler angle="radian"/>`
+  preserves the radian `limits_rad` wire contract in the compiled MuJoCo model.
+  No `actuator`, `freejoint`, `mocap`
   or unsafe file references. The SHA-256 `rig_revision` is an integrity digest,
   not a signature or permission token.
 - `HeadlessBody(rig)`: the **only** MuJoCo loader, invoked explicitly. Exact
