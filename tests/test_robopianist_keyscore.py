@@ -125,6 +125,8 @@ class RoboPianistKeyscoreTests(unittest.TestCase):
             path = Path(tmp) / "trace.json"
             path.write_text(json.dumps(demo_trace()), encoding="utf-8")
             self.assertEqual(read_trace(path), score_trace(demo_trace()))
+            with self.assertRaisesRegex(PianoBenchmarkError, "input must be a local Path"):
+                read_trace(str(path))
             for raw in ('{"schema":"x","schema":"y"}',
                         '{"oops":NaN}',
                         "[" * 1200 + "]" * 1200):
