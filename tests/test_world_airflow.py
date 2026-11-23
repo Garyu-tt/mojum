@@ -162,6 +162,17 @@ class WorldAirflowTests(unittest.TestCase):
         with self.assertRaises(AirflowError):
             self.sample(sources=many)
 
+    def test_result_magnitude_limit_uses_exact_euclidean_comparison(self):
+        # Full weight at the sample point yields (100000, 1). isqrt() floors
+        # sqrt(100000**2 + 1) to 100000 and used to admit this over-limit vector.
+        sources = [
+            {"id": f"s{i}", "x_mm": 1000, "y_mm": 1000,
+             "vx_mm_s": 20_000, "vy_mm_s": 1 if i == 0 else 0}
+            for i in range(5)
+        ]
+        with self.assertRaisesRegex(AirflowError, "output speed"):
+            self.sample(sources=sources)
+
     def test_huge_native_integer_is_rejected_as_domain_error(self):
         with self.assertRaises(AirflowError):
             self.sample(sources=[{"id": "huge", "x_mm": 10**1000, "y_mm": 0,
