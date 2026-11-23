@@ -12,8 +12,8 @@ from typing import Any
 
 SCHEMA = "mojum.reviewer-identity.v1"
 MAX_REVIEWS = 1000
-_SHA_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\\Z")
-_LOGIN_RE = re.compile(r"[A-Za-z0-9-]{1,39}\\Z")
+_SHA_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
+_LOGIN_RE = re.compile(r"[A-Za-z0-9-]{1,39}\Z")
 _STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"})
 
 
