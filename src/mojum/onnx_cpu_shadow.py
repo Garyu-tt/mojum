@@ -36,11 +36,12 @@ class ShadowSpec:
     runtime_version: str = ORT_VERSION
 
     def validate(self) -> None:
-        if self.schema != SCHEMA or self.runtime_version != ORT_VERSION:
+        if (type(self.schema) is not str or self.schema != SCHEMA
+                or type(self.runtime_version) is not str or self.runtime_version != ORT_VERSION):
             raise ShadowInferenceError("unsupported shadow schema or runtime pin")
-        if not isinstance(self.model_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", self.model_sha256):
+        if type(self.model_sha256) is not str or not re.fullmatch(r"[0-9a-f]{64}", self.model_sha256):
             raise ShadowInferenceError("invalid model digest")
-        if not all(isinstance(s, str) and _NAME.fullmatch(s) for s in (self.input_name, self.output_name)):
+        if not all(type(s) is str and _NAME.fullmatch(s) for s in (self.input_name, self.output_name)):
             raise ShadowInferenceError("invalid tensor name")
         if type(self.features) is not int or not (1 <= self.features <= MAX_FEATURES):
             raise ShadowInferenceError("invalid feature budget")
@@ -98,7 +99,7 @@ class ShadowRunner:
 
     def predict(self, features: object, *, source_classification: str) -> dict:
         """Only PUBLIC_SYNTHETIC vectors; output is NEVER a motor command."""
-        if source_classification != "PUBLIC_SYNTHETIC":
+        if type(source_classification) is not str or source_classification != "PUBLIC_SYNTHETIC":
             raise ShadowInferenceError("source not admitted to offline shadow")
         if type(features) not in (list, tuple) or len(features) != self.spec.features:
             raise ShadowInferenceError("invalid input vector width")
@@ -138,7 +139,8 @@ def create_shadow_runner(model_path: str | Path, spec: ShadowSpec, *, enabled: b
             runtime = importlib.import_module("onnxruntime")
         except ImportError as exc:
             raise ShadowInferenceError("optional onnxruntime package unavailable") from exc
-    if getattr(runtime, "__version__", None) != spec.runtime_version:
+    runtime_version = getattr(runtime, "__version__", None)
+    if type(runtime_version) is not str or runtime_version != spec.runtime_version:
         raise ShadowInferenceError("onnxruntime version differs from pin")
     if tensor_factory is None:
         try:

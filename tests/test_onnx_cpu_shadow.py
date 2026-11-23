@@ -1,5 +1,6 @@
 """Offline stdlib-only contract/failure tests for optional ONNX CPU shadow (#757)."""
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
@@ -179,6 +180,71 @@ class ShadowTests(unittest.TestCase):
         a = runner.predict([1, 2, 3], source_classification="PUBLIC_SYNTHETIC")
         b = runner.predict([1, 2, 3], source_classification="PUBLIC_SYNTHETIC")
         self.assertEqual(a, b)
+
+
+    def test_non_native_wire_discriminators_rejected_before_equality(self):
+        class ForgedLabel:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ForgedString(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        runner = self.load()
+        for forged in (ForgedLabel(), ForgedString("PRIVATE")):
+            with self.subTest(kind=type(forged).__name__):
+                with self.assertRaisesRegex(ShadowInferenceError, "source not admitted"):
+                    runner.predict([0, 0, 0], source_classification=forged)
+                for field in ("schema", "runtime_version"):
+                    with self.subTest(field=field):
+                        with self.assertRaisesRegex(ShadowInferenceError, "unsupported shadow"):
+                            replace(self.spec, **{field: forged}).validate()
+
+    def test_hostile_comparison_callbacks_are_not_invoked(self):
+        class ExplosiveLabel:
+            def __eq__(self, other):
+                raise RuntimeError("untrusted equality callback")
+
+            def __ne__(self, other):
+                raise RuntimeError("untrusted inequality callback")
+
+        forged = ExplosiveLabel()
+        for field in ("schema", "runtime_version"):
+            with self.subTest(field=field):
+                with self.assertRaises(ShadowInferenceError):
+                    replace(self.spec, **{field: forged}).validate()
+        with self.assertRaises(ShadowInferenceError):
+            self.load().predict([0, 0, 0], source_classification=forged)
+
+    def test_manifest_and_runtime_pin_require_native_strings(self):
+        class StrSubclass(str):
+            pass
+
+        for field, value in (
+            ("model_sha256", StrSubclass(self.spec.model_sha256)),
+            ("input_name", StrSubclass("input")),
+            ("output_name", StrSubclass("scores")),
+            ("schema", StrSubclass(SCHEMA)),
+            ("runtime_version", StrSubclass(ORT_VERSION)),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ShadowInferenceError):
+                    replace(self.spec, **{field: value}).validate()
+
+        class RuntimeWithSpoofedVersion(FakeORT):
+            __version__ = StrSubclass(ORT_VERSION)
+
+        with self.assertRaisesRegex(ShadowInferenceError, "runtime version differs"):
+            create_shadow_runner(self.model, self.spec, enabled=True,
+                                 runtime=RuntimeWithSpoofedVersion,
+                                 tensor_factory=lambda x: x)
 
     def test_invalid_manifest(self):
         for width in (True, 0, 513):
