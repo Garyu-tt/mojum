@@ -21,7 +21,7 @@ from .school_activity import (
 
 REVIEW_SCHEMA = "mojum.school-artifact-review/1"
 SVG_NS = "http://www.w3.org/2000/svg"
-_PATH = re.compile(r"M ([0-9]{1,2}) ([0-9]{1,2}) L ([0-9]{1,2}) ([0-9]{1,2})\\Z")
+_PATH = re.compile(r"M ([0-9]{1,2}) ([0-9]{1,2}) L ([0-9]{1,2}) ([0-9]{1,2})$")
 
 
 class SchoolArtifactReviewError(ValueError):
