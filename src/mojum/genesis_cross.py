@@ -116,11 +116,11 @@ def cross_seeds(
         "child_seed_sha256": sha256(child_seed),
         "selections": selections,
         "method": "sha256-bit-per-gene-parent-selection/1",
+        "integrity_notice": "consistency_digest_not_authentication",
     }
     receipt = {
         **receipt_body,
         "receipt_sha256": sha256(receipt_body),
-        "integrity_notice": "consistency_digest_not_authentication",
     }
 
     # All nested objects are newly allocated; callers cannot mutate either input.
