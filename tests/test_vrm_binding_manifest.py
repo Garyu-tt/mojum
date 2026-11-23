@@ -179,5 +179,30 @@ assert.deepEqual(report.duplicate_expected_joint_ids, ['a']);
 assert.deepEqual(report.duplicate_available_bones, ['hips']);
 """)
 
+
+    def test_proxy_trap_failures_are_normalized_to_type_error(self) -> None:
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
+const good = {
+  schema:'mojum.vrm-binding-manifest/1',
+  expected_joint_ids:['a'],
+  mappings:[{id:'a',bone:'hips',axis:'x'}],
+  available_bones:['hips']
+};
+const recordProxy = new Proxy(good, {
+  ownKeys() { throw new Error('hostile ownKeys trap'); }
+});
+assert.throws(() => validateVrmBindingManifest(recordProxy), TypeError);
+const arrayProxy = new Proxy(['a'], {
+  getPrototypeOf() { throw new Error('hostile getPrototypeOf trap'); }
+});
+assert.throws(
+  () => validateVrmBindingManifest({...good, expected_joint_ids:arrayProxy}),
+  TypeError
+);
+""")
+
 if __name__ == "__main__":
     unittest.main()
