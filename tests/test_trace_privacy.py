@@ -98,6 +98,27 @@ class TracePrivacyTests(unittest.TestCase):
         with self.assertRaises(TracePrivacyError):
             sanitize_trace_event({**BASE, 4: "unexpected"})
 
+    def test_rejects_oversized_key_before_hashing(self):
+        from unittest.mock import patch
+
+        raw = {**BASE, "x" * 100_000: None}
+        with patch("mojum.trace_privacy.set",
+                   side_effect=AssertionError("oversized key reached hashing"),
+                   create=True):
+            with self.assertRaisesRegex(TracePrivacyError, "bounded native strings"):
+                sanitize_trace_event(raw)
+
+    def test_rejects_hostile_schema_string_subclass_before_comparison(self):
+        class HostileString(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("hostile schema equality executed")
+
+        raw = {**BASE, "schema": HostileString(SCHEMA)}
+        with self.assertRaises(TracePrivacyError):
+            sanitize_trace_event(raw)
+
     def test_rejects_missing_required_fields(self):
         for key in BASE:
             with self.subTest(key=key), self.assertRaises(TracePrivacyError):
