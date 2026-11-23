@@ -187,6 +187,38 @@ class FlowWitnessTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "native JSON"):
             attest_flow(graph)
 
+    def test_rejects_hostile_keys_before_any_raw_graph_lookup(self):
+        class ExplodingKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise RuntimeError("attacker key equality must never execute")
+
+        top_level = strict_v2()
+        raw_nodes = top_level.pop("nodes")
+        top_level[ExplodingKey("nodes")] = raw_nodes
+        with self.assertRaisesRegex(GraphError, "native JSON"):
+            attest_flow(top_level)
+
+        node_key = strict_v2()
+        first = node_key["nodes"][0]
+        original_id = first.pop("id")
+        first[ExplodingKey("id")] = original_id
+        with self.assertRaisesRegex(GraphError, "native JSON"):
+            attest_flow(node_key)
+
+        nested = strict_v2()
+        nested["nodes"][0]["config"][ExplodingKey("secret")] = 7
+        with self.assertRaisesRegex(GraphError, "native JSON"):
+            attest_flow(nested)
+
+    def test_native_scan_terminates_before_cyclic_json_validation(self):
+        candidate = strict_v2()
+        config = candidate["nodes"][0]["config"]
+        config["self"] = config
+        with self.assertRaises(GraphError):
+            attest_flow(candidate)
+
     def test_refuses_invalid_input_before_reading_edges(self):
         for invalid in (None, [], {"nodes": []}, {"nodes": [{}]}):
             with self.subTest(invalid=invalid):
