@@ -246,22 +246,24 @@ def validate(graph):
     # to its id/revision field without invoking caller-controlled behavior.
     if type(graph) is not dict:
         raise GraphError("Graph v1 requires a native root object")
-    # Reject caller-controlled schema values and oversized root mappings before
-    # any equality comparison or key-set operation can invoke user behavior.
-    _require_native_json_tree(graph)
+    # Inspect the bounded root shape using only exact built-in dict operations.
+    # Check individual key wire sizes before the short-name rule so a malicious
+    # multi-megabyte key still receives the byte-budget diagnostic.
     if len(graph) != 5:
         raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
     root_keys = tuple(dict.keys(graph))
-    # Every valid v1 root key is at most eight characters. Reject oversized
-    # exact strings before dict lookup or set construction can hash them.
-    if any(type(key) is not str or len(key) > len("revision") for key in root_keys):
-        raise GraphError("Graph v1 root keys must be bounded exact strings")
-    # All keys are now bounded exact built-in strings, so the schema lookup and
-    # root-field comparison cannot trigger unbounded caller-controlled hashing.
-    if dict.get(graph, "schema") != SCHEMA:
-        raise GraphError("Unsupported or absent graph schema")
+    for key in root_keys:
+        if type(key) is not str:
+            raise GraphError("Graph v1 root keys must be bounded exact strings")
+        _json_string_wire_size(key)
+        if len(key) > len("revision"):
+            raise GraphError("Graph v1 root keys must be bounded exact strings")
     if set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}:
         raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
+
+    # Preserve the established field-specific identity diagnostics before the
+    # whole-tree UTF-8 walk. These direct lookups are safe: the root is an exact
+    # dict and its complete key set has just been reduced to five short strings.
     for field in ("id", "revision"):
         value = dict.__getitem__(graph, field)
         if type(value) is not str or not value.strip() or len(value) > 256:
@@ -270,6 +272,12 @@ def validate(graph):
             value.encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:
             raise GraphError(f"Graph v1 {field} must be valid UTF-8") from exc
+
+    # Schema values and all nested data are now preflighted before comparisons,
+    # hash lookups, or graph topology processing.
+    _require_native_json_tree(graph)
+    if dict.get(graph, "schema") != SCHEMA:
+        raise GraphError("Unsupported or absent graph schema")
 
     if graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
