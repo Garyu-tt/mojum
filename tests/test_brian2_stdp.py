@@ -91,6 +91,26 @@ class STDPInputTests(unittest.TestCase):
                 with self.assertRaises(STDPInputError):
                     parse_case(d)
 
+    def test_reject_huge_integer_as_typed_input_error(self):
+        for key in ("dt_ms", "tau_pre_ms", "initial_weight"):
+            with self.subTest(key=key):
+                document = public_fixture()
+                document[key] = 10 ** 10000
+                with self.assertRaises(STDPInputError):
+                    parse_case(document)
+
+    def test_reject_equality_spoofed_schema_or_visibility(self):
+        class EqualToAnything:
+            def __eq__(self, other):
+                return True
+
+        for key in ("schema", "visibility"):
+            with self.subTest(key=key):
+                document = public_fixture()
+                document[key] = EqualToAnything()
+                with self.assertRaises(STDPInputError):
+                    parse_case(document)
+
     def test_reject_non_dict_payload(self):
         with self.assertRaises(STDPInputError):
             parse_case([])
