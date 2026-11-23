@@ -37,7 +37,9 @@ def _finite_number(value: object) -> bool:
 
 def audit_snapshot(snapshot: object) -> dict[str, object]:
     """Return a deterministic, redacted report for one association/2 snapshot."""
-    if type(snapshot) is not dict or any(type(key) is not str for key in snapshot):
+    if type(snapshot) is not dict or len(snapshot) != len(_EXPECTED_KEYS):
+        raise _invalid()
+    if any(type(key) is not str or len(key) > 32 for key in snapshot):
         raise _invalid()
     if set(snapshot) != _EXPECTED_KEYS:
         raise _invalid()
@@ -63,8 +65,8 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
     ):
         raise _invalid()
     if (
-        any(type(key) is not str for key in table)
-        or any(type(key) is not str for key in last_seen)
+        any(type(key) is not str or len(key) > 11 for key in table)
+        or any(type(key) is not str or len(key) > 11 for key in last_seen)
         or set(table) != set(last_seen)
     ):
         raise _invalid()
@@ -76,8 +78,8 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
         if (
             type(cue) is not str or len(cue) > 11 or _CUE.fullmatch(cue) is None
             or any(int(part) > 255 for part in cue.split(":"))
-            or type(entry) is not dict
-            or any(type(key) is not str for key in entry)
+            or type(entry) is not dict or len(entry) != 2
+            or any(type(key) is not str or len(key) > 32 for key in entry)
             or set(entry) != {"count", "mean_deflection"}
         ):
             raise _invalid()
