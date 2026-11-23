@@ -8,7 +8,7 @@ establish authentication, capacity measurements, leases, or scheduling fairness.
 
 from .placement import (
     MAX_JOBS, MAX_NODES, Assignment, NodeBudget, PlacementError,
-    PlacementPlan, StatelessJob, _check_id,
+    PlacementPlan, StatelessJob, _check_id, _snapshot_records,
 )
 
 
@@ -35,6 +35,7 @@ def verify_placement(candidate, jobs, nodes, *, local_node_id,
     for node_id in trusted_remote_ids:
         _check_id(node_id)
 
+    jobs, nodes = _snapshot_records(jobs, nodes)
     by_job = {job.job_id: job for job in jobs}
     by_node = {node.node_id: node for node in nodes}
     if len(by_job) != len(jobs) or len(by_node) != len(nodes):
