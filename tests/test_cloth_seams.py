@@ -92,10 +92,15 @@ class ClothSeamTests(unittest.TestCase):
     def test_gap_budget_is_bounded(self):
         with self.assertRaises(ClothSeamError):
             self.admit(max_gap_m=0.250001)
+        with self.assertRaises(ClothSeamError):
+            self.admit(max_gap_m=10 ** 10000)
 
     def test_non_boundary_endpoint_rejected(self):
-        v, t, s = fixture()
-        s[0]["pairs"] = [[0, 4], [2, 7]]
+        v, _, _ = fixture()
+        v.append([0.5, 0.5, 0.0])
+        t = [[0, 1, 8], [1, 2, 8], [2, 3, 8], [3, 0, 8],
+             [4, 5, 6], [4, 6, 7]]
+        s = [{"id": "bad", "pairs": [[8, 4], [2, 7]]}]
         with self.assertRaises(ClothSeamError):
             self.admit(vertices=v, triangles=t, seams=s)
 
@@ -165,6 +170,19 @@ class ClothSeamTests(unittest.TestCase):
     def test_extra_seam_field_rejected(self):
         v, t, s = fixture()
         s[0]["unexpected"] = True
+        with self.assertRaises(ClothSeamError):
+            self.admit(vertices=v, triangles=t, seams=s)
+
+    def test_non_native_mapping_key_rejected_before_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not execute")
+
+        v, t, s = fixture()
+        s[0][HostileKey("extra")] = "bad"
         with self.assertRaises(ClothSeamError):
             self.admit(vertices=v, triangles=t, seams=s)
 
