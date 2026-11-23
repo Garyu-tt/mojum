@@ -1,0 +1,43 @@
+name: Physics benchmark comparison QA
+on:
+  pull_request:
+    paths:
+      - "src/mojum/physics_benchmark_compare.py"
+      - "tests/test_physics_benchmark_compare.py"
+      - ".github/workflows/physics-benchmark-compare.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "src/mojum/physics_benchmark_compare.py"
+      - "tests/test_physics_benchmark_compare.py"
+      - ".github/workflows/physics-benchmark-compare.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact checked-out revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Compile module
+        run: python -m py_compile src/mojum/physics_benchmark_compare.py
+      - name: Run focused contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_physics_benchmark_compare.py" -v
