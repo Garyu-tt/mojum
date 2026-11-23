@@ -205,6 +205,26 @@ def evaluate_forward_kinematics(rig: object) -> dict[str, Any]:
     ))
 
 
+def _utf8_size_within(value: str, remaining: int) -> int | None:
+    """Count UTF-8 bytes without allocating an encoded copy of caller text."""
+    size = 0
+    for char in value:
+        code = ord(char)
+        if 0xD800 <= code <= 0xDFFF:
+            return None
+        if code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > remaining:
+            return None
+    return size
+
+
 def _bounded_native_json_tree(value: object) -> bool:
     """Admit only a small acyclic tree of exact built-in JSON value types."""
     pending = [(value, 0)]
@@ -225,12 +245,10 @@ def _bounded_native_json_tree(value: object) -> bool:
             for key, child in current.items():
                 if type(key) is not str:
                     return False
-                try:
-                    text_bytes += len(key.encode("utf-8"))
-                except UnicodeError:
+                size = _utf8_size_within(key, 262144 - text_bytes)
+                if size is None:
                     return False
-                if text_bytes > 262144:
-                    return False
+                text_bytes += size
                 pending.append((child, depth + 1))
         elif kind is list:
             identity = id(current)
@@ -239,12 +257,10 @@ def _bounded_native_json_tree(value: object) -> bool:
             seen.add(identity)
             pending.extend((child, depth + 1) for child in current)
         elif kind is str:
-            try:
-                text_bytes += len(current.encode("utf-8"))
-            except UnicodeError:
+            size = _utf8_size_within(current, 262144 - text_bytes)
+            if size is None:
                 return False
-            if text_bytes > 262144:
-                return False
+            text_bytes += size
         elif kind is int:
             if current.bit_length() > 256:
                 return False
