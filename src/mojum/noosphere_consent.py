@@ -263,6 +263,23 @@ def _validate_dataset(dataset):
             raise ConsentError("event recorded_at_ns precedes observed_at_ns")
         if type(event["visibility"]) is not str or event["visibility"] not in _VISIBILITY:
             raise ConsentError("event has unsupported visibility")
+        # The dataset projection's filters are part of its public contract.
+        # Re-check them against every supplied event instead of trusting that a
+        # caller-provided projection was actually produced by LocalNoosphere.dataset().
+        if filters["topic"] is not None and event["topic"] != filters["topic"]:
+            raise ConsentError(f"items[{index}] does not match the dataset topic filter")
+        if filters["source"] is not None and event["source"] != filters["source"]:
+            raise ConsentError(f"items[{index}] does not match the dataset source filter")
+        if (filters["as_of_recorded_ns"] is not None
+                and event["recorded_at_ns"] > filters["as_of_recorded_ns"]):
+            raise ConsentError(f"items[{index}] exceeds the dataset recorded-time filter")
+        if filters["valid_at_ns"] is not None:
+            valid_at = filters["valid_at_ns"]
+            if not (event["valid_from_ns"] <= valid_at
+                    and (event["valid_to_ns"] is None or valid_at < event["valid_to_ns"])):
+                raise ConsentError(f"items[{index}] does not match the dataset validity filter")
+        if not filters["include_nonpublic"] and event["visibility"] != "PUBLIC":
+            raise ConsentError(f"items[{index}] violates the PUBLIC-only dataset filter")
         if type(event["payload"]) is not dict:
             raise ConsentError("event payload must be an object")
         detached.append({
