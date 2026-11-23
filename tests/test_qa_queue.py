@@ -154,6 +154,24 @@ class DurableTaskQueueTests(unittest.TestCase):
         with self.assertRaisesRegex(QueueError, "unsupported or missing queue schema version"):
             DurableTaskQueue(unknown)
 
+    def test_non_queue_database_is_not_adopted(self) -> None:
+        unrelated = Path(self.temp.name) / "application.sqlite3"
+        with closing(sqlite3.connect(unrelated)) as db:
+            db.execute("CREATE TABLE application_data (value TEXT NOT NULL)")
+            db.execute("INSERT INTO application_data VALUES ('preserve me')")
+        with self.assertRaisesRegex(QueueError, "database is not empty"):
+            DurableTaskQueue(unrelated)
+        with closing(sqlite3.connect(unrelated)) as db:
+            self.assertEqual(
+                db.execute("SELECT value FROM application_data").fetchone()[0],
+                "preserve me",
+            )
+            self.assertIsNone(
+                db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='queue_meta'"
+                ).fetchone()
+            )
+
     def test_operational_connections_are_closed_on_success_and_error(self) -> None:
         original = self.queue._connect
         opened = []
