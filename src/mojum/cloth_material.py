@@ -73,11 +73,6 @@ class ClothMaterialProfile:
         if type(value) is not dict:
             raise ClothMaterialError("profile must be an exact built-in dict")
 
-        keys = tuple(dict.keys(value))
-        # Reject non-native keys before hashing/comparing them in set operations.
-        if any(type(key) is not str for key in keys):
-            raise ClothMaterialError("profile keys must be exact strings")
-
         expected = (
             "schema",
             "classification",
@@ -89,7 +84,16 @@ class ClothMaterialProfile:
             "static_friction_ppm",
             "dynamic_friction_ppm",
         )
-        if len(keys) != len(expected) or set(keys) != set(expected):
+        # An exact dict can still be adversarially oversized. Check its native
+        # cardinality before allocating a tuple containing every supplied key.
+        if len(value) != len(expected):
+            raise ClothMaterialError("profile fields do not match the versioned schema")
+        keys = tuple(dict.keys(value))
+        # Reject non-native keys before hashing/comparing them in set operations.
+        if any(type(key) is not str for key in keys):
+            raise ClothMaterialError("profile keys must be exact strings")
+
+        if set(keys) != set(expected):
             raise ClothMaterialError("profile fields do not match the versioned schema")
 
         # The exact dict check above means these lookups cannot dispatch to user code.
