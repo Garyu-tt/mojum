@@ -136,8 +136,9 @@ def _require_native_json_tree(value):
                 add_wire_bytes(4)
             else:
                 raise GraphError("Graph contains a non-native JSON value")
-    except GraphError:
-        raise
+    except GraphError as exc:
+        # Preserve the public v1 wire-validation error family for direct callers.
+        raise GraphError(f"Graph requires lossless UTF-8 JSON: {exc}") from exc
     except (RuntimeError, RecursionError, OverflowError, UnicodeError, ValueError) as exc:
         raise GraphError("Graph contains an invalid or changing JSON tree") from exc
 
@@ -237,6 +238,16 @@ def load_graph(path):
 
 
 def validate(graph):
+    # Keep root metadata diagnostics precise: these fields are part of the
+    # public graph-v1 contract and are safe to inspect on an exact built-in dict.
+    if type(graph) is dict:
+        for field in ("id", "revision"):
+            value = graph.get(field)
+            if type(value) is str:
+                try:
+                    value.encode("utf-8", errors="strict")
+                except UnicodeEncodeError as exc:
+                    raise GraphError(f"Graph v1 {field} must be valid UTF-8") from exc
     # Validate the complete caller-owned object tree before any dict/set
     # comparison, membership operation, or topology lookup can invoke custom
     # Python behavior. The same limits apply to load_graph() and direct users.
