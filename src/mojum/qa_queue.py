@@ -189,11 +189,12 @@ class DurableQueue:
         """Atomically claim the oldest ready job, reclaiming expired leases."""
         if not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 200:
             raise InvalidJob("worker_id must be 1..200 nonblank characters")
-        if (isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float))\n                or not math.isfinite(float(lease_seconds)) or lease_seconds <= 0):
+        if (isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float))
+                or not math.isfinite(float(lease_seconds)) or lease_seconds <= 0):
             raise InvalidJob("lease_seconds must be positive")
         now = float(self._clock())
         until = now + float(lease_seconds)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 """
@@ -229,11 +230,12 @@ class DurableQueue:
         self, job_id: int, worker_id: str, *, lease_seconds: float = 60.0
     ) -> Job:
         """Extend a live lease; an expired or reassigned lease cannot revive."""
-        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float)) or lease_seconds <= 0:
+        if (isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float))
+                or not math.isfinite(float(lease_seconds)) or lease_seconds <= 0):
             raise InvalidJob("lease_seconds must be positive")
         now = float(self._clock())
         until = now + float(lease_seconds)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
                 """
@@ -262,7 +264,7 @@ class DurableQueue:
         self, job_id: int, worker_id: str, status: str, reason: str | None
     ) -> Job:
         now = float(self._clock())
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
                 """
@@ -283,7 +285,7 @@ class DurableQueue:
     def unblock(self, job_id: int) -> Job:
         """Return a manually-unblocked job to the ready queue."""
         now = float(self._clock())
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
                 """
@@ -300,13 +302,13 @@ class DurableQueue:
         return self._job(row)
 
     def get(self, job_id: int) -> Job | None:
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             row = db.execute("SELECT * FROM qa_jobs WHERE id=?", (job_id,)).fetchone()
         return self._job(row) if row is not None else None
 
     def counts(self) -> dict[str, int]:
         """Return aggregate counts only; never expose job payloads."""
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             rows = db.execute(
                 "SELECT status, COUNT(*) AS count FROM qa_jobs GROUP BY status"
             ).fetchall()
