@@ -173,13 +173,21 @@ def _accessor(
     fmt, width = _COMPONENTS[typ]
     elem = width * _DIMS[kind]
     stride = view.get("byteStride", elem)
+    # glTF 2.0: byteStride is defined only for vertex attributes. Explicit
+    # vertex strides are 4-byte aligned even for uint8 JOINTS_0 data.
+    if semantic == "indices" and "byteStride" in view:
+        _reject("index accessor bufferView must not define byteStride")
     if type(stride) is not int or stride < elem or stride > 252 or stride % width:
         _reject("invalid bufferView stride")
+    if "byteStride" in view and stride % 4:
+        _reject("vertex attribute byteStride must be 4-byte aligned")
     base = _uint(view.get("byteOffset", 0), len(binary), "view offset")
     view_len = _uint(view.get("byteLength"), len(binary), "view length")
     local_offset = _uint(acc.get("byteOffset", 0), view_len, "accessor offset")
     if base % width or local_offset % width or base + view_len > len(binary):
         _reject("unaligned or out-of-bounds bufferView")
+    if semantic != "indices" and local_offset % 4:
+        _reject("vertex attribute offset must be 4-byte aligned")
     if local_offset + (num - 1) * stride + elem > view_len:
         _reject("accessor data outside bufferView")
     unpack = struct.Struct("<" + fmt * _DIMS[kind])
@@ -242,6 +250,10 @@ def import_glb(
         _reject("invalid expected SHA-256")
     if not isinstance(raw, bytes):
         _reject("GLB must be immutable bytes")
+    # Direct Python API callers bypass the bounded regular-file CLI reader.
+    # Enforce the byte budget before an O(n) cryptographic hash is started.
+    if len(raw) > MAX_FILE:
+        _reject("GLB file size outside bounds")
     digest = hashlib.sha256(raw).hexdigest()
     if digest != expected_sha256:
         _reject("GLB SHA-256 mismatch")
@@ -262,7 +274,8 @@ def import_glb(
     if len(primitives) != 1:
         _reject("exactly one mesh primitive required")
     prim = _object(primitives[0], "primitive")
-    if prim.get("mode", 4) != 4 or "targets" in prim or "extensions" in prim:
+    mode = prim.get("mode", 4)
+    if type(mode) is not int or mode != 4 or "targets" in prim or "extensions" in prim:
         _reject("only uncompressed TRIANGLES without morph targets supported")
     attrs = _object(prim.get("attributes"), "primitive attributes")
     if any(k.startswith(("JOINTS_", "WEIGHTS_")) and k not in ("JOINTS_0", "WEIGHTS_0") for k in attrs):
