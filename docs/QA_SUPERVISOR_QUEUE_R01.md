@@ -11,8 +11,11 @@ Issue #1179. This is the durable scheduling primitive, not the complete supervis
   after process restart.
 - Claims use BEGIN IMMEDIATE, serializing competing processes before selecting work.
 - Explicit state transitions. Moving to ready, waiting_ci, blocked, escalated, or
-  merged releases the lease. A separate supervisor/poller must decide when to
-  requeue those states; pending CI never blocks unrelated discovered jobs.
+  merged releases the lease. A ready job can be marked merged only through
+  `record_merged`, which compare-and-swaps the expected head after the caller has
+  independently verified the merge. The queue itself does not verify GitHub state.
+- A separate supervisor/poller must decide when to requeue deferred states; pending
+  CI never blocks unrelated discovered jobs.
 - Payload is bounded to 64 KiB of finite JSON metadata. Never store credentials,
   private Noosphere records, raw diffs, prompts, or host identifiers here.
 
