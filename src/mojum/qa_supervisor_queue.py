@@ -121,7 +121,7 @@ class DurableQAQueue:
         key=idempotency_key or f"{issue_number}:{head_sha.lower()}"
         if type(key) is not str or not key or len(key)>256: raise ValueError("invalid idempotency_key")
         ts=self._time(now)
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("""INSERT OR IGNORE INTO qa_jobs
               (job_id,issue_number,head_sha,idempotency_key,payload_json,state,attempts,created_at,updated_at)
@@ -138,7 +138,7 @@ class DurableQAQueue:
         if type(worker_id) is not str or not worker_id.strip() or len(worker_id)>128: raise ValueError("invalid worker_id")
         if type(lease_seconds) is not int or not 1<=lease_seconds<=86400: raise ValueError("invalid lease_seconds")
         ts=self._time(now)
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("""UPDATE qa_jobs SET state='discovered',worker_id=NULL,lease_token=NULL,
               lease_until=NULL,updated_at=? WHERE state IN ('claimed','reviewing','testing','fixing','retesting')
@@ -157,7 +157,7 @@ class DurableQAQueue:
                   now: float | None=None) -> QueueJob:
         if type(lease_seconds) is not int or not 1<=lease_seconds<=86400: raise ValueError("invalid lease_seconds")
         ts=self._time(now)
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             changed=db.execute("""UPDATE qa_jobs SET lease_until=?,updated_at=? WHERE job_id=?
               AND lease_token=? AND state IN ('claimed','reviewing','testing','fixing','retesting')
@@ -172,7 +172,7 @@ class DurableQAQueue:
         if new_state not in STATES: raise TransitionError(f"unknown state: {new_state!r}")
         if error is not None and (type(error) is not str or len(error)>2048): raise ValueError("invalid error")
         ts=self._time(now)
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row=db.execute("SELECT * FROM qa_jobs WHERE job_id=?",(job_id,)).fetchone()
             if row is None or row["lease_token"]!=lease_token or row["lease_until"] is None or row["lease_until"]<=ts:
@@ -195,7 +195,7 @@ class DurableQAQueue:
         if expected_state not in allowed:
             raise TransitionError("only deferred/ready states can be requeued")
         ts = self._time(now)
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             changed = db.execute("""UPDATE qa_jobs SET state='discovered', updated_at=?, last_error=NULL
                 WHERE job_id=? AND state=? AND lease_token IS NULL""",
@@ -208,11 +208,11 @@ class DurableQAQueue:
         return self._decode(row)
 
     def get(self, job_id: str) -> QueueJob | None:
-        with self._connect() as db: row=db.execute("SELECT * FROM qa_jobs WHERE job_id=?",(job_id,)).fetchone()
+        with self._connection() as db: row=db.execute("SELECT * FROM qa_jobs WHERE job_id=?",(job_id,)).fetchone()
         return self._decode(row)
 
     def counts(self) -> dict[str,int]:
-        with self._connect() as db: rows=db.execute("SELECT state,COUNT(*) n FROM qa_jobs GROUP BY state").fetchall()
+        with self._connection() as db: rows=db.execute("SELECT state,COUNT(*) n FROM qa_jobs GROUP BY state").fetchall()
         result={state:0 for state in sorted(STATES)}
         result.update({row["state"]:row["n"] for row in rows})
         return result
