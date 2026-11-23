@@ -184,5 +184,11 @@ class DurableWorkQueueTests(unittest.TestCase):
         self.assertTrue(all(connection.closed for connection in opened))
 
 
+    def test_idempotency_conflicts_on_retry_budget_change(self):
+        self.queue.enqueue("task-1", "idem-1", {"pr": 42}, max_attempts=2)
+        with self.assertRaises(IdempotencyConflict):
+            self.queue.enqueue("task-1", "idem-1", {"pr": 42}, max_attempts=3)
+
+
 if __name__ == "__main__":
     unittest.main()
