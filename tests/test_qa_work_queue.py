@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import sqlite3
 
 try:
     import pytest
@@ -151,3 +152,51 @@ def test_expired_worker_cannot_heartbeat_before_reclaim(tmp_path):
         assert lease
         with pytest.raises(LeaseLost):
             q.heartbeat(job.id, lease.token, now=4)
+
+
+
+def test_read_apis_do_not_disclose_live_lease_token(tmp_path):
+    with QAWorkQueue(str(tmp_path / "private-token.db")) as q:
+        job, _ = q.enqueue("token-test", "review", {}, now=1)
+        lease = q.claim("worker", now=2)
+        assert lease is not None and lease.token
+        assert not hasattr(q.get(job.id), "lease_token")
+        listed = q.list_jobs(status="leased")
+        assert len(listed) == 1 and not hasattr(listed[0], "lease_token")
+        assert all(lease.token not in repr(event) for event in q.audit(job.id))
+        assert q.complete(job.id, lease.token, now=3).status == "succeeded"
+
+
+def test_schema_version_is_recorded_and_unknown_versions_fail_closed(tmp_path):
+    path = str(tmp_path / "versioned.db")
+    q = QAWorkQueue(path)
+    version = q._db.execute(
+        "SELECT value FROM qa_meta WHERE key='schema_version'"
+    ).fetchone()[0]
+    assert version == "mojum.qa-work-queue/1"
+    q._db.execute(
+        "UPDATE qa_meta SET value=? WHERE key='schema_version'",
+        ("mojum.qa-work-queue/999",),
+    )
+    q.close()
+    with pytest.raises(QueueError, match="unsupported queue schema version"):
+        QAWorkQueue(path)
+
+
+def test_unversioned_existing_database_is_not_adopted(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE qa_jobs (legacy INTEGER)")
+    connection.commit()
+    connection.close()
+    with pytest.raises(QueueError, match="unversioned queue database"):
+        QAWorkQueue(path)
+
+
+def test_payload_text_budget_precedes_serialization(tmp_path, monkeypatch):
+    with QAWorkQueue(str(tmp_path / "bounded-text.db")) as q:
+        def forbidden_serialize(*args, **kwargs):
+            raise AssertionError("serializer must not run for oversized text")
+        monkeypatch.setattr("mojum.qa_work_queue.json.dumps", forbidden_serialize)
+        with pytest.raises(QueueError, match="text exceeds byte budget"):
+            q.enqueue("oversized", "review", {"data": "x" * 65_537})
