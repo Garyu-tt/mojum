@@ -58,7 +58,8 @@ def _native_int(value: object, field: str, low: int, high: int) -> int:
 def _sample_copy(item: object, index: int) -> dict[str, object]:
     if not isinstance(item, Mapping) or type(item) is not dict:
         raise ClothTelemetryError(f"sample {index} must be a native dict")
-    keys = tuple(item.keys())\n    if any(type(key) is not str for key in keys) or set(keys) != _SAMPLE_KEYS:
+    keys = tuple(item.keys())
+    if any(type(key) is not str for key in keys) or set(keys) != _SAMPLE_KEYS:
         raise ClothTelemetryError(f"sample {index} has an invalid shape")
     tick = _native_int(item["tick"], f"samples[{index}].tick", 0, MAX_TICK)
     kind = item["contact"]
