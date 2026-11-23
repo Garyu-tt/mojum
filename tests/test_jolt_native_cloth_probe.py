@@ -72,8 +72,11 @@ def validate_report(raw: str) -> dict[str, Any]:
         report = json.loads(
             raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant,
         )
-    except (TypeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+    except (TypeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("report must be one strict JSON object") from exc
+    except ValueError:
+        # Preserve the specific duplicate-key / non-finite-value rejection.
+        raise
     if type(report) is not dict or set(report) != EXPECTED_KEYS:
         raise ValueError("report keys do not match mojum.jolt-native-cloth/1")
     if report["schema"] != "mojum.jolt-native-cloth/1":
