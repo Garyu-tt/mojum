@@ -55,8 +55,11 @@ def _decode_json(raw):
                               AdmissionError("nonfinite provider JSON")))
     except AdmissionError:
         raise
-    except (ValueError, UnicodeError, RecursionError) as exc:
-        raise AdmissionError("invalid provider JSON") from exc
+    except (ValueError, UnicodeError, RecursionError):
+        pass
+    # Raise after the original parser exception has left exception scope:
+    # neither traceback formatting nor __context__ must expose backend data.
+    raise AdmissionError("invalid provider JSON")
 
 
 def local_http(port: int, path: str, body=None, timeout: int = 5):
@@ -73,8 +76,11 @@ def local_http(port: int, path: str, body=None, timeout: int = 5):
     if body is not None:
         try:
             binary = json.dumps(body, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        except (TypeError, ValueError, RecursionError) as exc:
-            raise AdmissionError("invalid outbound request") from exc
+        except (TypeError, ValueError, RecursionError):
+            binary = None
+        if binary is None:
+            # The encoder exception may contain the untrusted prompt.
+            raise AdmissionError("invalid outbound request")
         if len(binary) > MAX_PROMPT_BYTES:
             raise AdmissionError("request byte budget exceeded")
     req = Request(f"http://127.0.0.1:{port}{path}", data=binary,
@@ -88,9 +94,11 @@ def local_http(port: int, path: str, body=None, timeout: int = 5):
             if not response.headers.get("Content-Type", "").lower().startswith("application/json"):
                 raise AdmissionError("provider response is not JSON")
             return _decode_json(response.read(MAX_JSON_BYTES + 1))
-    except (HTTPError, URLError, OSError, TimeoutError) as exc:
-        # Do not include backend response bodies, URLs or backend error text.
-        raise TransportError("local provider unavailable: " + type(exc).__name__) from exc
+    except (HTTPError, URLError, OSError, TimeoutError):
+        # Returning from the exception handler must not carry untrusted backend
+        # error text, URL, response fragments or __context__ into diagnostics.
+        pass
+    raise TransportError("local provider unavailable")
 
 
 def _integer(number, name, *, low=0, high=2**31 - 1):

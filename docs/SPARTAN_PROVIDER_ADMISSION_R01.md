@@ -31,8 +31,13 @@ canonical Graph IR, Noosphere, Aquarium or SQLite journals.
   uncertain delivery. This does not enforce cross-process quotas.
 - Fixed API paths/ports and literal IPv4 loopback; Python `ProxyHandler({})`
   disables proxy environment variables, redirects are denied, timeouts and
-  request/response byte sizes are bounded. There are **no** API keys,
-  environment reads, shell calls or persistent artifact writes.
+  request/response byte sizes are bounded. Internal JSON encoding/parsing and
+  transport failures are raised *after* leaving the original exception handler:
+  normal traceback formatting and `__cause__`/`__context__` do not expose
+  underlying backend URLs, error text or sensitive request fragments. This
+  diagnostic boundary does not sanitize exceptions created or logged by
+  arbitrary caller code. There are **no** API keys, environment reads, shell
+  calls or persistent artifact writes.
 - LiteLLM `127.0.0.1:4000` can be *discovered* through `/v1/models`, but the
   execution gate deliberately refuses it: a local proxy can route to a
   remote/cloud provider or another backend, and its model catalog does **not**

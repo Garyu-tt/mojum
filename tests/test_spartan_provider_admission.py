@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import traceback
+from urllib.error import HTTPError, URLError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
@@ -260,6 +262,51 @@ class AdmissionTests(unittest.TestCase):
                     b'"' * (ad.MAX_JSON_BYTES + 1)):
             with self.subTest(length=len(raw)), self.assertRaises(ad.AdmissionError):
                 ad._decode_json(raw)
+
+    def test_sensitive_backend_exception_never_reaches_diagnostics(self):
+        sentinel = "PRIVATE_SENTINEL_QUERY_DO_NOT_LOG_42"
+
+        def assert_redacted(call, expected):
+            try:
+                call()
+            except expected as error:
+                formatted = "".join(traceback.format_exception(error))
+                self.assertIsNone(error.__cause__)
+                self.assertIsNone(error.__context__)
+                self.assertNotIn(sentinel, formatted)
+                self.assertNotIn(sentinel, str(error))
+            else:
+                self.fail("expected sanitized provider failure")
+
+        # json.loads can carry raw payloads or remote tokens in its exception.
+        with patch.object(ad.json, "loads", side_effect=ValueError(sentinel)):
+            assert_redacted(lambda: ad._decode_json(b"{}"), ad.AdmissionError)
+
+        # Outbound serialization may include the caller's PRIVATE request.
+        with patch.object(ad.json, "dumps", side_effect=ValueError(sentinel)):
+            assert_redacted(
+                lambda: ad.local_http(
+                    18182, "/v1/chat/completions", body={"prompt": sentinel}),
+                ad.AdmissionError)
+
+        # urllib errors can retain backend URLs and response-body fragments.
+        unsafe = (
+            URLError("https://backend.invalid/?key=" + sentinel),
+            HTTPError("https://backend.invalid/?key=" + sentinel,
+                      403, sentinel, {}, None),
+            OSError("socket path " + sentinel),
+            TimeoutError("timeout at " + sentinel),
+        )
+        for original in unsafe:
+            class FailingOpener:
+                def open(self, *args, **kwargs):
+                    raise original
+
+            with self.subTest(type=type(original).__name__):
+                with patch.object(ad, "build_opener", return_value=FailingOpener()):
+                    assert_redacted(
+                        lambda: ad.local_http(18182, "/v1/models"),
+                        ad.TransportError)
 
     def test_invalid_transport_path_fails_before_network(self):
         for port, path, body in ((443, "/v1/models", None),
