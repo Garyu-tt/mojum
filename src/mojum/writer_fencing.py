@@ -13,7 +13,7 @@ from typing import Any
 SCHEMA = "mojum.mesh.writer-fence/1"
 RECEIPT_SCHEMA = "mojum.mesh.writer-fence-decision/1"
 MAX_COUNTER = (1 << 63) - 1
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\\Z", re.ASCII)
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z", re.ASCII)
 _FIELDS = frozenset({"schema", "organism_id", "scope", "owner_id", "epoch", "revision"})
 
 @dataclass(frozen=True)
@@ -87,6 +87,8 @@ def evaluate_writer_fence(candidate: Any, high_water: Any = None) -> FenceDecisi
     candidate_digest = _digest(proposed)
     previous_digest = _digest(previous)
     if previous is None:
+        if proposed["epoch"] != 1 or proposed["revision"] != 1:
+            return _decision(False, "REJECT_MALFORMED", candidate_digest, None)
         return _decision(True, "ACCEPTED_INITIAL", candidate_digest, None)
     if (proposed["organism_id"] != previous["organism_id"]
             or proposed["scope"] != previous["scope"]):
