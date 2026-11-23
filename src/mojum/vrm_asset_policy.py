@@ -124,7 +124,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
         violations.append("asset.media_type")
     if not _token(source) or "://" in source:
         violations.append("asset.source")
-    if type(license_id) is not str or license_id not in rules["allowed_licenses"]:
+    if not _token(license_id) or license_id not in rules["allowed_licenses"]:
         violations.append("asset.license")
 
     dependencies = manifest["dependencies"]
@@ -146,7 +146,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
             violations.append(f"dependencies[{index}].unapproved_name")
         if not _version(version):
             violations.append(f"dependencies[{index}].version")
-        if type(dep_license) is not str or dep_license not in rules["allowed_licenses"]:
+        if not _token(dep_license) or dep_license not in rules["allowed_licenses"]:
             violations.append(f"dependencies[{index}].license")
         if (_version(version) and type(dep_license) is str
                 and dep_license in rules["allowed_licenses"]):
@@ -162,7 +162,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
             "size_bytes": size if type(size) is int and 0 < size <= rules["max_asset_bytes"] else 0,
             "media_type": media_type if type(media_type) is str and len(media_type) <= 127 and media_type in rules["allowed_media_types"] else "",
             "source": source if _token(source) else "",
-            "license": license_id if type(license_id) is str and _token(license_id) and license_id in rules["allowed_licenses"] else "",
+            "license": license_id if _token(license_id) and license_id in rules["allowed_licenses"] else "",
         },
         "dependencies": normalized_dependencies,
     }
