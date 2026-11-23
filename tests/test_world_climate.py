@@ -70,7 +70,6 @@ class WorldClimateTests(unittest.TestCase):
                 with self.assertRaises(ClimateError):
                     self.sample(provenance=provenance)
 
-
     def test_hostile_provenance_comparison_is_never_invoked(self):
         class HostileProvenance:
             def __eq__(self, other):
@@ -122,9 +121,12 @@ class WorldClimateTests(unittest.TestCase):
 
     def test_rejects_obstructed_and_noncanonical_inputs(self):
         blocked_room = Room(5, 5, ((1, 1, 2, 2),))
-        blocked_state = initial_state(blocked_room, 0, 0)
         from mojum.world_room import _revision
-        blocked_state = RoomState(0, 1.5, 0, _revision(blocked_room, 0, 1.5, 0))
+        # The position is inside the closed obstacle rectangle. Construct a
+        # matching revision so rejection exercises occupancy, not staleness.
+        blocked_state = RoomState(
+            0, 1.5, 1.5, _revision(blocked_room, 0, 1.5, 1.5)
+        )
         with self.assertRaises(ClimateError):
             sample_room_climate(
                 blocked_room, blocked_state, base_temperature_millic=20_000,
