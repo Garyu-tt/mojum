@@ -57,7 +57,15 @@ def _reject_constant(_: str) -> None:
 
 
 def _exact_keys(value: dict[str, Any], expected: set[str], where: str) -> None:
-    if type(value) is not dict or set(value) != expected:
+    if type(value) is not dict or len(value) != len(expected):
+        raise RevocationAuditError(f"{where} has an invalid shape")
+    # Fixed-schema inputs are tiny. Reject oversized or hostile keys before
+    # allocating a key snapshot or hashing caller-controlled strings in a set.
+    max_key_length = max((len(key) for key in expected), default=0)
+    keys = tuple(dict.keys(value))
+    if any(type(key) is not str or len(key) > max_key_length for key in keys):
+        raise RevocationAuditError(f"{where} has an invalid shape")
+    if set(keys) != expected:
         raise RevocationAuditError(f"{where} has an invalid shape")
 
 
