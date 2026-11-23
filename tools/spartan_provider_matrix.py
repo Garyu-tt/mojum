@@ -150,19 +150,34 @@ def validate_live_slots(snapshot: Snapshot, backends) -> None:
     Accepts existing spartan_local_fleet.Backend objects, checked by caller.
     LiteLLM is excluded: it does not expose llama.cpp's slot protocol.
     """
-    lookup = {(b.port, b.model): b for b in backends}
+    # A duplicate or malformed provider entry is ambiguous capacity evidence.
+    # Reject it rather than silently letting the last record win.
+    lookup = {}
+    try:
+        for backend in backends:
+            if (type(backend.port) is not int or type(backend.model) is not str
+                    or (backend.port, backend.model) in lookup):
+                raise AdmissionError("invalid or duplicate live backend inventory")
+            lookup[(backend.port, backend.model)] = backend
+    except (TypeError, AttributeError) as exc:
+        raise AdmissionError("invalid live backend inventory") from exc
     for model in snapshot.models:
         if model.transport != "llama.cpp":
             continue
         port = int(model.endpoint.rsplit(":", 1)[1])
         backend = lookup.get((port, model.model))
-        if (backend is None or type(backend.total) is not int
-                or type(backend.free) is not int
-                or backend.total != model.slots_total
-                or backend.free < model.slots_free
-                or backend.free > backend.total
-                or backend.ctx < model.context_tokens):
+        if backend is None:
             raise AdmissionError("live llama.cpp slots disagree with inventory; remeasure")
+        try:
+            if (type(backend.total) is not int or type(backend.free) is not int
+                    or type(backend.ctx) is not int
+                    or backend.total != model.slots_total
+                    or backend.free < model.slots_free
+                    or backend.free > backend.total
+                    or backend.ctx < model.context_tokens):
+                raise AdmissionError("live llama.cpp slots disagree with inventory; remeasure")
+        except AttributeError as exc:
+            raise AdmissionError("incomplete live llama.cpp slot metadata") from exc
 
 
 def matrix(snapshot: Snapshot, *, counts=(1, 2, 4, 8), worker_leases=300,
