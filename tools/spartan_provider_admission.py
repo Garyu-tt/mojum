@@ -63,7 +63,7 @@ def local_http(port: int, path: str, body=None, timeout: int = 5):
     """Only fixed loopback ports and API paths, no proxies or redirects."""
     if type(port) is not int or port not in LLAMA_PORTS | {LITELLM_PORT}:
         raise AdmissionError("unapproved local port")
-    if path not in ("/health", "/slots", "/v1/models", "/v1/chat/completions"):
+    if type(path) is not str or path not in ("/health", "/slots", "/v1/models", "/v1/chat/completions"):
         raise AdmissionError("unapproved API path")
     if (body is None) != (path != "/v1/chat/completions"):
         raise AdmissionError("invalid request method")
@@ -113,7 +113,7 @@ class Provider:
     price_output_micro_usd_per_1k: int = 0
 
     def __post_init__(self):
-        if self.kind not in ("llama_cpp", "litellm"):
+        if type(self.kind) is not str or self.kind not in ("llama_cpp", "litellm"):
             raise AdmissionError("unknown provider kind")
         allowed = LLAMA_PORTS if self.kind == "llama_cpp" else {LITELLM_PORT}
         if type(self.port) is not int or self.port not in allowed:
