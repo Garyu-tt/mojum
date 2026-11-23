@@ -18,6 +18,8 @@ VIZDOOM_VERSION = "1.3.3"
 WIDTH, HEIGHT = 160, 120
 FRAME_BYTES = WIDTH * HEIGHT * 3
 MAX_STEPS = 256
+# Independently bounded before float conversion, including oversized Python ints.
+MAX_ABS_REWARD = 1_000_000
 ACTIONS = {
     "forward": (1, 0, 0),
     "left": (0, 1, 0),
@@ -38,8 +40,16 @@ def _vision(screen):
         raise ValueError("missing RGB screen")
     try:
         view = memoryview(screen)
-        if view.nbytes != FRAME_BYTES or not view.c_contiguous:
-            raise ValueError("unexpected screen size/layout")
+        # An equal byte count is not sufficient: CHW/float buffers would
+        # silently be interpreted as interleaved RGB24 pixels.
+        if (view.format != "B" or view.itemsize != 1
+                or view.nbytes != FRAME_BYTES or not view.c_contiguous
+                or (view.ndim, tuple(view.shape)) not in (
+                    (1, (FRAME_BYTES,)),
+                    (2, (HEIGHT, WIDTH * 3)),
+                    (3, (HEIGHT, WIDTH, 3)),
+                )):
+            raise ValueError("unexpected RGB24 screen type/size/layout")
         rgb = view.tobytes()
     except (TypeError, BufferError) as e:
         raise ValueError("invalid screen buffer") from e
@@ -86,8 +96,11 @@ def run_episode(factory, *, seed, steps, policy):
             image_hash, brightness = _vision(state.screen_buffer)
             name = _choose(policy, brightness)
             reward = game.make_action(list(ACTIONS[name]), 1)
-            if type(reward) not in (float, int) or not math.isfinite(reward):
-                raise ValueError("invalid engine reward")
+            # Avoid math.isfinite(huge_int), which raises raw OverflowError.
+            # The per-tick bound also keeps 256-tick aggregate sums finite.
+            if (type(reward) not in (float, int)
+                    or not -MAX_ABS_REWARD <= reward <= MAX_ABS_REWARD):
+                raise ValueError("invalid or out-of-budget engine reward")
             trace.append({"tick": tick, "frame_sha256": image_hash,
                           "action": name, "reward": float(reward)})
         total = sum(item["reward"] for item in trace)
