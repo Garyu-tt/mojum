@@ -147,7 +147,7 @@ def _accessor(
     view = _object(views[view_index], "bufferView")
     if "sparse" in acc or "extensions" in acc or "extensions" in view:
         _reject("sparse/compressed/extended accessors unsupported")
-    if view.get("buffer") != 0:
+    if type(view.get("buffer")) is not int or view["buffer"] != 0:
         _reject("accessor uses unsupported buffer")
     kind = acc.get("type")
     typ = acc.get("componentType")
@@ -236,7 +236,7 @@ def import_glb(
     asset_id = _identifier(asset_id, "asset ID")
     rig_version = _identifier(rig_version, "rig version")
     body_profile = _identifier(body_profile, "body profile")
-    if license_id not in SPDX_PUBLIC:
+    if type(license_id) is not str or license_id not in SPDX_PUBLIC:
         _reject("unsupported PUBLIC asset license")
     if not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
         _reject("invalid expected SHA-256")
@@ -304,8 +304,9 @@ def import_glb(
         # A skin list alone does not prove it is bound to this specific mesh.
         nodes = _array(doc, "nodes", max_count=256)
         bindings = [_object(node, "mesh node") for node in nodes
-                    if isinstance(node, dict) and node.get("mesh") == 0]
-        if len(bindings) != 1 or bindings[0].get("skin") != 0:
+                    if isinstance(node, dict) and type(node.get("mesh")) is int and node["mesh"] == 0]
+        if (len(bindings) != 1 or type(bindings[0].get("skin")) is not int
+                or bindings[0]["skin"] != 0):
             _reject("skinned mesh must have exactly one mesh-to-skin node binding")
         if any(key in bindings[0] for key in ("matrix", "translation", "rotation", "scale")):
             _reject("mesh node transforms require an upstream bake")
