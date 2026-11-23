@@ -27,8 +27,12 @@ def audit_obstacles(obstacles: list[dict]) -> dict:
     for item in obstacles:
         if type(item) is not dict:
             raise ValueError("invalid rectangle fields")
-        # Check key types before set()/equality: str subclasses can override
-        # hashing/equality and execute arbitrary code during comparisons.
+        # Bound cardinality before iterating attacker-controlled keys or
+        # allocating a temporary set. Each rectangle has exactly five fields.
+        if len(item) != len(_EXPECTED_FIELDS):
+            raise ValueError("invalid rectangle field count")
+        # Check key types/lengths before set()/equality: str subclasses can
+        # override hashing/equality and execute arbitrary code during compares.
         if any(type(key) is not str or len(key) > 32 for key in item):
             raise ValueError("rectangle keys must be bounded exact native strings")
         if set(item) != _EXPECTED_FIELDS:
