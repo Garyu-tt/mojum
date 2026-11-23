@@ -134,6 +134,9 @@ class SherpaVadTests(unittest.TestCase):
                     enabled=True, consent=True, _sherpa=_FakeSherpa(),
                     _numpy=self.np, _backend_version="2.0.3")
         opts.update(extra)
+        if opts["_sherpa"] is None and opts["_numpy"] is None:
+            # No injection: exercise the genuine optional dependency import path.
+            opts["_backend_version"] = None
         return segment_public_pcm16(**opts)
 
     def test_native_shape_and_timestamp_projection(self):
