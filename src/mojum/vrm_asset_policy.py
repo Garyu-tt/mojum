@@ -41,7 +41,7 @@ def _policy(policy: Any) -> dict[str, Any]:
         raise AssetPolicyError("policy must be an exact dict")
     required = {"allowed_dependencies", "allowed_licenses", "allowed_media_types",
                 "max_asset_bytes", "max_dependencies"}
-    if set(policy) != required:
+    if not _has_keys(policy, required):
         raise AssetPolicyError("policy has missing or unknown keys")
     for key in ("allowed_dependencies", "allowed_licenses", "allowed_media_types"):
         values = policy[key]
@@ -72,13 +72,13 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
     rules = _policy(policy)
     if not _exact_dict(manifest):
         raise AssetPolicyError("manifest must be an exact dict")
-    if set(manifest) != {"schema", "provenance", "asset", "dependencies"}:
+    if not _has_keys(manifest, {"schema", "provenance", "asset", "dependencies"}):
         raise AssetPolicyError("manifest has missing or unknown keys")
 
     violations: list[str] = []
-    if manifest["schema"] != SCHEMA or type(manifest["schema"]) is not str:
+    if type(manifest["schema"]) is not str or manifest["schema"] != SCHEMA:
         violations.append("schema")
-    if manifest["provenance"] != "PUBLIC_SYNTHETIC" or type(manifest["provenance"]) is not str:
+    if type(manifest["provenance"]) is not str or manifest["provenance"] != "PUBLIC_SYNTHETIC":
         violations.append("provenance")
 
     asset = manifest["asset"]
@@ -108,7 +108,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
     normalized_dependencies: list[dict[str, str]] = []
     seen_names: set[str] = set()
     for index, dependency in enumerate(dependencies):
-        if not _exact_dict(dependency) or set(dependency) != {"name", "version", "license"}:
+        if not _exact_dict(dependency) or not _has_keys(dependency, {"name", "version", "license"}):
             raise AssetPolicyError(f"dependency[{index}] has invalid shape")
         name, version, dep_license = dependency["name"], dependency["version"], dependency["license"]
         if not _token(name):
