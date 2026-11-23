@@ -62,6 +62,18 @@ class PacketTests(unittest.TestCase):
         with self.assertRaises(CollabError):
             encode_packet([GOOD[:3] + ('x' * 513,) + GOOD[4:]])
 
+    def test_invalid_unicode_and_empty_note_fail_closed(self):
+        for invalid in ('', '\ud800'):
+            with self.subTest(note=repr(invalid)):
+                row = GOOD[:3] + (invalid,) + GOOD[4:]
+                with self.assertRaises(CollabError):
+                    encode_packet([row])
+                packet = json.loads(encode_packet([GOOD]))
+                packet['changes'][0][3] = invalid
+                raw = json.dumps(packet, ensure_ascii=True).encode('ascii')
+                with self.assertRaises(CollabError):
+                    decode_packet(raw)
+
     def test_tombstone(self):
         tomb = list(GOOD)
         tomb[2:4] = ['-1', None]
@@ -162,6 +174,21 @@ class ScratchpadBoundaryTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             s.apply(encode_packet([GOOD]), trusted_local_fixture=True)
         self.assertEqual(conn.calls[-1], ('ROLLBACK', ()))
+
+    def test_invalid_note_never_reaches_sql_or_merge(self):
+        conn = FakeCRR()
+        scratchpad = Scratchpad(conn)
+        for invalid in ('', '\ud800'):
+            with self.subTest(note=repr(invalid)):
+                with self.assertRaises(CollabError):
+                    scratchpad.put('safe', invalid)
+        self.assertEqual(conn.calls, [])
+        payload = json.loads(encode_packet([GOOD]))
+        payload['changes'][0][3] = '\ud800'
+        with self.assertRaises(CollabError):
+            scratchpad.apply(json.dumps(payload).encode('ascii'),
+                             trusted_local_fixture=True)
+        self.assertEqual(conn.calls, [])
 
     def test_put_disallows_hostile_text_and_exhaustion(self):
         conn = FakeCRR()
