@@ -96,7 +96,9 @@ def run_episode(factory, *, seed, policy="frozen", cycles=MAX_CYCLES, enabled=Fa
     if enabled is not True:
         raise BenchmarkError("explicit enabled=True required")
     seed = _index(seed, 0, 2**32 - 1, "seed")
-    if policy not in ("frozen", "online_transition"):
+    # Reject equality-spoofing objects and str subclasses before the policy gate.
+    # Only a native, immutable mode string may enter the public result report.
+    if type(policy) is not str or policy not in ("frozen", "online_transition"):
         raise BenchmarkError("unknown policy")
     cycles = _index(cycles, 1, 64, "cycles")
     env = factory()
