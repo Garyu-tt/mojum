@@ -66,8 +66,10 @@ PYTHONPATH=src python -m mojum.segment_archive_cli restore \
   --expected-sealed-head INDEPENDENTLY_RECORDED_SEALED_SHA256
 ```
 
-The archive directory must exist already with 0700 permissions
-and cannot be a symlink. Do not put unencrypted PRIVATE history
+The archive directory must exist already with 0700 permissions.
+Neither it nor its lexical ancestor components may be symlinks; this
+static guard does not eliminate concurrent rename/TOCTOU attacks by
+another local process. Do not put unencrypted PRIVATE history
 in a public volume. The expected source head and sealed-prefix
 head are **different** if an unsealed tail remains. The latter
 must come from a separately trusted record, not blindly copied
