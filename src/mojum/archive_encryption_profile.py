@@ -74,12 +74,14 @@ def admit_profile(raw: Mapping[str, Any], *, private_opt_in: bool = False) -> Ar
         _fail("profile must be an exact built-in dict")
     if type(private_opt_in) is not bool or not private_opt_in:
         _fail("explicit private_opt_in=True is required")
-    # Bound attacker-controlled key strings before cardinality checks and
-    # frozenset hashing/comparison, so oversized hostile keys fail closed.
-    if any(type(key) is not str or len(key) > 32 for key in raw):
-        _fail("profile keys must be exact native strings of at most 32 characters")
+    # Cardinality is the first resource bound: reject oversized mappings
+    # before iterating attacker-controlled keys or allocating a key set.
     if len(raw) != len(_REQUIRED):
         _fail("profile fields must match the exact schema")
+    # With cardinality bounded to the schema size, validate native keys before
+    # frozenset hashing/comparison so hostile str subclasses cannot execute.
+    if any(type(key) is not str or len(key) > 32 for key in raw):
+        _fail("profile keys must be exact native strings of at most 32 characters")
     if frozenset(raw.keys()) != _REQUIRED:
         _fail("profile fields must match the exact schema")
 
