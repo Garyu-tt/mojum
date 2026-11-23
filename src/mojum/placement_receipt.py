@@ -63,14 +63,23 @@ def _snapshots(candidate, jobs, nodes, *, local_node_id, trusted_remote_ids):
         raise PlacementError("invalid job snapshot")
     if any(type(node) is not NodeBudget for node in nodes):
         raise PlacementError("invalid node snapshot")
-    safe_jobs = tuple(StatelessJob(j.job_id, j.cpu_slots, j.memory_mib,
-                                   j.required_capabilities, j.priority,
-                                   j.stateless) for j in jobs)
-    safe_nodes = tuple(NodeBudget(n.node_id, n.cpu_slots, n.memory_mib,
-                                  n.capabilities, n.online) for n in nodes)
-    verify_placement(candidate, safe_jobs, safe_nodes,
-                     local_node_id=local_node_id,
-                     trusted_remote_ids=trusted_remote_ids)
+    try:
+        safe_jobs = tuple(StatelessJob(j.job_id, j.cpu_slots, j.memory_mib,
+                                       j.required_capabilities, j.priority,
+                                       j.stateless) for j in jobs)
+        safe_nodes = tuple(NodeBudget(n.node_id, n.cpu_slots, n.memory_mib,
+                                      n.capabilities, n.online) for n in nodes)
+    except AttributeError as exc:
+        # object.__new__ can bypass a frozen dataclass constructor entirely.
+        # Preserve the typed reject contract for incomplete raw records.
+        raise PlacementError("invalid placement snapshot fields") from exc
+    try:
+        verify_placement(candidate, safe_jobs, safe_nodes,
+                         local_node_id=local_node_id,
+                         trusted_remote_ids=trusted_remote_ids)
+    except AttributeError as exc:
+        # Also reject incomplete forged PlacementPlan/Assignment instances.
+        raise PlacementError("invalid placement plan fields") from exc
     inputs = {
         "local_node_id": local_node_id,
         "trusted_remote_ids": sorted(trusted_remote_ids),
@@ -86,12 +95,15 @@ def _snapshots(candidate, jobs, nodes, *, local_node_id, trusted_remote_ids):
              "online": n.online}
             for n in safe_nodes), key=lambda x: x["node_id"]),
     }
-    proposed = {
-        "assignments": sorted((
-            {"job_id": a.job_id, "node_id": a.node_id}
-            for a in candidate.assignments), key=lambda x: x["job_id"]),
-        "deferred": sorted(candidate.deferred),
-    }
+    try:
+        proposed = {
+            "assignments": sorted((
+                {"job_id": a.job_id, "node_id": a.node_id}
+                for a in candidate.assignments), key=lambda x: x["job_id"]),
+            "deferred": sorted(candidate.deferred),
+        }
+    except AttributeError as exc:
+        raise PlacementError("invalid placement plan fields") from exc
     return inputs, proposed
 
 
