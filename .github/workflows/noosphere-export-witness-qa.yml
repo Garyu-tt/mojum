@@ -1,0 +1,39 @@
+name: Noosphere export witness bounded-admission QA
+
+on:
+  pull_request:
+    branches:
+      - build/8-noosphere-export-witness-20261123-r01
+    paths:
+      - "src/mojum/noosphere_export_witness.py"
+      - "tests/test_noosphere_export_witness.py"
+      - ".github/workflows/noosphere-export-witness-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head:
+    name: Python ${{ matrix.python-version }} / export witness admission
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Assert exact pull-request head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile touched Python files
+        run: python -m compileall -q src/mojum/noosphere_export_witness.py tests/test_noosphere_export_witness.py
+      - name: Run focused export-witness regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_noosphere_export_witness.py' -v
