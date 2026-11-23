@@ -98,6 +98,9 @@ class RigContractTests(unittest.TestCase):
             HeadlessBody(self.rig, mujoco_module=type("Stub", (), {"__version__": "0.0"})())
         # No implicit package loading during stdlib source import or validation.
         self.assertEqual(DT, .002)
+        if importlib.util.find_spec("mujoco") is None:
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["--steps", "1"]), 2)
 
 
 @unittest.skipUnless(importlib.util.find_spec("mujoco") is not None,
@@ -113,7 +116,12 @@ class NativeMuJoCoTests(unittest.TestCase):
         body = HeadlessBody(fixture_rig())
         self.assertEqual(body.model.nu, 0)
         initial = body.observe()
-        final = body.step(50)
+        seen_contacts = []
+        for _ in range(50):
+            final = body.step()
+            seen_contacts.extend(final["contacts"])
+        self.assertTrue(any("floor" in (c["geom_a"], c["geom_b"])
+                            for c in seen_contacts), "expected measured virtual floor contact")
         self.assertEqual(final["tick"], 50)
         self.assertAlmostEqual(final["sim_time_s"], 50 * DT, places=10)
         self.assertEqual(len(final["joints"]), 2)
