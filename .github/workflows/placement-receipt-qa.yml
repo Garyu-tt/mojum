@@ -1,0 +1,39 @@
+name: Placement receipt stdlib QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/placement_receipt.py"
+      - "src/mojum/placement.py"
+      - "src/mojum/placement_verify.py"
+      - "tests/test_placement_receipt.py"
+      - ".github/workflows/placement-receipt-qa.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/mojum/placement_receipt.py"
+      - "src/mojum/placement.py"
+      - "src/mojum/placement_verify.py"
+      - "tests/test_placement_receipt.py"
+      - ".github/workflows/placement-receipt-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-stdlib:
+    name: receipt-stdlib (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Placement receipt adversarial tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_placement_receipt.py' -v
