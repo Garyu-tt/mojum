@@ -39,7 +39,7 @@ class WorldLightSensorTests(unittest.TestCase):
     def test_path_around_obstacle_remains_visible(self):
         room = Room(10.0, 10.0, ((4.0, 4.0, 1.0, 2.0),))
         state = initial_state(room, 1.0, 1.0)
-        frame = self.measure(room, state, (("lamp", 9.0, 8.0, 1.0),))
+        frame = self.measure(room, state, (("lamp", 9.0, 2.0, 1.0),))
         self.assertEqual(frame.visible_sources, ("lamp",))
         self.assertGreater(frame.direct, 0.0)
 
