@@ -9,7 +9,7 @@ try:
 except ImportError:  # Full repository unittest discovery must remain stdlib-only.
     pytest = None
 
-from mojum.qa_work_queue import IdempotencyConflict, LeaseLost, QAWorkQueue, QueueError
+from mojum.qa_work_queue import IdempotencyConflict, LeaseLost, QAWorkQueue, QueueError, _payload
 
 
 def _claim_process(path, worker_number, result_queue):
@@ -284,6 +284,20 @@ def test_payload_text_budget_precedes_serialization(tmp_path, monkeypatch):
         monkeypatch.setattr("mojum.qa_work_queue.json.dumps", forbidden_serialize)
         with pytest.raises(QueueError, match="text exceeds byte budget"):
             q.enqueue("oversized", "review", {"data": "x" * 65_537})
+
+
+def test_payload_bounds_json_escape_expansion_before_serialization(tmp_path):
+    cases = (
+        {"data": chr(0) * 11_000},
+        {chr(0) * 11_000: "safe"},
+        {"data": chr(92) * 33_000},
+        {"data": '"' * 33_000},
+    )
+    for payload in cases:
+        with patch("mojum.qa_work_queue.json.dumps",
+                   side_effect=AssertionError("serializer must not run")):
+            with pytest.raises(QueueError, match="serialized JSON exceeds byte budget"):
+                _payload(payload)
 
 
 def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
