@@ -61,7 +61,11 @@ class OccupancyTests(unittest.TestCase):
         out = rasterize_occupancy(payload(
             room=dict(x0=0, y0=0, x1=256, y1=256),
             cell_mm=1,
-            obstacles=[dict(full) for _ in range(1024)],
+            obstacles=[
+                dict(full),
+                dict(x0=0, y0=0, x1=128, y1=128),
+                dict(x0=64, y0=64, x1=192, y1=192),
+            ],
         ))
         self.assertEqual((out["width"], out["height"]), (256, 256))
         self.assertEqual(out["occupied"], 65536)
