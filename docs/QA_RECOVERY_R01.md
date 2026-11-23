@@ -1,6 +1,6 @@
 # QA supervisor restart recovery contract R0.1
 
-Schema: moj um.qa-recovery/1 (wire identifier: moj um.qa-recovery/1).
+Schema: mojum.qa-recovery/1 (wire identifier: mojum.qa-recovery/1).
 
 This is a pure-Python offline decision helper for a supervisor that has loaded
 a bounded task snapshot from its durable queue. It proposes actions only. The
