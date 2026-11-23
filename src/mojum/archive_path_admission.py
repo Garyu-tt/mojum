@@ -13,7 +13,7 @@ MAX_PATH_BYTES = 1024
 MAX_COMPONENT_BYTES = 255
 _DRIVE = re.compile(r"^[A-Za-z]:")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-_WINDOWS_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL"})
+_WINDOWS_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"})
 _WINDOWS_NUMBERED = re.compile(r"^(?:COM|LPT)[1-9¹²³]$", re.IGNORECASE)
 
 
