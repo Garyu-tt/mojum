@@ -77,7 +77,11 @@ class IngressRateLimiter:
             window = self._windows.get(source_id)
             if window is None:
                 if len(self._windows) >= self.max_sources:
-                    return Admission(False, "capacity_exhausted", 0, self.window_ns)
+                    retry = min(
+                        value.started_ns + self.window_ns - now_ns
+                        for value in self._windows.values()
+                    )
+                    return Admission(False, "capacity_exhausted", 0, retry)
                 self._windows[source_id] = _Window(now_ns, 1)
                 return Admission(True, "allowed", self.limit - 1, 0)
 
