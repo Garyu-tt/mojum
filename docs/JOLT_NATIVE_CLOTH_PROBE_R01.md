@@ -4,7 +4,7 @@
 
 This isolated acceptance slice closes the missing native-engine smoke in the #702 Jolt/PBD study. It builds and runs an actual Jolt Physics **5.7.0** C++ soft-body cloth fixture. It is separate from the Python PBD control and native-report shape validator in PR #728.
 
-The probe creates a 12 × 8 triangular cloth mesh, pins its first row, generates distance/bend/LRA constraints using Jolt's `SoftBodySharedSettings`, and advances 240 fixed 1/60 s CPU steps under gravity. A strict JSON result reports particle/face counts, bottom-row drop, pinned-row drift and finite-state checks.
+The probe creates a 12 × 8 triangular cloth mesh, pins its first row, generates distance/bend/LRA constraints using Jolt's `SoftBodySharedSettings`, and advances 240 fixed 1/60 s CPU steps under gravity. A strict JSON result reports particle/face counts, bottom-row drop, pinned-row drift and finite-state checks. The Python report parser caps input at 8,192 characters before decoding, rejects duplicate JSON keys and non-finite constants, and normalizes malformed/deep JSON into a bounded `ValueError` failure.
 
 ## Reproduce
 
