@@ -102,6 +102,18 @@ class RetryPolicyTests(unittest.TestCase):
             with self.subTest(arg=arg), self.assertRaises(ValueError):
                 self.decide(**arg)
 
+    def test_equivalent_zero_offset_utc_timezone_is_accepted(self):
+        utc_alias = timezone(timedelta(0), name="UTC-alias")
+        now = NOW.astimezone(utc_alias)
+        deadline = now + timedelta(seconds=2)
+        decision = self.decide(
+            now_utc=now,
+            deadline_utc=deadline,
+            retry_after="Mon, 23 Nov 2026 16:00:02 GMT",
+        )
+        self.assertTrue(decision.should_retry)
+        self.assertEqual(decision.delay_ms, 1_500)
+
     def test_deadline_exact_and_insufficient(self):
         self.assertEqual(self.decide(deadline_utc=NOW + timedelta(milliseconds=250)).delay_ms,
                          250)
