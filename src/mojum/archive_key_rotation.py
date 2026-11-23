@@ -117,7 +117,9 @@ def verify_rotation_chain(
         # Bound cardinality before materializing keys, and reject subclasses
         # before set/hash/equality operations can invoke caller code.
         keys = tuple(record)
-        if any(type(key) is not str for key in keys) or set(keys) != _RECORD_FIELDS:
+        if any(type(key) is not str or len(key) > 32 for key in keys):
+            raise RotationError("rotation record keys must be bounded native strings")
+        if set(keys) != _RECORD_FIELDS:
             raise RotationError("rotation record has an invalid exact shape")
         schema = record["schema"]
         epoch = record["epoch"]
