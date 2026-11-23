@@ -18,8 +18,9 @@ registered port types must be identical. IDs and endpoint mappings are unique.
 export_nested_editor emits stable React Flow-shaped or Rete-shaped container
 nodes. The full child graph and portal metadata remain in data; no edge or
 node fields are silently dropped. import_nested_editor requires an
-independently supplied parent revision and SHA-256 anchor. In R0.1 only layout
-positions may change. Structural edits fail closed and require a future
+independently supplied parent revision and SHA-256 anchor. The source digest
+covers the parent graph plus container IDs, child graphs and portal inventory;
+only layout positions are excluded. In R0.1 only layout positions may change. Structural edits fail closed and require a future
 versioned contract.
 
 ## Limits and security
