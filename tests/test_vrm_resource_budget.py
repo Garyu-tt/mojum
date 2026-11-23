@@ -68,6 +68,12 @@ class VrmResourceBudgetTests(unittest.TestCase):
                         assess_vrm_resource_budget(candidate)
                     dumps.assert_not_called()
 
+    def test_revalidates_mutated_frozen_limits(self):
+        limits = ResourceLimits()
+        object.__setattr__(limits, "max_vertices", -1)
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(inventory(), limits)
+
     def test_report_detached(self):
         data = inventory()
         report = assess_vrm_resource_budget(data)
