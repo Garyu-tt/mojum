@@ -33,15 +33,16 @@ class AdmittedTrace:
 def admit_trace(value: object) -> AdmittedTrace:
     """Admit only explicit synthetic metadata, without echoing rejected input.
 
-    Exact built-in types prevent bool-as-int and hostile mapping subclasses.
+    Exact built-in containers and keys are checked before hashing/comparison,
+    preventing hostile string subclasses from executing during schema checks.
     The digest is a consistency checksum, NOT a signature.
     """
     if type(value) is not dict:
         raise TraceEnvelopeError("expected plain object")
+    if any(type(key) is not str or len(key) > 32 for key in value):
+        raise TraceEnvelopeError("invalid key type or length")
     if len(value) != len(_ALLOWED) or set(value) != _ALLOWED:
         raise TraceEnvelopeError("invalid field set")
-    if any(type(k) is not str for k in value):
-        raise TraceEnvelopeError("invalid key type")
     if type(value["schema"]) is not str or value["schema"] != SCHEMA:
         raise TraceEnvelopeError("invalid schema")
     if type(value["provenance"]) is not str or value["provenance"] != "PUBLIC_SYNTHETIC":
