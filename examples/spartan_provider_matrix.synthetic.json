@@ -1,0 +1,22 @@
+{
+  "schema": "mojum.spartan.provider-capacity/1",
+  "evidence": "synthetic-fixture",
+  "models": [
+    {
+      "id": "synthetic-local-7b",
+      "transport": "llama.cpp",
+      "model": "SyntheticLocal7B",
+      "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_version": "b7010",
+      "endpoint": "http://127.0.0.1:18182",
+      "device": "cpu",
+      "ram_mib": 8192,
+      "vram_mib": 0,
+      "slots_total": 4,
+      "slots_free": 4,
+      "context_tokens": 4096,
+      "decode_tokens_per_sec": 128,
+      "micro_usd_per_1k_tokens": 0
+    }
+  ]
+}
