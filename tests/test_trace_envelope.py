@@ -51,9 +51,22 @@ class TraceEnvelopeTests(unittest.TestCase):
     def test_hostile_containers(self):
         class DictSubclass(dict):
             pass
+
+        class HostileKey(str):
+            def __hash__(self):
+                return hash(str(self))
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not execute")
+
         for value in [[], None, DictSubclass(sample())]:
             with self.assertRaises(TraceEnvelopeError):
                 admit_trace(value)
+
+        hostile = sample()
+        hostile[HostileKey("schema")] = hostile.pop("schema")
+        with self.assertRaises(TraceEnvelopeError):
+            admit_trace(hostile)
 
     def test_error_never_echoes_input(self):
         x = sample()
