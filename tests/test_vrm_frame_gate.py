@@ -166,5 +166,23 @@ class PoseFrameGateTests(unittest.TestCase):
             gate().admit(candidate, consent=True, source_tag=PUBLIC_SYNTHETIC)
 
 
+    def test_constructor_rejects_coordinate_limit_that_overflows_float(self):
+        with self.assertRaises(FrameGateError):
+            PoseFrameGate(max_abs_coordinate=10 ** 10000)
+
+    def test_rejects_hostile_packet_key_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("schema")
+
+            def __eq__(self, _other):
+                raise AssertionError("hostile key equality must not run")
+
+        candidate = packet()
+        candidate[HostileKey("body_revision")] = candidate["body_revision"]
+        with self.assertRaises(FrameGateError):
+            gate().admit(candidate, consent=True, source_tag=PUBLIC_SYNTHETIC)
+
+
 if __name__ == "__main__":
     unittest.main()
