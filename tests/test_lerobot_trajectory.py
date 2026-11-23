@@ -125,6 +125,30 @@ class TrajectoryAdmissionTests(unittest.TestCase):
         with self.assertRaises(TrajectoryError):
             validate_trajectory(payload)
 
+    def test_joint_order_is_semantically_significant(self):
+        original = sample()
+        reordered = sample()
+        reordered["joint_names"] = ["elbow", "shoulder"]
+        for frame in reordered["frames"]:
+            frame["positions_rad"].reverse()
+        self.assertNotEqual(
+            validate_trajectory(original).sha256,
+            validate_trajectory(reordered).sha256,
+        )
+
+    def test_scalar_sample_budget_is_enforced(self):
+        payload = {
+            "schema": SCHEMA, "provenance": PROVENANCE, "consent": CONSENT,
+            "position_unit": POSITION_UNIT,
+            "joint_names": [f"j{i}" for i in range(MAX_JOINTS)],
+            "frames": [
+                {"timestamp_ns": i, "positions_rad": [0] * MAX_JOINTS}
+                for i in range(1001)
+            ],
+        }
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
     def test_bad_root_values_rejected(self):
         for payload in (None, [], "trajectory", 42):
             with self.subTest(payload=payload), self.assertRaises(TrajectoryError):
