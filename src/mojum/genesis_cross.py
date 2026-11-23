@@ -13,7 +13,6 @@ from .genesis import (
     GENES,
     GENOTYPE_SCHEMA,
     GenesisError,
-    canonical,
     sha256,
     validate_seed,
 )
@@ -176,7 +175,8 @@ def verify_cross_receipt(result: object) -> bool:
     for gene, selection in receipt["selections"].items():
         if type(selection) is not dict or set(selection) != {"source", "value"}:
             raise GenesisError(f"invalid selection for {gene}")
-        if selection["source"] not in {"parent_a", "parent_b"}:
+        source = selection["source"]
+        if type(source) is not str or source not in ("parent_a", "parent_b"):
             raise GenesisError(f"invalid selection source for {gene}")
         if type(selection["value"]) is not int:
             raise GenesisError(f"invalid selected value for {gene}")
