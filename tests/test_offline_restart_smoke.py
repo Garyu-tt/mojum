@@ -1,5 +1,6 @@
 """Isolated regression tests for disposable Aquarium cold-restart audit."""
 
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -18,7 +19,8 @@ def _fixture(tick, **patch):
         "trust": "checksum_only_not_authenticated",
         "agent_id": "fixture-only", "journal_head": format(tick + 1, "064x"),
         "manifest_sha256": "a" * 64, "status": "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO",
-        "sim_time_ns": tick * 10_000_000, "world_revision": tick,
+        "sim_time_ns": tick * 10_000_000,
+        "world_revision": hashlib.sha256(f"synthetic-{tick}".encode()).hexdigest(),
         "genome_revision": 0,
     }
     value.update(patch)
@@ -88,6 +90,25 @@ class RestartAuditTests(unittest.TestCase):
             _checkpoint('{' + ' ' * 65536 + '}', tick=1, events=2)
         with self.assertRaises(SmokeFailure):
             _checkpoint('{"tick":NaN}', tick=1, events=2)
+
+    def test_world_revision_is_digest_and_zero_tick_must_preserve_it(self):
+        decoded = _checkpoint(_fixture(3), tick=3, events=4)
+        self.assertEqual(len(decoded["world_revision"]), 64)
+        for invalid in (7, True, "a" * 63, "G" * 64):
+            with self.subTest(invalid=invalid), self.assertRaises(SmokeFailure):
+                _checkpoint(_fixture(3, world_revision=invalid), tick=3, events=4)
+
+        class AlteredZeroTick(StubRunner):
+            def __call__(self, *args, **kwargs):
+                proc = super().__call__(*args, **kwargs)
+                if len(self.calls) == 3:
+                    payload = json.loads(proc.stdout)
+                    payload["world_revision"] = "0" * 64
+                    return subprocess.CompletedProcess(proc.args, 0, json.dumps(payload), "")
+                return proc
+
+        with self.assertRaisesRegex(SmokeFailure, "zero-tick reopen changed world revision"):
+            run_audit(runner=AlteredZeroTick())
 
     def test_bounded_deep_json_and_invalid_utf8_fail_closed(self):
         # About 30 KiB, below MAX_OUTPUT, but beyond JSON nesting limits.
