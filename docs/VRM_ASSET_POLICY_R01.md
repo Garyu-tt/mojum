@@ -25,7 +25,8 @@ No filesystem, network, three-vrm, browser, SQLite, PRIVATE Noosphere, runtime w
 Run:
 
 ```sh
-python -m unittest tests.test_vrm_asset_policy -v
+python -m pip install --no-deps -e .
+python -m unittest discover -s tests -p 'test_vrm_asset_policy.py' -v
 ```
 
 The dedicated GitHub Actions workflow runs the focused stdlib suite on CPython 3.11, 3.12 and 3.13.
