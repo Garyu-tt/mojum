@@ -170,15 +170,19 @@ class FlowWitnessTests(unittest.TestCase):
             pass
 
         base = graph_v1()
-        base["nodes"][0]["config"]["integer"] = ForgedNumber(7)
+        base["nodes"][0]["config"]["integer"] = 7
         graph = strict_v2(base)
+        # Inject only *after* upgrade_v1 has normalized its own wire copy.
+        graph["nodes"][0]["config"]["integer"] = ForgedNumber(7)
         self.assertEqual(validate_v2(graph)["node_count"], 6)
         with self.assertRaisesRegex(GraphError, "native JSON"):
             attest_flow(graph)
 
         base = graph_v1()
-        base["nodes"][0]["config"][ForgedKey("extra")] = 3
+        base["nodes"][0]["config"]["extra"] = 3
         graph = strict_v2(base)
+        value = graph["nodes"][0]["config"].pop("extra")
+        graph["nodes"][0]["config"][ForgedKey("extra")] = value
         self.assertEqual(validate_v2(graph)["node_count"], 6)
         with self.assertRaisesRegex(GraphError, "native JSON"):
             attest_flow(graph)
