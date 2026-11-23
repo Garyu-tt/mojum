@@ -16,6 +16,9 @@ BATCH_SCHEMA = "mojum.genesis.acquisition-batch/1"
 MAX_BATCH_EVENTS = 64
 MAX_BATCH_BYTES = 512 * 1024
 MAX_EVENT_BYTES = 8 * 1024
+# GenomeLedger.from_snapshot replays append() and all effective tick prefixes;
+# keep this adapter's replay budget below the ledger's storage ceiling.
+MAX_BASE_EVENTS = 128
 
 
 @dataclass(frozen=True)
@@ -151,12 +154,24 @@ def apply_acquisition_batch(
     """
     if type(expected_base_revision) is not str or len(expected_base_revision) != 64:
         raise GenesisError("expected_base_revision must be a SHA-256 revision")
-    snapshot_json = _bounded_json(snapshot, limit=MAX_BATCH_BYTES, label="snapshot")
-    events_json = _bounded_json(events, limit=MAX_BATCH_BYTES, label="events")
     if type(snapshot) is not dict or type(events) is not list:
         raise GenesisError("snapshot must be a native dict and events a native list")
+    # Refuse expensive existing-ledger replay before canonical serialization.
+    # GenomeLedger.append re-hashes the growing history and rechecks every
+    # unique valid_from_tick prefix, making large replay substantially costly.
+    if len(snapshot) != 4 or any(type(key) is not str for key in dict.keys(snapshot)):
+        raise GenesisError("snapshot must have the exact native GENESIS ledger shape")
+    if set(dict.keys(snapshot)) != {"schema", "seed", "events", "revision"}:
+        raise GenesisError("snapshot must have the exact native GENESIS ledger shape")
+    base_events = dict.__getitem__(snapshot, "events")
+    if type(base_events) is not list or len(base_events) > MAX_BASE_EVENTS:
+        raise GenesisError(
+            f"base ledger event budget exceeded (maximum {MAX_BASE_EVENTS})"
+        )
     if not 1 <= len(events) <= MAX_BATCH_EVENTS:
         raise GenesisError(f"batch must contain 1..{MAX_BATCH_EVENTS} events")
+    snapshot_json = _bounded_json(snapshot, limit=MAX_BATCH_BYTES, label="snapshot")
+    events_json = _bounded_json(events, limit=MAX_BATCH_BYTES, label="events")
     for index, event in enumerate(events):
         if type(event) is not dict:
             raise GenesisError(f"events[{index}] must be a native dict")
