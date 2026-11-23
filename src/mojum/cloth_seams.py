@@ -43,7 +43,10 @@ class SeamValidation:
 def _number(value: object, field: str) -> float:
     if type(value) not in (int, float):
         raise ClothSeamError(f"{field} must be a native int or float")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ClothSeamError(f"{field} is outside the numeric budget") from exc
     if not math.isfinite(result) or abs(result) > 1_000_000:
         raise ClothSeamError(f"{field} is non-finite or outside the coordinate budget")
     return result
