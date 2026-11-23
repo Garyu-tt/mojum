@@ -10,7 +10,10 @@ phenotype projections before a downstream consumer uses them.
 ## API
 
     from mojum.genesis_phenotype_audit import audit_phenotype
-    report = audit_phenotype(ledger_snapshot, phenotype_snapshot, tick=120)
+    report = audit_phenotype(
+        ledger_snapshot, phenotype_snapshot, tick=120,
+        source_classification="PUBLIC_SYNTHETIC",
+    )
     if report["status"] != "match":
         raise ValueError("phenotype does not match its ledger and tick")
 
@@ -21,6 +24,9 @@ phenotype.
 
 ## Bounds and failure behavior
 
+- Caller must explicitly supply the exact `PUBLIC_SYNTHETIC` classification;
+  the gate rejects missing, private, or malformed classifications. This is a
+  caller assertion, not independent provenance verification.
 - Standard-library only; no network, filesystem, SQLite, native engine, or
   live runtime access.
 - Native JSON dictionaries/lists only, maximum depth 32 and 20,000 values.
