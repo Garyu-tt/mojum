@@ -105,6 +105,12 @@ class Replica:
             staged[op_id] = op
             if len(staged) > MAX_EVENTS:
                 raise ValueError("replica event budget exceeded")
+        # Reject atomically if the resulting replica would be impossible to
+        # export within the same wire budget. Otherwise retransmission could
+        # leave a permanently non-serializable (but seemingly valid) state.
+        canonical = _canonical([op for _, op in sorted(staged.items())])
+        if len(canonical) > MAX_JSON_BYTES:
+            raise ValueError("replica serialization budget exceeded")
         self._events = staged
 
     def merge_frame(self, data: bytes) -> None:
