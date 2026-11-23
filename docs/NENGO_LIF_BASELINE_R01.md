@@ -17,7 +17,7 @@ Nengo is **NOT a package requirement of Mojum**. For independent license-approve
 python -m venv /tmp/mojum-nengo-test
 . /tmp/mojum-nengo-test/bin/activate
 python -m pip install 'nengo==4.1.0'
-PYTHONPATH=src python -m unittest tests.test_nengo_lif_baseline -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_nengo_lif_baseline.py' -v
 PYTHONPATH=src python - <<'PY'
 from mojum.nengo_lif_baseline import fixture, compare
 print(compare(fixture(1000)))  # synthetic current; never PRIVATE data
@@ -29,7 +29,7 @@ Nengo 4.1.0 published May 29, 2025, requires Python >=3.8 and declares **GPLv2**
 ## QA / acceptance limits
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_nengo_lif_baseline -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_nengo_lif_baseline.py' -v
 ```
 
 The native test is **skipped** if Nengo is absent; offline unit tests exercise the optional binding against a small fake to validate the adapter contract, **not** the real native implementation. Real CPU benchmark, exact-head CI, independent QA, backends' numerical tolerances across platforms, licensing approval, complete GENESIS wire mapping, checkpoint/export/import, LIF STDP and a real full Nengo `Simulator` remain explicitly **unverified**. This is an isolated spike, not issue closure.
