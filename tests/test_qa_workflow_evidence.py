@@ -88,7 +88,7 @@ class WorkflowEvidenceTests(unittest.TestCase):
             evaluate_workflow_evidence([run()], expected_head_sha=HEAD, required_workflow_ids=[True])
 
     def test_malformed_sha_event_status_and_conclusion_rejected(self):
-        for change in ({"head_sha": "bad"}, {"event": "push"}, {"status": "success"}, {"status": "completed", "conclusion": "neutral"}):
+        for change in ({"head_sha": "bad"}, {"event": "push"}, {"status": "success"}, {"status": "completed", "conclusion": "not-a-github-conclusion"}):
             with self.subTest(change=change), self.assertRaises(WorkflowEvidenceError):
                 evaluate_workflow_evidence([dict(run(), **change)], expected_head_sha=HEAD, required_workflow_ids=[10])
 
