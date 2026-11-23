@@ -35,6 +35,36 @@ class EnvelopeTests(unittest.TestCase):
     def test_empty_changes_are_valid(self):
         self.assertEqual(cr.unpack_changes(cr.pack_changes([])), ())
 
+    def test_direct_pack_rejects_spoofed_table_or_column_before_comparison(self):
+        class EqualLooking:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class Explosive:
+            def __eq__(self, other):
+                raise AssertionError("untrusted equality executed")
+
+            def __ne__(self, other):
+                raise AssertionError("untrusted inequality executed")
+
+        class StringSubclass(str):
+            pass
+
+        for index, value in (
+            (0, EqualLooking()), (2, EqualLooking()),
+            (0, Explosive()), (2, Explosive()),
+            (0, StringSubclass("collab_notes")),
+            (2, StringSubclass("value")),
+        ):
+            with self.subTest(index=index, kind=type(value).__name__):
+                row = list(change())
+                row[index] = value
+                with self.assertRaisesRegex(ValueError, "unapproved"):
+                    cr.pack_changes([row])
+
     def test_reject_unapproved_table_or_unsafe_content(self):
         for field in ("home/username", "secret\nvalue", "🔥", "", "x" * 65):
             with self.subTest(field=field), self.assertRaises(ValueError):

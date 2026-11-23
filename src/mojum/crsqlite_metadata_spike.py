@@ -54,7 +54,9 @@ def _encode_change(row):
     if not isinstance(row, (tuple, list)) or len(row) != 9:
         raise ValueError("invalid CR-SQLite change shape")
     table, pk, cid, val, col_version, db_version, site_id, cl, seq = row
-    if table != TABLE or cid != "value":
+    # Enforce exact built-in selectors before potentially hostile equality.
+    if (type(table) is not str or type(cid) is not str
+            or table != TABLE or cid != "value"):
         raise ValueError("unapproved replicated table or column")
     return {
         "table": TABLE,
