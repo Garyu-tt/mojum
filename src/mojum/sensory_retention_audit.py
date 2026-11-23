@@ -1,11 +1,9 @@
 """Read-only integrity audit for versioned synthetic sensory retention snapshots.
-
 This module validates conservation and chronology invariants in an existing
-association/2 snapshot. It does not load or mutate an agent, open SQLite,
-perform migrations, authenticate provenance, or infer real-world perception.
+association/2 snapshot. It does not open SQLite, mutate state, migrate schemas,
+authenticate provenance, or infer real-world perception.
 """
 from __future__ import annotations
-
 import hashlib
 import json
 import math
@@ -16,11 +14,8 @@ SOURCE_SCHEMA = "mojum.sensory-curiosity.association/2"
 MAX_CUES = 128
 MAX_UPDATES = 100_000
 MAX_TICK = 2**63 - 1
-_CUE = re.compile(r"(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2})\\Z", re.ASCII)
-_EXPECTED_KEYS = {
-    "schema", "table", "updates", "last_seen_at", "last_contact_tick",
-    "evictions", "forgotten_observations",
-}
+_CUE = re.compile(r"(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2})\Z", re.ASCII)
+_EXPECTED_KEYS = {"schema", "table", "updates", "last_seen_at", "last_contact_tick", "evictions", "forgotten_observations"}
 
 
 class RetentionAuditError(ValueError):
@@ -41,19 +36,11 @@ def _finite_number(value: object) -> bool:
 
 
 def audit_snapshot(snapshot: object) -> dict[str, object]:
-    """Return a deterministic, redacted report for one association/2 snapshot.
-
-    Revalidate the raw structure instead of trusting the model loader. Exact
-    builtin types are required before comparisons/iteration so hostile
-    subclasses cannot run custom equality or conversion code during audit.
-    """
-    if type(snapshot) is not dict:
-        raise _invalid()
-    if any(type(key) is not str for key in snapshot):
+    """Return a deterministic, redacted report for one association/2 snapshot."""
+    if type(snapshot) is not dict or any(type(key) is not str for key in snapshot):
         raise _invalid()
     if set(snapshot) != _EXPECTED_KEYS:
         raise _invalid()
-
     schema = snapshot["schema"]
     table = snapshot["table"]
     last_seen = snapshot["last_seen_at"]
@@ -61,7 +48,6 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
     last_tick = snapshot["last_contact_tick"]
     evictions = snapshot["evictions"]
     forgotten = snapshot["forgotten_observations"]
-
     if (
         type(schema) is not str or schema != SOURCE_SCHEMA
         or type(table) is not dict or type(last_seen) is not dict
@@ -95,9 +81,7 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
             or set(entry) != {"count", "mean_deflection"}
         ):
             raise _invalid()
-        count = entry["count"]
-        mean = entry["mean_deflection"]
-        stamp = last_seen[cue]
+        count, mean, stamp = entry["count"], entry["mean_deflection"], last_seen[cue]
         if (
             type(count) is not int or not 1 <= count <= MAX_UPDATES
             or not _finite_number(mean) or not 0 <= mean <= 1
@@ -108,7 +92,6 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
         retained_observations += count
         stamps.append(stamp)
         lru_rows.append((stamp, cue, count))
-
     if len(set(stamps)) != len(stamps):
         raise _invalid()
     if (
@@ -118,16 +101,11 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
     ):
         raise _invalid()
 
-    # Source policy is deterministic oldest-first; cue is a final tie-breaker.
+    # Mirrors deterministic oldest-first retention without exposing cue values.
     lru_rows.sort(key=lambda row: (row[0], row[1]))
     oldest_age = last_tick - lru_rows[0][0] if lru_rows else None
     newest_age = last_tick - lru_rows[-1][0] if lru_rows else None
-    canonical = json.dumps(
-        snapshot, ensure_ascii=True, allow_nan=False, sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
-    digest = hashlib.sha256(canonical).hexdigest()
-
+    canonical = json.dumps(snapshot, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("ascii")
     return {
         "schema": SCHEMA,
         "source_schema": SOURCE_SCHEMA,
@@ -140,5 +118,5 @@ def audit_snapshot(snapshot: object) -> dict[str, object]:
         "last_contact_tick": last_tick,
         "oldest_retained_age_ticks": oldest_age,
         "newest_retained_age_ticks": newest_age,
-        "snapshot_sha256": digest,
+        "snapshot_sha256": hashlib.sha256(canonical).hexdigest(),
     }
