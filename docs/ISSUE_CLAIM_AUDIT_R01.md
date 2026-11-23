@@ -57,7 +57,10 @@ this source). Example:
 `comments` may be omitted for an empty array. The tool accepts up to 2 MiB,
 300 issues, 20,000 total comments, and 16 KiB per text body; malformed data,
 duplicate JSON keys, duplicate issue/comment IDs, non-UTC timestamps, invalid
-or quoted machine markers fail closed. It does not accept source URLs, tokens,
+or quoted machine markers fail closed. Markdown fenced code blocks (backticks or
+tildes) and four-space/tab-indented examples are **not claims**: a marker
+appearing in one causes an invalid-input result rather than phantom ownership.
+A real marker must be on its own non-code line (at most three leading spaces). It does not accept source URLs, tokens,
 or private organism data.
 
 ## Run
