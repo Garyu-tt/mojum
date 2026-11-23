@@ -24,6 +24,7 @@ class RigContractTests(unittest.TestCase):
         self.assertEqual(self.rig, validate_rig(self.rig))
         xml = ET.fromstring(compile_mjcf(self.rig))
         self.assertEqual(xml.tag, "mujoco")
+        self.assertEqual(xml.find("compiler").get("angle"), "radian")
         self.assertIsNone(xml.find("actuator"))
         self.assertIsNone(xml.find(".//freejoint"))
         joints = xml.findall(".//joint")
@@ -115,6 +116,13 @@ class NativeMuJoCoTests(unittest.TestCase):
     def test_compiles_and_runs_without_controlled_actuators(self):
         body = HeadlessBody(fixture_rig())
         self.assertEqual(body.model.nu, 0)
+        # Check the *compiled* engine limits, not just XML source attributes.
+        # Default MJCF angle=degree would shrink every limit by pi/180.
+        for i, joint in enumerate(fixture_rig()["joints"]):
+            for side in (0, 1):
+                self.assertAlmostEqual(
+                    float(body.model.jnt_range[i, side]),
+                    joint["limits_rad"][side], places=8)
         initial = body.observe()
         seen_contacts = []
         for _ in range(50):
