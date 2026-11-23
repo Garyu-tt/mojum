@@ -148,7 +148,7 @@ class SupervisorMetricsTests(unittest.TestCase):
 
         task = {"id": "x", "state": "READY", huge_key: None}
         with patch("mojum.qa_supervisor_metrics.set",
-                   side_effect=AssertionError("task field name must be bounded before hashing"),
+                   side_effect=bounded_set,
                    create=True):
             with self.assertRaises(MetricsInputError):
                 summarize_snapshot({"observed_at": 1, "tasks": [task]})
