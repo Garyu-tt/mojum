@@ -146,6 +146,16 @@ class ReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             benchmark.validate_report(make_report(step_count=True))
 
+    def test_rejects_oversized_report_mapping_before_key_scan(self):
+        report = make_report()
+        report.update({f"extra_{index}": index for index in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "bounded field count"):
+            benchmark.validate_report(report)
+
+    def test_rejects_inverted_nearest_rank_percentiles(self):
+        with self.assertRaisesRegex(ValueError, "p95_step_ns"):
+            benchmark.validate_report(make_report(p50_step_ns=20_000, p95_step_ns=10_000))
+
     def test_rejects_unknown_key(self):
         with self.assertRaises(ValueError):
             benchmark.validate_report(make_report(extra="not-allowed"))
