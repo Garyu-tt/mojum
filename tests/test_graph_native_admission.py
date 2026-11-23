@@ -29,6 +29,16 @@ class HostileString(str):
         raise AssertionError("hostile string equality was invoked")
 
 
+class HostileSchemaValue:
+    def __ne__(self, other):
+        raise AssertionError("hostile schema comparison was invoked")
+
+
+class HostileSchemaString(str):
+    def __ne__(self, other):
+        raise AssertionError("hostile schema string comparison was invoked")
+
+
 class HostileDict(dict):
     def items(self):
         raise AssertionError("hostile dict iteration was invoked")
@@ -55,6 +65,14 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         self.assertTrue(incoming)
         self.assertEqual(digest(graph), before)
         self.assertEqual(graph, FIXTURE)
+
+    def test_hostile_schema_value_is_rejected_before_comparison(self):
+        for value in (HostileSchemaValue(), HostileSchemaString("mechanicus.universal-graph/1")):
+            graph = self.fresh()
+            graph["schema"] = value
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(GraphError):
+                validate(graph)
+
 
     def test_root_container_subclass_is_rejected_without_custom_lookup(self):
         class Root(HostileDict):
