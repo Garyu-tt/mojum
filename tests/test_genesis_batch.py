@@ -225,7 +225,7 @@ class GenesisBatchTests(unittest.TestCase):
                 apply_acquisition_batch(
                     ledger.snapshot(), [bad], expected_base_revision=ledger.revision
                 )
-            self.assertEqual(serializer.call_count, 1)  # bounded snapshot only
+            self.assertEqual(serializer.call_count, 2)  # snapshot and batch; individual event rejected before serialization
 
     def test_invalid_unicode_rejected(self):
         bad = event()
