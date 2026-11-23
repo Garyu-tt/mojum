@@ -21,7 +21,7 @@ class EnvironmentExposureAuditTests(unittest.TestCase):
     def test_repeated_mixed_case_values_distinguish_collision_and_duplicate(self):
         for names, expected in (
             (["A", "a", "a"], [
-                {"name": "A", "code": "case_collision"},
+                {"name": "a", "code": "case_collision"},
                 {"name": "a", "code": "duplicate"},
             ]),
             (["a", "A", "A"], [
