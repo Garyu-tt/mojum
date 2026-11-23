@@ -51,7 +51,8 @@ def observe_virtual_support(packet: object) -> dict:
     contact provenance. The SHA-256 digest is a reproducibility checksum,
     NOT authentication or tamper protection against source replacement.
     """
-    if type(packet) is not dict or set(packet) != _KEYS:
+    if (type(packet) is not dict or any(type(key) is not str for key in packet)
+            or set(packet) != _KEYS):
         raise ValueError("invalid support envelope")
     if type(packet["schema"]) is not str or packet["schema"] != INPUT_SCHEMA:
         raise ValueError("unsupported support schema")
@@ -73,10 +74,12 @@ def observe_virtual_support(packet: object) -> dict:
     contacts: list[dict] = []
     ids: set[str] = set()
     for contact in supplied:
-        if type(contact) is not dict or set(contact) != _CONTACT_KEYS:
+        if (type(contact) is not dict or any(type(key) is not str for key in contact)
+                or set(contact) != _CONTACT_KEYS):
             raise ValueError("invalid virtual floor contact")
         ident = contact["id"]
-        if type(ident) is not str or _ID.fullmatch(ident) is None or ident in ids:
+        if (type(ident) is not str or len(ident) > 64
+                or _ID.fullmatch(ident) is None or ident in ids):
             raise ValueError("invalid or duplicate contact id")
         ids.add(ident)
         point = _position(contact["point_m"], "virtual contact position")
