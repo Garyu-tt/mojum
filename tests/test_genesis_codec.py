@@ -92,7 +92,7 @@ class GenesisCodecTests(unittest.TestCase):
             with self.assertRaisesRegex(GenesisCodecError, "byte limit"):
                 loads(b" " * 9)
 
-    def test_oversized_text_rejected_before_utf8_conversion(self):
+    def test_oversized_text_inputs_rejected(self):
         with patch("mojum.genesis_codec.MAX_SNAPSHOT_BYTES", 8):
             with self.assertRaisesRegex(GenesisCodecError, "byte limit"):
                 loads("x" * 9)
