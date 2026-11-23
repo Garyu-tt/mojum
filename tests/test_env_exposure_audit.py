@@ -25,8 +25,8 @@ class EnvironmentExposureAuditTests(unittest.TestCase):
                 {"name": "a", "code": "duplicate"},
             ]),
             (["a", "A", "A"], [
-                {"name": "A", "code": "duplicate"},
                 {"name": "A", "code": "case_collision"},
+                {"name": "A", "code": "duplicate"},
             ]),
         ):
             with self.subTest(names=names):
