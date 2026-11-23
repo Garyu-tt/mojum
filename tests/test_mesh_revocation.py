@@ -2,7 +2,8 @@
 import unittest
 
 from mojum.mesh_revocation import (
-    MeshRevocationError, check_peer_access, sign_snapshot, verify_snapshot,
+    MeshRevocationError, VerifiedRevocationSnapshot, check_peer_access,
+    sign_snapshot, verify_snapshot,
 )
 
 KEY = b"K" * 32
@@ -139,6 +140,16 @@ class MeshRevocationTests(unittest.TestCase):
         with self.assertRaises(MeshRevocationError):
             check_peer_access(verified, node_id="node-a", enrollment_id="enroll-a",
                               operation="read", now_tick=121)
+
+    def test_unverified_snapshot_instance_cannot_bypass_signature_verification(self):
+        forged = VerifiedRevocationSnapshot(
+            authority_id="mesh-root", key_id="authority-key-1", generation=99,
+            issued_at_tick=100, expires_at_tick=200, entries=(), digest="0" * 64,
+            _verification_token=None,
+        )
+        with self.assertRaises(MeshRevocationError):
+            check_peer_access(forged, node_id="node-a", enrollment_id="enroll-a",
+                              operation="read", now_tick=150)
 
     def test_invalid_operation_rejected(self):
         verified = verify_snapshot(envelope(), authority_keys=KEYS, now_tick=150)
