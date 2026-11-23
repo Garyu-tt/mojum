@@ -76,7 +76,7 @@ class IngressRateLimiterTests(unittest.TestCase):
 
         def attempt(index):
             barrier.wait()
-            result = limiter.admit("shared-agent", index)
+            result = limiter.admit("shared-agent", 1)
             with guard:
                 outcomes.append(result.allowed)
 
