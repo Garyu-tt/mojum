@@ -34,7 +34,7 @@ env.close()
 PY
 ```
 
-Explicit factory `make_parallel_env` lazily imports optional libraries and creates a real `pettingzoo.ParallelEnv` subclass, with Gymnasium `Discrete(5)` and `Box(0..1, shape=(5,), dtype=float32)` spaces. Importing Mojum alone does not import PettingZoo or NumPy. No auto-install, registry activation, remote integration or persistence. Missing optional modules fail with an explicit `ImportError`.
+Explicit factory `make_parallel_env` lazily imports optional libraries and creates a real `pettingzoo.ParallelEnv` subclass, with Gymnasium `Discrete(5)` and `Box(0..1, shape=(5,), dtype=float32)` spaces. The PettingZoo wrapper accepts the API's arbitrary reset options mapping but discards it without examining or forwarding payloads; nonempty options are explicitly marked `reset_options_ignored` in per-agent reset info. The stricter stdlib core rejects nonempty options. Importing Mojum alone does not import PettingZoo or NumPy. No auto-install, registry activation, remote integration or persistence. Missing optional modules fail with an explicit `ImportError`.
 
 ## Reproducibility and acceptance limits
 
