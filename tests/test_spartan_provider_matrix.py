@@ -105,6 +105,22 @@ class ProviderMatrixTests(unittest.TestCase):
         pm.validate_live_slots(snap, [SimpleNamespace(port=18182, model="QwenCoder7B",
                                                       total=4, free=4, ctx=4096)])
 
+    def test_live_slot_evidence_rejects_duplicates_and_malformed_metadata(self):
+        snap = parse(fixture())
+        good = SimpleNamespace(port=18182, model="QwenCoder7B",
+                               total=4, free=4, ctx=4096)
+        bad = SimpleNamespace(port=18182, model="QwenCoder7B",
+                              total=2, free=0, ctx=4096)
+        with self.assertRaises(pm.AdmissionError):
+            pm.validate_live_slots(snap, [bad, good])
+        with self.assertRaises(pm.AdmissionError):
+            pm.validate_live_slots(snap, [SimpleNamespace(
+                port=18182, model="QwenCoder7B", total=4, free=4, ctx="4096")])
+        with self.assertRaises(pm.AdmissionError):
+            pm.validate_live_slots(snap, [SimpleNamespace(port=18182, model="QwenCoder7B")])
+        with self.assertRaises(pm.AdmissionError):
+            pm.validate_live_slots(snap, None)
+
     def test_invalid_json_duplicates_nonfinite_and_oversized(self):
         for raw in (b'{"schema":1,"schema":2}', b'{"schema":NaN}',
                     b'{}' * 40000, b'\xff', b'[]'):
