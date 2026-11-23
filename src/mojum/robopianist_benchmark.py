@@ -181,7 +181,9 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
     if trace["sha256"] != _digest(unsigned):
         raise BenchmarkError("trace digest mismatch")
     hits = 0
+    duration_hits = 0
     timing_error = 0
+    previous_tick = -1
     for index, event in enumerate(events):
         _require_exact_dict(event, frozenset({
             "index", "key", "finger", "tick", "duration_ticks"
@@ -193,18 +195,22 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
         duration = _plain_int(event["duration_ticks"], 1, 8, "event duration")
         if ei != index or finger != _finger_for_key(key):
             raise BenchmarkError("invalid event order or finger mapping")
+        if tick <= previous_tick:
+            raise BenchmarkError("trace event ticks must be strictly increasing")
+        previous_tick = tick
         _, target_key, target_finger, target_tick, target_duration = checked["notes"][index]
         if key == target_key and finger == target_finger:
             hits += 1
         timing_error += min(abs(tick - target_tick), MAX_ABS_ERROR_TICKS)
-        if duration != target_duration:
-            # Duration is part of the task contract, but does not change pitch accuracy.
-            pass
+        if duration == target_duration:
+            duration_hits += 1
     count = len(events)
     result = {"schema": RESULT_SCHEMA, "provenance": PROVENANCE,
               "task_sha256": checked["sha256"], "trace_sha256": trace["sha256"],
               "mode": trace["mode"], "note_count": count, "correct_notes": hits,
               "pitch_accuracy": hits / count,
+              "correct_durations": duration_hits,
+              "duration_accuracy": duration_hits / count,
               "mean_abs_timing_error_ticks": timing_error / count,
               "transfer_measured": False, "learning_claimed": False}
     result["sha256"] = _digest(result)
