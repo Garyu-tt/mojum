@@ -180,6 +180,28 @@ class BudgetedDispatchTests(unittest.TestCase):
         rows = self.db.execute("SELECT * FROM requests").fetchall()
         self.assertNotIn(marker, repr([tuple(row) for row in rows]))
 
+    def test_non_native_receipt_key_cannot_impersonate_usage_field(self):
+        class ForgedKey(str):
+            def __hash__(self):
+                return hash("actual_tokens")
+
+            def __eq__(self, other):
+                return other == "actual_tokens"
+
+        receipt = {
+            ForgedKey("actual_tokens"): 12,
+            "actual_micro_usd": 340,
+        }
+        calls, invoke, extract = self.call(receipts=receipt)
+        with self.assertRaises(BudgetedCallError):
+            dispatch(
+                self.db, request_id="forged-key", worker=12,
+                reserve_tokens=80, reserve_micro_usd=800,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(spartan_budget.status(self.db)["unsettled"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
