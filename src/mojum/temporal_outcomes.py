@@ -52,6 +52,7 @@ class RangeOutcomeMemory:
     def from_snapshot(cls, snapshot):
         if (type(snapshot) is not dict
                 or set(snapshot) != {"schema", "updates", "histograms"}
+                or type(snapshot["schema"]) is not str
                 or snapshot["schema"] != SCHEMA
                 or type(snapshot["updates"]) is not int
                 or not 0 <= snapshot["updates"] <= MAX_UPDATES
@@ -99,7 +100,17 @@ class RangeOutcomeMemory:
                 "blocked": blocked == "1"}
 
     def observe(self, before, action, after, blocked, prior):
-        if type(blocked) is not bool or prior != self.predict(before, action):
+        # Accept only canonical scalar evidence. Python's overloaded __eq__ or
+        # __ne__ on arbitrary objects must not bypass a causal prediction check.
+        if (type(blocked) is not bool
+                or type(prior) is not dict
+                or set(prior) != {"observations", "next_bucket", "blocked"}
+                or type(prior["observations"]) is not int
+                or (prior["next_bucket"] is not None
+                    and type(prior["next_bucket"]) is not int)
+                or (prior["blocked"] is not None
+                    and type(prior["blocked"]) is not bool)
+                or prior != self.predict(before, action)):
             raise TemporalOutcomeError("forged or stale movement prediction")
         b, a = _bucket(before), _bucket(after)
         if (after["tick"] != before["tick"] + 1
