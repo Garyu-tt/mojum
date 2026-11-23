@@ -16,6 +16,7 @@ MAX_TTL_SECONDS = 30 * 24 * 60 * 60
 CLOCK_SKEW_SECONDS = 300
 _MIN_KEY_BYTES = 32
 _MAX_KEY_BYTES = 128
+_MAX_AUTHORITIES = 128
 _KEY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
 _STATEMENT_ID = re.compile(r"[0-9a-f]{32}", re.ASCII)
 _HEX_MAC = re.compile(r"[0-9a-f]{64}", re.ASCII)
@@ -56,6 +57,25 @@ def _validate_key(key, *, what="authority key"):
     if type(key) is not bytes or not (_MIN_KEY_BYTES <= len(key) <= _MAX_KEY_BYTES):
         raise AttestationError(what + " must be 32..128 raw bytes")
     return key
+
+
+def _validate_authority_keys(authority_keys):
+    """Admit a small native-string-key map before performing hash lookups.
+
+    Exact dict alone is insufficient: a caller can place a str subclass with
+    a colliding hash and hostile __eq__ in that dict. Validate every key's
+    exact type before dict.get() can dispatch caller-controlled equality.
+    """
+    if type(authority_keys) is not dict:
+        raise AttestationError("authority_keys must be an exact dict")
+    if len(authority_keys) > _MAX_AUTHORITIES:
+        raise AttestationError("authority key map exceeds its entry budget")
+    names = tuple(dict.keys(authority_keys))
+    if any(type(name) is not str for name in names):
+        raise AttestationError("authority key IDs must be native strings")
+    for name in names:
+        _require_text(name, _KEY_ID, "authority key id")
+    return authority_keys
 
 
 def _payload(attestation):
@@ -132,9 +152,8 @@ def verify_attestation(attestation, authority_keys, *, now):
         raise AttestationDenied("attestation is not yet valid")
     if attestation.expires_at <= now:
         raise AttestationDenied("attestation has expired")
-    if type(authority_keys) is not dict:
-        raise AttestationError("authority_keys must be an exact dict")
-    key = authority_keys.get(attestation.key_id)
+    checked_keys = _validate_authority_keys(authority_keys)
+    key = checked_keys.get(attestation.key_id)
     if key is None:
         raise AttestationDenied("unknown authority key")
     _validate_key(key)
