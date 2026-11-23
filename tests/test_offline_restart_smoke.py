@@ -21,7 +21,7 @@ def _fixture(tick, **patch):
         "manifest_sha256": "a" * 64, "status": "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO",
         "sim_time_ns": tick * 10_000_000,
         "world_revision": hashlib.sha256(f"synthetic-{tick}".encode()).hexdigest(),
-        "genome_revision": 0,
+        "genome_revision": "b" * 64,
     }
     value.update(patch)
     return json.dumps(value)
@@ -77,7 +77,8 @@ class RestartAuditTests(unittest.TestCase):
             {"tick": True}, {"stored_events": 2}, {"trust": "authenticated"},
             {"journal_head": "0" * 63}, {"agent_id": ""},
             {"schema": "mojum.aquarium.checkpoint/999"}, {"status": "READY"},
-            {"world_revision": True}, {"manifest_sha256": "A" * 64},
+            {"world_revision": True}, {"genome_revision": 0},
+            {"manifest_sha256": "A" * 64},
         ]
         for patch in invalid:
             with self.subTest(patch=patch), self.assertRaises(SmokeFailure):
@@ -94,6 +95,7 @@ class RestartAuditTests(unittest.TestCase):
     def test_world_revision_is_digest_and_zero_tick_must_preserve_it(self):
         decoded = _checkpoint(_fixture(3), tick=3, events=4)
         self.assertEqual(len(decoded["world_revision"]), 64)
+        self.assertEqual(len(decoded["genome_revision"]), 64)
         for invalid in (7, True, "a" * 63, "G" * 64):
             with self.subTest(invalid=invalid), self.assertRaises(SmokeFailure):
                 _checkpoint(_fixture(3, world_revision=invalid), tick=3, events=4)
