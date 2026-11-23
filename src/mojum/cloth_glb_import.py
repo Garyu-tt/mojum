@@ -188,6 +188,10 @@ def _accessor(
     local_offset = _uint(acc.get("byteOffset", 0), view_len, "accessor offset")
     if base % width or local_offset % width or base + view_len > len(binary):
         _reject("unaligned or out-of-bounds bufferView")
+    # glTF 2.0 section 3.6.2.4: every vertex attribute's accessor-local
+    # byteOffset must start on a 4-byte boundary, even for uint8 JOINTS_0.
+    if semantic != "indices" and local_offset % 4:
+        _reject("vertex attribute offset must be 4-byte aligned")
     if local_offset + (num - 1) * stride + elem > view_len:
         _reject("accessor data outside bufferView")
     unpack = struct.Struct("<" + fmt * _DIMS[kind])
@@ -250,6 +254,9 @@ def import_glb(
         _reject("invalid expected SHA-256")
     if not isinstance(raw, bytes):
         _reject("GLB must be immutable bytes")
+    # Refuse oversized direct-API bytes before CPU-intensive hashing.
+    if len(raw) > MAX_FILE:
+        _reject("GLB file size outside bounds")
     digest = hashlib.sha256(raw).hexdigest()
     if digest != expected_sha256:
         _reject("GLB SHA-256 mismatch")
