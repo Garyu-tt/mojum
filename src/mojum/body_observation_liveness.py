@@ -14,7 +14,7 @@ from dataclasses import dataclass
 OBSERVATION_SCHEMA = "mojum.body.observation/1"
 PUBLIC_SYNTHETIC = "PUBLIC_SYNTHETIC"
 MAX_FRAMES = 4096
-MAX_FRAME_BYTES = 1_048_576
+MAX_FRAME_BYTES = 524_288
 MAX_ID_CHARS = 96
 MAX_COUNTER = 2**63 - 1
 _REQUIRED_KEYS = frozenset({
