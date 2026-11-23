@@ -139,7 +139,7 @@ class SessionControlTests(unittest.TestCase):
         self.assertEqual(self.session.snapshot(), before)
 
     def test_invalid_identifiers_fail_closed(self):
-        for value in ("", "../dante", "bad id", "x" * 129, "\\ud800"):
+        for value in ("", "../dante", "bad id", "x" * 129, "\ud800"):
             with self.subTest(value=repr(value)):
                 with self.assertRaises(SessionControlError):
                     SessionController(value)
