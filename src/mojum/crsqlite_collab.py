@@ -52,7 +52,7 @@ def validate_operation(value):
         raise MetadataBoundaryError("invalid bounded logical counter")
     if type(value["key"]) is not str or _KEY.fullmatch(value["key"]) is None:
         raise MetadataBoundaryError("metadata key restricted to layout/label/note namespace")
-    if value["kind"] not in ("put", "remove") or type(value["kind"]) is not str:
+    if type(value["kind"]) is not str or value["kind"] not in ("put", "remove"):
         raise MetadataBoundaryError("invalid metadata operation kind")
     if value["kind"] == "remove":
         if value["value"] is not None:
