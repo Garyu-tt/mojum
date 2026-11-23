@@ -15,8 +15,11 @@ manifest order. The input is consumed once. Each UTF-8 name is limited to
 entries. Unsafe names cause `ArchivePathError`, never silent rewriting.
 
 Rejected: absolute/drive/UNC paths, backslashes, dot/dotdot components,
-empty components, controls/NUL, trailing dots/spaces, duplicate names,
-casefold-equivalent names, and file/directory prefix collisions.
+empty components, controls/NUL, trailing dots/spaces, colons (including NTFS
+alternate data streams), Windows DOS device basenames (`CON`, `PRN`, `AUX`,
+`NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, including extensions and superscript
+COM/LPT digits), duplicate names, casefold-equivalent names, and file/directory
+prefix collisions. Device-name checks apply to every path component.
 
 ## Security boundary
 
