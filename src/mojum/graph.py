@@ -22,8 +22,89 @@ PORTS = {
 }
 
 
+# Direct-Python callers must obey the same finite wire budget as load_graph().
+MAX_GRAPH_TREE_NODES = 50_000
+
+
 class GraphError(ValueError):
     pass
+
+
+def _require_native_json_tree(value):
+    """Admit only a bounded, detached-shape JSON tree made from exact built-ins.
+
+    This runs before any schema set comparison or topology lookup. It avoids
+    invoking caller-defined equality/hash/iteration hooks and rejects Python
+    object graphs (cycles and shared containers) that have no JSON tree form.
+    """
+    if type(value) is not dict:
+        raise GraphError("Graph must be an exact built-in JSON object")
+    pending = [(value, 0)]
+    seen_containers = set()
+    node_count = 0
+    text_bytes = 0
+
+    try:
+        while pending:
+            current, depth = pending.pop()
+            node_count += 1
+            if node_count > MAX_GRAPH_TREE_NODES:
+                raise GraphError("Graph JSON tree exceeds node budget")
+            if depth > MAX_JSON_DEPTH:
+                raise GraphError("Graph JSON nesting depth exceeded")
+
+            kind = type(current)
+            if kind is dict:
+                identity = id(current)
+                if identity in seen_containers:
+                    raise GraphError("Graph JSON tree contains a cycle or shared container")
+                seen_containers.add(identity)
+                if len(current) > MAX_GRAPH_TREE_NODES:
+                    raise GraphError("Graph JSON object exceeds node budget")
+                for key, child in current.items():
+                    node_count += 1
+                    if node_count > MAX_GRAPH_TREE_NODES:
+                        raise GraphError("Graph JSON tree exceeds node budget")
+                    if type(key) is not str:
+                        raise GraphError("Graph JSON object keys must be exact strings")
+                    try:
+                        text_bytes += len(key.encode("utf-8", errors="strict"))
+                    except UnicodeEncodeError as exc:
+                        raise GraphError("Graph JSON text must be valid UTF-8") from exc
+                    if text_bytes > MAX_GRAPH_BYTES:
+                        raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+                    pending.append((child, depth + 1))
+            elif kind is list:
+                identity = id(current)
+                if identity in seen_containers:
+                    raise GraphError("Graph JSON tree contains a cycle or shared container")
+                seen_containers.add(identity)
+                if len(current) > MAX_GRAPH_TREE_NODES:
+                    raise GraphError("Graph JSON array exceeds node budget")
+                pending.extend((child, depth + 1) for child in current)
+            elif kind is str:
+                try:
+                    text_bytes += len(current.encode("utf-8", errors="strict"))
+                except UnicodeEncodeError as exc:
+                    raise GraphError("Graph JSON text must be valid UTF-8") from exc
+                if text_bytes > MAX_GRAPH_BYTES:
+                    raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+            elif kind is int:
+                # Keep decimal conversion/serialization bounded even for a
+                # direct caller that bypasses load_graph()'s byte limit.
+                if current.bit_length() > MAX_GRAPH_BYTES * 3:
+                    raise GraphError("Graph JSON integer exceeds byte budget")
+            elif kind is float:
+                if not math.isfinite(current):
+                    raise GraphError("Graph JSON numbers must be finite")
+            elif kind is bool or current is None:
+                pass
+            else:
+                raise GraphError("Graph contains a non-native JSON value")
+    except GraphError:
+        raise
+    except (RuntimeError, RecursionError, OverflowError, UnicodeError, ValueError) as exc:
+        raise GraphError("Graph contains an invalid or changing JSON tree") from exc
 
 
 def _unique_json_object(pairs):
@@ -76,7 +157,9 @@ def _require_lossless_json(graph):
     try:
         wire = json.dumps(graph, sort_keys=True, ensure_ascii=False,
                           separators=(",", ":"), allow_nan=False)
-        wire.encode("utf-8", errors="strict")
+        wire_bytes = wire.encode("utf-8", errors="strict")
+        if len(wire_bytes) > MAX_GRAPH_BYTES:
+            raise GraphError("Graph JSON exceeds 256 KiB byte limit")
         decoded = json.loads(wire)
     except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
         raise GraphError("Graph requires lossless UTF-8 JSON values") from exc
@@ -119,7 +202,11 @@ def load_graph(path):
 
 
 def validate(graph):
-    if not isinstance(graph, dict) or graph.get("schema") != SCHEMA:
+    # Validate the complete caller-owned object tree before any dict/set
+    # comparison, membership operation, or topology lookup can invoke custom
+    # Python behavior. The same limits apply to load_graph() and direct users.
+    _require_native_json_tree(graph)
+    if type(graph) is not dict or graph.get("schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
     # V1 graph identity and revision are part of the canonical wire format.
     # Missing or malformed metadata must fail before Simulation hashes this
@@ -136,25 +223,25 @@ def validate(graph):
             raise GraphError(f"Graph v1 {field} must be valid UTF-8") from exc
     nodes = graph.get("nodes")
     edges = graph.get("edges")
-    if not isinstance(nodes, list) or not nodes or not isinstance(edges, list):
+    if type(nodes) is not list or not nodes or type(edges) is not list:
         raise GraphError("nodes must be nonempty list and edges must be list")
     if len(nodes) > 256 or len(edges) > 2048:
         raise GraphError("Graph exceeds safe bootstrap size")
     by_id = {}
     for n in nodes:
-        if not isinstance(n, dict) or set(n) != {"id", "kind", "config", "notes"}:
+        if type(n) is not dict or set(n) != {"id", "kind", "config", "notes"}:
             raise GraphError("Unsupported graph v1 node shape")
-        if not isinstance(n["id"], str) or not n["id"]:
+        if type(n["id"]) is not str or not n["id"]:
             raise GraphError("Every node requires a nonempty string ID")
         if n["id"] in by_id:
             raise GraphError("Duplicate node ID: " + n["id"])
         kind = n.get("kind")
-        if not isinstance(kind, str) or kind not in PORTS:
+        if type(kind) is not str or kind not in PORTS:
             raise GraphError("Unsupported node kind: " + str(kind))
-        if not isinstance(n.get("config"), dict) or not isinstance(n.get("notes"), dict):
+        if type(n.get("config")) is not dict or type(n.get("notes")) is not dict:
             raise GraphError("Every node needs config and notes objects")
         purpose = n["notes"].get("purpose")
-        if not isinstance(purpose, str) or not purpose.strip():
+        if type(purpose) is not str or not purpose.strip():
             raise GraphError("Node notes.purpose must be nonempty text")
         by_id[n["id"]] = n
     incoming = defaultdict(dict)
@@ -163,14 +250,14 @@ def validate(graph):
     for e in edges:
         # A mixed v1/alternate-v1 record may carry ignored source/target aliases
         # alongside canonical from/to, so reject any extra or absent wire keys.
-        if not isinstance(e, dict) or set(e) != {"from", "to"}:
+        if type(e) is not dict or set(e) != {"from", "to"}:
             raise GraphError("Unsupported graph v1 edge shape")
         src, dst = e["from"], e["to"]
-        if (not isinstance(src, dict) or set(src) != {"node", "port"}
-                or not isinstance(dst, dict) or set(dst) != {"node", "port"}):
+        if (type(src) is not dict or set(src) != {"node", "port"}
+                or type(dst) is not dict or set(dst) != {"node", "port"}):
             raise GraphError("Malformed edge endpoint")
         sid, sport, did, dport = src["node"], src["port"], dst["node"], dst["port"]
-        if not all(isinstance(value, str) for value in (sid, sport, did, dport)):
+        if not all(type(value) is str for value in (sid, sport, did, dport)):
             raise GraphError("Malformed edge endpoint")
         if sid not in by_id or did not in by_id:
             raise GraphError("Edge references absent node")
