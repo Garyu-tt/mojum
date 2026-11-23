@@ -14,6 +14,16 @@ class ViZDoomBenchmarkTests(unittest.TestCase):
         self.assertEqual(set(r["comparison"]), {"frozen", "vision"})
         self.assertNotIn("trace", r["comparison"]["frozen"])
 
+    def test_heldout_fake_seeds_and_nonlearning_control(self):
+        # These are only synthetic regression seeds, not real-engine acceptance.
+        for seed in (0, 7, 42, 2026, 2**32 - 1):
+            with self.subTest(seed=seed):
+                output = mod.benchmark(seed=seed, steps=32)
+                self.assertTrue(output["replay_equal"])
+                self.assertGreater(output["comparison"]["vision"]["total_reward"],
+                                   output["comparison"]["frozen"]["total_reward"])
+                self.assertLess(output["comparison"]["vision"]["steps"], 32)
+
     def test_identical_trace_and_closed_game(self):
         made = []
         def factory(seed, steps):
