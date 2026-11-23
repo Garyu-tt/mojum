@@ -145,6 +145,21 @@ class GenesisCodecTests(unittest.TestCase):
         restored = loads(dumps(ledger))
         self.assertEqual(restored.snapshot(), ledger.snapshot())
 
+    def test_dumps_normalizes_recursive_snapshot_and_canonical_failures(self):
+        ledger = self.ledger()
+        with patch.object(ledger, "snapshot", side_effect=RecursionError("deep snapshot")):
+            with self.assertRaisesRegex(GenesisCodecError, "canonical JSON"):
+                dumps(ledger)
+
+        with patch("mojum.genesis_codec.canonical", side_effect=RecursionError("deep canonical value")):
+            with self.assertRaisesRegex(GenesisCodecError, "canonical JSON"):
+                dumps(self.ledger())
+
+        # The exceptional path must not broaden normal acceptance or alter
+        # deterministic wire output.
+        control = self.ledger()
+        self.assertEqual(loads(dumps(control)).revision, control.revision)
+
 
 if __name__ == "__main__":
     unittest.main()
