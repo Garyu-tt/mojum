@@ -8,7 +8,7 @@ This opt-in, solver-neutral contract validates caller-supplied synthetic cloth c
 
 - Schema: `mojum.cloth.material-profile/1`
 - Required classification: `PUBLIC_SYNTHETIC`
-- Input: one exact built-in Python `dict` with exactly the fields below.
+- Input: one exact built-in Python `dict` with exactly the fields below; fixed cardinality is checked before enumerating keys.
 - Runtime: Python 3.11+, standard library only.
 - Output: frozen `ClothMaterialProfile`, detached mapping export, and unkeyed SHA-256 content fingerprint.
 
