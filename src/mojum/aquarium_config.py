@@ -15,7 +15,7 @@ from typing import Final
 SCHEMA: Final = "mojum.aquarium.launch-profile/1"
 MAX_PROFILE_BYTES: Final = 16_384
 MAX_PATH_CHARS: Final = 512
-MAX_TICKS: Final = 100_000
+MAX_TICKS: Final = 1_000
 MIN_DT_NS: Final = 1_000
 MAX_DT_NS: Final = 1_000_000_000
 
@@ -191,14 +191,24 @@ def validate_profile(source: object) -> LaunchProfile:
 
     db_path = _text_path(data["db_path"], "db_path")
     room_file = _text_path(values["room_file"], "room_file", optional=True)
-    ticks = _exact_int(values["ticks"], "ticks", 1, MAX_TICKS)
+    motor_mode = _enum(values["motor_mode"], "motor_mode", MOTOR_MODES)
+    ticks = _exact_int(values["ticks"], "ticks", 0, MAX_TICKS)
+    if motor_mode == "local_cell_v2_a_archive":
+        if ticks != 0:
+            raise AquariumConfigError("local_cell_v2_a_archive requires ticks=0")
+    elif ticks == 0:
+        raise AquariumConfigError("ticks=0 is reserved for local_cell_v2_a_archive")
+    if room_file is not None and motor_mode in {
+        "local_cell_v2b", "local_cell_v3", "local_cell_v3_escape",
+        "local_cell_v4", "local_cell_v2", "local_cell_v2_a_archive",
+    }:
+        raise AquariumConfigError("room_file is incompatible with fixed-geometry local-cell motor modes")
     dt_ns = _exact_int(values["dt_ns"], "dt_ns", MIN_DT_NS, MAX_DT_NS)
     read_only = values["read_only"]
     if type(read_only) is not bool:
         raise AquariumConfigError("read_only must be a boolean")
 
     neural_mode = _enum(values["neural_mode"], "neural_mode", NEURAL_MODES)
-    motor_mode = _enum(values["motor_mode"], "motor_mode", MOTOR_MODES)
     brain_mode = _enum(values["brain_mode"], "brain_mode", BRAIN_MODES)
     sensory_mode = _enum(values["sensory_mode"], "sensory_mode", SENSORY_MODES)
     temporal_mode = _enum(values["temporal_mode"], "temporal_mode", TEMPORAL_MODES)
