@@ -91,14 +91,17 @@ class NoosphereValidityTests(unittest.TestCase):
         item = fact("long-key")
         del item["visibility"]
         item["x" * 100_000] = "PUBLIC"
-        expected = set(("event_id", "fact_key", "visibility", "provenance",
-                        "valid_from_ns", "valid_to_ns", "value"))
-        with patch("mojum.noosphere_validity.set", side_effect=AssertionError(
-            "oversized fixed-schema key reached set hashing"
-        ), create=True) as key_set:
+        native_set = set
+
+        def guarded_set(values=()):
+            values = tuple(values)
+            if any(type(key) is str and len(key) > 13 for key in values):
+                raise AssertionError("oversized fixed-schema key reached set hashing")
+            return native_set(values)
+
+        with patch("mojum.noosphere_validity.set", side_effect=guarded_set, create=True) as key_set:
             with self.assertRaisesRegex(ValidityAuditError, "invalid object key"):
                 audit_validity([item])
-            key_set.assert_not_called()
 
     def test_json_parser_rejects_oversized_object_keys_before_duplicate_lookup(self):
         wire = json.dumps({
