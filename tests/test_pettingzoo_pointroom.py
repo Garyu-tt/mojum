@@ -132,6 +132,11 @@ class ActualPettingZooAPITests(unittest.TestCase):
         for a in AGENTS:
             self.assertTrue((options_obs[a] == first[a]).all())
         second, _ = env.reset(seed=13)
+        for large_seed in (2**32, 2**64 + 17, 2**128):
+            large_first, _ = env.reset(seed=large_seed)
+            large_second, _ = env.reset(seed=large_seed)
+            for a in AGENTS:
+                self.assertTrue((large_first[a] == large_second[a]).all())
         for a in AGENTS:
             self.assertTrue((first[a] == second[a]).all())
             self.assertTrue(env.observation_space(a).contains(first[a]))
