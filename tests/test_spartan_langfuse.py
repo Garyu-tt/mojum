@@ -179,6 +179,10 @@ class LangfuseContractTests(unittest.TestCase):
         events = (provider(sequence=i) for i in range(MAX_EVENTS+1))
         with self.assertRaisesRegex(ValueError, "budget"):
             summarize(events)
+        # Repeating one valid event must also consume a finite CPU budget.
+        duplicates = (provider() for _ in range(MAX_EVENTS+1))
+        with self.assertRaisesRegex(ValueError, "budget"):
+            summarize(duplicates)
 
     def test_summary_is_deterministic_without_external_packages(self):
         one = summarize([ci(), provider(), qa()])
