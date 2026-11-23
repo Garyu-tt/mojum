@@ -16,7 +16,7 @@ This opt-in, solver-neutral contract validates caller-supplied synthetic cloth c
 
 | Field | Stored unit | Scale to SI | Accepted stored range |
 |---|---|---:|---:|
-| `areal_density_ug_m2` | micro-kg/m² | 10⁻⁶ kg/m² | 1 .. 1,000,000,000,000 |
+| `areal_density_ug_m2` | µg/m² (microgram per square metre) | 10⁻⁹ kg/m² per stored unit | 1 .. 1,000,000,000,000 |
 | `thickness_nm` | nm | 10⁻⁹ m | 1 .. 1,000,000,000 |
 | `stretch_stiffness_uN_m` | micro-N/m | 10⁻⁶ N/m | 1 .. 1,000,000,000,000,000 |
 | `bend_stiffness_uNm` | micro-N·m | 10⁻⁶ N·m | 0 .. 1,000,000,000,000 |
@@ -34,7 +34,7 @@ from mojum.cloth_material import validate_material_profile
 profile = validate_material_profile({
     "schema": "mojum.cloth.material-profile/1",
     "classification": "PUBLIC_SYNTHETIC",
-    "areal_density_ug_m2": 180_000,
+    "areal_density_ug_m2": 180_000_000,
     "thickness_nm": 250_000,
     "stretch_stiffness_uN_m": 12_000_000,
     "bend_stiffness_uNm": 75,
