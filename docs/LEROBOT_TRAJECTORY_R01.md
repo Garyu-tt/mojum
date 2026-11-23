@@ -13,8 +13,7 @@ safe, physically plausible, human-authored, or useful for learning.
 
 ## Input contract
 
-Schema identifier: moj um.lerobot-trajectory/1 is not valid; the canonical identifier is
-mojum.lerobot-trajectory/1.
+The schema identifier is: mojum.lerobot-trajectory/1.
 
 The root mapping contains exactly schema, provenance, consent, position_unit,
 joint_names and frames. Provenance must be PUBLIC_SYNTHETIC, consent must be
