@@ -104,9 +104,11 @@ class TraceSanitizeTests(unittest.TestCase):
         with self.assertRaises(TraceSanitizationError):
             sanitize_trace_attributes({"pr_number": 0})
 
-    def test_rejects_non_string_keys_and_too_many_fields(self):
+    def test_rejects_non_string_keys_oversized_keys_and_too_many_fields(self):
         with self.assertRaises(TraceSanitizationError):
             sanitize_trace_attributes({1: "bad"})
+        with self.assertRaises(TraceSanitizationError):
+            sanitize_trace_attributes({"x" * 1_000_000: "bad"})
         with self.assertRaises(TraceSanitizationError):
             sanitize_trace_attributes({f"field_{i}": i for i in range(25)})
 
