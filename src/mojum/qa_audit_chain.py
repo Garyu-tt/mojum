@@ -53,6 +53,21 @@ def _admit_record(record: Any, *, signed: bool) -> dict[str, Any]:
 
 def _canonical(record: Any) -> bytes:
     admitted = _admit_record(record, signed=(len(record) == 8 if type(record) is dict else False))
+    seq = _native_int(admitted["seq"], "seq", 1)
+    if seq > MAX_RECORDS:
+        raise AuditChainError("seq exceeds the supported record bound")
+    _native_int(admitted["at_ms"], "at_ms", 0)
+    if type(admitted["kind"]) is not str or admitted["kind"] not in KINDS:
+        raise AuditChainError("unsupported event kind")
+    if type(admitted["state"]) is not str or admitted["state"] not in STATES:
+        raise AuditChainError("unsupported task state")
+    if type(admitted["task_key"]) is not str or not _TOKEN.fullmatch(admitted["task_key"]):
+        raise AuditChainError("task_key is malformed")
+    reason = admitted["reason"]
+    if reason is not None and (type(reason) is not str or len(reason) > MAX_REASON or not _TOKEN.fullmatch(reason)):
+        raise AuditChainError("reason must be a bounded token or null")
+    if type(admitted["previous_digest"]) is not str or not _HEX.fullmatch(admitted["previous_digest"]):
+        raise AuditChainError("previous_digest must be lowercase SHA-256 hex")
     unsigned = {key: admitted[key] for key in _UNSIGNED_FIELDS}
     try:
         return json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
