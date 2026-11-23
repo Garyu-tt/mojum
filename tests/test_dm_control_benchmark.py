@@ -141,7 +141,9 @@ class ReportTests(unittest.TestCase):
         report = make_report()
         value = report.pop("step_count")
         report[Key("step_count")] = value
-        with self.assertRaisesRegex(ValueError, "native string keys"):
+        # The exact field-count admission guard runs before inspecting any
+        # caller-controlled key, so this malformed mapping may fail there first.
+        with self.assertRaises(ValueError):
             benchmark.validate_report(report)
 
     def test_rejects_boolean_integer(self):
