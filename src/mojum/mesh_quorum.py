@@ -98,7 +98,12 @@ def evaluate_quorum(*, organism_id: str, members: tuple[str, ...],
     candidates: list[str] = []
     canonical_votes: list[dict[str, object]] = []
     for vote in vote_receipts:
-        if type(vote) is not dict or any(type(key) is not str for key in vote):
+        if type(vote) is not dict:
+            raise MeshQuorumError("vote receipt has an invalid shape")
+        # Reject oversized receipts before key iteration or set allocation.
+        if len(vote) != len(_VOTE_FIELDS):
+            raise MeshQuorumError("vote receipt has an invalid shape")
+        if any(type(key) is not str for key in vote):
             raise MeshQuorumError("vote receipt has an invalid shape")
         if frozenset(vote) != _VOTE_FIELDS:
             raise MeshQuorumError("vote receipt has an invalid shape")
