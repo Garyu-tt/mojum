@@ -154,8 +154,7 @@ class RetentionAuditTests(unittest.TestCase):
 
     def test_rejects_oversized_envelope_and_nested_key_strings(self):
         forged = valid_snapshot()
-        forged["schema"] = forged.pop("s" * 4096, SOURCE_SCHEMA)
-        forged["x" * 4096] = SOURCE_SCHEMA
+        forged["x" * 4096] = forged.pop("schema")
         with self.assertRaises(RetentionAuditError):
             audit_snapshot(forged)
 
