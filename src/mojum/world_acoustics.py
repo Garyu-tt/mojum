@@ -37,6 +37,13 @@ def _text(value, name, limit):
         raise AcousticError(f"{name} must be valid UTF-8") from exc
     return value
 
+def _millimetres(value, name):
+    """Convert a finite room coordinate to integer mm without leaking overflow."""
+    scaled = value * 1000
+    if not isfinite(scaled):
+        raise AcousticError(f"{name} is outside the supported millimetre coordinate range")
+    return round(scaled)
+
 def _check_room_state(room, state, expected_revision):
     if type(room) is not Room or type(state) is not RoomState:
         raise AcousticError("room/state must be canonical Room and RoomState")
@@ -97,11 +104,12 @@ def sense_sound_events(room: Room, state: RoomState, events, *,
         seen.add(event["event_id"])
         normalized.append(event)
 
-    lx, ly = round(state.x * 1000), round(state.y * 1000)
+    lx, ly = (_millimetres(state.x, "listener.x"),
+              _millimetres(state.y, "listener.y"))
     observed = []
     for event in normalized:
-        dx = round(event["x"] * 1000) - lx
-        dy = round(event["y"] * 1000) - ly
+        dx = _millimetres(event["x"], "event.x") - lx
+        dy = _millimetres(event["y"], "event.y") - ly
         distance = isqrt(dx * dx + dy * dy)
         occluded = any(_segment_hits_rect(state.x, state.y, event["x"], event["y"], r)
                        for r in room.obstacles)
