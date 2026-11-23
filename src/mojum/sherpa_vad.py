@@ -105,16 +105,22 @@ def segment_public_pcm16(
         raise ValueError("invalid audio timestamp")
     validated_path = _verified_local_model(model_path, model_sha256)
 
-    if _sherpa is None or _numpy is None:
+    injected = any(value is not None for value in (_sherpa, _numpy, _backend_version))
+    if injected and not all(value is not None for value in (_sherpa, _numpy, _backend_version)):
+        raise ValueError("incomplete test-only VAD backend injection")
+    if not injected:
         try:
             import numpy as np  # optional native dependency
             import sherpa_onnx as sherpa  # optional native dependency
             version = importlib.metadata.version("sherpa-onnx")
         except (ImportError, importlib.metadata.PackageNotFoundError):
             raise RuntimeError("optional sherpa-onnx 2.0.3 and numpy are required") from None
+        backend_name = "sherpa-onnx-silero-vad"
     else:
         sherpa, np = _sherpa, _numpy
         version = _backend_version
+        # Injectable test engines must never claim a verified native provenance.
+        backend_name = "unverified-test-double-vad"
     if version != PINNED_SHERPA_VERSION:
         raise RuntimeError("unverified sherpa-onnx VAD version")
 
@@ -185,7 +191,7 @@ def segment_public_pcm16(
         "observed_at_ns": observed_at_ns,
         "duration_ns": _offset_ns(sample_count),
         "model_sha256": model_sha256,
-        "backend": "sherpa-onnx-silero-vad",
+        "backend": backend_name,
         "backend_version": PINNED_SHERPA_VERSION,
         "segments": segments,
         "raw_audio_retained": False,
