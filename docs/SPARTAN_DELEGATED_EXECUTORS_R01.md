@@ -11,7 +11,14 @@ to secrets, contact external services by default, or publish/merge a PR.
 `tools/spartan_delegate.py` adds an explicitly installed side ledger **in
 the same coordinator SQLite database**, where the original `tasks` rows
 remain authoritative. A valid live `tasks` row, exact worker ID, and current
-attempt are checked inside each `BEGIN IMMEDIATE` transaction.
+attempt are checked inside each `BEGIN IMMEDIATE` transaction. `install(db)`
+preserves caller transactions, but every delegated mutation (`reserve`,
+`acknowledge`, cancellation, orphan reconciliation and PR intent) requires
+**no active outer SQLite transaction**. Nested SAVEPOINTs are deliberately
+rejected: a later outer rollback could erase the admission record after a
+Ray/Temporal dispatch, violating the durable first-dispatch gate. Commit or
+rollback the caller transaction before dispatch; failure is a sanitized
+`DelegationRejected` and does not change the caller transaction.
 
 * `DelegatedLease` and `mojum.spartan.delegation/1` transport only six
   allowlisted metadata fields, never arbitrary task payloads, prompts, paths,
