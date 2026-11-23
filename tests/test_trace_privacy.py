@@ -92,6 +92,20 @@ class TracePrivacyTests(unittest.TestCase):
             with self.subTest(patch=patch), self.assertRaises(TracePrivacyError):
                 sanitize_trace_event({**BASE, **patch})
 
+    def test_rejects_oversized_schema_and_event_values_before_lookup(self):
+        huge = "x" * 1_000_000
+        with self.assertRaises(TracePrivacyError):
+            sanitize_trace_event({**BASE, "schema": huge})
+
+        class ExplodingAllowlist:
+            def __contains__(self, value):
+                raise AssertionError("oversized event reached allowlist lookup")
+
+        from unittest.mock import patch
+        with patch("mojum.trace_privacy._ALLOWED_EVENTS", ExplodingAllowlist()):
+            with self.assertRaises(TracePrivacyError):
+                sanitize_trace_event({**BASE, "event_type": huge})
+
     def test_rejects_oversized_and_non_string_keys(self):
         with self.assertRaises(TracePrivacyError):
             sanitize_trace_event({**BASE, "extra": 1})
