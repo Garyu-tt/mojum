@@ -37,6 +37,20 @@ def valid_manifest() -> dict:
 
 
 class AnnarchyBuildAttestationTests(unittest.TestCase):
+    def test_rejects_hostile_string_subclass_keys_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("schema")
+
+            def __eq__(self, _other):
+                raise RuntimeError("hostile key equality must not run")
+
+        item = valid_manifest()
+        schema = item.pop("schema")
+        item[HostileKey("schema")] = schema
+        with self.assertRaisesRegex(ManifestError, "native strings"):
+            validate_manifest(item)
+
     def test_valid_openmp_manifest(self):
         checked = validate_manifest(valid_manifest())
         self.assertEqual(checked["backend"], "openmp")
