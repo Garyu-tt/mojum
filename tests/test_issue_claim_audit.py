@@ -80,6 +80,44 @@ class ClaimAuditTests(unittest.TestCase):
         report = claim_audit.audit(raw)
         self.assertEqual(report["issues"][0]["active_claims"][0]["source_id"], 0)
 
+    def test_fenced_code_examples_never_count_as_claims(self):
+        for opening in ("```text", "~~~~text", "````json"):
+            closing = opening.split("text")[0].split("json")[0]
+            snippet = opening + "\n" + marker("agent", "scope") + "\n" + closing
+            with self.subTest(opening=opening), self.assertRaisesRegex(
+                claim_audit.ClaimAuditError, "code fence"
+            ):
+                claim_audit.audit(snapshot(comment(1, "bot", snippet)))
+
+    def test_marker_after_closed_fence_still_counts_as_claim(self):
+        body = "```text\nexample without marker\n```\n" + marker("agent", "scope")
+        report = claim_audit.audit(snapshot(comment(1, "bot", body)))
+        self.assertEqual(report["status"], "clear")
+        self.assertEqual(report["issues"][0]["active_claims"][0]["worker"], "agent")
+
+    def test_indented_markdown_code_is_not_a_claim(self):
+        with self.assertRaises(claim_audit.ClaimAuditError):
+            claim_audit.audit(snapshot(comment(1, "bot", "    " + marker("agent", "scope"))))
+
+    def test_invalid_unicode_is_typed_for_comments_and_issue_bodies(self):
+        for issue in (False, True):
+            raw = snapshot(comment(1, "bot", "bad \ud800")) if not issue else snapshot()
+            if issue:
+                raw["issues"][0].update({"body": "bad \ud800", "author": "bot",
+                                         "created_at": "2026-11-23T11:00:00Z"})
+            with self.subTest(issue=issue), self.assertRaisesRegex(
+                claim_audit.ClaimAuditError, "invalid Unicode"
+            ):
+                claim_audit.audit(raw)
+
+    def test_partial_issue_body_metadata_is_rejected(self):
+        for key in ("body", "author", "created_at"):
+            raw = snapshot()
+            raw["issues"][0][key] = "anything"
+            with self.subTest(key=key), self.assertRaisesRegex(
+                claim_audit.ClaimAuditError, "must appear together"
+            ):
+                claim_audit.audit(raw)
     def test_duplicate_claim_by_same_worker_is_idempotent(self):
         raw = snapshot(comment(1, "bot", marker("agent-a", "scope-a")),
                        comment(2, "bot", marker("agent-a", "scope-a")))
