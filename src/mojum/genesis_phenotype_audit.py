@@ -89,5 +89,6 @@ def audit_phenotype_snapshot(ledger_snapshot: dict[str, Any], phenotype_snapshot
     computed = ledger.phenotype(tick)
     computed_bytes = _canonical_bytes(computed)
     fields = sorted(set(computed) | set(phenotype_snapshot))
-    mismatches = tuple(key for key in fields if key not in computed or key not in phenotype_snapshot or computed[key] != phenotype_snapshot[key])
+    # Canonical JSON preserves exact JSON types; Python equality does not (60 == 60.0, True == 1).
+    mismatches = tuple(key for key in fields if key not in computed or key not in phenotype_snapshot or _canonical_bytes(computed[key]) != _canonical_bytes(phenotype_snapshot[key]))
     return PhenotypeAudit(SCHEMA, not mismatches, tick, ledger.revision, len(ledger_snapshot["events"]), mismatches, _digest(computed_bytes), _digest(supplied_bytes))
