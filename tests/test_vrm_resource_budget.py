@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from unittest.mock import patch
 import mojum.vrm_resource_budget as budget_module
 from mojum.vrm_resource_budget import ResourceBudgetError, ResourceLimits, SCHEMA, assess_vrm_resource_budget
 
@@ -67,6 +68,19 @@ class VrmResourceBudgetTests(unittest.TestCase):
                     with self.assertRaises(ResourceBudgetError):
                         assess_vrm_resource_budget(candidate)
                     dumps.assert_not_called()
+
+    def test_rejects_oversized_inventory_before_serialization(self):
+        oversized_count = {f"extra-{i}": 0 for i in range(20_000)}
+        oversized_key = inventory()
+        oversized_key["x" * 1_000_000] = oversized_key.pop("joint_count")
+        huge_integer = inventory(vertex_count=10**10_000)
+
+        for candidate in (oversized_count, oversized_key, huge_integer):
+            with self.subTest(size=len(candidate)):
+                with patch("mojum.vrm_resource_budget.json.dumps") as serializer:
+                    with self.assertRaises(ResourceBudgetError):
+                        assess_vrm_resource_budget(candidate)
+                    serializer.assert_not_called()
 
     def test_report_detached(self):
         data = inventory()
