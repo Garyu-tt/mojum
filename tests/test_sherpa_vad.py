@@ -157,6 +157,15 @@ class SherpaVadTests(unittest.TestCase):
         self.assertEqual(fake.config.silero_vad.window_size, WINDOW_SAMPLES)
         self.assertAlmostEqual(fake.detector.frames[0][0], .5)
 
+    def test_test_double_cannot_spoof_native_provenance(self):
+        result = self.run_vad()
+        self.assertEqual(result["backend"], "unverified-test-double-vad")
+        self.assertNotEqual(result["backend"], "sherpa-onnx-silero-vad")
+        with self.assertRaisesRegex(ValueError, "incomplete test-only"):
+            self.run_vad(_sherpa=_FakeSherpa(), _numpy=None)
+        with self.assertRaisesRegex(ValueError, "incomplete test-only"):
+            self.run_vad(_backend_version=None)
+
     def test_repeatability_and_silence(self):
         self.assertEqual(self.run_vad(), self.run_vad())
         self.assertEqual(self.run_vad(pcm=bytes(1024))["segments"], [])
