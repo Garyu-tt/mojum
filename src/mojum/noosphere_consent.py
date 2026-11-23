@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
-from collections.abc import Mapping
 
 CONSENT_SCHEMA = "mojum.noosphere.source-consent/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
@@ -14,6 +14,8 @@ MAX_GRANTS = 128
 MAX_TOPICS = 64
 MAX_EVENTS = 10_000
 MAX_WIRE_BYTES = 16 * 1024 * 1024
+MAX_TREE_NODES = 200_000
+MAX_TREE_DEPTH = 64
 _VISIBILITY = frozenset({"PUBLIC", "RESTRICTED", "PRIVATE"})
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _GRANT_KEYS = {
@@ -55,6 +57,61 @@ def _integer(value, field):
     return value
 
 
+def _check_native_json_tree(value):
+    """Bound an untrusted JSON tree before equality, hashing, or serialization."""
+    stack = [(value, 0)]
+    seen = set()
+    nodes = 0
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_TREE_NODES or depth > MAX_TREE_DEPTH:
+            raise ConsentError("JSON structure exceeds its depth or node budget")
+        kind = type(item)
+        if kind is dict:
+            identity = id(item)
+            if identity in seen:
+                raise ConsentError("JSON input must be a tree without cycles or shared containers")
+            seen.add(identity)
+            keys = tuple(dict.keys(item))
+            if len(keys) > MAX_TREE_NODES - nodes:
+                raise ConsentError("JSON object exceeds the node budget")
+            if any(type(key) is not str for key in keys):
+                raise ConsentError("JSON object keys must be native strings")
+            for key in keys:
+                if len(key) > MAX_WIRE_BYTES:
+                    raise ConsentError("JSON object key exceeds the byte budget")
+                try:
+                    key.encode("utf-8", errors="strict")
+                except UnicodeEncodeError as exc:
+                    raise ConsentError("JSON object key must be valid UTF-8") from exc
+                stack.append((item[key], depth + 1))
+        elif kind is list:
+            identity = id(item)
+            if identity in seen:
+                raise ConsentError("JSON input must be a tree without cycles or shared containers")
+            seen.add(identity)
+            if len(item) > MAX_TREE_NODES - nodes:
+                raise ConsentError("JSON array exceeds the node budget")
+            for child in item:
+                stack.append((child, depth + 1))
+        elif kind is str:
+            if len(item) > MAX_WIRE_BYTES:
+                raise ConsentError("JSON text exceeds the byte budget")
+            try:
+                item.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise ConsentError("JSON text must be valid UTF-8") from exc
+        elif kind is int:
+            if not -(2**63) <= item <= 2**63 - 1:
+                raise ConsentError("JSON integer exceeds the signed 64-bit limit")
+        elif kind is float:
+            if not math.isfinite(item):
+                raise ConsentError("JSON numbers must be finite")
+        elif kind not in (bool, type(None)):
+            raise ConsentError("input must contain native JSON values")
+
+
 def _canonical(value):
     try:
         wire = json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -72,7 +129,12 @@ def _digest(value):
 
 
 def _exact_mapping(value, keys, field):
-    if not isinstance(value, Mapping) or set(value) != keys:
+    if type(value) is not dict:
+        raise ConsentError(f"{field} must be a native JSON object")
+    native_keys = tuple(dict.keys(value))
+    if any(type(key) is not str for key in native_keys):
+        raise ConsentError(f"{field} keys must be native strings")
+    if frozenset(native_keys) != keys:
         raise ConsentError(f"{field} must contain exactly the documented fields")
 
 
@@ -87,6 +149,7 @@ def _sorted_text_list(value, field, maximum):
 
 def validate_grant(grant):
     """Validate and detach one explicit source-consent grant."""
+    _check_native_json_tree(grant)
     _exact_mapping(grant, _GRANT_KEYS, "consent grant")
     if grant["schema"] != CONSENT_SCHEMA:
         raise ConsentError("unsupported consent grant schema")
@@ -115,6 +178,7 @@ def validate_grant(grant):
 
 
 def _validate_dataset(dataset):
+    _check_native_json_tree(dataset)
     _exact_mapping(dataset, {"projection", "sha256"}, "dataset envelope")
     projection = dataset["projection"]
     _exact_mapping(projection, _PROJECTION_KEYS, "dataset projection")
@@ -178,8 +242,8 @@ def _validate_dataset(dataset):
             raise ConsentError("event recorded_at_ns precedes observed_at_ns")
         if type(event["visibility"]) is not str or event["visibility"] not in _VISIBILITY:
             raise ConsentError("event has unsupported visibility")
-        if not isinstance(event["payload"], Mapping):
-            raise ConsentError("event payload must be an object")
+        if type(event["payload"]) is not dict:
+            raise ConsentError("event payload must be a native JSON object")
         detached.append({
             "seq": seq, "event": json.loads(_canonical(event)),
             "event_hash": event_hash,
