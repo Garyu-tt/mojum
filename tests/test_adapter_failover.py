@@ -161,6 +161,11 @@ class AdapterFailoverTests(unittest.TestCase):
         with self.assertRaises(FailoverError):
             transition(derived, {})
 
+    def test_impossible_initial_active_state_is_rejected(self):
+        forged = FailoverState(adapter_id="vr-world", mode="active")
+        with self.assertRaises(FailoverError):
+            transition(forged, {})
+
 
 if __name__ == "__main__":
     unittest.main()
