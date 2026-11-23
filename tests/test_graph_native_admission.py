@@ -2,6 +2,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from mojum.graph import (
@@ -144,6 +145,24 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         graph["nodes"][0]["config"]["bulk"] = "x" * (MAX_GRAPH_BYTES + 1)
         with self.assertRaisesRegex(GraphError, "256 KiB"):
             validate(graph)
+
+    def test_escaped_json_size_is_rejected_before_serialization(self):
+        graph = self.fresh()
+        # Each control character expands to six bytes in compact JSON.
+        graph["nodes"][0]["config"]["control"] = "\x01" * (MAX_GRAPH_BYTES // 6 + 1)
+        with patch("mojum.graph.json.dumps", wraps=json.dumps) as serializer:
+            with self.assertRaisesRegex(GraphError, "256 KiB"):
+                validate(graph)
+            serializer.assert_not_called()
+
+    def test_json_structure_overhead_is_included_in_preflight(self):
+        graph = self.fresh()
+        graph["nodes"][0]["config"]["padding"] = "x" * (MAX_GRAPH_BYTES - 220)
+        graph["nodes"][0]["config"]["many"] = [None] * 100
+        with patch("mojum.graph.json.dumps", wraps=json.dumps) as serializer:
+            with self.assertRaisesRegex(GraphError, "256 KiB"):
+                validate(graph)
+            serializer.assert_not_called()
 
     def test_huge_integer_is_rejected_before_decimal_serialization(self):
         graph = self.fresh()
