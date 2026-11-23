@@ -206,8 +206,8 @@ def test_payload_text_budget_precedes_serialization(tmp_path, monkeypatch):
 def test_payload_rejects_malformed_unicode_and_oversized_integer(tmp_path):
     with QAWorkQueue(str(tmp_path / "unicode-bounds.db")) as q:
         with pytest.raises(QueueError, match="valid UTF-8"):
-            q.enqueue("bad-unicode", "review", {"value": "\\ud800"})
+            q.enqueue("bad-unicode", "review", {"value": "\ud800"})
         with pytest.raises(QueueError, match="valid UTF-8"):
-            q.enqueue("bad-key", "review", {"\\ud800": "value"})
+            q.enqueue("bad-key", "review", {"\ud800": "value"})
         with pytest.raises(QueueError, match="integer exceeds bit budget"):
             q.enqueue("big-int", "review", {"value": 1 << 4096})
