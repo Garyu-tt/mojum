@@ -12,7 +12,7 @@ MAX_MEMBERS = 4096
 MAX_PATH_BYTES = 1024
 MAX_COMPONENT_BYTES = 255
 _DRIVE = re.compile(r"^[A-Za-z]:")
-_CONTROL = re.compile(r"[\\x00-\\x1f\\x7f]")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class ArchivePathError(ValueError):
@@ -25,9 +25,13 @@ def validate_member_path(path: str) -> str:
     No normalization of unsafe input is performed: callers must not silently
     reinterpret a malicious member name.
     """
-    if not isinstance(path, str):
-        raise ArchivePathError("member path must be a string")
-    if not path or len(path.encode("utf-8")) > MAX_PATH_BYTES:
+    if type(path) is not str:
+        raise ArchivePathError("member path must be an exact native string")
+    try:
+        encoded_path = path.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ArchivePathError("member path is not valid UTF-8 text") from exc
+    if not path or len(encoded_path) > MAX_PATH_BYTES:
         raise ArchivePathError("empty or oversized member path")
     if path.startswith(("/", "\\\\")) or _DRIVE.match(path):
         raise ArchivePathError("absolute or drive-prefixed member path")
