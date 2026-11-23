@@ -138,6 +138,12 @@ class TrajectoryAdmissionTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(TrajectoryError):
                 validate_trajectory(payload)
 
+    def test_huge_native_integer_rejected_before_float_conversion(self):
+        payload = sample()
+        payload["frames"][0]["positions_rad"][0] = 10 ** 100_000
+        with self.assertRaisesRegex(TrajectoryError, "supported magnitude"):
+            validate_trajectory(payload)
+
     def test_schema_and_units_are_versioned(self):
         for field, value in (("schema", "v2"), ("position_unit", "degrees")):
             payload = sample()
