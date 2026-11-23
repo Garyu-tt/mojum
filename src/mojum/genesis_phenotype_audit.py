@@ -14,33 +14,86 @@ class GenesisPhenotypeAuditError(ValueError):
     """Malformed or unsupported audit input."""
 
 
-def _check_tree(value, path="$", depth=0, budget=None):
-    if budget is None:
-        budget = [0]
-    budget[0] += 1
-    if budget[0] > MAX_TREE_NODES:
-        raise GenesisPhenotypeAuditError("input node budget exceeded")
-    if depth > MAX_TREE_DEPTH:
-        raise GenesisPhenotypeAuditError("input nesting budget exceeded")
-    kind = type(value)
-    if kind is dict:
-        for key, child in value.items():
-            if type(key) is not str:
-                raise GenesisPhenotypeAuditError(f"{path} has a non-string key")
-            _check_tree(child, f"{path}.{key}", depth + 1, budget)
-    elif kind is list:
-        for index, child in enumerate(value):
-            _check_tree(child, f"{path}[{index}]", depth + 1, budget)
-    elif value is None or kind in (str, int, bool, float):
-        if kind is str:
-            try:
-                value.encode("utf-8")
-            except UnicodeEncodeError as exc:
-                raise GenesisPhenotypeAuditError(
-                    f"{path} contains invalid Unicode"
-                ) from exc
-    else:
-        raise GenesisPhenotypeAuditError(f"{path} is not a native JSON value")
+def _json_string_size(value):
+    """Return the exact UTF-8 size of json.dumps' quoted string form."""
+    size = 2  # surrounding quotes
+    short_escapes = {8, 9, 10, 12, 13}
+    for char in value:
+        code = ord(char)
+        if code in (34, 92):
+            size += 2
+        elif code < 32:
+            size += 2 if code in short_escapes else 6
+        elif 0xD800 <= code <= 0xDFFF:
+            raise GenesisPhenotypeAuditError("input contains invalid Unicode")
+        elif code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > MAX_INPUT_BYTES:
+            raise GenesisPhenotypeAuditError("input exceeds the 1 MiB JSON budget")
+    return size
+
+
+def _check_tree(value, path="$"):
+    """Preflight exact JSON serialization size before allocating serialized input."""
+    stack = [(value, 0)]
+    nodes = 0
+    encoded_size = 0
+
+    def add_size(amount):
+        nonlocal encoded_size
+        encoded_size += amount
+        if encoded_size > MAX_INPUT_BYTES:
+            raise GenesisPhenotypeAuditError(
+                f"{path} exceeds the 1 MiB JSON input limit"
+            )
+
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_TREE_NODES:
+            raise GenesisPhenotypeAuditError("input node budget exceeded")
+        if depth > MAX_TREE_DEPTH:
+            raise GenesisPhenotypeAuditError("input nesting budget exceeded")
+
+        kind = type(item)
+        if kind is dict:
+            add_size(2 + max(0, len(item) - 1))  # braces and commas
+            for key, child in item.items():
+                if type(key) is not str:
+                    raise GenesisPhenotypeAuditError(
+                        f"{path} contains a non-string object key"
+                    )
+                add_size(_json_string_size(key) + 1)  # key and colon
+                stack.append((child, depth + 1))
+        elif kind is list:
+            add_size(2 + max(0, len(item) - 1))  # brackets and commas
+            for child in item:
+                stack.append((child, depth + 1))
+        elif kind is str:
+            add_size(_json_string_size(item))
+        elif kind is int:
+            # GENESIS counters and parameters are signed 63-bit values.
+            if not -(2**63) <= item <= MAX_TICK:
+                raise GenesisPhenotypeAuditError("input integer is out of range")
+            add_size(len(str(item)))
+        elif kind is float:
+            if not math.isfinite(item):
+                raise GenesisPhenotypeAuditError("input contains a non-finite number")
+            add_size(len(repr(item)))
+        elif kind is bool:
+            add_size(5 if item else 5)  # true/false are both five bytes
+        elif item is None:
+            add_size(4)
+        else:
+            raise GenesisPhenotypeAuditError(
+                f"{path} contains a non-native JSON value"
+            )
 
 
 def _bounded_canonical(value, path):
