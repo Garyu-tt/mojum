@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from mojum.qa_supervisor_metrics import MetricsInputError, summarize_snapshot
 
@@ -125,6 +126,22 @@ class SupervisorMetricsTests(unittest.TestCase):
         oversized.update({f"extra-{i}": None for i in range(10_000)})
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [oversized]})
+
+    def test_oversized_field_names_rejected_before_hashing(self):
+        huge_key = "x" * 1_000_000
+        snapshot = {"observed_at": 1, "tasks": [], huge_key: None}
+        with patch("mojum.qa_supervisor_metrics.set",
+                   side_effect=AssertionError("field name must be bounded before hashing"),
+                   create=True):
+            with self.assertRaises(MetricsInputError):
+                summarize_snapshot(snapshot)
+
+        task = {"id": "x", "state": "READY", huge_key: None}
+        with patch("mojum.qa_supervisor_metrics.set",
+                   side_effect=AssertionError("task field name must be bounded before hashing"),
+                   create=True):
+            with self.assertRaises(MetricsInputError):
+                summarize_snapshot({"observed_at": 1, "tasks": [task]})
 
 
 if __name__ == "__main__":
