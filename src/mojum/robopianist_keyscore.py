@@ -215,8 +215,9 @@ def read_trace(path: Path):
     try:
         with path.open("rb") as handle:
             data = handle.read(MAX_BYTES + 1)
-    except OSError as exc:
-        raise PianoBenchmarkError("cannot read local trace") from exc
+    except OSError:
+        # Do not expose a potentially sensitive local path through traceback chaining.
+        raise PianoBenchmarkError("cannot read local trace") from None
     if len(data) > MAX_BYTES:
         raise PianoBenchmarkError("oversized trace")
     try:
