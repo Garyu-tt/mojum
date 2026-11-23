@@ -17,7 +17,6 @@ MAX_TEXT_CHARS = 2_000
 MAX_AUDIO_MS = 30_000
 MAX_CHUNK_BYTES = 64 * 1024
 MAX_CHUNKS = 4_096
-MAX_BACKEND_ID_CHARS = 64
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z", re.ASCII)
 _LANG = re.compile(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*\Z", re.ASCII)
 
@@ -136,8 +135,8 @@ def _close_iterator(iterator: object) -> None:
 def synthesize(request: TTSRequest, backend: TTSBackend) -> TTSResult:
     """Run an injected local backend and enforce incremental output limits.
 
-    The duration limit is enforced while consuming output, so oversized output
-    is stopped without first buffering the complete backend response.
+    The backend must return a streaming iterator, not a materialized list.
+    Output bounds are enforced while consuming that iterator.
     """
     validate_request(request)
     backend_id, backend_version = _backend_metadata(backend)
@@ -150,6 +149,9 @@ def synthesize(request: TTSRequest, backend: TTSBackend) -> TTSResult:
         iterator = iter(chunks)
     except Exception as exc:
         raise TTSBackendError("backend failed to start") from exc
+    if iterator is not chunks:
+        _close_iterator(iterator)
+        raise TTSError("backend must return a streaming iterator")
 
     max_bytes = request.sample_rate_hz * 2 * request.max_audio_ms // 1_000
     output = bytearray()
