@@ -22,4 +22,4 @@ jobs:
       - name: Install package
         run: python -m pip install --no-deps .
       - name: Run focused contract suite
-        run: python -m unittest tests.test_genesis_timeline -v
+        run: python -m unittest discover -s tests -p 'test_genesis_timeline.py' -v
