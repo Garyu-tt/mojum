@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+import mojum.vrm_resource_budget as budget_module
 from mojum.vrm_resource_budget import ResourceBudgetError, ResourceLimits, SCHEMA, assess_vrm_resource_budget
 
 def inventory(**changes):
@@ -51,6 +53,21 @@ class VrmResourceBudgetTests(unittest.TestCase):
     def test_limits_bool_rejected(self):
         with self.assertRaises(ResourceBudgetError):
             ResourceLimits(max_vertices=True)
+
+    def test_preflight_rejects_before_serialization(self):
+        cases = (
+            {**inventory(), "extra": 1},
+            {**inventory(), "x" * 1000: 1},
+            inventory(vertex_count="9" * 100_000),
+            inventory(vertex_count=10 ** 100_000),
+        )
+        for candidate in cases:
+            with self.subTest(candidate_keys=len(candidate)):
+                with patch.object(budget_module.json, "dumps", side_effect=AssertionError("serialized")) as dumps:
+                    with self.assertRaises(ResourceBudgetError):
+                        assess_vrm_resource_budget(candidate)
+                    dumps.assert_not_called()
+
     def test_report_detached(self):
         data = inventory()
         report = assess_vrm_resource_budget(data)
