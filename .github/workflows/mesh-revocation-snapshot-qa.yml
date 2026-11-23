@@ -9,7 +9,7 @@ on:
       - ".github/workflows/mesh-revocation-snapshot-qa.yml"
   push:
     branches:
-      - "build/12-mesh-signed-revocations-20261123"
+      - "build/12-mesh-revocation-20261123"
     paths:
       - "src/mojum/mesh_revocation.py"
       - "tests/test_mesh_revocation.py"
