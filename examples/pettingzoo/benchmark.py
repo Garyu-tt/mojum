@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+from itertools import islice
 from typing import Iterable
 
 
@@ -20,7 +21,7 @@ class DeterministicCoordinationEnv:
         self.agents: list[str] = []
         self._target = 0
         self._step_count = 0
-        self._last_rewards: dict[str, int | None] = {}
+        self._last_rewards: dict[str, int] = {}
         self._done = True
 
     def reset(self, seed: int = 0, options: dict | None = None):
@@ -30,7 +31,7 @@ class DeterministicCoordinationEnv:
             raise ValueError("options must be a dict or None")
         self._target = random.Random(seed).randrange(2)
         self._step_count = 0
-        self._last_rewards = {agent: None for agent in self.possible_agents}
+        self._last_rewards = {agent: -1 for agent in self.possible_agents}
         self.agents = list(self.possible_agents)
         self._done = False
         return self._observations(), {agent: {"step": 0} for agent in self.agents}
@@ -38,11 +39,12 @@ class DeterministicCoordinationEnv:
     def _observations(self):
         return {
             agent: {
-                "agent_id": agent,
+                "agent_id": index,
                 "step": self._step_count,
                 "last_reward": self._last_rewards[agent],
             }
-            for agent in self.agents
+            for index, agent in enumerate(self.possible_agents)
+            if agent in self.agents
         }
 
     def step(self, actions: dict[str, int]):
@@ -95,6 +97,7 @@ def make_pettingzoo_env(horizon: int = 10):
             self._core = DeterministicCoordinationEnv(horizon=horizon)
             self.possible_agents = list(self._core.possible_agents)
             self.agents = []
+            self.render_mode = None
             self.action_spaces = {
                 agent: spaces.Discrete(2) for agent in self.possible_agents
             }
@@ -102,7 +105,7 @@ def make_pettingzoo_env(horizon: int = 10):
                 agent: spaces.Dict({
                     "agent_id": spaces.Discrete(2),
                     "step": spaces.Discrete(horizon + 1),
-                    "last_reward": spaces.Discrete(2),
+                    "last_reward": spaces.Discrete(3, start=-1),
                 })
                 for agent in self.possible_agents
             }
@@ -141,12 +144,18 @@ def make_pettingzoo_env(horizon: int = 10):
 def _run_episode(seed: int, horizon: int, adaptive: bool) -> tuple[int, list[dict]]:
     env = DeterministicCoordinationEnv(horizon=horizon)
     env.reset(seed=seed)
+    last_action: int | None = None
     last_reward: int | None = None
     total_reward = 0
     trace: list[dict] = []
 
     while env.agents:
-        action = 0 if not adaptive or last_reward in (None, 1) else 1
+        if not adaptive or last_action is None:
+            action = 0
+        elif last_reward == 1:
+            action = last_action
+        else:
+            action = 1 - last_action
         actions = {agent: action for agent in env.agents}
         _, rewards, _, truncations, _ = env.step(actions)
         total_reward += sum(rewards.values())
@@ -156,6 +165,7 @@ def _run_episode(seed: int, horizon: int, adaptive: bool) -> tuple[int, list[dic
             "rewards": [rewards[agent] for agent in sorted(rewards)],
             "truncated": all(truncations.values()),
         })
+        last_action = action
         last_reward = rewards["agent_0"]
 
     env.close()
@@ -166,7 +176,7 @@ def run_benchmark(seeds: Iterable[int], horizon: int = 10) -> dict:
     """Compare adaptive win-stay/lose-switch with a frozen action-0 control."""
     if type(horizon) is not int or not 1 <= horizon <= 256:
         raise ValueError("horizon must be an integer in [1, 256]")
-    seed_list = list(seeds)
+    seed_list = list(islice(seeds, 1001))
     if not 1 <= len(seed_list) <= 1000:
         raise ValueError("provide between 1 and 1000 episode seeds")
     if any(type(seed) is not int or not 0 <= seed <= 2**32 - 1 for seed in seed_list):
