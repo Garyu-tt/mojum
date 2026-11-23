@@ -63,6 +63,8 @@ test('rejects gaps, duplicate/reordered sequence and nonmonotonic time', () => {
 test('rejects cross-epoch frames and changing joint inventory', () => {
   const otherEpoch = frame(1, {epoch: 'body-epoch-02'});
   assert.throws(() => createVrmPoseTimeline([frame(0), otherEpoch]), /epochs/);
+  const otherRevision = frame(1, {revision: 'b'.repeat(64)});
+  assert.throws(() => createVrmPoseTimeline([frame(0), otherRevision]), /revisions/);
   const otherJoints = frame(1, {
     joints: [{id: 'hip.yaw', angle_rad: 0.1}],
   });
