@@ -57,8 +57,12 @@ def sanitize_trace_attributes(attributes: Any) -> dict[str, str | int]:
         raise TraceSanitizationError("too many trace attributes")
 
     clean: dict[str, str | int] = {}
+    max_field_length = max(map(len, _ALLOWED_FIELDS))
     for key, value in attributes.items():
-        if type(key) is not str or key not in _ALLOWED_FIELDS:
+        # Bound caller-controlled key length before set membership hashes it.
+        if type(key) is not str or len(key) > max_field_length:
+            raise TraceSanitizationError("unknown or unsafe trace attribute")
+        if key not in _ALLOWED_FIELDS:
             raise TraceSanitizationError("unknown or unsafe trace attribute")
         if key in _STRING_PATTERNS:
             if type(value) is not str:
