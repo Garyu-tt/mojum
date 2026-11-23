@@ -36,6 +36,19 @@ class IngressRateLimiterTests(unittest.TestCase):
         self.assertTrue(limiter.admit("agent-b", 10).allowed)
         self.assertEqual(limiter.tracked_sources, 1)
 
+    def test_capacity_retry_after_uses_earliest_expiry(self):
+        limiter = IngressRateLimiter(limit=1, window_ns=10, max_sources=2)
+        self.assertTrue(limiter.admit("agent-a", 0).allowed)
+        self.assertTrue(limiter.admit("agent-b", 5).allowed)
+
+        denied = limiter.admit("agent-c", 9)
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "capacity_exhausted")
+        self.assertEqual(denied.retry_after_ns, 1)
+
+        # Once the earliest window expires, capacity becomes available.
+        self.assertTrue(limiter.admit("agent-c", 10).allowed)
+
     def test_clock_rollback_does_not_mutate(self):
         limiter = IngressRateLimiter(limit=2, window_ns=10)
         self.assertTrue(limiter.admit("agent-a", 5).allowed)
