@@ -151,6 +151,15 @@ class TracePrivacyTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(TracePrivacyError):
                 sanitize_trace_event({**BASE, field: huge})
 
+    def test_oversized_key_rejected_before_hashing(self):
+        from unittest.mock import patch
+
+        huge_key = "x" * 1_000_000
+        raw = {**BASE, huge_key: None}
+        with patch("mojum.trace_privacy.set", side_effect=AssertionError("oversized key reached hashing"), create=True):
+            with self.assertRaisesRegex(TracePrivacyError, "bounded native strings"):
+                sanitize_trace_event(raw)
+
     def test_offline_sink_validates_but_never_persists_or_sends(self):
         sink = OfflineTraceSink()
         self.assertIs(sink.emit(BASE), False)
