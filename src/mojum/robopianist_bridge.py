@@ -63,6 +63,27 @@ def _validate_action(action: Any, lower: tuple[float, ...], upper: tuple[float, 
     return tuple(out)
 
 
+def _validate_native_action(action: Any, lower: tuple[float, ...], upper: tuple[float, ...]) -> None:
+    """Revalidate *converted* backend values before dispatching any step.
+
+    NumPy dtype casts or an explicit array_factory may alter an already-checked
+    finite Python vector (e.g. float64 -> float32 overflow to infinity). Never
+    trust the pre-cast check as proof of the exact action sent to the backend.
+    """
+    try:
+        shape = getattr(action, "shape", None)
+        if shape is not None and tuple(shape) != (len(lower),):
+            raise PianoBridgeError("converted action shape mismatch")
+        if len(action) != len(lower):
+            raise PianoBridgeError("converted action length mismatch")
+        for index, (minimum, maximum) in enumerate(zip(lower, upper)):
+            value = _number(action[index], "converted action")
+            if not minimum <= value <= maximum:
+                raise PianoBridgeError("converted action outside bounded spec")
+    except (TypeError, IndexError, OverflowError) as exc:
+        raise PianoBridgeError("invalid converted action") from exc
+
+
 def _read_timestep(ts: Any, *, piano_keys: int, tick: int, origin: str, expect_reward: bool) -> dict[str, Any]:
     # Only the current target-key goal is projected; never export raw observation,
     # piano state, camera pixels, actions, notes, private context or MIDI files.
@@ -176,6 +197,7 @@ class PianoBridge:
                 native_action = numpy.asarray(vector, dtype=self._env.action_spec().dtype)
             else:
                 native_action = self._array_factory(vector)
+            _validate_native_action(native_action, self._lower, self._upper)
             ts = self._env.step(native_action)
             frame = _read_timestep(ts, piano_keys=self._piano_keys,
                                    tick=self._tick + 1, origin=self._origin,
