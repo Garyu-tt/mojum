@@ -188,7 +188,17 @@ def audit_phenotype_snapshot(
     # Reject expensive ledger replays before serialization/deepcopy/restore.
     # GenomeLedger.append validates every unique valid_from_tick prefix and
     # re-hashes the growing history, so replay cost grows cubically.
-    raw_events = ledger_snapshot.get("events")
+    # GenomeLedger snapshots have exactly four root fields. Check bounded
+    # cardinality and native keys before lookup: dict.get("events") can invoke
+    # equality on a hostile str-subclass key with a colliding hash.
+    if len(ledger_snapshot) != 4:
+        raise PhenotypeAuditError("ledger snapshot has an invalid root shape")
+    root_keys = tuple(dict.keys(ledger_snapshot))
+    if any(type(key) is not str for key in root_keys):
+        raise PhenotypeAuditError("ledger snapshot contains a non-native object key")
+    if set(root_keys) != {"schema", "seed", "events", "revision"}:
+        raise PhenotypeAuditError("ledger snapshot has an invalid root shape")
+    raw_events = dict.__getitem__(ledger_snapshot, "events")
     if type(raw_events) is not list or len(raw_events) > MAX_AUDIT_EVENTS:
         raise PhenotypeAuditError(
             f"ledger event budget exceeded (maximum {MAX_AUDIT_EVENTS})"
