@@ -124,6 +124,11 @@ def _live(db, lease, now):
 
 
 def _atomic(db, fn):
+    # A nested SAVEPOINT is not durable until its caller commits. For remote
+    # dispatch that could publish work after an outer ROLLBACK, violating the
+    # one-dispatch admission guarantee. Fail closed before touching caller state.
+    if db.in_transaction:
+        raise DelegationRejected("finish caller transaction before delegation mutation")
     db.execute("BEGIN IMMEDIATE")
     try:
         result = fn()
