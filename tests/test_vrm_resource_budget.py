@@ -65,6 +65,28 @@ class VrmResourceBudgetTests(unittest.TestCase):
         with self.assertRaises(ResourceBudgetError):
             assess_vrm_resource_budget(inventory(vertex_count={"nested": [1]}))
 
+    def test_rejects_oversized_key_before_hashing(self):
+        candidate = inventory()
+        candidate["x" * 1_000_000] = 1
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(candidate)
+
+    def test_rejects_string_subclass_key_before_hashing(self):
+        class HostileString(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+
+        candidate = inventory()
+        candidate[HostileString("schema")] = candidate.pop("schema")
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(candidate)
+
+    def test_rejects_oversized_schema_before_comparison(self):
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(inventory(schema="x" * 1_000_000))
+
     def test_report_detached(self):
         data = inventory()
         report = assess_vrm_resource_budget(data)
