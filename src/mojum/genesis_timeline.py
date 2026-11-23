@@ -25,6 +25,17 @@ def audit_timeline(snapshot: Mapping[str, Any], *, max_boundaries: int = MAX_BOU
     if type(max_boundaries) is not int or not 1 <= max_boundaries <= MAX_BOUNDARIES:
         raise GenesisError(f"max_boundaries must be an integer in [1, {MAX_BOUNDARIES}]")
 
+    # This boundary intentionally accepts only ordinary JSON-shaped built-ins;
+    # do not invoke arbitrary Mapping/list subclass behavior while auditing.
+    if type(snapshot) is not dict:
+        raise GenesisError("Snapshot must be an exact built-in dict")
+    seed = snapshot.get("seed")
+    if type(seed) is not dict or type(seed.get("inherited")) is not dict:
+        raise GenesisError("Snapshot seed must use exact built-in dicts")
+    events_input = snapshot.get("events")
+    if type(events_input) is not list or any(type(event) is not dict for event in events_input):
+        raise GenesisError("Snapshot events must be an exact built-in list of dicts")
+
     ledger = GenomeLedger.from_snapshot(snapshot)
     canonical_snapshot = ledger.snapshot()
     events = canonical_snapshot["events"]
