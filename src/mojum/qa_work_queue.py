@@ -14,6 +14,8 @@ SCHEMA = "mojum.qa-work-queue/1"
 MAX_PAYLOAD_BYTES = 65_536
 MAX_AUDIT_ROWS = 10_000
 MAX_EXPIRY_BATCH = 500
+_MAX_SQLITE_INTEGER = 2**63 - 1
+_VALID_STATUSES = frozenset({"queued", "leased", "succeeded", "failed"})
 
 
 class QueueError(ValueError):
@@ -257,8 +259,8 @@ class QAWorkQueue:
 
     @staticmethod
     def _id(job_id: object) -> int:
-        if type(job_id) is not int or job_id <= 0:
-            raise QueueError("job_id must be a positive integer")
+        if type(job_id) is not int or not 1 <= job_id <= _MAX_SQLITE_INTEGER:
+            raise QueueError("job_id must be a positive SQLite integer")
         return job_id
 
     @staticmethod
@@ -434,7 +436,9 @@ class QAWorkQueue:
     def list_jobs(self, *, status: str | None = None, limit: int = 100) -> tuple[Job, ...]:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise QueueError("limit must be an integer from 1 to 500")
-        if status is not None and (type(status) is not str or status not in {"queued", "leased", "succeeded", "failed"}):
+        if status is not None and (
+            type(status) is not str or len(status) > 9 or status not in _VALID_STATUSES
+        ):
             raise QueueError("unsupported status filter")
         sql, args = "SELECT * FROM qa_jobs", ()
         if status is not None:
