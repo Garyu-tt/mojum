@@ -103,6 +103,11 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _read_source(source: object) -> dict[str, object]:
     if type(source) is str:
+        # UTF-8 requires at least one byte per code point. Bound character
+        # count before allocating the encoded copy, then enforce the exact
+        # byte budget for multibyte input.
+        if len(source) > MAX_PROFILE_BYTES:
+            raise AquariumConfigError("profile exceeds the byte budget")
         try:
             raw = source.encode("utf-8", "strict")
         except UnicodeError as exc:
