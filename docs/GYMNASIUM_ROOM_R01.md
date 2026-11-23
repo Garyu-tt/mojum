@@ -29,7 +29,7 @@ indicates the step horizon was reached first. Reset must precede step.
 Install separately into an isolated environment, after dependency/license review:
 
 ```sh
-python -m pip install 'gymnasium==1.2.1'
+python -m pip install 'gymnasium==1.2.2'
 PYTHONPATH=src python -m unittest tests.test_gym_room -v
 ```
 
@@ -56,7 +56,7 @@ before adding Stable-Baselines3. `dm_control` is research-only.
   release + transitive licenses before distribution), SB3 (MIT; **not used**),
   dm_control (Apache 2.0; **not used**). The integration registry stays `planned`
   until reviewed under its license gates. Pin shown above is an example
-  environment lock, not a production clearance.
+  environment lock, matches the dedicated CI matrix, not a production clearance.
 - Fixed start and goal mean `seed` is recorded but there is no stochastic
   reset yet; reproducibility is exact for repeated actions and geometry.
 - CPU/disk: O(obstacle_count) per step for canonical swept collision;
