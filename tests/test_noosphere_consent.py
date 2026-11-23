@@ -180,7 +180,8 @@ class NoosphereConsentTests(unittest.TestCase):
             )
 
     def test_noncanonical_visibility_list_rejected(self):
-        bad = grant(visibility=["PUBLIC", "PRIVATE"])
+        bad = grant(visibility=["PRIVATE", "PUBLIC"])
+        bad["allowed_visibility"] = ["PUBLIC", "PRIVATE"]
         with self.assertRaises(ConsentError):
             validate_grant(bad)
 
