@@ -233,12 +233,16 @@ class LocalNoosphere:
             raw, prior, stored = row["wire_json"], row["prev_hash"], row["event_hash"]
             recorded = row["recorded_at_ns"]
             try:
+                # A tampered row may be valid JSON text but exceed Python's
+                # safe parser/encoder recursion limit. Fail closed with the
+                # same payload-free store error as other invalid records.
                 event = _validate_event(json.loads(raw), self.agent_id)
-            except (ValueError, TypeError) as exc:
+                canonical_wire = _canonical(event)
+            except (ValueError, TypeError, RecursionError, OverflowError) as exc:
                 raise NoosphereError(f"invalid event at row {seq}") from exc
             # A recomputed semantic event hash alone cannot reject duplicate
             # JSON keys, whitespace rewrites, or parser disagreement.
-            if raw != _canonical(event):
+            if raw != canonical_wire:
                 raise NoosphereError(f"noncanonical stored JSON at row {seq}")
             if seq != expected_seq:
                 raise NoosphereError(f"noncontiguous sequence at row {seq}")
