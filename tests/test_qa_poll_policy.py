@@ -77,6 +77,29 @@ class PollPolicyTests(unittest.TestCase):
         with self.assertRaises(PollPolicyError):
             circuit_transition(Circuit(), "unknown", now_epoch=0)  # type: ignore[arg-type]
 
+    def test_malformed_circuit_snapshots_are_rejected(self):
+        invalid = (
+            Circuit(status="unknown", opened_at=0),
+            Circuit(status="closed", failures=True),
+            Circuit(status="open", opened_at=float("nan")),
+            Circuit(status="open", opened_at=-1),
+            Circuit(status="open", opened_at=1, probe_in_flight=True),
+            Circuit(status="closed", probe_in_flight=True),
+        )
+        for circuit in invalid:
+            with self.subTest(circuit=circuit):
+                with self.assertRaises(PollPolicyError):
+                    poll_permitted(circuit, now_epoch=100)
+                with self.assertRaises(PollPolicyError):
+                    circuit_transition(circuit, "success", now_epoch=100)
+
+    def test_retry_after_rejects_string_subclasses(self):
+        class HostileString(str):
+            def strip(self):
+                raise AssertionError("subclass method must not run")
+
+        self.assertIsNone(parse_retry_after(HostileString("10"), now_epoch=0))
+
     def test_closed_circuit_always_permits_poll(self):
         self.assertTrue(poll_permitted(Circuit(), now_epoch=0))
 
