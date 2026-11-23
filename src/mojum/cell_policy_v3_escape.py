@@ -41,6 +41,9 @@ MAX_CONSECUTIVE_RESTS = 3
 # Bounded re-probing: rest only after this many consecutive failed probes in
 # a cell where every move already has measured blocked evidence.
 REPROBE_BLOCKED_BEFORE_REST = 4
+# Snapshot v2 carries a bounded chronology witness; v1 snapshots are rejected.
+SNAPSHOT_VERSION = 2
+MAX_OUTCOME_TAIL = max(MAX_CONSECUTIVE_RESTS, REPROBE_BLOCKED_BEFORE_REST)
 
 _ZONE = re.compile(
     r"(?:0|[1-9][0-9]{0,4}):(?:0|[1-9][0-9]{0,4})\Z", re.ASCII
@@ -122,6 +125,60 @@ def _check_streak_counters(state):
             raise CellV3EscapeError("recent cell lacks measured blocked move")
 
 
+def _validate_outcome_tail(state):
+    """Validate the exact bounded suffix that substantiates terminal streaks."""
+    tail = state["outcome_tail"]
+    if type(tail) is not list or len(tail) > MAX_OUTCOME_TAIL:
+        raise CellV3EscapeError("invalid escape outcome tail size")
+    if state["updates"] == 0:
+        if tail:
+            raise CellV3EscapeError("outcome tail without observations")
+        return
+    if len(tail) != min(state["updates"], MAX_OUTCOME_TAIL):
+        raise CellV3EscapeError("incomplete escape outcome tail")
+    first_tick = state["last_tick"] - len(tail) + 1
+    retained_counts = {}
+    retained_blocks = {}
+    for offset, entry in enumerate(tail):
+        if (type(entry) is not dict
+                or set(entry) != {"tick", "cell", "action", "blocked"}
+                or type(entry["tick"]) is not int
+                or entry["tick"] != first_tick + offset
+                or type(entry["cell"]) is not str
+                or _ZONE.fullmatch(entry["cell"]) is None
+                or entry["action"] not in ACTIONS
+                or type(entry["blocked"]) is not bool
+                or (entry["action"] == "rest" and entry["blocked"])):
+            raise CellV3EscapeError("invalid escape outcome tail entry")
+        cell = entry["cell"]
+        if cell in state["records"]:
+            key = (cell, entry["action"])
+            retained_counts[key] = retained_counts.get(key, 0) + 1
+            if entry["blocked"]:
+                retained_blocks[key] = retained_blocks.get(key, 0) + 1
+    for (cell, action), count in retained_counts.items():
+        totals = state["records"][cell].get(action)
+        if totals is None or totals[0] < count:
+            raise CellV3EscapeError("outcome tail exceeds retained action totals")
+    for (cell, action), count in retained_blocks.items():
+        if state["records"][cell][action][1] < count:
+            raise CellV3EscapeError("outcome tail exceeds retained blocked totals")
+    rests = probes = 0
+    for entry in reversed(tail):
+        if entry["action"] == "rest":
+            if probes:
+                break
+            rests += 1
+        elif entry["blocked"]:
+            if rests:
+                break
+            probes += 1
+        else:
+            break
+    if rests != state["consecutive_rests"] or probes != state["consecutive_blocked_probes"]:
+        raise CellV3EscapeError("terminal streak counters disagree with ordered outcome tail")
+
+
 class CellExplorerV3Escape:
     """Bounded 4cm memory plus measured rest-escape probing (opt-in profile)."""
 
@@ -134,6 +191,7 @@ class CellExplorerV3Escape:
         self.forgotten_observations = 0
         self.consecutive_rests = 0
         self.consecutive_blocked_probes = 0
+        self.outcome_tail = []
 
     @staticmethod
     def _cell(sense):
@@ -148,6 +206,7 @@ class CellExplorerV3Escape:
     def snapshot(self):
         return {
             "schema": SCHEMA,
+            "snapshot_version": SNAPSHOT_VERSION,
             "cell_size_m": STEP_METERS,
             "last_tick": self.last_tick,
             "updates": self.updates,
@@ -157,17 +216,20 @@ class CellExplorerV3Escape:
             "forgotten_observations": self.forgotten_observations,
             "consecutive_rests": self.consecutive_rests,
             "consecutive_blocked_probes": self.consecutive_blocked_probes,
+            "outcome_tail": copy.deepcopy(self.outcome_tail),
         }
 
     @classmethod
     def from_snapshot(cls, state):
         mandatory = {
-            "schema", "cell_size_m", "last_tick", "updates", "records",
+            "schema", "snapshot_version", "cell_size_m", "last_tick", "updates", "records",
             "last_seen_at", "evictions", "forgotten_observations",
-            "consecutive_rests", "consecutive_blocked_probes",
+            "consecutive_rests", "consecutive_blocked_probes", "outcome_tail",
         }
         if (type(state) is not dict or set(state) != mandatory
                 or state["schema"] != SCHEMA
+                or type(state["snapshot_version"]) is not int
+                or state["snapshot_version"] != SNAPSHOT_VERSION
                 or type(state["cell_size_m"]) is not float
                 or state["cell_size_m"] != STEP_METERS
                 or type(state["last_tick"]) is not int
@@ -231,6 +293,7 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
+        _validate_outcome_tail(state)
         _check_streak_counters(state)
 
         # Each observation belongs to exactly one cell and tick. A live
@@ -265,6 +328,7 @@ class CellExplorerV3Escape:
         model.forgotten_observations = state["forgotten_observations"]
         model.consecutive_rests = state["consecutive_rests"]
         model.consecutive_blocked_probes = state["consecutive_blocked_probes"]
+        model.outcome_tail = copy.deepcopy(state["outcome_tail"])
         return model
 
     def decide(self, sense):
@@ -341,6 +405,10 @@ class CellExplorerV3Escape:
         self.last_seen_at[cell] = sense.tick
         self.last_tick = sense.tick
         self.updates += 1
+        self.outcome_tail.append({
+            "tick": sense.tick, "cell": cell, "action": action, "blocked": blocked,
+        })
+        self.outcome_tail = self.outcome_tail[-MAX_OUTCOME_TAIL:]
         if action == "rest":
             self.consecutive_rests += 1
             self.consecutive_blocked_probes = 0
