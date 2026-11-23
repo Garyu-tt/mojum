@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
+import unicodedata
 from typing import Any
 
 SCHEMA = "mojum.rig-joint-map/1"
@@ -59,7 +60,7 @@ def _text(value: object, path: str, *, identifier: bool = False) -> str:
         raise JointMapError(f"{path} must be valid UTF-8") from exc
     if identifier and _ID.fullmatch(value) is None:
         raise JointMapError(f"{path} is not a valid stable identifier")
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+    if any(unicodedata.category(ch) == "Cc" for ch in value):
         raise JointMapError(f"{path} contains control characters")
     return value
 
