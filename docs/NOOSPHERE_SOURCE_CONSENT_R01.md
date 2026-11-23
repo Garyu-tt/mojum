@@ -19,7 +19,7 @@ authorized = authorize_dataset(
 )
 ```
 
-The input must already have been obtained from a chain-verified Noosphere read. The helper rechecks the projection digest, exact shape, bounds, sequence ordering, event identity, and JSON-compatible values. It does **not** re-verify the SQLite chain; use `LocalNoosphere.verify_chain()` first and preserve its independently trusted head when that is required.
+The input must already have been obtained from a chain-verified Noosphere read. The helper rechecks the projection digest, exact shape, bounds, sequence ordering, event identity, JSON-compatible values, and every declared dataset filter (`topic`, `source`, recorded-time cutoff, validity instant, and PUBLIC-only visibility mode). A projection that contains an item excluded by its own filters is rejected, even when its digest has been recomputed. It does **not** re-verify the SQLite chain; use `LocalNoosphere.verify_chain()` first and preserve its independently trusted head when that is required.
 
 Only events with a matching active grant are returned. The output is detached, deterministic, versioned and contains a SHA-256 digest binding the source projection, grant digests and admitted event list. No source event is modified or deleted.
 
