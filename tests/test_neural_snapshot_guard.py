@@ -1,7 +1,7 @@
 import unittest
 
 from mojum.neural import NeuralError, PulsePredictor
-from mojum.neural_snapshot_guard import restore_snapshot
+from mojum.neural_snapshot_guard import _MAX_NODES, restore_snapshot
 
 
 class HostileDict(dict):
@@ -95,6 +95,17 @@ class NeuralSnapshotGuardTests(unittest.TestCase):
         state = fixture()
         state["schema"] = "mojum.neural.hidden/2"
         with self.assertRaises(NeuralError):
+            restore_snapshot(state)
+
+    def test_rejects_oversized_container_cardinality_before_expansion(self):
+        state = fixture()
+        state["weights"] = [0] * (_MAX_NODES + 1)
+        with self.assertRaisesRegex(NeuralError, "structural budget"):
+            restore_snapshot(state)
+
+        state = fixture()
+        state.update({f"extra_{index}": 0 for index in range(_MAX_NODES)})
+        with self.assertRaisesRegex(NeuralError, "structural budget"):
             restore_snapshot(state)
 
     def test_rejects_invalid_summation_before_restore(self):
