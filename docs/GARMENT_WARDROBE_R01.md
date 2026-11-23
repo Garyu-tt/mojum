@@ -12,7 +12,7 @@ PBD, GLB skinning, collision detection, self-contact, equip/unequip inside a run
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_garment_contract.py' -v
 ~~~
 
-Eight deterministic unittest methods include malformed JSON and manifest fields,
+Nine deterministic unittest methods include missing/unreadable manifests, malformed JSON and manifest fields,
 path traversal, symlink rejection, changed GLB hashes, conflicting slots,
 stale revisions, rig changes, age-range rejection, and fail-closed rebinding.
 All synthetic mesh bytes are built by the tests. Baseline Python stdlib only,
