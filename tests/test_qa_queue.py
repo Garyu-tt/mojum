@@ -108,6 +108,12 @@ class DurableTaskQueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.queue.enqueue("ok", "key2", {"x": "x" * 70_000}, now_ns=1)
         with self.assertRaises(ValueError):
+            self.queue.enqueue("ok", "key3", {1: "not-a-string-key"}, now_ns=1)
+        with self.assertRaises(ValueError):
+            self.queue.enqueue("ok", "key4", {"tuple": (1, 2)}, now_ns=1)
+        with self.assertRaises(ValueError):
+            self.queue.enqueue("ok", "key5", {"surrogate": "\\ud800"}, now_ns=1)
+        with self.assertRaises(ValueError):
             self.queue.claim("worker", lease_seconds=True, now_ns=1)
         with self.assertRaises(ValueError):
             self.queue.claim("worker", now_ns=True)
