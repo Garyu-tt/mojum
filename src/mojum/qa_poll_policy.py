@@ -25,6 +25,18 @@ def _int(value: object, name: str, minimum: int, maximum: int) -> int:
     return value
 
 
+def _finite_number(value: object, name: str, minimum: float, maximum: float) -> float:
+    if type(value) not in (int, float):
+        raise PollPolicyError(f"{name} must be a finite bounded number")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        raise PollPolicyError(f"{name} must be a finite bounded number") from None
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        raise PollPolicyError(f"{name} must be in [{minimum}, {maximum}]")
+    return number
+
+
 def _finite_float(value: object, name: str, *, minimum: float = 0.0) -> float:
     """Convert an exact native numeric input without leaking float overflow."""
     if type(value) not in (int, float):
@@ -131,7 +143,7 @@ def circuit_transition(
                        opened_at=now_value, probe_in_flight=False)
     failures = min(100, circuit.failures + 1)
     if circuit.status == "half_open" or failures >= failure_threshold:
-        return Circuit(status="open", failures=failures, opened_at=float(now_epoch),
+        return Circuit(status="open", failures=failures, opened_at=clock,
                        probe_in_flight=False)
     return Circuit(status="closed", failures=failures)
 
