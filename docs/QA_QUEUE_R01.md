@@ -78,7 +78,7 @@ operations idempotent and revalidate their source revision before acting.
 Run the focused suite:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_qa_queue -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_qa_queue.py' -v
 ```
 
 The test module covers idempotency, payload detachment, delayed availability,
