@@ -54,6 +54,15 @@ class SupervisorMetricsTests(unittest.TestCase):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [{"id": "x", "state": "RUNNING"}]})
 
+    def test_oversized_state_and_block_reason_rejected(self):
+        huge = "x" * 1_000_000
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [{"id": "x", "state": huge}]})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [
+                {"id": "x", "state": "WAITING_CI", "blocked_reason": huge}
+            ]})
+
     def test_invalid_block_reason_rejected(self):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [{"id": "x", "state": "WAITING_CI", "blocked_reason": "arbitrary"}]})
