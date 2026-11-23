@@ -33,6 +33,16 @@ def _native_int(value: Any, name: str, minimum: int = 0) -> int:
     return value
 
 
+def _bounded_token(value: Any, name: str, maximum: int) -> bool:
+    """Reject oversized tokens before invoking the regular-expression engine."""
+    return type(value) is str and len(value) <= maximum and _TOKEN.fullmatch(value) is not None
+
+
+def _bounded_hex(value: Any) -> bool:
+    """Admit exact-length native SHA-256 text before regex scanning."""
+    return type(value) is str and len(value) == 64 and _HEX.fullmatch(value) is not None
+
+
 def _admit_record(record: Any, *, signed: bool) -> dict[str, Any]:
     """Admit an exact built-in record before hashing, lookup, or serialization."""
     if type(record) is not dict:
@@ -61,12 +71,12 @@ def _canonical(record: Any) -> bytes:
         raise AuditChainError("unsupported event kind")
     if type(admitted["state"]) is not str or admitted["state"] not in STATES:
         raise AuditChainError("unsupported task state")
-    if type(admitted["task_key"]) is not str or not _TOKEN.fullmatch(admitted["task_key"]):
+    if not _bounded_token(admitted["task_key"], "task_key", MAX_TASK_KEY):
         raise AuditChainError("task_key is malformed")
     reason = admitted["reason"]
-    if reason is not None and (type(reason) is not str or len(reason) > MAX_REASON or not _TOKEN.fullmatch(reason)):
+    if reason is not None and not _bounded_token(reason, "reason", MAX_REASON):
         raise AuditChainError("reason must be a bounded token or null")
-    if type(admitted["previous_digest"]) is not str or not _HEX.fullmatch(admitted["previous_digest"]):
+    if not _bounded_hex(admitted["previous_digest"]):
         raise AuditChainError("previous_digest must be lowercase SHA-256 hex")
     unsigned = {key: admitted[key] for key in _UNSIGNED_FIELDS}
     try:
@@ -109,16 +119,16 @@ def verify_audit_chain(records: Any, *, max_records: int = MAX_RECORDS) -> dict[
             raise AuditChainError("unsupported event kind")
         if type(item["state"]) is not str or item["state"] not in STATES:
             raise AuditChainError("unsupported task state")
-        if type(item["task_key"]) is not str or not _TOKEN.fullmatch(item["task_key"]):
+        if not _bounded_token(item["task_key"], "task_key", MAX_TASK_KEY):
             raise AuditChainError("task_key is malformed")
         reason = item["reason"]
-        if reason is not None and (type(reason) is not str or len(reason) > MAX_REASON or not _TOKEN.fullmatch(reason)):
+        if reason is not None and not _bounded_token(reason, "reason", MAX_REASON):
             raise AuditChainError("reason must be a bounded token or null")
-        if type(item["previous_digest"]) is not str or not _HEX.fullmatch(item["previous_digest"]):
+        if not _bounded_hex(item["previous_digest"]):
             raise AuditChainError("previous_digest must be lowercase SHA-256 hex")
         if item["previous_digest"] != previous:
             raise AuditChainError("previous digest does not match chain head")
-        if type(item["digest"]) is not str or not _HEX.fullmatch(item["digest"]):
+        if not _bounded_hex(item["digest"]):
             raise AuditChainError("digest must be lowercase SHA-256 hex")
         expected = hashlib.sha256(_canonical(item)).hexdigest()
         if item["digest"] != expected:
