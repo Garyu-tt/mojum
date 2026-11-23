@@ -103,6 +103,20 @@ class QAFleetTests(unittest.TestCase):
         self.assertEqual(target.stat().st_mode & 0o777,before)
         self.assertFalse((target/"lock").exists())
 
+    def test_corrupt_local_state_recovers_without_discarding_safety_checks(self):
+        for state_path in (self.home/"current.json", self.home/"history.json"):
+            for raw in (b"{broken", b"\\xff", b"[]"):
+                with self.subTest(path=state_path.name, raw=raw):
+                    state_path.write_bytes(raw)
+                    state_path.chmod(0o600)
+                    self.assertEqual(fleet.safe_load(state_path, {"cursor": 0}), {"cursor": 0})
+            state_path.write_text('{"cursor":2}', encoding="utf-8")
+            self.assertEqual(fleet.safe_load(state_path, {}), {"cursor": 2})
+            state_path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                fleet.safe_load(state_path, {})
+            state_path.chmod(0o600)
+
     def test_mirror_symlink_rejected(self):
         actual=self.mirror.with_name("source.json")
         self.mirror.rename(actual)
