@@ -20,6 +20,13 @@ class PhenotypeAuditTests(unittest.TestCase):
         result=self.audit(ledger, expected)
         self.assertFalse(result.accepted); self.assertEqual(result.mismatch_fields,("parameters",))
         self.assertNotIn("event-1",repr(result.to_dict())); self.assertNotIn("heartbeat_bpm",repr(result.to_dict()))
+    def test_json_number_type_spoof_is_rejected(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        expected["parameters"]["heartbeat_bpm"] = float(expected["parameters"]["heartbeat_bpm"])
+        result=self.audit(ledger, expected)
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.mismatch_fields, ("parameters",))
+        self.assertNotEqual(result.computed_sha256, result.supplied_sha256)
     def test_missing_and_extra_fields_are_rejected(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected.pop("ledger_revision"); expected["extra"]="x"
         self.assertEqual(self.audit(ledger,expected).mismatch_fields,("extra","ledger_revision"))
