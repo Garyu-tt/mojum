@@ -136,22 +136,34 @@ class RateShadowProofTests(unittest.TestCase):
                 self.r = [0.0] * n
                 self.drive = [0.0] * n
         class FakeNetwork:
+            def __init__(self, *, dt):
+                self.dt = dt
             def create(self, n, model):
+                if model["parameters"]["drive"] != (0.0, "local"):
+                    raise AssertionError("drive must be independent per neuron")
                 self.population = FakePop(n)
                 return self.population
             def compile(self, *, directory):
                 self.compiled = True
             def simulate(self, dt):
+                if dt != self.dt:
+                    raise AssertionError("simulation step must equal network dt")
                 self.population.r = [r + dt / 10 * (i - r)
                                      for r, i in zip(self.population.r,
                                                      self.population.drive)]
         fake = types.ModuleType("ANNarchy")
         fake.__version__ = ANNARCHY_VERSION
+        fake.Parameter = lambda value, *, locality: (value, locality)
         fake.Neuron = lambda **kwargs: kwargs
         fake.Network = FakeNetwork
         with mock.patch.dict(sys.modules, {"ANNarchy": fake}):
             output = compare_rate_traces(fixture(15), backend="annarchy", enabled=True)
+            submillisecond = compare_rate_traces(
+                fixture(15), spec=RateSpec(dt_ms=0.2),
+                backend="annarchy", enabled=True)
         self.assertEqual(output["max_abs_error"], 0)
+        self.assertEqual(submillisecond["max_abs_error"], 0)
+        self.assertEqual(submillisecond["dt_ms"], 0.2)
         self.assertEqual(output["backend"], "annarchy")
         self.assertIsNone(output["motor_intention"])
 
