@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
 import unittest
-from mojum.qa_supervisor_queue import DurableQAQueue, LeaseError, TransitionError, MAX_PAYLOAD_BYTES
+from mojum.qa_supervisor_queue import DurableQAQueue, LeaseError, TransitionError, QueueError, MAX_PAYLOAD_BYTES
 
 SHA="a"*40
 
@@ -22,9 +22,9 @@ class QueueTests(unittest.TestCase):
 
     def test_conflicting_duplicate_key_never_creates_second_job(self):
         a=self.q.enqueue(12,SHA,idempotency_key="fixed",now=1)
-        b=self.q.enqueue(99,"b"*40,idempotency_key="fixed",now=2)
-        self.assertEqual(a.job_id,b.job_id)
-        self.assertEqual(b.issue_number,12)
+        with self.assertRaises(QueueError):
+            self.q.enqueue(99,"b"*40,idempotency_key="fixed",now=2)
+        self.assertEqual(self.q.get(a.job_id).issue_number,12)
 
     def test_concurrent_workers_get_one_exclusive_lease(self):
         self.q.enqueue(12,SHA,now=1)
@@ -60,6 +60,16 @@ class QueueTests(unittest.TestCase):
         waiting=self.q.transition(job.job_id,job.lease_token,"waiting_ci",now=4)
         self.assertIsNone(waiting.lease_token)
         self.assertIsNone(self.q.claim("other",now=5))
+
+    def test_deferred_job_can_be_requeued_with_compare_and_swap(self):
+        self.q.enqueue(12,SHA,now=1)
+        job=self.q.claim("worker",now=2)
+        waiting=self.q.transition(job.job_id,job.lease_token,"waiting_ci",now=3)
+        queued=self.q.requeue(waiting.job_id,expected_state="waiting_ci",now=4)
+        self.assertEqual(queued.state,"discovered")
+        self.assertIsNone(queued.lease_token)
+        with self.assertRaises(TransitionError):
+            self.q.requeue(queued.job_id,expected_state="waiting_ci",now=5)
 
     def test_invalid_transition_does_not_mutate_state(self):
         self.q.enqueue(12,SHA,now=1)
