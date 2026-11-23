@@ -144,9 +144,11 @@ class DurableWorkQueue:
                 (idempotency_key,),
             ).fetchone()
             if existing is not None:
-                if existing["payload_json"] != payload_json or existing["task_id"] != task_id:
+                if (existing["payload_json"] != payload_json
+                        or existing["task_id"] != task_id
+                        or existing["max_attempts"] != max_attempts):
                     connection.rollback()
-                    raise IdempotencyConflict("idempotency key already belongs to another task")
+                    raise IdempotencyConflict("idempotency key already belongs to different task parameters")
                 connection.commit()
                 return self._task(existing)
             try:
