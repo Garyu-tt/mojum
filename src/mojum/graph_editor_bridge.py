@@ -112,7 +112,7 @@ def _valid_position(position):
         raise GraphError("invalid editor position")
     for key in ("x", "y"):
         n = position[key]
-        if type(n) not in (int, float) or not math.isfinite(n) or abs(n) > MAX_POSITION:
+        if type(n) not in (int, float) or abs(n) > MAX_POSITION or not math.isfinite(n):
             raise GraphError("editor position is not finite and bounded")
 
 
