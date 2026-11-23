@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 from collections import Counter
-from collections.abc import Mapping
 from typing import Any
 
 MAX_TASKS = 10_000
@@ -37,7 +36,7 @@ class MetricsInputError(ValueError):
 
 
 def _integer(value: Any, field: str, *, minimum: int = 0, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
+    if type(value) is not int:
         raise MetricsInputError(f"{field} must be an integer")
     if not minimum <= value <= maximum:
         raise MetricsInputError(f"{field} is outside the permitted range")
@@ -45,7 +44,7 @@ def _integer(value: Any, field: str, *, minimum: int = 0, maximum: int) -> int:
 
 
 def _finite_number(value: Any, field: str, *, maximum: int) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if type(value) not in (int, float):
         raise MetricsInputError(f"{field} must be numeric")
     try:
         result = float(value)
@@ -76,15 +75,15 @@ def _nearest_rank(values: list[float], percentile: int) -> float | None:
     return round(ordered[index], 3)
 
 
-def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Return aggregate metrics and a SHA-256 receipt for a bounded snapshot.
 
-    Accepted top-level fields: observed_at (non-negative epoch seconds),
-    tasks (up to 10,000 task mappings), and optional duration_samples_ms.
-    Task IDs are validated for uniqueness but never copied into the result.
+    Only exact built-in dict/list/tuple and scalar types are admitted. This
+    prevents caller-defined container/scalar methods from running during
+    validation and keeps the declared bounds meaningful.
     """
-    if not isinstance(snapshot, Mapping):
-        raise MetricsInputError("snapshot must be a mapping")
+    if type(snapshot) is not dict:
+        raise MetricsInputError("snapshot must be a built-in dict")
     if set(snapshot) - {"observed_at", "tasks", "duration_samples_ms"}:
         raise MetricsInputError("snapshot contains unknown fields")
     if "observed_at" not in snapshot or "tasks" not in snapshot:
@@ -92,8 +91,8 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
     observed_at = _integer(snapshot["observed_at"], "observed_at", maximum=4_102_444_800)
     tasks = snapshot["tasks"]
-    if not isinstance(tasks, (list, tuple)) or len(tasks) > MAX_TASKS:
-        raise MetricsInputError("tasks must be a bounded list")
+    if type(tasks) not in (list, tuple) or len(tasks) > MAX_TASKS:
+        raise MetricsInputError("tasks must be a bounded built-in list or tuple")
 
     ids: set[str] = set()
     states: Counter[str] = Counter()
@@ -101,20 +100,20 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     blocked: Counter[str] = Counter()
     leases = Counter({"active": 0, "expiring": 0, "expired": 0, "missing": 0})
     for index, task in enumerate(tasks):
-        if not isinstance(task, Mapping):
-            raise MetricsInputError(f"task {index} must be a mapping")
+        if type(task) is not dict:
+            raise MetricsInputError(f"task {index} must be a built-in dict")
         allowed = {"id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds"}
         if set(task) - allowed or not {"id", "state"} <= set(task):
             raise MetricsInputError(f"task {index} has an invalid schema")
         task_id = task["id"]
-        if not isinstance(task_id, str) or not task_id or len(task_id) > MAX_ID_LENGTH:
+        if type(task_id) is not str or not task_id or len(task_id) > MAX_ID_LENGTH:
             raise MetricsInputError(f"task {index} has an invalid id")
         if task_id in ids:
             raise MetricsInputError("duplicate task id")
         ids.add(task_id)
 
         state = task["state"]
-        if not isinstance(state, str) or state not in STATES:
+        if type(state) is not str or state not in STATES:
             raise MetricsInputError(f"task {index} has an unknown state")
         states[state] += 1
 
@@ -124,7 +123,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
         reason = task.get("blocked_reason")
         if state in BLOCKED_STATES and reason is not None:
-            if not isinstance(reason, str) or reason not in BLOCK_REASONS:
+            if type(reason) is not str or reason not in BLOCK_REASONS:
                 raise MetricsInputError(f"task {index} has an unknown blocked reason")
             blocked[reason] += 1
         elif reason is not None:
@@ -150,8 +149,8 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             raise MetricsInputError(f"task {index} has a lease outside an active state")
 
     samples = snapshot.get("duration_samples_ms", ())
-    if not isinstance(samples, (list, tuple)) or len(samples) > MAX_DURATION_SAMPLES:
-        raise MetricsInputError("duration_samples_ms must be a bounded list")
+    if type(samples) not in (list, tuple) or len(samples) > MAX_DURATION_SAMPLES:
+        raise MetricsInputError("duration_samples_ms must be a bounded built-in list or tuple")
     durations = [
         _finite_number(value, f"duration_samples_ms[{i}]", maximum=MAX_DURATION_MS)
         for i, value in enumerate(samples)
