@@ -1,0 +1,57 @@
+name: ANNarchy native smoke (isolated CPU process)
+on:
+  pull_request:
+    paths:
+      - "tools/annarchy_native_smoke.py"
+      - "tests/test_annarchy_native_smoke.py"
+      - ".github/workflows/annarchy-native-smoke.yml"
+      - "src/mojum/annarchy_rate_probe.py"
+      - "docs/ANNARCHY_NATIVE_SMOKE_R01.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: annarchy-native-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-annarchy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: peer-source/src
+      PYTHONNOUSERSITE: "1"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Checkout pinned ANNarchy rate-probe source
+        uses: actions/checkout@v4
+        with:
+          ref: 4d469095ad237bc516950c31a7f2507ffa955ecc
+          path: peer-source
+          persist-credentials: false
+      - name: Assert pinned parent source revision
+        shell: bash
+        run: test "$(git -C peer-source rev-parse HEAD)" = "4d469095ad237bc516950c31a7f2507ffa955ecc"
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Run offline harness contract tests without site packages
+        run: python -S -m unittest discover -s tests -p test_annarchy_native_smoke.py -v
+      - name: Install pinned optional ANNarchy engine
+        run: python -m pip install --disable-pip-version-check "ANNarchy==5.0.4.1"
+      - name: Run disposable native compile and CPU smoke
+        run: python tools/annarchy_native_smoke.py --probe-source peer-source/src --frames 32 --wall-seconds 90 --cpu-seconds 60 --memory-mib 2048
+      - name: Do not persist compiler logs or artifacts
+        run: echo "Native smoke outputs are temporary and are not uploaded."
