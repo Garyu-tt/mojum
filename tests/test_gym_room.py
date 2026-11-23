@@ -92,6 +92,20 @@ class PointRoomGymTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             episode.reset(options={"start": [3, 2]})
 
+    def test_oversized_integer_geometry_rejected_as_value_error(self):
+        # math.isfinite() raises OverflowError for integer magnitudes above
+        # the platform's float range: untrusted numeric input must fail closed.
+        oversized = 10**1000
+        for kwargs in (
+            {"start": (oversized, 1)},
+            {"goal": (1, oversized)},
+            {"step_m": oversized},
+            {"goal_radius_m": oversized},
+        ):
+            with self.subTest(field=next(iter(kwargs))):
+                with self.assertRaises(ValueError):
+                    self.episode(**kwargs)
+
     def test_large_nonnegative_seed_is_accepted_and_replayed(self):
         for seed in (2**32, 2**64 + 17, 2**128):
             with self.subTest(seed=seed):
