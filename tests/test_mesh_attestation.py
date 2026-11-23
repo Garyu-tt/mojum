@@ -65,6 +65,33 @@ class MeshAttestationTests(unittest.TestCase):
                     (AttestationDenied, AttestationError)):
                 verify_attestation(changed, KEYS, now=1_500)
 
+    def test_rejects_hostile_non_string_authority_map_keys_before_lookup(self):
+        class HostileKey:
+            def __hash__(self):
+                return hash("root-2026")
+
+            def __eq__(self, _other):
+                raise RuntimeError("untrusted key equality executed")
+
+        statement = attestation()
+        hostile = {HostileKey(): KEY}
+        with self.assertRaises(AttestationError):
+            verify_attestation(statement, hostile, now=1_500)
+
+    def test_rejects_oversized_authority_key_map_before_iteration(self):
+        statement = attestation()
+        oversized = {"root-2026": KEY}
+        oversized.update({f"extra-{index}": KEY for index in range(128)})
+        with self.assertRaises(AttestationError):
+            verify_attestation(statement, oversized, now=1_500)
+
+    def test_validates_all_authority_map_entries(self):
+        statement = attestation()
+        with self.assertRaises(AttestationError):
+            verify_attestation(statement, {"root-2026": KEY, "invalid key": KEY}, now=1_500)
+        with self.assertRaises(AttestationError):
+            verify_attestation(statement, {"root-2026": KEY, "other": b"short"}, now=1_500)
+
     def test_wrong_or_unknown_authority_key_denied(self):
         statement = attestation()
         with self.assertRaises(AttestationDenied):
