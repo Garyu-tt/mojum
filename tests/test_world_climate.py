@@ -70,6 +70,15 @@ class WorldClimateTests(unittest.TestCase):
                 with self.assertRaises(ClimateError):
                     self.sample(provenance=provenance)
 
+
+    def test_hostile_provenance_comparison_is_never_invoked(self):
+        class HostileProvenance:
+            def __eq__(self, other):
+                raise AssertionError("untrusted equality must not run")
+
+        with self.assertRaises(ClimateError):
+            self.sample(provenance=HostileProvenance())
+
     def test_rejects_boolean_and_non_integer_parameters(self):
         for name, value in (
             ("base_temperature_millic", True),
