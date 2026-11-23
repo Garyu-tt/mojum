@@ -152,8 +152,9 @@ class SignedPacketTests(unittest.TestCase):
 
     def test_extra_json_and_duplicate_field_refused(self):
         good = json.dumps(event()).encode()
-        for raw in (good + b" {}", good.replace(b'"seq": 1', b'"seq": 1, "seq": 2'),
-                    good.replace(b'"seq":1', b'"seq":1,"seq":2')):
+        duplicate = good.replace(b'"seq": 1', b'"seq": 1, "seq": 2')
+        self.assertNotEqual(duplicate, good)
+        for raw in (good + b" {}", duplicate):
             with self.assertRaises(SenderError):
                 signed_packet(raw, KEY)
 
