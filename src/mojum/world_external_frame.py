@@ -150,8 +150,16 @@ def _validate_previous(previous: object, grant: ExternalFrameGrant, expected_tic
     for key in ("frame_sha256", "admission_sha256"):
         if not _hex(previous[key]):
             raise ValueError("invalid predecessor digest")
-    if previous["parent_sha256"] is not None and not _hex(previous["parent_sha256"]):
-        raise ValueError("invalid parent digest")
+    # A hash-valid predecessor must still obey its position in the chain.
+    # Genesis has no parent; all later receipts must name one. A receipt
+    # produced by contiguous genesis-origin sequencing has sequence == tick.
+    if expected_tick == 1:
+        if previous["parent_sha256"] is not None:
+            raise ValueError("invalid genesis predecessor parent")
+    elif not _hex(previous["parent_sha256"]):
+        raise ValueError("missing or invalid predecessor parent")
+    if previous_frame["sequence"] != expected_tick - 1:
+        raise ValueError("invalid predecessor sequence/tick")
     if _digest(previous_frame) != previous["frame_sha256"]:
         raise ValueError("predecessor frame was modified")
     unsigned = {k: previous[k] for k in _ADMISSION_KEYS if k != "admission_sha256"}
