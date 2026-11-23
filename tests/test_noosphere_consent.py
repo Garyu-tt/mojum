@@ -291,6 +291,17 @@ class NoosphereConsentTests(unittest.TestCase):
             authorize_dataset(source, [grant(visibility=["PRIVATE"])],
                               as_of_ns=50, purpose="research")
 
+    def test_schema_mapping_cardinality_rejected_before_key_snapshot(self):
+        candidate = grant()
+        candidate.update({f"unexpected-{index}": None for index in range(25_000)})
+        with self.assertRaises(ConsentError):
+            validate_grant(candidate)
+
+        source = dataset([event()])
+        source.update({f"unexpected-{index}": None for index in range(25_000)})
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
     def test_oversized_exact_mapping_is_rejected_by_node_preflight(self):
         source = dataset([])
         source["projection"]["padding"] = {f"extra-{n}": n for n in range(200_001)}
