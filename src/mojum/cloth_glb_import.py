@@ -250,6 +250,9 @@ def import_glb(
         _reject("invalid expected SHA-256")
     if not isinstance(raw, bytes):
         _reject("GLB must be immutable bytes")
+    # Refuse oversized direct-API bytes before CPU-intensive hashing.
+    if len(raw) > MAX_FILE:
+        _reject("GLB file size outside bounds")
     digest = hashlib.sha256(raw).hexdigest()
     if digest != expected_sha256:
         _reject("GLB SHA-256 mismatch")
