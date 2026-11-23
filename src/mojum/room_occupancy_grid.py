@@ -12,25 +12,22 @@ from types import MappingProxyType
 SCHEMA = "mojum.room.occupancy/1"
 MAX_CELLS = 65536
 MAX_OBSTACLES = 1024
+MAX_CELL_MARKS = 1_000_000
+_RECT_FIELDS = frozenset({"x0", "y0", "x1", "y1"})
+_PAYLOAD_FIELDS = frozenset({"schema", "provenance", "room", "cell_mm", "obstacles"})
 
 
-def _admit_fields(value, required, name):
-    """Copy an exact dict only after validating keys without hashing caller keys."""
-    if type(value) is not dict or len(value) != len(required):
-        raise ValueError(f"{name}: expected exact fields")
-    clean = {}
-    for key, item in dict.items(value):
-        if type(key) is not str or not key or len(key) > 32:
-            raise ValueError(f"{name}: invalid field key")
-        clean[key] = item
-    if len(clean) != len(required) or set(clean) != set(required):
-        raise ValueError(f"{name}: expected exact fields")
-    return clean
+def _native_keys(value, expected, name):
+    if type(value) is not dict or len(value) != len(expected):
+        raise ValueError(f"{name}: expected exact native fields")
+    keys = tuple(value)
+    if any(type(key) is not str for key in keys) or set(keys) != expected:
+        raise ValueError(f"{name}: expected exact native fields")
 
 
 def _rect(value, name):
-    fields = _admit_fields(value, ("x0", "y0", "x1", "y1"), name)
-    coords = tuple(fields[k] for k in ("x0", "y0", "x1", "y1"))
+    _native_keys(value, _RECT_FIELDS, name)
+    coords = tuple(value[k] for k in ("x0", "y0", "x1", "y1"))
     if any(type(v) is not int or abs(v) > 1_000_000 for v in coords):
         raise ValueError(f"{name}: coordinates must be bounded integers")
     x0, y0, x1, y1 = coords
@@ -42,21 +39,20 @@ def _rect(value, name):
 def rasterize_occupancy(payload):
     """Return immutable occupancy rows and a stable SHA256 consistency digest.
 
-    Input must be an exact dict with schema, provenance, room, cell_mm and
-    obstacles. The final edge cells may be smaller than cell_mm.
+    Input must be an exact native dict with schema, provenance, room, cell_mm
+    and obstacles. Cell marking is capped at one million obstacle-cell marks.
+    The final edge cells may be smaller than cell_mm.
     """
-    fields = _admit_fields(
-        payload, ("schema", "provenance", "room", "cell_mm", "obstacles"), "payload"
-    )
-    if type(fields["schema"]) is not str or fields["schema"] != SCHEMA:
+    _native_keys(payload, _PAYLOAD_FIELDS, "payload")
+    if type(payload["schema"]) is not str or payload["schema"] != SCHEMA:
         raise ValueError("unsupported schema")
-    if type(fields["provenance"]) is not str or fields["provenance"] != "PUBLIC_SYNTHETIC":
+    if type(payload["provenance"]) is not str or payload["provenance"] != "PUBLIC_SYNTHETIC":
         raise ValueError("PUBLIC_SYNTHETIC provenance required")
-    room = _rect(fields["room"], "room")
-    cell = fields["cell_mm"]
+    room = _rect(payload["room"], "room")
+    cell = payload["cell_mm"]
     if type(cell) is not int or not 1 <= cell <= 100_000:
         raise ValueError("cell_mm must be an integer in [1, 100000]")
-    obstacles = fields["obstacles"]
+    obstacles = payload["obstacles"]
     if type(obstacles) is not list or len(obstacles) > MAX_OBSTACLES:
         raise ValueError("invalid obstacle list")
     parsed = tuple(_rect(obstacle, "obstacle") for obstacle in obstacles)
@@ -66,37 +62,30 @@ def rasterize_occupancy(payload):
     if width * height > MAX_CELLS:
         raise ValueError("occupancy grid exceeds cell budget")
 
-    # 2D difference grid: each rectangle contributes four corner updates,
-    # then one O(width*height) prefix pass paints the final occupancy. This
-    # avoids scanning every obstacle for every cell (up to 67M comparisons).
-    diff = [[0] * (width + 1) for _ in range(height + 1)]
+    # Mark cells touched by each obstacle instead of testing every obstacle
+    # against every cell. Bound total writes before entering the marking loops.
+    spans = []
+    total_marks = 0
     for ox0, oy0, ox1, oy1 in parsed:
+        if ox1 <= x0 or ox0 >= x1 or oy1 <= y0 or oy0 >= y1:
+            continue
         ix0 = max(0, (ox0 - x0) // cell)
         iy0 = max(0, (oy0 - y0) // cell)
         ix1 = min(width, (ox1 - x0 + cell - 1) // cell)
         iy1 = min(height, (oy1 - y0 + cell - 1) // cell)
-        if ix0 >= ix1 or iy0 >= iy1:
-            continue
-        diff[iy0][ix0] += 1
-        diff[iy0][ix1] -= 1
-        diff[iy1][ix0] -= 1
-        diff[iy1][ix1] += 1
+        marks = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+        total_marks += marks
+        if total_marks > MAX_CELL_MARKS:
+            raise ValueError("obstacle-cell marking budget exceeded")
+        spans.append((ix0, iy0, ix1, iy1))
 
-    rows = []
-    for iy in range(height):
-        row = []
-        for ix in range(width):
-            value = diff[iy][ix]
-            if iy:
-                value += diff[iy - 1][ix]
-            if ix:
-                value += diff[iy][ix - 1]
-            if iy and ix:
-                value -= diff[iy - 1][ix - 1]
-            diff[iy][ix] = value
-            row.append(value > 0)
-        rows.append(tuple(row))
-    cells = tuple(rows)
+    rows = [[False] * width for _ in range(height)]
+    for ix0, iy0, ix1, iy1 in spans:
+        for iy in range(iy0, iy1):
+            row = rows[iy]
+            for ix in range(ix0, ix1):
+                row[ix] = True
+    cells = tuple(tuple(row) for row in rows)
     normalized = {"schema": SCHEMA, "room": room, "cell_mm": cell,
                   "width": width, "height": height, "rows": cells}
     encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
