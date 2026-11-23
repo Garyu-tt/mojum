@@ -67,6 +67,26 @@ class LaunchProfile:
     room_file: str | None
     sha256: str
 
+    def __post_init__(self) -> None:
+        if type(self) is not LaunchProfile:
+            raise AquariumConfigError("LaunchProfile subclasses are not supported")
+        raw = {
+            "schema": self.schema, "db_path": self.db_path, "ticks": self.ticks,
+            "dt_ns": self.dt_ns, "neural_mode": self.neural_mode,
+            "motor_mode": self.motor_mode, "brain_mode": self.brain_mode,
+            "sensory_mode": self.sensory_mode, "temporal_mode": self.temporal_mode,
+            "pulse_sum": self.pulse_sum, "read_only": self.read_only,
+            "room_file": self.room_file,
+        }
+        normalized = _normalize_profile_data(raw)
+        for field, expected_value in normalized.items():
+            supplied = raw[field]
+            if type(supplied) is not type(expected_value) or supplied != expected_value:
+                raise AquariumConfigError(f"{field} is not in canonical normalized form")
+        expected_digest = hashlib.sha256(_canonical(normalized)).hexdigest()
+        if type(self.sha256) is not str or self.sha256 != expected_digest:
+            raise AquariumConfigError("profile digest does not match normalized fields")
+
     def to_dict(self) -> dict[str, object]:
         """Return a fresh detached JSON-shaped representation."""
         result = asdict(self)
@@ -177,12 +197,15 @@ def _canonical(payload: dict[str, object]) -> bytes:
         raise AquariumConfigError("profile cannot be represented canonically") from exc
 
 
-def validate_profile(source: object) -> LaunchProfile:
-    """Validate a native mapping or JSON text into a detached launch profile.
-
-    The caller owns all I/O. Path fields are inert text and are never opened.
-    """
-    data = _read_source(source)
+def _normalize_profile_data(data: dict[str, object]) -> dict[str, object]:
+    """Validate and normalize a native mapping without constructing a value object."""
+    if type(data) is not dict:
+        raise AquariumConfigError("profile root must be an exact native dict")
+    if len(data) > len(_ALLOWED_KEYS):
+        raise AquariumConfigError("profile has too many fields")
+    for key in data:
+        if type(key) is not str or len(key) > 64:
+            raise AquariumConfigError("profile keys must be exact bounded strings")
     unknown = set(data) - _ALLOWED_KEYS
     if unknown:
         raise AquariumConfigError(f"unknown profile field: {sorted(unknown)[0]}")
@@ -233,7 +256,7 @@ def validate_profile(source: object) -> LaunchProfile:
     if pulse_sum != "auto" and neural_mode == "disabled":
         raise AquariumConfigError("explicit pulse_sum requires neural shadow mode")
 
-    normalized: dict[str, object] = {
+    return {
         "schema": SCHEMA,
         "db_path": db_path,
         "ticks": ticks,
@@ -247,13 +270,17 @@ def validate_profile(source: object) -> LaunchProfile:
         "read_only": read_only,
         "room_file": room_file,
     }
+
+
+def validate_profile(source: object) -> LaunchProfile:
+    """Validate a native mapping or JSON text into a detached launch profile.
+
+    The caller owns all I/O. Path fields are inert text and are never opened.
+    """
+    data = _read_source(source)
+    normalized = _normalize_profile_data(data)
     digest = hashlib.sha256(_canonical(normalized)).hexdigest()
-    return LaunchProfile(
-        schema=SCHEMA, db_path=db_path, ticks=ticks, dt_ns=dt_ns,
-        neural_mode=neural_mode, motor_mode=motor_mode, brain_mode=brain_mode,
-        sensory_mode=sensory_mode, temporal_mode=temporal_mode, pulse_sum=pulse_sum,
-        read_only=read_only, room_file=room_file, sha256=digest,
-    )
+    return LaunchProfile(**normalized, sha256=digest)
 
 
 def load_profile_text(text: str) -> LaunchProfile:
