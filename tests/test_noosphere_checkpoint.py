@@ -123,6 +123,17 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(restored, manifest)
         self.assertEqual(encode_checkpoint(restored), wire)
 
+    def test_oversized_manifest_and_component_maps_fail_closed(self):
+        manifest = self.make()
+        manifest.update({f"unexpected_{index}": None for index in range(25_000)})
+        with self.assertRaisesRegex(CheckpointError, "expected exactly"):
+            verify_checkpoint(manifest)
+
+        components = refs()
+        components.update({f"unexpected_{index}": None for index in range(25_000)})
+        with self.assertRaisesRegex(CheckpointError, "expected exactly"):
+            self.make(components=components)
+
     def test_hostile_string_subclass_keys_fail_closed(self):
         class HostileKey(str):
             def __hash__(self):
