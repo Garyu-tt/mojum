@@ -1,6 +1,6 @@
 import unittest
 
-from mojum.world_room import Room, initial_state
+from mojum.world_room import Room, RoomState, initial_state
 from mojum.world_airflow import (
     AirflowError, MAX_SOURCES, MAX_SOURCE_SPEED_MM_S, SCHEMA,
     sample_room_airflow,
@@ -79,6 +79,46 @@ class WorldAirflowTests(unittest.TestCase):
             self.sample(tick=1)
         with self.assertRaises(AirflowError):
             self.sample(expected_revision="0" * 64)
+
+    def test_rejects_result_magnitude_just_above_limit(self):
+        # All sources are colocated with the sample, so attenuation is exactly
+        # one. The old floor-sqrt check incorrectly accepted (100000, 1).
+        sources = [
+            {"id": f"s{i}", "x_mm": 1000, "y_mm": 1000,
+             "vx_mm_s": 20_000, "vy_mm_s": 1 if i == 0 else 0}
+            for i in range(5)
+        ]
+        with self.assertRaisesRegex(AirflowError, "output speed"):
+            self.sample(sources=sources)
+
+    def test_hostile_room_state_revision_is_rejected_before_comparison(self):
+        class HostileRevision(str):
+            called = False
+
+            def __eq__(self, other):
+                type(self).called = True
+                raise AssertionError("revision equality hook must not execute")
+
+            def __ne__(self, other):
+                type(self).called = True
+                raise AssertionError("revision inequality hook must not execute")
+
+        forged = RoomState(
+            tick=self.state.tick, x=self.state.x, y=self.state.y,
+            revision=HostileRevision(self.state.revision),
+        )
+        with self.assertRaises(AirflowError):
+            self.sample(state=forged, expected_revision=self.state.revision)
+        self.assertFalse(HostileRevision.called)
+
+    def test_rejects_oversized_logical_tick(self):
+        oversized = 10 ** 1000
+        forged = RoomState(
+            tick=oversized, x=self.state.x, y=self.state.y,
+            revision=self.state.revision,
+        )
+        with self.assertRaisesRegex(AirflowError, "bounded current"):
+            self.sample(state=forged, tick=oversized)
 
     def test_rejects_bool_and_float_sensor_coordinates(self):
         with self.assertRaises(AirflowError):
