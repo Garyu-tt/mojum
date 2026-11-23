@@ -65,6 +65,26 @@ class VrmResourceBudgetTests(unittest.TestCase):
         with self.assertRaises(ResourceBudgetError):
             assess_vrm_resource_budget(inventory(vertex_count={"nested": [1]}))
 
+    def test_rejects_hostile_and_oversized_keys_before_set(self):
+        class HostileKey(str):
+            armed = False
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile key was hashed")
+                return str.__hash__(self)
+
+        hostile = HostileKey("schema")
+        candidate = inventory()
+        candidate[hostile] = candidate.pop("schema")
+        hostile.armed = True
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(candidate)
+
+        oversized = inventory()
+        oversized["x" * 1_000_000] = 1
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(oversized)
+
     def test_report_detached(self):
         data = inventory()
         report = assess_vrm_resource_budget(data)
