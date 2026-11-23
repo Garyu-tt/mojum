@@ -14,8 +14,8 @@ class GenesisAttributionTraversalBudgetTests(unittest.TestCase):
 
     def test_oversized_mapping_is_rejected_before_child_expansion(self):
         snapshot = sample_snapshot()
-        # Short keys keep this fixture beneath the byte ceiling.
-        snapshot["padding"] = {f"k{i:05d}": None for i in range(17_000)}
+        # Compact keys keep the JSON fixture small while exceeding the node budget.
+        snapshot["padding"] = {format(i, "x"): None for i in range(21_000)}
         with self.assertRaisesRegex(AttributionError, "node limit"):
             audit_attribution(snapshot, 0)
 
