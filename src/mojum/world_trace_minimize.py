@@ -241,6 +241,8 @@ def minimize_case(case: dict) -> dict:
             if result[0]:
                 best = candidate
                 best_result = result
+                # Deleting a later step can make an earlier one redundant.
+                index = 0
             else:
                 index += 1
 
