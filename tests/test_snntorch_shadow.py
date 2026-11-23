@@ -23,6 +23,18 @@ class ShadowTests(unittest.TestCase):
             with self.subTest(label=label), self.assertRaises(s.ShadowError):
                 s.run_shadow(self.fixture(), enabled=True, source_class=label)
 
+    def test_discriminators_cannot_be_spoofed_by_custom_equality(self):
+        class PretendSource:
+            def __eq__(self, other):
+                return other == "PUBLIC_SYNTHETIC"
+        class PretendEngine:
+            def __eq__(self, other):
+                return other == "reference"
+        with self.assertRaises(s.ShadowError):
+            s.run_shadow(self.fixture(), enabled=True, source_class=PretendSource())
+        with self.assertRaisesRegex(s.ShadowError, "engine"):
+            s.run_shadow(self.fixture(), enabled=True, source_class="PUBLIC_SYNTHETIC", engine=PretendEngine())
+
     def test_reference_repeats(self):
         a, b = self.run_ref(), self.run_ref()
         self.assertEqual(a, b)
