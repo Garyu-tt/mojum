@@ -66,7 +66,8 @@ class PRSnapshotTests(unittest.TestCase):
             admit_pr_snapshot(raw)
 
     def test_rejects_invalid_sha_and_ref(self):
-        for key, value in (("head_sha", "z" * 40), ("base_ref", "../main"),\n                          ("base_ref", ".hidden/main"), ("head_ref", "feature/.hidden")):
+        for key, value in (("head_sha", "z" * 40), ("base_ref", "../main"),
+                          ("base_ref", ".hidden/main"), ("head_ref", "feature/.hidden")):
             raw = fixture()
             raw[key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
