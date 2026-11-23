@@ -99,6 +99,9 @@ test('rejects aggregate frame-by-joint sample budgets', () => {
     tick: sequence + 1,
     simulation_time_ns: sequence + 1,
   }));
+  // The over-budget frame is also malformed. The aggregate cap must
+  // reject before cloneFrame starts validating/copying its individual joints.
+  frames[2000].joints[0].angle_rad = Number.NaN;
   assert.throws(
     () => createVrmPoseTimeline(frames),
     /exceeds 256000 joint samples/,
