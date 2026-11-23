@@ -19,8 +19,19 @@ const BONES = new Set([
   'leftToes', 'rightToes'
 ]);
 
+// Track validator-owned TypeErrors by identity. Do not use instanceof in
+// catch blocks: a hostile Proxy can itself be thrown and make
+// error instanceof TypeError invoke its throwing getPrototypeOf trap.
+const validationErrors = new WeakSet();
+
 function fail(message) {
-  throw new TypeError(message);
+  const error = new TypeError(message);
+  validationErrors.add(error);
+  throw error;
+}
+
+function isValidationError(error) {
+  return validationErrors.has(error);
 }
 
 function plainRecord(value, requiredKeys, label) {
@@ -47,7 +58,7 @@ function plainRecord(value, requiredKeys, label) {
     }
     return result;
   } catch (error) {
-    if (error instanceof TypeError) throw error;
+    if (isValidationError(error)) throw error;
     fail(label + ' must be a plain record');
   }
 }
@@ -72,7 +83,7 @@ function denseArray(value, min, max, label) {
     }
     return out;
   } catch (error) {
-    if (error instanceof TypeError) throw error;
+    if (isValidationError(error)) throw error;
     fail(label + ' must be a bounded native array');
   }
 }
