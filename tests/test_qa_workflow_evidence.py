@@ -20,9 +20,19 @@ class WorkflowEvidenceTests(unittest.TestCase):
         empty = evaluate_workflow_evidence([], expected_head_sha=HEAD, required_workflow_ids=[10])
         stale = evaluate_workflow_evidence([run(sha=OTHER)], expected_head_sha=HEAD, required_workflow_ids=[10])
         self.assertEqual(empty.results[0].state, "MISSING")
-        self.assertEqual(stale.results[0].state, "MISSING")
+        self.assertEqual(stale.results[0].state, "STALE")
         self.assertEqual(stale.stale_run_count, 1)
         self.assertEqual(empty.state, "HOLD")
+
+    def test_newer_stale_head_run_supersedes_exact_head_success(self):
+        result = evaluate_workflow_evidence(
+            [run(1, sha=HEAD), run(2, sha=OTHER, status="in_progress", conclusion=None)],
+            expected_head_sha=HEAD, required_workflow_ids=[10],
+        )
+        self.assertEqual(result.results[0].state, "STALE")
+        self.assertEqual(result.results[0].run_id, 2)
+        self.assertEqual(result.stale_run_count, 1)
+        self.assertEqual(result.state, "HOLD")
 
     def test_latest_pending_attempt_supersedes_success(self):
         result = evaluate_workflow_evidence([run(1, attempt=1), run(2, attempt=2, status="in_progress", conclusion=None)],
