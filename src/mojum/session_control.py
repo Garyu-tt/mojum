@@ -16,8 +16,8 @@ SCHEMA = "mojum.session-control/1"
 TRUST = "checksum_only_not_authenticated"
 MAX_EVENTS = 1024
 MAX_TICK = 2**63 - 1
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_REVISION_RE = re.compile(r"[0-9a-f]{64}\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_REVISION_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 CREATED = "created"
 RUNNING = "running"
