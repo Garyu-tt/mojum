@@ -24,6 +24,6 @@ biological anatomy or calibrated biomechanics.
 ## Test
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_body_genetics_admission -v
-PYTHONPATH=src python -m unittest tests.test_body_genetics -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_body_genetics_admission.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_body_genetics.py' -v
 ```
