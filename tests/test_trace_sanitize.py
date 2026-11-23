@@ -110,6 +110,31 @@ class TraceSanitizeTests(unittest.TestCase):
         with self.assertRaises(TraceSanitizationError):
             sanitize_trace_attributes({f"field_{i}": i for i in range(25)})
 
+    def test_rejects_oversized_key_before_membership_lookup(self):
+        class MembershipTrap:
+            called = False
+
+            def __iter__(self):
+                return iter(trace_sanitize._STRING_PATTERNS)
+
+            def __contains__(self, value):
+                self.called = True
+                raise AssertionError("oversized key reached membership lookup")
+
+        trap = MembershipTrap()
+        with patch.object(trace_sanitize, "_ALLOWED_FIELDS", trap):
+            with self.assertRaises(TraceSanitizationError):
+                sanitize_trace_attributes({"x" * 1_000_000: 1})
+        self.assertFalse(trap.called)
+
+    def test_rejects_hostile_string_subclass_key_before_hashing(self):
+        class HostileKey(str):
+            def __hash__(self):
+                raise AssertionError("hostile hash must not run")
+
+        with self.assertRaises(TraceSanitizationError):
+            sanitize_trace_attributes({HostileKey("event"): "qa.completed"})
+
     def test_digest_revalidates_input(self):
         with self.assertRaises(TraceSanitizationError):
             trace_attributes_digest({"prompt": "do not export"})
