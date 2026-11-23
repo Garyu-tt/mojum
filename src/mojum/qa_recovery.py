@@ -60,7 +60,13 @@ def _integer(value: Any, field: str, minimum: int = 0) -> int:
 
 
 def _identifier(value: Any, field: str) -> str:
-    if type(value) is not str or not value or len(value.encode("utf-8")) > MAX_ID_BYTES:
+    if type(value) is not str or not value:
+        raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
+    try:
+        encoded_length = len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise RecoveryError(f"{field} is not valid UTF-8 text") from exc
+    if encoded_length > MAX_ID_BYTES:
         raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
     if any(ord(ch) < 33 or ord(ch) == 127 for ch in value):
         raise RecoveryError(f"{field} contains whitespace or control characters")
