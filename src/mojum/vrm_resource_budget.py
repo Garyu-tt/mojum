@@ -72,9 +72,15 @@ def assess_vrm_resource_budget(inventory, limits=None):
     # Validate shape and primitive bounds BEFORE serializing caller-controlled
     # values. Serializing first can allocate an unbounded string for a huge int,
     # deeply nested value, or oversized key despite the later 16 KiB check.
-    if set(inventory) != {"schema", *FIELDS}:
+    # The dict has exactly six entries, so materialize only this bounded key
+    # tuple. Reject oversized/subclass keys before hashing or equality checks.
+    keys = tuple(inventory)
+    if any(type(key) is not str or len(key) > 32 for key in keys):
+        raise ResourceBudgetError("inventory keys must be short native strings")
+    if set(keys) != {"schema", *FIELDS}:
         raise ResourceBudgetError("inventory fields must exactly match the versioned schema")
-    if type(inventory["schema"]) is not str or inventory["schema"] != SCHEMA:
+    schema = inventory["schema"]
+    if type(schema) is not str or len(schema) != len(SCHEMA) or schema != SCHEMA:
         raise ResourceBudgetError("unsupported inventory schema")
     counts = {}
     for field in FIELDS:
