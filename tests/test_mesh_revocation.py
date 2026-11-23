@@ -1,4 +1,5 @@
 """Adversarial tests for the offline mesh revocation policy oracle."""
+from dataclasses import replace
 import unittest
 
 from mojum.mesh_revocation import (
@@ -145,10 +146,17 @@ class MeshRevocationTests(unittest.TestCase):
         forged = VerifiedRevocationSnapshot(
             authority_id="mesh-root", key_id="authority-key-1", generation=99,
             issued_at_tick=100, expires_at_tick=200, entries=(), digest="0" * 64,
-            _verification_token=None,
         )
         with self.assertRaises(MeshRevocationError):
             check_peer_access(forged, node_id="node-a", enrollment_id="enroll-a",
+                              operation="read", now_tick=150)
+
+    def test_copied_or_replaced_snapshot_is_not_verification_provenance(self):
+        verified = verify_snapshot(envelope(revocations=[revoked()]),
+                                   authority_keys=KEYS, now_tick=150)
+        forged = replace(verified, entries=())
+        with self.assertRaises(MeshRevocationError):
+            check_peer_access(forged, node_id="node-17", enrollment_id="enroll-17",
                               operation="read", now_tick=150)
 
     def test_invalid_operation_rejected(self):
