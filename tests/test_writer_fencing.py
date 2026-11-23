@@ -74,8 +74,21 @@ class WriterFenceTests(unittest.TestCase):
             with self.subTest(value=repr(value)):
                 self.assertEqual(evaluate_writer_fence(token(epoch=value)).reason,
                                  "REJECT_MALFORMED")
-        self.assertTrue(evaluate_writer_fence(
-            token(epoch=MAX_COUNTER, revision=MAX_COUNTER)).accepted)
+        # The first token is deliberately fixed at epoch=1/revision=1.
+        # Exercise the numeric ceiling through valid advancing transitions.
+        previous_epoch = token(epoch=MAX_COUNTER - 1, revision=MAX_COUNTER)
+        new_epoch = evaluate_writer_fence(
+            token(epoch=MAX_COUNTER, revision=MAX_COUNTER), previous_epoch
+        )
+        self.assertTrue(new_epoch.accepted)
+        self.assertEqual(new_epoch.reason, "ACCEPTED_NEW_EPOCH")
+
+        previous_revision = token(epoch=MAX_COUNTER, revision=MAX_COUNTER - 1)
+        max_revision = evaluate_writer_fence(
+            token(epoch=MAX_COUNTER, revision=MAX_COUNTER), previous_revision
+        )
+        self.assertTrue(max_revision.accepted)
+        self.assertEqual(max_revision.reason, "ACCEPTED_ADVANCE")
 
     def test_inputs_are_not_mutated(self):
         candidate, high = token(epoch=2), token(epoch=1, revision=7)
