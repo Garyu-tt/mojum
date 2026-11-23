@@ -60,7 +60,7 @@ def _integer(value: Any, field: str, minimum: int = 0) -> int:
 
 
 def _identifier(value: Any, field: str) -> str:
-    if type(value) is not str or not value:
+    if type(value) is not str or not value or len(value) > MAX_ID_BYTES:
         raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
     try:
         encoded_length = len(value.encode("utf-8"))
@@ -99,7 +99,14 @@ def plan_recovery(tasks: Any, *, observed_at: int) -> RecoveryReport:
     by_id: dict[str, dict[str, Any]] = {}
     edges = 0
     for index, item in enumerate(tasks):
-        if type(item) is not dict or set(item) != required:
+        if type(item) is not dict or len(item) != len(required):
+            raise RecoveryError(f"tasks[{index}] must have the exact task schema")
+        # Do not hash/compare attacker-defined str subclasses or oversized
+        # keys during shape validation.
+        for key in item:
+            if type(key) is not str or len(key) > 32:
+                raise RecoveryError(f"tasks[{index}] contains an invalid field name")
+        if set(item) != required:
             raise RecoveryError(f"tasks[{index}] must have the exact task schema")
         task_id = _identifier(item["task_id"], f"tasks[{index}].task_id")
         if task_id in by_id:
