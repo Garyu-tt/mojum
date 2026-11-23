@@ -121,6 +121,31 @@ class ClothLODTests(unittest.TestCase):
             with self.subTest(field=next(iter(changed))), self.assertRaises(ClothLODError):
                 restore_state({**snap, **changed}, c)
 
+    def test_snapshot_field_names_reject_aliases_and_hostile_callbacks(self):
+        """Validate all key types before any set/hash/equality comparison."""
+        class KeyAlias(str):
+            pass
+
+        class ExplodingKey:
+            def __hash__(self):
+                return hash("schema")
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key comparison executed")
+
+        config = ClothLODConfig(requested="medium")
+        good = start(config).to_snapshot()
+        # Even value-equal str subclasses violate the native JSON schema.
+        with self.assertRaises(ClothLODError):
+            restore_state({KeyAlias(k): v for k, v in good.items()}, config)
+        # Hash-collision equality callbacks must never run during admission.
+        forged = {k: v for k, v in good.items() if k != "schema"}
+        forged[ExplodingKey()] = good["schema"]
+        with self.assertRaises(ClothLODError):
+            restore_state(forged, config)
+        # Clean primitive JSON survives the stricter boundary.
+        self.assertEqual(restore_state(good, config), start(config))
+
     def test_rejects_policy_reinterpretation_and_forged_state(self):
         c = ClothLODConfig(requested="low")
         snap = start(c).to_snapshot()
