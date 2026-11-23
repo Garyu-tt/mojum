@@ -157,7 +157,14 @@ def _digest(value):
 
 
 def _exact_mapping(value, keys, field):
-    if type(value) is not dict or set(value) != keys:
+    if type(value) is not dict:
+        raise ConsentError(f"{field} must contain exactly the documented fields")
+    if len(value) != len(keys):
+        raise ConsentError(f"{field} must contain exactly the documented fields")
+    observed = tuple(dict.keys(value))
+    if any(type(key) is not str for key in observed):
+        raise ConsentError(f"{field} keys must be exact strings")
+    if set(observed) != keys:
         raise ConsentError(f"{field} must contain exactly the documented fields")
 
 
