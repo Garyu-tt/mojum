@@ -19,56 +19,62 @@ const BONES = new Set([
   'leftToes', 'rightToes'
 ]);
 
-function compareCodePoints(left, right) {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function fail(message) {
   throw new TypeError(message);
 }
 
 function plainRecord(value, requiredKeys, label) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+  try {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      fail(label + ' must be a plain record');
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) fail(label + ' must be a plain record');
+    const keys = Reflect.ownKeys(value);
+    if (keys.some(k => typeof k !== 'string') ||
+        keys.length !== requiredKeys.length ||
+        requiredKeys.some(key => !keys.includes(key))) {
+      fail(label + ' has missing or unknown fields');
+    }
+    const result = Object.create(null);
+    for (const key of requiredKeys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+          descriptor.enumerable !== true) {
+        fail(label + ' fields must be enumerable data properties');
+      }
+      result[key] = descriptor.value;
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof TypeError) throw error;
     fail(label + ' must be a plain record');
   }
-  const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) fail(label + ' must be a plain record');
-  const keys = Reflect.ownKeys(value);
-  if (keys.some(k => typeof k !== 'string') ||
-      keys.slice().sort().join('\0') !== requiredKeys.slice().sort().join('\0')) {
-    fail(label + ' has missing or unknown fields');
-  }
-  const result = Object.create(null);
-  for (const key of requiredKeys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
-        descriptor.enumerable !== true) {
-      fail(label + ' fields must be enumerable data properties');
-    }
-    result[key] = descriptor.value;
-  }
-  return result;
 }
-
 function denseArray(value, min, max, label) {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
-      value.length < min || value.length > max) {
+  try {
+    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
+        value.length < min || value.length > max) {
+      fail(label + ' must be a bounded native array');
+    }
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== value.length + 1 || keys.some(k =>
+      k !== 'length' && (typeof k !== 'string' || !/^(0|[1-9][0-9]*)$/.test(k) ||
+        Number(k) >= value.length))) {
+      fail(label + ' must be dense and have no extra properties');
+    }
+    const out = [];
+    for (let i = 0; i < value.length; i++) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+          descriptor.enumerable !== true) fail(label + ' must contain data elements');
+      out.push(descriptor.value);
+    }
+    return out;
+  } catch (error) {
+    if (error instanceof TypeError) throw error;
     fail(label + ' must be a bounded native array');
   }
-  const keys = Reflect.ownKeys(value);
-  if (keys.length !== value.length + 1 || keys.some(k =>
-    k !== 'length' && (typeof k !== 'string' || !/^(0|[1-9][0-9]*)$/.test(k) ||
-      Number(k) >= value.length))) {
-    fail(label + ' must be dense and have no extra properties');
-  }
-  const out = [];
-  for (let i = 0; i < value.length; i++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
-    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
-        descriptor.enumerable !== true) fail(label + ' must contain data elements');
-    out.push(descriptor.value);
-  }
-  return out;
 }
 
 function stringList(value, min, max, label, allowed = null) {
@@ -154,14 +160,17 @@ export function validateVrmBindingManifest(input) {
   const duplicateMappingEntries = [...duplicateMappings].sort();
   const duplicateBoneAxes = [...duplicateTargets].sort();
 
+  // Identifier fields are restricted to ASCII. Compare UTF-16 code units
+  // explicitly instead of localeCompare(), whose result depends on host locale.
+  const compareCodeUnit = (left, right) =>
+    left < right ? -1 : left > right ? 1 : 0;
   const canonical = {
     schema: VRM_BINDING_SCHEMA,
-    expected_joint_ids: [...expected].sort(),
+    expected_joint_ids: [...expected].sort(compareCodeUnit),
     mappings: mappings.slice().sort((a, b) =>
-      compareCodePoints(a.id, b.id) ||
-      compareCodePoints(a.bone, b.bone) ||
-      compareCodePoints(a.axis, b.axis)),
-    available_bones: [...available].sort()
+      compareCodeUnit(a.id, b.id) || compareCodeUnit(a.bone, b.bone) ||
+      compareCodeUnit(a.axis, b.axis)),
+    available_bones: [...available].sort(compareCodeUnit)
   };
   const digest = createHash('sha256')
     .update(JSON.stringify(canonical), 'utf8').digest('hex');
