@@ -83,6 +83,20 @@ class WorldAirflowTests(unittest.TestCase):
                     self.sample(state=forged, tick=forged.tick,
                                 expected_revision=forged.revision)
 
+    def test_rejects_forged_room_geometry_before_revision_serialization(self):
+        room = Room(20.0, 20.0)
+        state = initial_state(room, 1.0, 1.0)
+        object.__setattr__(room, "width", 10 ** 10_000)
+        with self.assertRaisesRegex(AirflowError, "room dimensions"):
+            self.sample(room, state, expected_revision=state.revision, tick=state.tick)
+
+    def test_rejects_forged_obstacle_shape_before_revision_serialization(self):
+        room = Room(20.0, 20.0)
+        state = initial_state(room, 1.0, 1.0)
+        object.__setattr__(room, "obstacles", (("not-a-number", 0.0, 1.0, 1.0),))
+        with self.assertRaises(AirflowError):
+            self.sample(room, state, expected_revision=state.revision, tick=state.tick)
+
     def test_rejects_hostile_revision_type_before_equality(self):
         class HostileString(str):
             def __eq__(self, other):
