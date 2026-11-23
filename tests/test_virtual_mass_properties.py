@@ -147,6 +147,23 @@ class VirtualMassPropertiesTests(unittest.TestCase):
         with self.assertRaises(MassPropertiesError):
             build_mass_properties(fixture(segment("bad", inertia=tensor)))
 
+    def test_inertia_triangle_inequality_is_enforced(self):
+        # PSD alone is insufficient: principal moments must be physically realizable.
+        tensor = [[1, 0, 0], [0, 1, 0], [0, 0, 5]]
+        with self.assertRaises(MassPropertiesError):
+            build_mass_properties(fixture(segment("bad", inertia=tensor)))
+
+    def test_hostile_non_string_mapping_key_is_rejected_before_comparison(self):
+        class HostileKey:
+            def __hash__(self):
+                return hash("schema")
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+        raw = fixture(segment("ok"))
+        raw[HostileKey()] = "unexpected"
+        with self.assertRaises(MassPropertiesError):
+            build_mass_properties(raw)
+
     def test_reflection_is_not_a_rotation(self):
         reflection = [[-1, 0, 0], [0, 1, 0], [0, 0, 1]]
         with self.assertRaises(MassPropertiesError):
