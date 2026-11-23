@@ -92,5 +92,36 @@ class PlacementAdmissionRecheckTests(unittest.TestCase):
                                      self.job.priority, self.job.stateless))
 
 
+    def test_forged_plan_and_assignment_records_fail_closed(self):
+        # object.__new__ and object.__delattr__ bypass frozen dataclass init.
+        # The verifier must reject them via its documented PlacementError.
+        records = (
+            object.__new__(PlacementPlan),
+            PlacementPlan((object.__new__(Assignment),), ()),
+        )
+        for candidate in records:
+            with self.subTest(record=type(candidate).__name__):
+                with self.assertRaises(PlacementError):
+                    verify_placement(candidate, [self.job], [self.node],
+                                     local_node_id="local-1")
+
+        for field in ("assignments", "deferred"):
+            candidate = PlacementPlan((Assignment("job-1", "local-1"),), ())
+            object.__delattr__(candidate, field)
+            with self.subTest(plan_field=field):
+                with self.assertRaises(PlacementError):
+                    verify_placement(candidate, [self.job], [self.node],
+                                     local_node_id="local-1")
+
+        for field in ("job_id", "node_id"):
+            assignment = Assignment("job-1", "local-1")
+            object.__delattr__(assignment, field)
+            candidate = PlacementPlan((assignment,), ())
+            with self.subTest(assignment_field=field):
+                with self.assertRaises(PlacementError):
+                    verify_placement(candidate, [self.job], [self.node],
+                                     local_node_id="local-1")
+
+
 if __name__ == "__main__":
     unittest.main()
