@@ -1,0 +1,38 @@
+name: Motor slew exact-head QA
+
+on:
+  push:
+    branches:
+      - build/5-motor-slew-guard-20261123-r01
+    paths:
+      - "src/mojum/motor_slew_guard.py"
+      - "tests/test_motor_slew_guard.py"
+      - ".github/workflows/motor-slew-exact-head-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact pushed HEAD
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_motor_slew_guard.py' -v
