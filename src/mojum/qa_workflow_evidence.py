@@ -84,7 +84,8 @@ def evaluate_workflow_evidence(
         required.append(workflow_id)
 
     latest: dict[int, dict[str, Any]] = {}
-    seen_runs: set[int] = set()
+    seen_attempts: set[tuple[int, int]] = set()
+    run_identities: dict[int, tuple[int, str, str, str]] = {}
     stale_count = 0
     for index, raw in enumerate(runs):
         item = _fields(raw, index)
@@ -109,9 +110,15 @@ def evaluate_workflow_evidence(
                 raise WorkflowEvidenceError(f"runs[{index}].conclusion is unsupported")
         elif conclusion is not None:
             raise WorkflowEvidenceError(f"runs[{index}].conclusion must be null for a pending run")
-        if run_id in seen_runs:
-            raise WorkflowEvidenceError("duplicate run_id")
-        seen_runs.add(run_id)
+        attempt_key = (run_id, attempt)
+        if attempt_key in seen_attempts:
+            raise WorkflowEvidenceError("duplicate workflow run attempt")
+        seen_attempts.add(attempt_key)
+        identity = (workflow_id, name, head, item["event"])
+        previous_identity = run_identities.get(run_id)
+        if previous_identity is not None and previous_identity != identity:
+            raise WorkflowEvidenceError("workflow run identity changed across attempts")
+        run_identities[run_id] = identity
         if workflow_id not in required:
             continue
         if head != expected_head_sha:
