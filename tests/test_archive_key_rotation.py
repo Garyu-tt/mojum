@@ -87,6 +87,37 @@ class RotationChainTests(unittest.TestCase):
                 {key_fingerprint(self.k1): self.k2}, key_fingerprint(self.k2),
             )
 
+    def test_oversized_record_rejected_before_key_materialization(self):
+        r = make_rotation(1, self.k0, self.k1)
+        r.update({f"extra-{i}": None for i in range(10_000)})
+        with self.assertRaises(RotationError):
+            verify_rotation_chain(self.k0, 0, [r], {}, key_fingerprint(self.k1))
+
+    def test_keyring_cardinality_is_bounded(self):
+        keyring = {f"{i:064x}": self.k1 for i in range(33)}
+        with self.assertRaises(RotationError):
+            verify_rotation_chain(self.k0, 0, [], keyring, key_fingerprint(self.k0))
+
+    def test_keyring_rejects_string_subclass_before_lookup(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+
+        fingerprint = HostileString(key_fingerprint(self.k1))
+        keyring = {fingerprint: self.k1}
+        with self.assertRaises(RotationError):
+            verify_rotation_chain(self.k0, 0, [], keyring, key_fingerprint(self.k0))
+
+    def test_record_rejects_string_subclass_key_before_set(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+
+        r = make_rotation(1, self.k0, self.k1)
+        r[HostileString("schema")] = r.pop("schema")
+        with self.assertRaises(RotationError):
+            verify_rotation_chain(self.k0, 0, [r], {}, key_fingerprint(self.k1))
+
 
 if __name__ == "__main__":
     unittest.main()
