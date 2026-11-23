@@ -125,7 +125,7 @@ def sanitize_trace_event(raw: object) -> TraceEnvelope:
     intentionally does not recursively inspect or attempt to scrub arbitrary
     application objects, prompts, source text, PRIVATE events, or credentials.
     """
-    if not isinstance(raw, Mapping):
+    if type(raw) is not dict:
         raise TracePrivacyError("trace event must be a mapping")
     if len(raw) > MAX_FIELDS:
         raise TracePrivacyError("trace event has too many fields")
