@@ -1,6 +1,6 @@
 # Noosphere bitemporal fact-conflict audit R0.1
 
-The schema mojum.noosphere.validity-audit/1 (without the space: moj um) is a pure standard-library diagnostic over caller-supplied synthetic facts. It complements the append-only Noosphere event journal; it is not a journal reader, memory backend, merge policy, access-control system, or conflict resolver.
+The schema is mojum.noosphere.validity-audit/1. is a pure standard-library diagnostic over caller-supplied synthetic facts. It complements the append-only Noosphere event journal; it is not a journal reader, memory backend, merge policy, access-control system, or conflict resolver.
 
 ## Input contract
 
