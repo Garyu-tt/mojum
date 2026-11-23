@@ -190,6 +190,14 @@ class BodyAccelerationAuditTests(unittest.TestCase):
         with self.assertRaises(BodyAccelerationError):
             self.audit(value)
 
+    def test_rejects_total_position_value_budget(self):
+        value = trajectory(times=(0, 1, 2), positions=(0.0, 1.0, 2.0))
+        value["joint_names"] = ["joint-%03d" % index for index in range(256)]
+        for sample in value["samples"]:
+            sample["positions"] = [0.0] * 256
+        with self.assertRaises(BodyAccelerationError):
+            self.audit(value, {name: 1.0 for name in value["joint_names"]})
+
     def test_rejects_too_few_samples(self):
         value = trajectory()
         value["samples"] = value["samples"][:2]
