@@ -242,41 +242,43 @@ def evaluate_pulse_horizons(document):
         _fail("not enough frames for the selected horizon")
 
     forecast_rows = []
+    model_abs = [0.0] * max_horizon
+    model_sq = [0.0] * max_horizon
+    baseline_abs = [0.0] * max_horizon
+    baseline_sq = [0.0] * max_horizon
+    # Each origin is rolled forward exactly once. No true future pulse is fed
+    # back into the next step; it is consulted only for the score accumulator.
+    for origin in range(origin_count):
+        origin_pulse = frames[origin]["pulse"]
+        previous_prediction_pulse = origin_pulse
+        for step in range(1, max_horizon + 1):
+            target = frames[origin + step]
+            features = (
+                1.0,
+                target["phase_milli"] / 1000.0,
+                float(previous_prediction_pulse),
+            )
+            prediction = _clamp(_sum_products(weights, features, summation))
+            forecast_rows.append([frames[origin]["tick"], step, prediction])
+            actual = float(target["pulse"])
+            error = prediction - actual
+            index = step - 1
+            model_abs[index] += abs(error)
+            model_sq[index] += error * error
+            baseline_error = float(origin_pulse) - actual
+            baseline_abs[index] += abs(baseline_error)
+            baseline_sq[index] += baseline_error * baseline_error
+            previous_prediction_pulse = prediction >= 0.5
+
     metric_rows = []
-    for horizon in range(1, max_horizon + 1):
-        model_abs = model_sq = baseline_abs = baseline_sq = 0.0
-        for origin in range(origin_count):
-            origin_pulse = frames[origin]["pulse"]
-            previous_prediction_pulse = origin_pulse
-            prediction = 0.0
-            for step in range(1, horizon + 1):
-                target = frames[origin + step]
-                features = (
-                    1.0,
-                    target["phase_milli"] / 1000.0,
-                    float(previous_prediction_pulse),
-                )
-                prediction = _clamp(_sum_products(weights, features, summation))
-                forecast_rows.append([frames[origin]["tick"], step, prediction])
-                # Label is read only after the prediction and never enters rollout.
-                actual = float(target["pulse"])
-                error = prediction - actual
-                if step == horizon:
-                    model_abs += abs(error)
-                    model_sq += error * error
-                    baseline_prediction = float(origin_pulse)
-                    baseline_error = baseline_prediction - actual
-                    baseline_abs += abs(baseline_error)
-                    baseline_sq += baseline_error * baseline_error
-                previous_prediction_pulse = prediction >= 0.5
-        count = origin_count
+    for index in range(max_horizon):
         metric_rows.append(HorizonMetric(
-            horizon=horizon,
-            sample_count=count,
-            model_mae=model_abs / count,
-            model_brier=model_sq / count,
-            persistence_mae=baseline_abs / count,
-            persistence_brier=baseline_sq / count,
+            horizon=index + 1,
+            sample_count=origin_count,
+            model_mae=model_abs[index] / origin_count,
+            model_brier=model_sq[index] / origin_count,
+            persistence_mae=baseline_abs[index] / origin_count,
+            persistence_brier=baseline_sq[index] / origin_count,
         ))
 
     snapshot_sha = _canonical_hash(document["snapshot"])
