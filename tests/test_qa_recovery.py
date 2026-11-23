@@ -74,6 +74,10 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("a", lease=2)], observed_at=1)
 
+    def test_rejects_surrogate_identifiers(self):
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("bad\\ud800id")], observed_at=0)
+
     def test_bounds_and_exact_types(self):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("a")] * 501, observed_at=0)
