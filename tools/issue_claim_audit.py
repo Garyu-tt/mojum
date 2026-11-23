@@ -153,6 +153,12 @@ def audit(snapshot: Any) -> dict[str, Any]:
         if total_comments > MAX_COMMENTS:
             raise ClaimAuditError("too many comments")
         sources: list[tuple[datetime, int, str, str]] = []
+        # Incomplete body provenance must not silently turn a claimed issue
+        # into a clean/unclaimed audit result.
+        body_fields = ("body", "author", "created_at")
+        if any(field in item for field in body_fields) and not all(
+                field in item for field in body_fields):
+            raise ClaimAuditError("issue body, author and created_at must appear together")
         if "body" in item:
             sources.append((_time(item.get("created_at")), 0,
                             _name(item.get("author"), "issue author"), _body(item["body"])))
