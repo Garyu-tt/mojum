@@ -20,12 +20,20 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out PR head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile queue module
         run: python -m py_compile src/mojum/qa_queue.py
-      - name: Run focused queue contract tests
+      - name: Run focused queue contract and resource-warning audit
         env:
           PYTHONPATH: src
-        run: python -m unittest discover -s tests -p "test_qa_queue.py" -v
+          PYTHONWARNINGS: error::ResourceWarning
+        run: python -X dev -m unittest discover -s tests -p "test_qa_queue.py" -v
