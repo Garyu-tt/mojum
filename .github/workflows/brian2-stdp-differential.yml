@@ -1,0 +1,41 @@
+name: Brian2 STDP differential (opt-in)
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/brian2_stdp.py'
+      - 'tests/test_brian2_stdp.py'
+      - 'docs/BRIAN2_STDP_DIFFERENTIAL_R01.md'
+      - '.github/workflows/brian2-stdp-differential.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stdlib-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Offline reference without dependencies
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_brian2_stdp.py' -v
+
+  native-brian2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned optional Brian2
+        run: python -m pip install 'brian2==2.9.0'
+      - name: Test actual Brian2 numerical differential without silent skip
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=src python -m unittest discover -s tests -p 'test_brian2_stdp.py' -v 2>&1 | tee /tmp/brian2-stdp-native.log
+          if grep -Eq 'skipped.*native Brian2 optional' /tmp/brian2-stdp-native.log; then exit 1; fi
