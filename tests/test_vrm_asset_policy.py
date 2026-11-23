@@ -174,6 +174,12 @@ class VrmAssetPolicyTests(unittest.TestCase):
         self.assertEqual(report["normalized"]["asset"]["license"], "")
         self.assertEqual(len(report["manifest_digest"]), 64)
 
+        candidate = manifest()
+        candidate["dependencies"][0]["license"] = "L" * 100000
+        report = validate_manifest(candidate, POLICY)
+        self.assertFalse(report["accepted"])
+        self.assertIn("dependencies[0].license", report["violations"])
+
     def test_oversized_policy_tokens_and_versions_are_rejected(self):
         bad_policy = dict(POLICY, allowed_licenses=["L" * 100000])
         with self.assertRaises(AssetPolicyError):
