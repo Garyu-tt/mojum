@@ -105,11 +105,11 @@ def _principal_moments(m: tuple[tuple[float, ...], ...]) -> tuple[float, float, 
         scale = max(abs(a[0][0]), abs(a[1][1]), abs(a[2][2]), 1e-300)
         if abs(apq) <= 1e-15 * scale:
             break
-        tau = (a[q][q] - a[p][p]) / (2.0 * apq)
-        sign = 1.0 if tau >= 0.0 else -1.0
-        tangent = sign / (abs(tau) + math.sqrt(1.0 + tau * tau))
-        cosine = 1.0 / math.sqrt(1.0 + tangent * tangent)
-        sine = tangent * cosine
+        # atan2 avoids overflow in tau*tau for extremely small off-diagonals.
+        angle = 0.5 * math.atan2(2.0 * apq, a[q][q] - a[p][p])
+        cosine = math.cos(angle)
+        sine = math.sin(angle)
+        tangent = sine / cosine
         app, aqq = a[p][p], a[q][q]
         a[p][p] = app - tangent * apq
         a[q][q] = aqq + tangent * apq
