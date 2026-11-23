@@ -36,6 +36,10 @@ def _finite(value: object, field: str) -> float:
         raise MotorSlewError(f"{field} must be finite") from exc
     if not math.isfinite(normalized):
         raise MotorSlewError(f"{field} must be finite")
+    # Binary64 silently rounds some exact integers (notably 2**53 + 1).
+    # Never turn an out-of-bounds requested target into an in-bounds one.
+    if type(value) is int and normalized != value:
+        raise MotorSlewError(f"{field} loses integer precision")
     return normalized
 
 

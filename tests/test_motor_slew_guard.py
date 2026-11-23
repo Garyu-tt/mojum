@@ -109,6 +109,25 @@ class MotorSlewGuardTests(unittest.TestCase):
         self.assertEqual(dict(receipt.targets)["elbow"], 0.1)
         self.assertEqual(dict(gate.receipt().targets)["elbow"], 0.1)
 
+    def test_reject_lossy_large_int_before_bounds_or_slew(self):
+        # Without a lossless check, hi+1 rounds to hi as IEEE binary64
+        # and an out-of-bounds caller target is silently accepted.
+        hi = 2**54
+        gate = MotorSlewGuard({"j": (0, hi, 10)}, {"j": hi - 10})
+        before = gate.receipt()
+        with self.assertRaisesRegex(MotorSlewError, "precision"):
+            gate.advance({"j": hi + 1}, tick=1, expected_revision=0)
+        self.assertEqual(gate.receipt(), before)
+        with self.assertRaisesRegex(MotorSlewError, "precision"):
+            MotorSlewGuard({"j": (0, hi + 1, 10)}, {"j": 0})
+        with self.assertRaisesRegex(MotorSlewError, "precision"):
+            MotorSlewGuard({"j": (0, hi, 10)}, {"j": hi - 9})
+        # Exactly representable large integers remain supported.
+        self.assertEqual(
+            gate.advance({"j": hi}, tick=1, expected_revision=0).targets,
+            (("j", float(hi)),),
+        )
+
     def test_invalid_joint_definition(self):
         bad_limits = [
             {}, {"": (0, 1, 0.1)}, {"j k": (0, 1, 0.1)},
