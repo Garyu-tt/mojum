@@ -147,6 +147,50 @@ class NestedGraphEditorTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate_nested(parent, bad)
 
+    def test_preflight_rejects_subclasses_before_serialization(self):
+        class HostileDict(dict):
+            def items(self):
+                raise AssertionError("dict subclass hook must not execute")
+
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("list subclass hook must not execute")
+
+        parent, containers = fixture()
+        with self.assertRaises(GraphError):
+            validate_nested(HostileDict(parent), containers)
+        with self.assertRaises(GraphError):
+            validate_nested(parent, HostileList(containers))
+
+    def test_preflight_rejects_cycles_aliases_and_excessive_depth(self):
+        parent, containers = fixture()
+        cyclic = {}
+        cyclic["self"] = cyclic
+        with self.assertRaises(GraphError):
+            validate_nested(cyclic, containers)
+
+        shared = {"x": 1}
+        aliased = {"left": shared, "right": shared}
+        with self.assertRaises(GraphError):
+            from mojum.graph_editor_nested import _copy_json
+            _copy_json(aliased)
+
+        deeply_nested = []
+        cursor = deeply_nested
+        for _ in range(80):
+            child = []
+            cursor.append(child)
+            cursor = child
+        with self.assertRaises(GraphError):
+            from mojum.graph_editor_nested import _copy_json
+            _copy_json(deeply_nested)
+
+    def test_preflight_rejects_huge_integer_and_oversized_text(self):
+        from mojum.graph_editor_nested import _copy_json
+        for value in (10 ** 400, "x" * (1024 * 1024 + 1)):
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(GraphError):
+                _copy_json({"value": value})
+
     def test_inputs_are_not_mutated(self):
         parent, containers = fixture()
         parent_before, containers_before = copy.deepcopy(parent), copy.deepcopy(containers)
