@@ -100,7 +100,15 @@ class _Pinocchio2R:
     def ik(self, xy: tuple[float, float], start: object, *, max_steps: int = 96):
         if (type(max_steps) is not int or not 1 <= max_steps <= 256
                 or type(xy) not in (tuple, list) or len(xy) != 2
-                or any(type(v) not in (int, float) or not math.isfinite(v) for v in xy)):
+                or any(type(v) not in (int, float) for v in xy)):
+            raise ValueError("invalid IK target or iteration budget")
+        # math.isfinite(10**1000) itself raises OverflowError: reject
+        # unrepresentable targets before allocating any native/numpy state.
+        try:
+            target_finite = all(math.isfinite(v) for v in xy)
+        except (OverflowError, ValueError, TypeError):
+            target_finite = False
+        if not target_finite:
             raise ValueError("invalid IK target or iteration budget")
         q = self.np.asarray(validate_configuration(start), dtype=float)
         target = self.np.asarray(xy, dtype=float)
@@ -126,7 +134,7 @@ class _Pinocchio2R:
 
 def run_benchmark(*, backend: str, samples: int = 128) -> dict:
     """Return a public-only report; timings are measurements, never invented."""
-    if backend not in ("reference", "pinocchio"):
+    if type(backend) is not str or backend not in ("reference", "pinocchio"):
         raise ValueError("unsupported backend")
     if type(samples) is not int or not 1 <= samples <= 4096:
         raise ValueError("samples must be integer in 1..4096")

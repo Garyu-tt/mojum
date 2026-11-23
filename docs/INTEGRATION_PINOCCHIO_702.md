@@ -2,6 +2,12 @@
 
 This is **only the Pinocchio slice** of #702. Jolt/PBD cloth, MuJoCo contact, rig import, and canonical Aquarium integration remain unimplemented. Nothing in this module simulates hardware contact, handles live sensor feeds, uses network access, writes SQLite journals, or reads PRIVATE Noosphere events.
 
+## Non-overlap with #722
+
+This is an independent **native Jacobian-based damped least squares IK** experiment, including a real Pinocchio frame Jacobian and bounded iterative convergence. PR #722 instead benchmarks **analytic IK** checked with native Pinocchio FK. The two public 2R fixtures, report schemas, and module APIs are not interchangeable; do not merge both as duplicate canonical adapters without a deliberate #702 integration choice. This spike does not claim the entire #702 issue.
+
+Direct Python API callers must supply an exact built-in string backend selector; equality-spoofing objects are rejected. Native IK rejects unrepresentably large integer targets as a documented ValueError before any foreign solver state is touched.
+
 ## Reproduction
 
 No external dependencies for the public synthetic reference:
