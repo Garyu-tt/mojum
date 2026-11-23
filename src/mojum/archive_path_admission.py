@@ -29,11 +29,13 @@ def validate_member_path(path: str) -> str:
     """
     if type(path) is not str:
         raise ArchivePathError("member path must be an exact native string")
+    if not path or len(path) > MAX_PATH_BYTES:
+        raise ArchivePathError("empty or oversized member path")
     try:
         encoded_path = path.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ArchivePathError("member path is not valid UTF-8 text") from exc
-    if not path or len(encoded_path) > MAX_PATH_BYTES:
+    if len(encoded_path) > MAX_PATH_BYTES:
         raise ArchivePathError("empty or oversized member path")
     if path.startswith(("/", "\\\\")) or _DRIVE.match(path):
         raise ArchivePathError("absolute or drive-prefixed member path")
@@ -43,6 +45,7 @@ def validate_member_path(path: str) -> str:
     if any(
         component in ("", ".", "..")
         or ":" in component
+        or len(component) > MAX_COMPONENT_BYTES
         or len(component.encode("utf-8")) > MAX_COMPONENT_BYTES
         or component.endswith((" ", "."))
         or _is_windows_reserved_component(component)
