@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
+from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger, canonical as genesis_canonical
 from mojum.genesis_phenotype_audit import (
     GenesisPhenotypeAuditError, SCHEMA, audit_phenotype,
 )
@@ -117,10 +117,13 @@ class PhenotypeAuditTests(unittest.TestCase):
         observed["second"] = "b" * 600_000
         with patch(
             "mojum.genesis_phenotype_audit.canonical",
-            side_effect=AssertionError("canonical serialization must not run"),
-        ):
+            wraps=genesis_canonical,
+        ) as serializer:
             with self.assertRaises(GenesisPhenotypeAuditError):
                 audit_phenotype(ledger.snapshot(), observed, 3)
+            # The bounded ledger is serialized once; the rejected projection
+            # must fail its preflight before a second serialization call.
+            self.assertEqual(serializer.call_count, 1)
 
     def test_aggregate_object_key_budget_rejected_before_serialization(self):
         ledger = make_ledger()
@@ -129,10 +132,13 @@ class PhenotypeAuditTests(unittest.TestCase):
         observed["v" * 600_000] = 2
         with patch(
             "mojum.genesis_phenotype_audit.canonical",
-            side_effect=AssertionError("canonical serialization must not run"),
-        ):
+            wraps=genesis_canonical,
+        ) as serializer:
             with self.assertRaises(GenesisPhenotypeAuditError):
                 audit_phenotype(ledger.snapshot(), observed, 3)
+            # The bounded ledger is serialized once; the rejected projection
+            # must fail its preflight before a second serialization call.
+            self.assertEqual(serializer.call_count, 1)
 
     def test_non_finite_float_rejected_before_serialization(self):
         ledger = make_ledger()
@@ -142,10 +148,11 @@ class PhenotypeAuditTests(unittest.TestCase):
             with self.subTest(value=value):
                 with patch(
                     "mojum.genesis_phenotype_audit.canonical",
-                    side_effect=AssertionError("canonical serialization must not run"),
-                ):
+                    wraps=genesis_canonical,
+                ) as serializer:
                     with self.assertRaises(GenesisPhenotypeAuditError):
                         audit_phenotype(ledger.snapshot(), observed, 3)
+                    self.assertEqual(serializer.call_count, 1)
 
     def test_excessive_nesting_rejected(self):
         ledger = make_ledger()
