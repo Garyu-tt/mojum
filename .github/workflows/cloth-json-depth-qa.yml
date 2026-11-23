@@ -1,0 +1,38 @@
+name: Cloth benchmark JSON-depth exact-head QA
+
+on:
+  push:
+    branches:
+      - qa/1001-cloth-json-depth-20261123
+    paths:
+      - "tools/cloth_benchmark_compare.py"
+      - "tests/test_cloth_benchmark_compare.py"
+      - ".github/workflows/cloth-json-depth-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  parser-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact pushed HEAD
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Run comparator regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_cloth_benchmark_compare.py -v
