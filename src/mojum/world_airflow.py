@@ -17,6 +17,7 @@ MAX_SOURCES = 32
 MAX_SOURCE_SPEED_MM_S = 20_000
 MAX_RESULT_SPEED_MM_S = 100_000
 MAX_ROOM_EDGE_MM = 1_000_000
+MAX_TICK = (1 << 63) - 1
 ATTENUATION_RANGE_MM = 10_000
 WEIGHT_SCALE = 1_000_000
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,47}\Z", re.ASCII)
@@ -168,15 +169,23 @@ def sample_room_airflow(room, state, *, tick, expected_revision,
         raise AirflowError("explicit PUBLIC_SYNTHETIC assertion is required")
     if type(room) is not Room or type(state) is not RoomState:
         raise AirflowError("canonical Room and RoomState instances are required")
-    if (type(state.tick) is not int or state.tick < 0
-            or type(tick) is not int or tick < 0 or tick != state.tick):
-        raise AirflowError("sample tick must equal the current room-state tick")
+    if (type(state.tick) is not int or not 0 <= state.tick <= MAX_TICK
+            or type(tick) is not int or not 0 <= tick <= MAX_TICK
+            or tick != state.tick):
+        raise AirflowError("sample tick must equal the bounded current room-state tick")
     if (type(expected_revision) is not str or len(expected_revision) != 64
-            or expected_revision != state.revision
-            or state.revision != _revision(room, state.tick, state.x, state.y)):
+            or type(state.revision) is not str or len(state.revision) != 64):
         raise AirflowError("stale or corrupted room revision")
+
+    # Validate caller-constructible RoomState values before hashing them.
+    # Otherwise json.dumps in _revision may process an enormous integer first.
     if not _valid(room, state.x, state.y):
         raise AirflowError("invalid room state")
+    _mm(state.x, "state.x")
+    _mm(state.y, "state.y")
+    if (state.revision != expected_revision
+            or state.revision != _revision(room, state.tick, state.x, state.y)):
+        raise AirflowError("stale or corrupted room revision")
 
     width_mm, height_mm = _mm(room.width, "room.width"), _mm(room.height, "room.height")
     _mm(state.x, "state.x")
