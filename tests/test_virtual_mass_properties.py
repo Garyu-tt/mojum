@@ -58,6 +58,18 @@ class VirtualMassPropertiesTests(unittest.TestCase):
         self.assertEqual(result.inertia_about_com_kg_m2,
                          ((0.0, 0.0, 0.0), (0.0, 4.0, 0.0), (0.0, 0.0, 4.0)))
 
+    def test_tiny_negative_inertia_is_rejected(self):
+        # Relative scaling matters: this invalid principal moment is tiny in SI
+        # units, but is 100% negative relative to the tensor's own magnitude.
+        tensor = [[-1e-11, 0, 0], [0, 0, 0], [0, 0, 0]]
+        with self.assertRaises(MassPropertiesError):
+            build_mass_properties(fixture(segment("bad", inertia=tensor)))
+
+    def test_tiny_asymmetry_is_rejected_relative_to_tensor_scale(self):
+        tensor = [[1e-12, 2e-11, 0], [0, 1e-12, 0], [0, 0, 1e-12]]
+        with self.assertRaises(MassPropertiesError):
+            build_mass_properties(fixture(segment("bad", inertia=tensor)))
+
     def test_mass_weighted_center_of_mass(self):
         source = fixture(
             segment("light", mass=1.0, translation=(0.0, 0.0, 0.0)),
