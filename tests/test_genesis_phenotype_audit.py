@@ -59,6 +59,12 @@ class PhenotypeAuditTests(unittest.TestCase):
         result=audit_phenotype_snapshot(snapshot,expected,source_classification="PUBLIC_SYNTHETIC")
         snapshot["events"][0]["delta"]=999; expected["parameters"]["heartbeat_bpm"]=999
         self.assertTrue(result.accepted); self.assertEqual(result.at_tick,5)
+    def test_numerically_equal_different_json_types_are_rejected(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        expected["parameters"]["heartbeat_bpm"] = float(expected["parameters"]["heartbeat_bpm"])
+        result=self.audit(ledger, expected)
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.mismatch_fields, ("parameters",))
     def test_digest_is_deterministic(self):
         ledger=make_ledger(); first=self.audit(ledger,ledger.phenotype(5))
         second=audit_phenotype_snapshot(copy.deepcopy(ledger.snapshot()),copy.deepcopy(ledger.phenotype(5)),source_classification="PUBLIC_SYNTHETIC")
