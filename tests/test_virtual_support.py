@@ -7,6 +7,8 @@ import unittest
 from mojum.virtual_support import (
     INPUT_SCHEMA,
     MAX_CONTACTS,
+    MAX_COORD_M,
+    MAX_FORCE_N,
     MAX_WIRE_I64,
     OUTPUT_SCHEMA,
     observe_virtual_support,
@@ -101,7 +103,7 @@ class VirtualSupportTests(unittest.TestCase):
             self.assertEqual(observe_virtual_support(p)[field], MAX_WIRE_I64)
 
     def test_rejects_nonfinite_boolean_and_huge_numbers(self):
-        for value in (True, False, math.nan, math.inf, -math.inf, 10**1000, 10001):
+        for value in (True, False, math.nan, math.inf, -math.inf, 10**1000, MAX_FORCE_N + 1):
             for field, path in (
                 ("com", ("com_m", 0)),
                 ("point", ("floor_contacts", 0, "point_m", 1)),
@@ -117,6 +119,31 @@ class VirtualSupportTests(unittest.TestCase):
                         p["floor_contacts"][0]["vertical_force_n"] = value
                     with self.assertRaises(ValueError):
                         observe_virtual_support(p)
+
+    def test_distinct_coordinate_and_contact_force_bounds(self):
+        p = sample()
+        p["com_m"][0] = MAX_COORD_M
+        p["floor_contacts"][0]["point_m"][1] = -MAX_COORD_M
+        p["floor_contacts"][0]["vertical_force_n"] = MAX_FORCE_N
+        self.assertEqual(
+            observe_virtual_support(p)["total_vertical_force_n"], float(MAX_FORCE_N) + 30.0
+        )
+
+        for field, limit in (
+            ("com", MAX_COORD_M),
+            ("point", MAX_COORD_M),
+            ("force", MAX_FORCE_N),
+        ):
+            with self.subTest(field=field):
+                p = sample()
+                if field == "com":
+                    p["com_m"][0] = limit + 1
+                elif field == "point":
+                    p["floor_contacts"][0]["point_m"][1] = limit + 1
+                else:
+                    p["floor_contacts"][0]["vertical_force_n"] = limit + 1
+                with self.assertRaises(ValueError):
+                    observe_virtual_support(p)
 
     def test_rejects_negative_force_duplicate_ids_and_unexpected_keys(self):
         bad = sample()
