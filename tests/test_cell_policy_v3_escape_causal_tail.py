@@ -80,8 +80,8 @@ class CausalTailTests(unittest.TestCase):
         with self.assertRaisesRegex(CellV3EscapeError, "chronology tail"):
             CellExplorerV3Escape.from_snapshot(broken)
         broken = copy.deepcopy(snapshot)
-        broken["outcome_tail"][-1]["action"] = "rest"
-        with self.assertRaises(CellV3EscapeError):
+        broken["outcome_tail"][-1]["action"] = "not-an-action"
+        with self.assertRaisesRegex(CellV3EscapeError, "invalid measured-outcome chronology tail"):
             CellExplorerV3Escape.from_snapshot(broken)
 
 
