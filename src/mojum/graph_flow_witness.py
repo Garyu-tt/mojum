@@ -29,27 +29,42 @@ def _canonical_bytes(value):
 
 
 
-def _require_native_json_tree(value):
-    """Refuse subclass equality/hash tricks before using caller-owned topology.
+MAX_NATIVE_JSON_ITEMS = 250_000
 
-    validate_v2 validates a canonical JSON *copy* but returns only an audit,
-    not sanitized nodes/edges. Its copy can be equal to a caller object with
-    overloaded __eq__, while raw endpoint __hash__ can alter graph traversal.
-    Check every key/value by exact native type, without equality comparisons.
-    This runs after canonical validation so cyclic / non-JSON values have
-    already been rejected by the canonical encoder.
+
+def _require_native_json_tree(value):
+    """Bounded native-type scan before any untrusted dict lookup or v2 codec.
+
+    A str subclass can invoke user-defined __eq__/__hash__ during dict.get,
+    or the lossless JSON validator's comparison against the original object.
+    Walk only exact builtin containers/scalars. Keep a seen-container set so
+    cycles terminate here; the canonical v2 JSON encoder then rejects cycles.
+    The item budget limits memory and CPU before canonical graph validation.
     """
     pending = [value]
+    seen_containers = set()
+    scanned = 0
     while pending:
+        scanned += 1
+        if scanned > MAX_NATIVE_JSON_ITEMS:
+            raise GraphError("flow witness native JSON item budget exceeded")
         item = pending.pop()
-        if type(item) is dict:
-            for key, child in item.items():
-                if type(key) is not str:
-                    raise GraphError("flow witness requires native JSON keys")
-                pending.append(child)
-        elif type(item) is list:
-            pending.extend(item)
-        elif type(item) not in (str, int, float, bool, type(None)):
+        kind = type(item)
+        if kind is dict or kind is list:
+            identity = id(item)
+            if identity in seen_containers:
+                continue
+            seen_containers.add(identity)
+            if scanned + len(pending) + len(item) > MAX_NATIVE_JSON_ITEMS:
+                raise GraphError("flow witness native JSON item budget exceeded")
+            if kind is dict:
+                for key, child in item.items():
+                    if type(key) is not str:
+                        raise GraphError("flow witness requires native JSON keys")
+                    pending.append(child)
+            else:
+                pending.extend(item)
+        elif kind not in (str, int, float, bool, type(None)):
             raise GraphError("flow witness requires native JSON values")
 
 
@@ -66,6 +81,7 @@ def attest_flow(graph):
     # amplifying the ancestry report. The canonical graph itself is untouched.
     if type(graph) is not dict:
         raise GraphError("flow witness requires graph-v2 object")
+    _require_native_json_tree(graph)
     raw_nodes = graph.get("nodes")
     if type(raw_nodes) is not list or not 1 <= len(raw_nodes) <= MAX_WITNESS_NODES:
         raise GraphError("flow witness node budget exceeded")
@@ -80,7 +96,6 @@ def attest_flow(graph):
             raise GraphError("flow witness node ID byte budget exceeded")
 
     audit = validate_v2(graph)
-    _require_native_json_tree(graph)
     if audit["schema"] != V2_SCHEMA:
         raise GraphError("unexpected graph-v2 validator response")
     nodes = {node["id"]: node for node in raw_nodes}
