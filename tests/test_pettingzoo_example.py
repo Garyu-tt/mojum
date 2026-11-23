@@ -1,4 +1,5 @@
 import unittest
+from enum import IntEnum
 
 from examples.pettingzoo.benchmark import DeterministicCoordinationEnv, run_benchmark
 
@@ -90,6 +91,25 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
             run_benchmark([False], horizon=2)
         with self.assertRaises(ValueError):
             run_benchmark(range(1001), horizon=2)
+
+    def test_optional_adapter_normalizes_integral_action_scalars(self):
+        try:
+            from examples.pettingzoo.benchmark import make_pettingzoo_env
+            env = make_pettingzoo_env(horizon=1)
+        except RuntimeError:
+            self.skipTest("optional PettingZoo dependencies are not installed")
+
+        class Action(IntEnum):
+            ZERO = 0
+
+        env.reset(seed=0)
+        observations, rewards, terminations, truncations, infos = env.step({
+            "agent_0": Action.ZERO, "agent_1": Action.ZERO,
+        })
+        self.assertEqual(set(rewards), set(env.possible_agents))
+        self.assertTrue(all(truncations.values()))
+        self.assertFalse(any(terminations.values()))
+        env.close()
 
     def test_seeded_episode_is_bounded_and_trace_has_no_private_target(self):
         episode = run_benchmark([123], horizon=5)["episodes_detail"][0]
