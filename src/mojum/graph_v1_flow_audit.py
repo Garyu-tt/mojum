@@ -55,9 +55,25 @@ class GraphV1FlowAudit:
 
 
 def _check_json_tree(value: Any) -> None:
-    """Accept only exact JSON-native containers/scalars with bounded shape."""
+    """Admit exact JSON values without expanding beyond either resource budget."""
     pending = [(value, 0)]
     seen = 0
+    text_bytes = 0
+
+    def charge_text(text: str) -> None:
+        nonlocal text_bytes
+        # Check character length before encoding so one hostile huge string
+        # cannot allocate an equally huge temporary UTF-8 buffer.
+        if len(text) > MAX_JSON_BYTES:
+            raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
+        try:
+            size = len(text.encode("utf-8", errors="strict"))
+        except UnicodeEncodeError as exc:
+            raise GraphV1FlowAuditError("JSON text is not valid UTF-8") from exc
+        text_bytes += size
+        if text_bytes > MAX_JSON_BYTES:
+            raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
+
     while pending:
         current, depth = pending.pop()
         seen += 1
@@ -67,17 +83,26 @@ def _check_json_tree(value: Any) -> None:
             raise GraphV1FlowAuditError("JSON nesting depth exceeded")
         kind = type(current)
         if kind is dict:
+            # Count already-scheduled plus new children before creating any
+            # traversal entries. This keeps peak auxiliary memory O(limit),
+            # rather than O(the caller's untrusted container cardinality).
+            if seen + len(pending) + len(current) > MAX_JSON_ITEMS:
+                raise GraphV1FlowAuditError("JSON item budget exceeded")
             for key, child in current.items():
                 if type(key) is not str:
                     raise GraphV1FlowAuditError("JSON object keys must be exact strings")
+                charge_text(key)
                 pending.append((child, depth + 1))
         elif kind is list:
-            for child in current:
-                pending.append((child, depth + 1))
+            if seen + len(pending) + len(current) > MAX_JSON_ITEMS:
+                raise GraphV1FlowAuditError("JSON item budget exceeded")
+            pending.extend((child, depth + 1) for child in current)
+        elif kind is str:
+            charge_text(current)
         elif kind is float:
             if not math.isfinite(current):
                 raise GraphV1FlowAuditError("Non-finite JSON number")
-        elif kind not in (str, int, bool, type(None)):
+        elif kind not in (int, bool, type(None)):
             raise GraphV1FlowAuditError("Value is not an exact JSON primitive")
 
 
