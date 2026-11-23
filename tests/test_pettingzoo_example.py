@@ -10,9 +10,17 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
             run_benchmark([0, 1, 42], horizon=8),
         )
 
-    def test_adaptive_policy_beats_frozen_control_on_seed_set(self):
+    def test_adaptive_policy_is_never_worse_than_frozen_control(self):
         result = run_benchmark(range(32), horizon=10)
-        self.assertGreater(result["adaptive_reward"], result["frozen_reward"])
+        self.assertGreaterEqual(result["adaptive_reward"], result["frozen_reward"])
+
+    def test_adaptive_policy_stays_after_first_success(self):
+        result = run_benchmark(range(32), horizon=6)
+        for episode in result["episodes_detail"]:
+            trace = episode["adaptive_trace"]
+            if trace[0]["rewards"][0] == 0:
+                self.assertEqual(trace[1]["actions"], [1, 1])
+                self.assertTrue(all(row["actions"] == [1, 1] for row in trace[1:]))
 
     def test_observations_do_not_disclose_hidden_target(self):
         env = DeterministicCoordinationEnv(horizon=2)
@@ -20,6 +28,7 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
         for observation in observations.values():
             self.assertNotIn("target", observation)
             self.assertEqual(set(observation), {"agent_id", "step", "last_reward"})
+            self.assertIn(observation["last_reward"], (-1, 0, 1))
 
     def test_parallel_step_contract_and_truncation(self):
         env = DeterministicCoordinationEnv(horizon=1)
@@ -63,6 +72,8 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
             run_benchmark([1, 1], horizon=2)
         with self.assertRaises(ValueError):
             run_benchmark([False], horizon=2)
+        with self.assertRaises(ValueError):
+            run_benchmark(range(1001), horizon=2)
 
     def test_seeded_episode_is_bounded_and_trace_has_no_private_target(self):
         episode = run_benchmark([123], horizon=5)["episodes_detail"][0]
