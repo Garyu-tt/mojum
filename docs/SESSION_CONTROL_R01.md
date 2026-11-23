@@ -17,6 +17,8 @@ when the tick moves backwards, after termination, when a revision is stale, or
 when the bounded 1,024-event history is full. Failed commands do not mutate
 the state or consume the event ID. Snapshots replay the ordered transition
 history and validate state, tick, sequence, IDs and checksum before restore.
+Snapshot and event mappings must use exact built-in string keys; hostile string
+subclasses are rejected before key-set comparison.
 
 ## Usage
 
