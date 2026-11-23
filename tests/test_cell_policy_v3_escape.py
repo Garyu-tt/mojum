@@ -188,6 +188,8 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         # claims five observations despite last being seen on tick zero.
         valid = CellExplorerV3Escape().snapshot()
         valid.update({
+            "history_complete": False,
+            "outcome_tail": [],
             "last_tick": 99,
             "updates": 100,
             "records": {
@@ -234,6 +236,9 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             "cell_size_m": STEP_METERS,
             "consecutive_rests": 0,
             "consecutive_blocked_probes": 0,
+            "snapshot_version": 2,
+            "history_complete": False,
+            "outcome_tail": [],
         }
         forged = {
             "two_cells_stamped_same_tick": {
@@ -317,6 +322,64 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         )
         assert_rejected(lambda s: {"records": records})
         assert_rejected(lambda s: {"cell_size_m": 0.5})
+
+    def test_snapshot_rejects_interleaved_rest_move_rest(self):
+        snapshot = {
+            "schema": SCHEMA, "snapshot_version": 2,
+            "history_complete": True, "cell_size_m": STEP_METERS,
+            "last_tick": 2, "updates": 3,
+            "records": {"0:0": {"rest": [2, 0], "x+": [1, 0]}},
+            "last_seen_at": {"0:0": 2}, "evictions": 0,
+            "forgotten_observations": 0, "consecutive_rests": 2,
+            "consecutive_blocked_probes": 0,
+            "outcome_tail": [
+                {"tick": 0, "cell": "0:0", "action": "rest", "blocked": False},
+                {"tick": 1, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 2, "cell": "0:0", "action": "rest", "blocked": False},
+            ],
+        }
+        with self.assertRaisesRegex(CellV3EscapeError, "chronological tail"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
+    def test_snapshot_rejects_interleaved_block_success_block(self):
+        snapshot = {
+            "schema": SCHEMA, "snapshot_version": 2,
+            "history_complete": True, "cell_size_m": STEP_METERS,
+            "last_tick": 2, "updates": 3,
+            "records": {"0:0": {"x+": [3, 2]}},
+            "last_seen_at": {"0:0": 2}, "evictions": 0,
+            "forgotten_observations": 0, "consecutive_rests": 0,
+            "consecutive_blocked_probes": 2,
+            "outcome_tail": [
+                {"tick": 0, "cell": "0:0", "action": "x+", "blocked": True},
+                {"tick": 1, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 2, "cell": "0:0", "action": "x+", "blocked": True},
+            ],
+        }
+        with self.assertRaisesRegex(CellV3EscapeError, "chronological tail"):
+            CellExplorerV3Escape.from_snapshot(snapshot)
+
+    def test_legacy_snapshot_without_streak_remains_replayable_but_unattested(self):
+        legacy = CellExplorerV3Escape().snapshot()
+        for key in ("snapshot_version", "history_complete", "outcome_tail"):
+            legacy.pop(key)
+        restored = CellExplorerV3Escape.from_snapshot(legacy)
+        migrated = restored.snapshot()
+        self.assertFalse(migrated["history_complete"])
+        self.assertEqual(migrated["outcome_tail"], [])
+
+    def test_legacy_snapshot_with_terminal_streak_fails_closed(self):
+        legacy = CellExplorerV3Escape().snapshot()
+        for key in ("snapshot_version", "history_complete", "outcome_tail"):
+            legacy.pop(key)
+        legacy.update({
+            "last_tick": 0, "updates": 1,
+            "records": {"0:0": {"rest": [1, 0]}},
+            "last_seen_at": {"0:0": 0},
+            "consecutive_rests": 1,
+        })
+        with self.assertRaisesRegex(CellV3EscapeError, "cannot attest"):
+            CellExplorerV3Escape.from_snapshot(legacy)
 
     def test_snapshot_rejects_impossible_streak_counters(self):
         def snap(**changes):
