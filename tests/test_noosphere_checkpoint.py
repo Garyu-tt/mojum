@@ -77,6 +77,12 @@ class CheckpointTests(unittest.TestCase):
         with self.assertRaises(CheckpointError):
             self.make(components=source)
 
+    def test_unhashable_visibility_is_normalized(self):
+        source = refs()
+        source["memory"]["visibility"] = ["PRIVATE"]
+        with self.assertRaises(CheckpointError):
+            self.make(components=source)
+
     def test_boolean_tick_is_not_an_integer(self):
         with self.assertRaises(CheckpointError):
             create_checkpoint("dante", "c", True, refs())
