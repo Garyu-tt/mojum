@@ -76,6 +76,23 @@ class GenesisTimelineTests(unittest.TestCase):
         with self.assertRaises(GenesisError):
             audit_timeline({"schema": "wrong"})
 
+    def test_hostile_container_subclasses_rejected(self):
+        class HostileDict(dict):
+            def get(self, *args, **kwargs):
+                raise AssertionError("custom mapping code must not execute")
+
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("custom sequence code must not execute")
+
+        snap = populated().snapshot()
+        with self.assertRaises(GenesisError):
+            audit_timeline(HostileDict(snap))
+        snap = populated().snapshot()
+        snap["events"] = HostileList(snap["events"])
+        with self.assertRaises(GenesisError):
+            audit_timeline(snap)
+
     def test_boundary_limit_rejected_before_report(self):
         with self.assertRaisesRegex(GenesisError, "boundary limit"):
             audit_timeline(populated().snapshot(), max_boundaries=2)
