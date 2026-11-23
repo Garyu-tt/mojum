@@ -23,7 +23,7 @@ this benchmark assesses held-out *scenes*, not seed-based generalization.
 ## Opt-in Stable-Baselines3 CPU training
 
 After independent upstream and transitive-license review, prepare a disposable
-environment with candidate pins gymnasium==1.2.1,
+environment with candidate pins gymnasium==1.2.2,
 stable-baselines3==2.7.0 and a compatible **CPU-only** PyTorch build. These
 are example upstream version pins, **not a validated full dependency lockfile**.
 Both Gymnasium and Stable-Baselines3 are MIT licensed; PyTorch and all transitives
@@ -47,7 +47,7 @@ cross-platform numerical reproducibility have **not been measured**.
 - Merge only after independent exact-head/base CI + reviewer approval.
 - Run the real Gymnasium check_env and a real SB3 training smoke in an
   isolated optional-dependency CI job; the stdlib tests cannot prove either.
-- PR #725 currently restricts seed to uint32, with a separate QA fix #750.
-  This benchmark uses bounded seeds until that fix is integrated.
+- PR #725 now accepts arbitrary nonnegative Gymnasium seeds; this benchmark
+  intentionally caps seeds below 2**32 for SB3/NumPy RNG interoperability.
 - No claim of learned improvement unless held-out SB3 scores beat frozen controls.
 - No external assets, network, authentication tokens, journal data, or auto-enable.
