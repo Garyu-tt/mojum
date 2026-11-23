@@ -98,17 +98,20 @@ def install(db):
     """Explicitly augment the trusted existing Spartan ledger; never a new authority."""
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='tasks' AND type='table'").fetchone() is None:
         raise DelegationRejected("coordinator schema required")
-    db.executescript("""
+    # execute() preserves the caller's transaction; executescript() commits it.
+    db.execute("""
         CREATE TABLE IF NOT EXISTS delegated_runs (
           task_id TEXT NOT NULL, attempt INTEGER NOT NULL, worker_id INTEGER NOT NULL,
           backend TEXT NOT NULL CHECK(backend IN ('ray','temporal')),
           opaque_ref TEXT NOT NULL,
           state TEXT NOT NULL CHECK(state IN ('reserved','submitted','cancel_requested','orphaned')),
-          external_id TEXT, PRIMARY KEY(task_id,attempt));
+          external_id TEXT, PRIMARY KEY(task_id,attempt))
+    """)
+    db.execute("""
         CREATE TABLE IF NOT EXISTS delegated_pr_intents (
           task_id TEXT PRIMARY KEY, attempt INTEGER NOT NULL, worker_id INTEGER NOT NULL,
           branch TEXT NOT NULL, head_sha TEXT NOT NULL,
-          state TEXT NOT NULL CHECK(state IN ('prepared','confirmed')), pr_url TEXT);
+          state TEXT NOT NULL CHECK(state IN ('prepared','confirmed')), pr_url TEXT)
     """)
 
 
