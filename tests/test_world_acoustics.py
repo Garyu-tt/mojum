@@ -26,6 +26,21 @@ class TestWorldAcoustics(unittest.TestCase):
         b = sample_point_source((4, 6), (1, 2), 70)
         self.assertEqual(a, b)
 
+    def test_oversized_integers_fail_closed_without_float_overflow(self):
+        huge = 10**1000
+        cases = [
+            ((huge, 0), (0, 0), 40, {}),
+            ((0, 0), (0, huge), 40, {}),
+            ((0, 0), (1, 1), huge, {}),
+            ((0, 0), (1, 1), 40, {"reference_distance_m": huge}),
+            ((0, 0), (1, 1), 40, {"minimum_distance_m": huge}),
+            ((0, 0), (1, 1), 40, {"maximum_distance_m": huge}),
+        ]
+        for source, listener, level, kwargs in cases:
+            with self.subTest(kwargs=tuple(kwargs)):
+                with self.assertRaises(ValueError):
+                    sample_point_source(source, listener, level, **kwargs)
+
     def test_invalid_inputs(self):
         cases = [
             ((0, 0), (float("nan"), 0), 40, {}),
@@ -34,6 +49,8 @@ class TestWorldAcoustics(unittest.TestCase):
             ((0, 0), (1, 1), 40, {"maximum_distance_m": 0.5}),
             ((0, 0), (1, 1), 40, {"reference_distance_m": float("inf")}),
             ((0, 0), (1, 1), 400, {}),
+            ((0, 0), (1, 1), 40, {"reference_distance_m": 0.05}),
+            ((0, 0), (1e9 + 1, 0), 40, {}),
         ]
         for source, listener, level, kwargs in cases:
             with self.subTest(case=(source, listener, level, kwargs)):
