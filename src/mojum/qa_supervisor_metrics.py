@@ -37,7 +37,7 @@ class MetricsInputError(ValueError):
 
 
 def _integer(value: Any, field: str, *, minimum: int = 0, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
+    if type(value) is not int:
         raise MetricsInputError(f"{field} must be an integer")
     if not minimum <= value <= maximum:
         raise MetricsInputError(f"{field} is outside the permitted range")
@@ -45,7 +45,7 @@ def _integer(value: Any, field: str, *, minimum: int = 0, maximum: int) -> int:
 
 
 def _finite_number(value: Any, field: str, *, maximum: int) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if type(value) not in (int, float):
         raise MetricsInputError(f"{field} must be numeric")
     try:
         result = float(value)
@@ -83,17 +83,20 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     tasks (up to 10,000 task mappings), and optional duration_samples_ms.
     Task IDs are validated for uniqueness but never copied into the result.
     """
-    if not isinstance(snapshot, Mapping):
-        raise MetricsInputError("snapshot must be a mapping")
-    if set(snapshot) - {"observed_at", "tasks", "duration_samples_ms"}:
+    if type(snapshot) is not dict or len(snapshot) > 3:
+        raise MetricsInputError("snapshot must be a bounded native dict")
+    snapshot_keys = tuple(snapshot)
+    if any(type(key) is not str for key in snapshot_keys):
+        raise MetricsInputError("snapshot keys must be native strings")
+    if set(snapshot_keys) - {"observed_at", "tasks", "duration_samples_ms"}:
         raise MetricsInputError("snapshot contains unknown fields")
     if "observed_at" not in snapshot or "tasks" not in snapshot:
         raise MetricsInputError("observed_at and tasks are required")
 
     observed_at = _integer(snapshot["observed_at"], "observed_at", maximum=4_102_444_800)
     tasks = snapshot["tasks"]
-    if not isinstance(tasks, (list, tuple)) or len(tasks) > MAX_TASKS:
-        raise MetricsInputError("tasks must be a bounded list")
+    if type(tasks) not in (list, tuple) or len(tasks) > MAX_TASKS:
+        raise MetricsInputError("tasks must be a bounded native list/tuple")
 
     ids: set[str] = set()
     states: Counter[str] = Counter()
@@ -101,20 +104,24 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     blocked: Counter[str] = Counter()
     leases = Counter({"active": 0, "expiring": 0, "expired": 0, "missing": 0})
     for index, task in enumerate(tasks):
-        if not isinstance(task, Mapping):
-            raise MetricsInputError(f"task {index} must be a mapping")
+        if type(task) is not dict or len(task) > 5:
+            raise MetricsInputError(f"task {index} must be a bounded native dict")
+        task_keys = tuple(task)
+        if any(type(key) is not str for key in task_keys):
+            raise MetricsInputError(f"task {index} keys must be native strings")
         allowed = {"id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds"}
-        if set(task) - allowed or not {"id", "state"} <= set(task):
+        task_key_set = set(task_keys)
+        if task_key_set - allowed or not {"id", "state"} <= task_key_set:
             raise MetricsInputError(f"task {index} has an invalid schema")
         task_id = task["id"]
-        if not isinstance(task_id, str) or not task_id or len(task_id) > MAX_ID_LENGTH:
+        if type(task_id) is not str or not task_id or len(task_id) > MAX_ID_LENGTH:
             raise MetricsInputError(f"task {index} has an invalid id")
         if task_id in ids:
             raise MetricsInputError("duplicate task id")
         ids.add(task_id)
 
         state = task["state"]
-        if not isinstance(state, str) or state not in STATES:
+        if type(state) is not str or state not in STATES:
             raise MetricsInputError(f"task {index} has an unknown state")
         states[state] += 1
 
@@ -124,7 +131,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
         reason = task.get("blocked_reason")
         if state in BLOCKED_STATES and reason is not None:
-            if not isinstance(reason, str) or reason not in BLOCK_REASONS:
+            if type(reason) is not str or reason not in BLOCK_REASONS:
                 raise MetricsInputError(f"task {index} has an unknown blocked reason")
             blocked[reason] += 1
         elif reason is not None:
@@ -150,7 +157,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             raise MetricsInputError(f"task {index} has a lease outside an active state")
 
     samples = snapshot.get("duration_samples_ms", ())
-    if not isinstance(samples, (list, tuple)) or len(samples) > MAX_DURATION_SAMPLES:
+    if type(samples) not in (list, tuple) or len(samples) > MAX_DURATION_SAMPLES:
         raise MetricsInputError("duration_samples_ms must be a bounded list")
     durations = [
         _finite_number(value, f"duration_samples_ms[{i}]", maximum=MAX_DURATION_MS)
