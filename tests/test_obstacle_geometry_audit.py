@@ -43,6 +43,17 @@ class ObstacleGeometryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact native strings"):
             audit_obstacles([item])
 
+    def test_rejects_oversized_keys_and_unbounded_field_cardinality(self):
+        oversized = rect("a", 0, 0, 1, 1)
+        oversized["x" * 1_000_000] = oversized.pop("id")
+        with self.assertRaisesRegex(ValueError, "bounded length"):
+            audit_obstacles([oversized])
+
+        excessive = rect("a", 0, 0, 1, 1)
+        excessive.update({f"extra-{index}": 0 for index in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "invalid rectangle fields"):
+            audit_obstacles([excessive])
+
     def test_invalid(self):
         invalid = [
             "oops", [1], [rect("a", 0, 0, 0, 1)],
