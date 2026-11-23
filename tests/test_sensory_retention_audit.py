@@ -152,6 +152,26 @@ class RetentionAuditTests(unittest.TestCase):
         with self.assertRaises(RetentionAuditError):
             audit_snapshot(forged)
 
+    def test_rejects_oversized_envelope_and_nested_key_strings(self):
+        forged = valid_snapshot()
+        forged["schema"] = forged.pop("s" * 4096, SOURCE_SCHEMA)
+        forged["x" * 4096] = SOURCE_SCHEMA
+        with self.assertRaises(RetentionAuditError):
+            audit_snapshot(forged)
+
+        forged = valid_snapshot()
+        cue = "1" * 4096
+        forged["table"][cue] = {"count": 1, "mean_deflection": 0.2}
+        forged["last_seen_at"][cue] = 1
+        with self.assertRaises(RetentionAuditError):
+            audit_snapshot(forged)
+
+        forged = valid_snapshot()
+        entry = forged["table"]["42:90:174"]
+        entry["x" * 4096] = entry.pop("mean_deflection")
+        with self.assertRaises(RetentionAuditError):
+            audit_snapshot(forged)
+
     def test_empty_birth_snapshot_is_valid(self):
         snapshot = {
             "schema": SOURCE_SCHEMA, "table": {}, "updates": 0,
