@@ -52,6 +52,12 @@ class OccupancyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rasterize(None)
 
+    def test_max_obstacles_full_coverage_stays_bounded(self):
+        room = Room(2, 2, ((0, 0, 2, 2),) * 4096)
+        raster = rasterize(room, columns=128, rows=128)
+        self.assertEqual(raster["blocked_rows"], ["#" * 128] * 128)
+        self.assertTrue(verify_raster(room, raster))
+
     def test_subnormal_coordinate_resolution_is_rejected(self):
         room = Room(5e-324, 1)
         with self.assertRaisesRegex(ValueError, "resolution collapses"):
