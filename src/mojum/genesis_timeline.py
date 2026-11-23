@@ -19,6 +19,27 @@ def _tick(value: object, field: str) -> int:
     return value
 
 
+def _preflight_boundary_budget(snapshot: dict, start: int, end: int) -> None:
+    """Reject obviously over-dense windows before expensive ledger replay.
+
+    This is a refusal-only fast path, not validation: malformed or ambiguous
+    events still go through the authoritative GenomeLedger.from_snapshot gate.
+    Never invoke comparison/hash callbacks on caller-defined event/tick types.
+    """
+    raw_events = snapshot.get("events")
+    if type(raw_events) is not list:
+        return
+    ticks = {start, end}
+    for event in raw_events:
+        if type(event) is not dict:
+            continue
+        raw_tick = event.get("valid_from_tick")
+        if type(raw_tick) is int and start < raw_tick < end:
+            ticks.add(raw_tick)
+            if len(ticks) > MAX_BOUNDARIES:
+                raise GenesisError("phenotype timeline boundary budget exceeded")
+
+
 def attest_timeline(
     snapshot: dict,
     *,
@@ -43,6 +64,10 @@ def attest_timeline(
     if type(snapshot) is not dict:
         raise GenesisError("ledger snapshot must be a dict")
 
+    # Refuse an unambiguously over-dense window before quadratic/cubic replay
+    # work. This preflight never accepts any data; successful reports still
+    # require complete authoritative revision verification below.
+    _preflight_boundary_budget(snapshot, start, end)
     # Exact ledger revision is checked by from_snapshot; a forged or truncated
     # event collection must not produce a plausible timeline witness.
     ledger = GenomeLedger.from_snapshot(snapshot)
