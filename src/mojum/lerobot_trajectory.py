@@ -44,9 +44,9 @@ def _revision(value: str, key: str) -> str:
 
 
 def _number(value: object, key: str, *, nonnegative: bool = False) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         raise TrajectoryError(f"{key}: finite numeric value required")
-    if abs(value) > _MAX_ABS or (nonnegative and value < 0):
+    if abs(value) > _MAX_ABS or (nonnegative and value < 0) or not math.isfinite(value):
         raise TrajectoryError(f"{key}: value out of bounds")
     return float(value)
 
@@ -107,6 +107,30 @@ class Trajectory:
     episode_index: int
     frames: tuple[Frame, ...]
     schema: str = SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema != SCHEMA or type(self.provenance) is not Provenance:
+            raise TrajectoryError("invalid trajectory schema/provenance")
+        _index(self.episode_index, "episode_index")
+        if type(self.frames) is not tuple or not 1 <= len(self.frames) <= MAX_FRAMES:
+            raise TrajectoryError("invalid trajectory frame tuple")
+        state_dim = action_dim = None
+        last = None
+        for frame in self.frames:
+            if type(frame) is not Frame:
+                raise TrajectoryError("invalid frame type")
+            _index(frame.frame_index, "frame_index")
+            _number(frame.timestamp, "timestamp", nonnegative=True)
+            _vector(frame.state, "state")
+            _vector(frame.action, "action")
+            if last is not None and (frame.frame_index != last.frame_index + 1 or
+                                     frame.timestamp <= last.timestamp):
+                raise TrajectoryError("nonconsecutive/unsorted trajectory frames")
+            if state_dim is None:
+                state_dim, action_dim = len(frame.state), len(frame.action)
+            elif len(frame.state) != state_dim or len(frame.action) != action_dim:
+                raise TrajectoryError("varying trajectory dimensions")
+            last = frame
 
     @property
     def digest(self) -> str:
@@ -200,7 +224,7 @@ def import_lerobot_dataset(dataset: object, *, provenance: Provenance,
     """
     if type(start) is not int or type(stop) is not int or not (0 <= start < stop):
         raise TrajectoryError("invalid bounded dataset slice")
-    if stop - start > MAX_FRAMES:
+    if stop > 2**31 or stop - start > MAX_FRAMES:
         raise TrajectoryError("dataset slice exceeds frame budget")
     if not hasattr(dataset, "__getitem__"):
         raise TrajectoryError("dataset must support indexed local rows")
