@@ -48,6 +48,9 @@ class DamageReport:
 def _exact_number(value: Any, name: str) -> float:
     if type(value) not in (int, float):
         raise ClothDamageError(f"{name} must be a native int or float")
+    # Avoid expensive float conversion of arbitrarily wide Python integers.
+    if type(value) is int and value.bit_length() > 64:
+        raise ClothDamageError(f"{name} is outside finite numeric bounds")
     try:
         result = float(value)
     except (OverflowError, ValueError):
