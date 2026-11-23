@@ -10,20 +10,28 @@ import json
 SCHEMA = "mojum.obstacle-geometry-audit/1"
 MAX_OBSTACLES = 128
 MAX_COORD = 1_000_000
+_EXPECTED_FIELDS = {"id", "x_min", "y_min", "x_max", "y_max"}
 
 
 def audit_obstacles(obstacles: list[dict]) -> dict:
     """Return deterministic geometry metrics and positive-area overlaps.
 
     Rectangles use x_min, y_min, x_max, y_max in integer millimetres.
-    Touching edges are not considered overlaps.
+    Touching edges are not considered overlaps. Mapping keys are admitted
+    before set comparisons so hostile str subclasses cannot run user code.
     """
     if type(obstacles) is not list or len(obstacles) > MAX_OBSTACLES:
         raise ValueError("obstacles must be a bounded native list")
     validated = []
     ids = set()
     for item in obstacles:
-        if type(item) is not dict or set(item) != {"id", "x_min", "y_min", "x_max", "y_max"}:
+        if type(item) is not dict:
+            raise ValueError("invalid rectangle fields")
+        # Check key types before set()/equality: str subclasses can override
+        # hashing/equality and execute arbitrary code during comparisons.
+        if any(type(key) is not str for key in item):
+            raise ValueError("rectangle keys must be exact native strings")
+        if set(item) != _EXPECTED_FIELDS:
             raise ValueError("invalid rectangle fields")
         identifier = item["id"]
         if type(identifier) is not str or not (1 <= len(identifier) <= 64) or not all(c.isascii() and (c.isalnum() or c in "_-") for c in identifier):
