@@ -151,7 +151,8 @@ class PulseHoldoutTests(unittest.TestCase):
         for split in (0, 1, 24, 25, True, 2.0):
             with self.subTest(split=split), self.assertRaises(PulseHoldoutError):
                 self.run_audit(train_frames=split)
-        for rate in (True, 0, -0.1, 0.6, float("nan"), float("inf"), "0.1"):
+        for rate in (True, 0, -0.1, 0.6, 10 ** 1000,
+                     float("nan"), float("inf"), "0.1"):
             with self.subTest(rate=rate), self.assertRaises(PulseHoldoutError):
                 self.run_audit(learning_rate=rate)
         for mode in ("native", "sum", None, True):
