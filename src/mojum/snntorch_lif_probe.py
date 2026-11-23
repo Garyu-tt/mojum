@@ -51,7 +51,9 @@ def _sha(data: object) -> str:
 def validate_fixture(fixture: object) -> tuple[float, float, tuple[tuple[float, ...], ...]]:
     if type(fixture) is not dict or set(fixture) != {
         "schema", "visibility", "beta", "threshold", "currents"
-    } or fixture["schema"] != SCHEMA or fixture["visibility"] != "PUBLIC_SYNTHETIC":
+    } or type(fixture["schema"]) is not str or fixture["schema"] != SCHEMA
+            or type(fixture["visibility"]) is not str
+            or fixture["visibility"] != "PUBLIC_SYNTHETIC"):
         raise ProbeError("only exact PUBLIC_SYNTHETIC LIF fixture accepted")
     beta = _real(fixture["beta"], 0.05, 0.95)
     threshold = _real(fixture["threshold"], 0.25, 2.0)
@@ -104,7 +106,7 @@ class LIFReference:
     def restore(cls, saved: object) -> "LIFReference":
         if type(saved) is not dict or set(saved) != {
             "schema", "beta", "threshold", "neurons", "steps", "membrane", "sha256"
-        } or saved["schema"] != STATE_SCHEMA:
+        } or type(saved["schema"]) is not str or saved["schema"] != STATE_SCHEMA:
             raise ProbeError("incompatible LIF snapshot")
         state = {k: v for k, v in saved.items() if k != "sha256"}
         if type(saved["sha256"]) is not str or len(saved["sha256"]) != 64:
