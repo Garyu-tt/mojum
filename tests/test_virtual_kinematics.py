@@ -173,6 +173,50 @@ class VirtualKinematicsTests(unittest.TestCase):
         for bad in (None, [], {}, {"sha256": "bad"}, {"sha256": "0" * 64, "x": object()}):
             self.assertFalse(verify_kinematics_report(bad))
 
+    def test_verifier_rejects_nested_mapping_and_sequence_subclasses(self):
+        class HostileDict(dict):
+            def items(self):
+                raise AssertionError("untrusted items() must never run")
+
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("untrusted __iter__ must never run")
+
+        for nested in (HostileDict(value=1), HostileList([1, 2])):
+            with self.subTest(nested_type=type(nested).__name__):
+                report = evaluate_forward_kinematics(sample())
+                report["untrusted"] = nested
+                self.assertFalse(verify_kinematics_report(report))
+
+    def test_verifier_rejects_cycles_depth_and_oversized_text(self):
+        report = evaluate_forward_kinematics(sample())
+        cyclic = dict(report)
+        cyclic["cycle"] = cyclic
+        self.assertFalse(verify_kinematics_report(cyclic))
+
+        too_deep = dict(report)
+        cursor = too_deep
+        for _ in range(18):
+            child = {}
+            cursor["nested"] = child
+            cursor = child
+        self.assertFalse(verify_kinematics_report(too_deep))
+
+        oversized = dict(report)
+        oversized["extra"] = "x" * 262145
+        self.assertFalse(verify_kinematics_report(oversized))
+
+
+    def test_verifier_rejects_multibyte_utf8_text_over_budget(self):
+        report = evaluate_forward_kinematics(sample())
+        report["extra"] = "💡" * 70_000
+        self.assertFalse(verify_kinematics_report(report))
+
+        report = evaluate_forward_kinematics(sample())
+        report["extra"] = "é" * 140_000
+        report["second"] = "é" * 140_000
+        self.assertFalse(verify_kinematics_report(report))
+
     def test_rig_and_joint_mapping_subclasses_rejected(self):
         class Rig(dict):
             pass

@@ -205,16 +205,83 @@ def evaluate_forward_kinematics(rig: object) -> dict[str, Any]:
     ))
 
 
+def _utf8_size_within(value: str, remaining: int) -> int | None:
+    """Count UTF-8 bytes without allocating an encoded copy of caller text."""
+    size = 0
+    for char in value:
+        code = ord(char)
+        if 0xD800 <= code <= 0xDFFF:
+            return None
+        if code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > remaining:
+            return None
+    return size
+
+
+def _bounded_native_json_tree(value: object) -> bool:
+    """Admit only a small acyclic tree of exact built-in JSON value types."""
+    pending = [(value, 0)]
+    seen: set[int] = set()
+    visited = 0
+    text_bytes = 0
+    while pending:
+        current, depth = pending.pop()
+        visited += 1
+        if visited > 8192 or depth > 16:
+            return False
+        kind = type(current)
+        if kind is dict:
+            identity = id(current)
+            if identity in seen or len(current) > 4096:
+                return False
+            seen.add(identity)
+            for key, child in current.items():
+                if type(key) is not str:
+                    return False
+                size = _utf8_size_within(key, 262144 - text_bytes)
+                if size is None:
+                    return False
+                text_bytes += size
+                pending.append((child, depth + 1))
+        elif kind is list:
+            identity = id(current)
+            if identity in seen or len(current) > 4096:
+                return False
+            seen.add(identity)
+            pending.extend((child, depth + 1) for child in current)
+        elif kind is str:
+            size = _utf8_size_within(current, 262144 - text_bytes)
+            if size is None:
+                return False
+            text_bytes += size
+        elif kind is int:
+            if current.bit_length() > 256:
+                return False
+        elif kind is float:
+            if not math.isfinite(current):
+                return False
+        elif kind not in (bool, type(None)):
+            return False
+    return True
+
+
 def verify_kinematics_report(report: object) -> bool:
-    """Check the self-consistency of a detached report (not its authenticity)."""
-    if (type(report) is not dict or any(type(key) is not str for key in report)
-            or type(report.get("sha256")) is not str):
+    """Check a bounded native JSON report's self-consistency, not authenticity."""
+    if type(report) is not dict or not _bounded_native_json_tree(report):
         return False
-    if not re.fullmatch(r"[0-9a-f]{64}", report["sha256"], re.ASCII):
+    digest = report.get("sha256")
+    if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest, re.ASCII):
         return False
     unsigned = dict(report)
     supplied = unsigned.pop("sha256")
     try:
         return _canonical_digest(unsigned) == supplied
-    except ValueError:
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError):
         return False
