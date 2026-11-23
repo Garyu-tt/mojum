@@ -13,6 +13,7 @@ from tools import spartan_delegate as d
 class DelegationTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:", isolation_level=None)
+        self.db.row_factory = sqlite3.Row
         sp.create_schema(self.db)
         sp.init(self.db, 2, now=10)
         sp.enqueue(self.db, [{
@@ -192,6 +193,7 @@ class DelegationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "state.sqlite3")
             db = sqlite3.connect(path, isolation_level=None)
+            db.row_factory = sqlite3.Row
             try:
                 sp.create_schema(db)
                 sp.init(db, 2, now=10)
@@ -206,6 +208,7 @@ class DelegationTests(unittest.TestCase):
             finally:
                 db.close()
             db = sqlite3.connect(path, isolation_level=None)
+            db.row_factory = sqlite3.Row
             try:
                 self.assertFalse(d.prepare_pr(db, self.lease, "feat/701",
                                               "a" * 40, now=24))
@@ -215,6 +218,7 @@ class DelegationTests(unittest.TestCase):
     def test_install_preserves_caller_transaction_and_rollback(self):
         # SQLite executescript() silently commits an active transaction.
         db = sqlite3.connect(":memory:", isolation_level=None)
+        db.row_factory = sqlite3.Row
         try:
             db.execute("CREATE TABLE tasks (id TEXT)")
             db.execute("BEGIN IMMEDIATE")
@@ -234,6 +238,7 @@ class DelegationTests(unittest.TestCase):
 
     def test_install_needs_existing_lease_authority(self):
         empty = sqlite3.connect(":memory:", isolation_level=None)
+        empty.row_factory = sqlite3.Row
         try:
             with self.assertRaises(d.DelegationRejected):
                 d.install(empty)
