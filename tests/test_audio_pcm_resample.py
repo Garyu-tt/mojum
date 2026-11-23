@@ -30,6 +30,17 @@ class PCMResampleTests(unittest.TestCase):
                 resample_pcm16le_mono(encode([0, 0, 0]), 48000,
                                       opt_in=consent)
 
+    def test_source_tag_must_be_explicit(self):
+        # A missing label must not silently assert PUBLIC_SYNTHETIC provenance.
+        payload = encode([100, 200, 300])
+        with self.assertRaises(PCMResampleError):
+            resample_pcm16le_mono(payload, 48000, opt_in=True)
+        with self.assertRaises(PCMResampleError):
+            resample_pcm16le_mono(payload, 48000, opt_in=True, source_tag=None)
+        tagged = resample_pcm16le_mono(
+            payload, 48000, opt_in=True, source_tag=SOURCE_TAG)
+        self.assertEqual(tagged.source_tag, SOURCE_TAG)
+
     def test_rejects_forged_source_tag_and_subclasses(self):
         class ForgedStr(str):
             def __eq__(self, other):

@@ -68,12 +68,12 @@ def _clamp_pcm16(value):
 
 
 def resample_pcm16le_mono(payload, source_rate_hz, *, opt_in=False,
-                          source_tag=SOURCE_TAG):
+                          source_tag=None):
     """Return deterministic 16 kHz PCM16LE for *declared* PUBLIC_SYNTHETIC.
 
     Exact source rates: 16, 32, 48 kHz. Only complete integer decimation
     durations are accepted; the caller must buffer trailing incomplete frames.
-    Requires ``opt_in=True`` and an exact builtin bytes payload. Source audio
+    Requires ``opt_in=True``, an explicit source_tag declaration, and exact bytes. Source audio
     is never read from disk/devices or sent anywhere. No rate guessing,
     mutable global filter state, stochastic rounding or silent tail drop.
 
