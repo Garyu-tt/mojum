@@ -46,6 +46,20 @@ def _list(value: Any, field: str) -> list:
     return value
 
 
+def _check_keys(mapping: dict, required: set[str], field: str) -> None:
+    # Check cardinality before materializing a key collection. The exact dict
+    # type is checked by the caller, so len() and key iteration are inert.
+    if len(mapping) != len(required):
+        raise TrajectoryError(f"{field} must contain exactly the v1 required keys")
+    keys = tuple(mapping)
+    # Reject str subclasses before hashing/comparison: hostile __hash__ or
+    # __eq__ methods must never escape this validator.
+    if any(type(key) is not str or len(key) > 64 for key in keys):
+        raise TrajectoryError(f"{field} keys must be bounded native strings")
+    if set(keys) != required:
+        raise TrajectoryError(f"{field} contains unknown or missing keys")
+
+
 def _name(value: Any, field: str) -> str:
     if (type(value) is not str or not value or len(value) > MAX_NAME_LENGTH
             or value.strip() != value or any(ord(ch) < 0x20 for ch in value)):
@@ -75,8 +89,7 @@ def validate_trajectory(payload: Any) -> AdmittedTrajectory:
     """Validate and detach one PUBLIC_SYNTHETIC in-memory trajectory."""
     root = _dict(payload, "payload")
     required = {"schema", "provenance", "consent", "position_unit", "joint_names", "frames"}
-    if set(root) != required:
-        raise TrajectoryError("payload must contain exactly the v1 required keys")
+    _check_keys(root, required, "payload")
     for key, expected in (
         ("schema", SCHEMA), ("provenance", PROVENANCE),
         ("consent", CONSENT), ("position_unit", POSITION_UNIT),
@@ -102,8 +115,7 @@ def validate_trajectory(payload: Any) -> AdmittedTrajectory:
     previous = -1
     for index, raw_frame in enumerate(frames_in):
         frame = _dict(raw_frame, f"frames[{index}]")
-        if set(frame) != {"timestamp_ns", "positions_rad"}:
-            raise TrajectoryError(f"frames[{index}] has unknown or missing keys")
+        _check_keys(frame, {"timestamp_ns", "positions_rad"}, f"frames[{index}]")
         timestamp = _integer(
             frame["timestamp_ns"], f"frames[{index}].timestamp_ns",
             0, MAX_TIMESTAMP_NS,
