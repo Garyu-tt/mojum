@@ -109,6 +109,32 @@ class RunnableSelectionTests(unittest.TestCase):
         with self.assertRaises(SelectionError):
             select_runnable_tasks((), now_tick=0)
 
+    def test_hostile_string_subclass_key_is_rejected_before_hash_or_equality(self):
+        class HostileKey(str):
+            armed = False
+
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile __hash__ executed")
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("hostile __eq__ executed")
+                return str.__eq__(self, other)
+
+        key = HostileKey("task_id")
+        item = {key: "x", "state": "DISCOVERED", "priority": 0, "sequence": 0}
+        key.armed = True
+        with self.assertRaises(SelectionError):
+            select_runnable_tasks([item], now_tick=0)
+
+    def test_oversized_field_name_is_rejected(self):
+        item = {"task_id": "x", "state": "DISCOVERED", "priority": 0,
+                "sequence": 0, "x" * 100_000: None}
+        with self.assertRaises(SelectionError):
+            select_runnable_tasks([item], now_tick=0)
+
     def test_self_and_duplicate_dependencies_are_rejected(self):
         item = {"task_id": "x", "state": "DISCOVERED", "priority": 0,
                 "sequence": 0, "dependencies": ["x"]}
