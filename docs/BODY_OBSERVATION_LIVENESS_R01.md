@@ -55,7 +55,7 @@ authenticity claim.
 ## Tests
 
 ```bash
-PYTHONPATH=src python -m unittest tests.test_body_observation_liveness -v
+PYTHONPATH=src python -B -m unittest discover -s tests -p 'test_body_observation_liveness.py' -v
 ```
 
 Python 3.11+; no external dependencies, I/O, network, persistent state,
