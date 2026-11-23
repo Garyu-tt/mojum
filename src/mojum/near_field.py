@@ -14,7 +14,7 @@ import math
 import re
 
 from .developmental_policy import (
-    DevelopmentError, Explorer, Proprioception, MAX_EPISODE_TICKS, MAX_ZONES,
+    DevelopmentError, Explorer, Proprioception, MAX_EPISODE_TICKS, MAX_ZONES, _finite,
 )
 from .world_room import Room, RoomState
 
@@ -45,8 +45,7 @@ def sense_room_rays(room, state):
     if (type(state.tick) is not int or state.tick < 0
             or type(state.revision) is not str
             or _SHA.fullmatch(state.revision) is None
-            or not all(isinstance(v, (int, float)) and math.isfinite(v)
-                       for v in (x, y))
+            or not all(_finite(v) for v in (x, y))
             or not 0 <= x <= room.width or not 0 <= y <= room.height):
         raise DevelopmentError("invalid virtual world state")
     distances = [room.width - x, x, room.height - y, y]
@@ -110,8 +109,11 @@ class RangeExplorer(Explorer):
 
     @classmethod
     def from_snapshot(cls, state):
-        if (type(state) is not dict or set(state) !=
+        if (type(state) is not dict
+                or any(type(key) is not str for key in state)
+                or set(state) !=
                 {"schema", "last_tick", "updates", "records"}
+                or type(state["schema"]) is not str
                 or state["schema"] != MODEL_SCHEMA
                 or type(state["last_tick"]) is not int
                 or not -1 <= state["last_tick"] < MAX_EPISODE_TICKS
@@ -124,6 +126,7 @@ class RangeExplorer(Explorer):
         for context, actions in state["records"].items():
             if (type(context) is not str or _CONTEXT.fullmatch(context) is None
                     or type(actions) is not dict or not actions
+                    or any(type(key) is not str for key in actions)
                     or not set(actions).issubset(ACTIONS)):
                 raise DevelopmentError("invalid numeric ray context")
             for counts in actions.values():
