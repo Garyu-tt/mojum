@@ -1,6 +1,8 @@
 """Adversarial stdlib tests for virtual, never physical, motor slew admission."""
 
 import unittest
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 
 from mojum.motor_slew_guard import (
@@ -187,6 +189,36 @@ class MotorSlewGuardTests(unittest.TestCase):
         for item in ([], (), None, "", (("elbow", 0.1), ("wrist", 1.0))):
             with self.subTest(item=item), self.assertRaises(MotorSlewError):
                 gate.advance(item, tick=1, expected_revision=0)
+
+    def test_concurrent_same_revision_admits_exactly_one_frame(self):
+        class SlowAdmissionGuard(MotorSlewGuard):
+            @staticmethod
+            def _normalize_targets(targets, limits):
+                # Widen validation so the old unlocked check/commit race is deterministic.
+                time.sleep(0.03)
+                return MotorSlewGuard._normalize_targets(targets, limits)
+
+        gate = SlowAdmissionGuard({"j": (0.0, 1.0, 0.5)}, {"j": 0.0})
+
+        def submit(value):
+            try:
+                gate.advance({"j": value}, tick=1, expected_revision=0)
+                return "accepted"
+            except MotorSlewError:
+                return "rejected"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(submit, (0.1, 0.2)))
+        self.assertEqual(sorted(results), ["accepted", "rejected"])
+        self.assertEqual((gate.tick, gate.revision), (1, 1))
+
+    def test_estop_remains_latched_across_rejected_frame(self):
+        gate = guard()
+        gate.trip_estop()
+        with self.assertRaisesRegex(MotorSlewError, "e-stop"):
+            gate.advance({"elbow": 0.0, "wrist": 1.0}, tick=1, expected_revision=0)
+        self.assertTrue(gate.estop_latched)
+        self.assertEqual((gate.tick, gate.revision), (0, 0))
 
     def test_empty_joint_set_fails_closed(self):
         with self.assertRaises(MotorSlewError):
