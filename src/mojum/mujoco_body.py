@@ -229,7 +229,7 @@ class HeadlessBody:
                 self.mj.mj_step(self.model, self.data)
                 self.tick += 1
                 self._observe()
-        except (ValueError, OverflowError, IndexError, FloatingPointError) as exc:
+        except (ValueError, OverflowError, IndexError, FloatingPointError, RuntimeError) as exc:
             self.faulted = True
             raise RigError("invalid engine transition; fault latched") from exc
         return self.observe()
@@ -254,11 +254,19 @@ def benchmark(*, steps=100, warmup=10):
             max_violation = max(max_violation,
                                 *(j["limit_violation_rad"] for j in obs["joints"]))
     sorted_ms = sorted(v / 1_000_000 for v in samples)
+    try:
+        import resource
+        import sys
+        rss_native = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        rss_kib = int(rss_native / 1024) if sys.platform == "darwin" else int(rss_native)
+    except (ImportError, OSError, ValueError):
+        rss_kib = None
     return {"schema": BENCH_SCHEMA, "engine": "mujoco", "version": PINNED_MUJOCO,
             "rig_revision": body.revision, "steps": steps, "warmup": warmup,
             "p50_wall_ms_per_step": round(statistics.median(sorted_ms), 6),
             "p95_wall_ms_per_step": round(sorted_ms[math.ceil(0.95*steps)-1], 6),
             "max_solver_contacts": max_contacts,
+            "max_rss_kib_process": rss_kib,
             "max_joint_limit_violation_rad": max_violation,
             "note": "virtual solver contacts, wall time not CPU utilization; no external actuation"}
 
