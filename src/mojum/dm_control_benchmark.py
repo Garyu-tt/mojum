@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 SCHEMA = "mojum.dm-control-benchmark/1"
 MAX_STEPS = 20_000
 MAX_OBSTACLES = 16
+MAX_ROOM_EDGE_M = 1_000.0
 MAX_REPORT_BYTES = 32 * 1024
 MAX_CONTROL = 4.0
 POINT_RADIUS_M = 0.03
@@ -41,7 +42,7 @@ def _sha256_hex(value: str) -> bool:
             and all(char in "0123456789abcdef" for char in value))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ProbeConfig:
     """Exact, bounded synthetic 2D point-mass workload."""
 
@@ -65,8 +66,9 @@ class ProbeConfig:
             value = getattr(self, name)
             if not _finite_number(value):
                 raise ValueError(f"{name} must be a finite native number")
-        if self.width_m <= 2 * POINT_RADIUS_M or self.height_m <= 2 * POINT_RADIUS_M:
-            raise ValueError("room dimensions are too small for the point body")
+        if (self.width_m <= 2 * POINT_RADIUS_M or self.height_m <= 2 * POINT_RADIUS_M
+                or self.width_m > MAX_ROOM_EDGE_M or self.height_m > MAX_ROOM_EDGE_M):
+            raise ValueError("room dimensions are outside the bounded point-body profile")
         if not (POINT_RADIUS_M <= self.start_x_m <= self.width_m - POINT_RADIUS_M
                 and POINT_RADIUS_M <= self.start_y_m <= self.height_m - POINT_RADIUS_M):
             raise ValueError("start position is outside the valid room interior")
