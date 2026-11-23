@@ -184,6 +184,10 @@ def main():
         )
     }
     print(json.dumps(summary, sort_keys=True, allow_nan=False))
+    # Keep the measured report visible, but do not let insufficient frozen-arm
+    # contact exposure count as a successful development-stress CI run.
+    if not report["evidence_quality"]["passes_contact_gate"]:
+        raise SystemExit("contact-exposure QA gate failed")
     return summary
 
 
