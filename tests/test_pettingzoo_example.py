@@ -59,6 +59,20 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             env.step({"agent_0": 0, "agent_1": 2})
 
+    def test_rejects_hostile_or_oversized_agent_keys_before_set(self):
+        class HostileKey:
+            def __hash__(self):
+                return 123
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not execute")
+
+        env = DeterministicCoordinationEnv()
+        env.reset(seed=1)
+        with self.assertRaises(ValueError):
+            env.step({HostileKey(): 0, "agent_1": 0})
+        with self.assertRaises(ValueError):
+            env.step({"x" * 1_000_000: 0, "agent_1": 0})
+
     def test_rejects_bool_seed_and_invalid_horizon(self):
         with self.assertRaises(ValueError):
             DeterministicCoordinationEnv(horizon=True)
