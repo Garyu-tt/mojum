@@ -24,6 +24,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Run focused tests
-        run: python -m unittest discover -s tests -p test_vrm_resource_budget.py -v
+        run: PYTHONPATH=src python -m unittest discover -s tests -p test_vrm_resource_budget.py -v
       - name: Compile module
-        run: python -m py_compile src/mojum/vrm_resource_budget.py
+        run: PYTHONPATH=src python -m py_compile src/mojum/vrm_resource_budget.py
