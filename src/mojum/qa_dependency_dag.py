@@ -41,6 +41,9 @@ def evaluate_dependency_dag(
     for record in records:
         if type(record) is not dict:
             raise ValueError("each record must be a native dict mapping")
+        # Reject oversized native dicts before materializing their key tuple.
+        if len(record) != 3:
+            raise ValueError("record must contain exactly id, state, depends_on")
         keys = tuple(record.keys())
         if any(type(key) is not str for key in keys):
             raise ValueError("record keys must be native strings")
