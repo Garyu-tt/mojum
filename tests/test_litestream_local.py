@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 import os
 from pathlib import Path
 import sqlite3
@@ -9,6 +10,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import litestream_local as mod
@@ -24,7 +26,7 @@ class LitestreamLocalTests(unittest.TestCase):
         self.replica = root / "replica"
         self.replica.mkdir(mode=0o700)
         self.source = self.private / "source.db"
-        with sqlite3.connect(self.source) as db:
+        with closing(sqlite3.connect(self.source)) as db, db:
             db.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, event TEXT NOT NULL)")
             db.execute("INSERT INTO events (event) VALUES ('public synthetic')")
         self.source.chmod(0o600)
@@ -117,6 +119,31 @@ else: sys.exit(9)
         with self.assertRaises(mod.SafetyError):
             mod.restore_verified(str(self.binary), str(self.replica), str(target),
                                  expected_sha256=self.expected, timeout=5)
+
+    def test_restore_closes_sqlite_verification_connection(self):
+        # The sqlite3 context manager only handles transactions, not close().
+        # Verify that both successful validation and publication leave no DB
+        # handle alive in the restored staging directory.
+        closed = []
+
+        class TrackedConnection(sqlite3.Connection):
+            def close(self):
+                closed.append(True)
+                return super().close()
+
+        real_connect = sqlite3.connect
+
+        def tracked_connect(*args, **kwargs):
+            return real_connect(*args, factory=TrackedConnection, **kwargs)
+
+        target = self.private / "closed-verified.db"
+        with patch.object(mod.sqlite3, "connect", side_effect=tracked_connect):
+            self.assertEqual(
+                mod.restore_verified(str(self.binary), str(self.replica), str(target),
+                                     expected_sha256=self.expected, timeout=5),
+                self.expected,
+            )
+        self.assertEqual(closed, [True])
 
     def test_restore_rejects_stale_target_sidecars(self):
         target = self.private / "restored.db"
