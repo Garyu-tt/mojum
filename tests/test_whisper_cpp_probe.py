@@ -145,7 +145,7 @@ printf 'Hello world!\n' > "$out.txt"
             self.assertNotEqual(Path(args[2]), self.model)
             self.assertEqual(Path(args[0]).stat().st_mode & 0o777, 0o700)
             self.assertEqual(Path(args[2]).stat().st_mode & 0o777, 0o600)
-            self._fake_cli("#!/bin/sh\\nexit 91\\n")
+            self._fake_cli("#!/bin/sh\nexit 91\n")
             self.model.write_bytes(b"mutated-unpinned-model")
             return original_run(args, **kwargs)
 
