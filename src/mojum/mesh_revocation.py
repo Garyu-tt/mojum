@@ -92,8 +92,10 @@ def _exact_native_keys(value: dict, expected: set[str], field: str) -> None:
         raise MeshRevocationError(f"{field} has an invalid shape")
     keys = tuple(dict.keys(value))
     # Run before set/equality: hostile key objects must not execute __hash__/__eq__.
-    if any(type(key) is not str for key in keys):
-        raise MeshRevocationError(f"{field} keys must be native strings")
+    # Fixed schema names are short; bound caller-controlled strings before hashing.
+    max_key_length = max((len(key) for key in expected), default=0)
+    if any(type(key) is not str or len(key) > max_key_length for key in keys):
+        raise MeshRevocationError(f"{field} keys must be bounded native strings")
     if set(keys) != expected:
         raise MeshRevocationError(f"{field} has an invalid shape")
 
