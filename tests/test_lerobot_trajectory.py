@@ -149,6 +149,38 @@ class TrajectoryAdmissionTests(unittest.TestCase):
         with self.assertRaises(TrajectoryError):
             validate_trajectory(payload)
 
+    def test_mapping_keys_are_bounded_before_set_comparison(self):
+        payload = sample()
+        payload.update({f"extra-{index}": index for index in range(10_000)})
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
+    def test_hostile_string_subclass_keys_fail_closed(self):
+        class HostileString(str):
+            block_hash = False
+
+            def __hash__(self):
+                if type(self).block_hash:
+                    raise RuntimeError("hostile hash must not execute")
+                return str.__hash__(self)
+
+        payload = sample()
+        payload["hostile-temp"] = 1
+        payload.pop("hostile-temp")
+        payload.pop("schema")
+        payload[HostileString("schema")] = SCHEMA
+        HostileString.block_hash = True
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
+        HostileString.block_hash = False
+        frame = payload["frames"][0]
+        frame.pop("timestamp_ns")
+        frame[HostileString("timestamp_ns")] = 10
+        HostileString.block_hash = True
+        with self.assertRaises(TrajectoryError):
+            validate_trajectory(payload)
+
     def test_bad_root_values_rejected(self):
         for payload in (None, [], "trajectory", 42):
             with self.subTest(payload=payload), self.assertRaises(TrajectoryError):
