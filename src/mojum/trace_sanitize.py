@@ -29,15 +29,15 @@ _STRING_MAX_LENGTHS = {
     "reason_code": 48,
 }
 _STRING_PATTERNS = {
-    "trace_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
-    "lease_id": re.compile(r"[0-9a-f]{32,64}\\Z"),
-    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\\Z"),
-    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
-    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}\\Z"),
-    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
-    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)\\Z"),
-    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)\\Z"),
-    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}\\Z"),
+    "trace_id": re.compile(r"[0-9a-f]{32,64}"),
+    "lease_id": re.compile(r"[0-9a-f]{32,64}"),
+    "head_sha": re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})"),
+    "event": re.compile(r"[a-z][a-z0-9_.-]{0,47}"),
+    "component": re.compile(r"[a-z][a-z0-9_.-]{0,31}"),
+    "operation": re.compile(r"[a-z][a-z0-9_.-]{0,47}"),
+    "outcome": re.compile(r"(?:success|failure|skipped|deferred|rejected)"),
+    "status": re.compile(r"(?:ok|error|pending|blocked|complete|incomplete)"),
+    "reason_code": re.compile(r"[a-z][a-z0-9_.-]{0,47}"),
 }
 _INTEGER_FIELDS = {
     "fencing_epoch", "pr_number", "duration_ms", "latency_ms",
