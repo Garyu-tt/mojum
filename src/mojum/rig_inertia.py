@@ -148,16 +148,28 @@ def _inertia_tensor(value: object) -> tuple[tuple[float, float, float], ...]:
     if any(m[i][j] != m[j][i] for i in range(3) for j in range(i + 1, 3)):
         raise RigInertiaError("inertia tensor must be exactly symmetric")
 
-    # Sylvester's criterion for strict positive definiteness.
-    minor2 = m[0][0] * m[1][1] - m[0][1] * m[1][0]
-    determinant = _determinant3(m)
-    if m[0][0] <= 0.0 or minor2 <= 0.0 or determinant <= 0.0:
+    # Positive definiteness and the principal-moment triangle inequality are
+    # invariant under multiplication by a positive scalar. Normalize first:
+    # evaluating minors/determinants in the input scale can underflow for
+    # perfectly valid small SI tensors (or overflow after future bound changes).
+    scale = max(abs(item) for row in m for item in row)
+    if scale == 0.0:
+        raise RigInertiaError("inertia tensor must be positive definite")
+    normalized = tuple(tuple(item / scale for item in row) for row in m)
+
+    # Sylvester's criterion for strict positive definiteness, on the normalized
+    # tensor so its products stay near the representable range.
+    minor2 = (normalized[0][0] * normalized[1][1]
+              - normalized[0][1] * normalized[1][0])
+    determinant = _determinant3(normalized)
+    if (normalized[0][0] <= 0.0 or minor2 <= 0.0
+            or determinant <= 0.0):
         raise RigInertiaError("inertia tensor must be positive definite")
 
     # A realizable rigid body's principal moments obey the triangle inequality.
-    moments = _principal_moments(m)
+    moments = _principal_moments(normalized)
     largest = moments[2]
-    tolerance = 1e-10 * max(abs(largest), abs(moments[0]), abs(moments[1]), 1e-300)
+    tolerance = 1e-10 * max(abs(largest), abs(moments[0]), abs(moments[1]))
     if moments[0] <= 0.0 or largest > moments[0] + moments[1] + tolerance:
         raise RigInertiaError("principal moments violate the rigid-body triangle inequality")
     return m  # type: ignore[return-value]
