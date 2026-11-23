@@ -84,6 +84,11 @@ def parse_manifest(payload: bytes) -> ReplicaHead:
         )
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise ManifestError("invalid strict JSON manifest") from exc
+    return _validated_fields(obj)
+
+
+def _validated_fields(obj: dict[str, Any]) -> ReplicaHead:
+    """Admit bounded native field types before in-memory serialization."""
     if type(obj) is not dict or obj.keys() != _KEYS:
         raise ManifestError("invalid manifest fields")
     if type(obj["schema"]) is not str or obj["schema"] != SCHEMA:
@@ -149,19 +154,23 @@ def compare(source: ReplicaHead, replica: ReplicaHead) -> Decision:
     """
     if type(source) is not ReplicaHead or type(replica) is not ReplicaHead:
         raise ManifestError("invalid in-memory manifest types")
-    # Revalidate even in-memory instances (not just parsed JSON).
+    # Validate direct-API instances without JSON-encoding arbitrary nested
+    # Python objects. The 4 KiB wire budget must not be bypassed by unbounded
+    # encoding work on forged in-memory ReplicaHead fields.
     for item in (source, replica):
-        encoded = {
-            "schema": SCHEMA, "organism_id": item.organism_id,
-            "node_id": item.node_id, "epoch": item.epoch,
-            "sequence": item.sequence,
-            "journal_head_sha256": item.journal_head_sha256,
-            "checkpoint_sha256": item.checkpoint_sha256,
-        }
         try:
-            parse_manifest(json.dumps(encoded, separators=(",", ":"), allow_nan=False).encode("utf-8"))
-        except (TypeError, ValueError, UnicodeError) as exc:
-            raise ManifestError("invalid in-memory manifest") from exc
+            fields = {
+                "schema": SCHEMA,
+                "organism_id": item.organism_id,
+                "node_id": item.node_id,
+                "epoch": item.epoch,
+                "sequence": item.sequence,
+                "journal_head_sha256": item.journal_head_sha256,
+                "checkpoint_sha256": item.checkpoint_sha256,
+            }
+        except AttributeError as exc:
+            raise ManifestError("incomplete in-memory manifest") from exc
+        _validated_fields(fields)
 
     if source.organism_id != replica.organism_id:
         return Decision("diverged", "organism_mismatch")
