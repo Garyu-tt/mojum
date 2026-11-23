@@ -216,7 +216,7 @@ class GenesisBatchTests(unittest.TestCase):
         from mojum.genesis import canonical as canonical_json
 
         bad = event()
-        bad["evidence"] = "\\x01" * 2_000
+        bad["evidence"] = "\x01" * 2_000
         ledger = GenomeLedger(SEED)
         with patch(
             "mojum.genesis_batch.canonical", wraps=canonical_json,
