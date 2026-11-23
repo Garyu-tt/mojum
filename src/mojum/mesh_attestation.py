@@ -65,6 +65,8 @@ def _payload(attestation):
     if attestation.schema != SCHEMA:
         raise AttestationError("unsupported attestation schema")
     _require_text(attestation.key_id, _KEY_ID, "key id")
+    if type(attestation.node_id) is not str or type(attestation.protocol) is not str:
+        raise AttestationError("node id and protocol must be plain strings")
     _require_text(attestation.statement_id, _STATEMENT_ID, "statement id")
     _require_epoch(attestation.issued_at, "issued_at")
     _require_epoch(attestation.expires_at, "expires_at")
@@ -72,7 +74,8 @@ def _payload(attestation):
         raise AttestationError("expiry must follow issue time")
     if attestation.expires_at - attestation.issued_at > MAX_TTL_SECONDS:
         raise AttestationError("attestation lifetime exceeds maximum")
-    if type(attestation.capabilities) is not tuple or len(attestation.capabilities) > 128:
+    if (type(attestation.capabilities) is not tuple or len(attestation.capabilities) > 128
+            or any(type(item) is not str for item in attestation.capabilities)):
         raise AttestationError("invalid capabilities")
     try:
         _validated(Offer(attestation.protocol, attestation.node_id,
@@ -145,6 +148,10 @@ def verify_offer(offer, attestation, authority_keys, *, now):
     """Authorize exactly the node/capabilities covered by a verified statement."""
     if type(offer) is not Offer:
         raise AttestationError("expected exact mesh Offer")
+    if (type(offer.protocol) is not str or type(offer.node_id) is not str
+            or type(offer.capabilities) is not tuple
+            or any(type(item) is not str for item in offer.capabilities)):
+        raise AttestationError("offer fields must use exact primitive types")
     try:
         _validated(offer)
     except (TypeError, ValueError) as exc:
