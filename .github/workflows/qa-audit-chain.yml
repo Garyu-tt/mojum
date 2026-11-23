@@ -6,7 +6,16 @@ on:
       - "tests/test_qa_audit_chain.py"
       - "docs/QA_AUDIT_CHAIN_R01.md"
       - ".github/workflows/qa-audit-chain.yml"
+  push:
+    branches:
+      - "qa/1205-regex-bounds-20261123"
+    paths:
+      - "src/mojum/qa_audit_chain.py"
+      - "tests/test_qa_audit_chain.py"
+      - ".github/workflows/qa-audit-chain.yml"
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -16,8 +25,17 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Assert exact checked-out head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Focused regression
-        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_qa_audit_chain.py' -v
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_qa_audit_chain.py" -v
