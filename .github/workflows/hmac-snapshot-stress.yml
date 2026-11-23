@@ -1,0 +1,28 @@
+name: Mojum verified HMAC replay snapshot stress
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hmac-snapshot-stress.yml"
+      # A portable-host or graph change may affect the replay/cache chain;
+      # re-run the real snapshot stress for any runtime change.
+      - "src/mojum/**"
+      - "tests/stress_hmac_snapshot_boundary.py"
+      - "tests/test_verified_replay_snapshot.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-hmac-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Full-hash-audited actual 10k+ private synthetic journal snapshot
+        run: |
+          python tests/stress_hmac_snapshot_boundary.py

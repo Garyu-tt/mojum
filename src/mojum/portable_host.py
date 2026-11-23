@@ -99,11 +99,15 @@ def run_paced(aquarium, *, ticks, interval_ms, stop_event,
     deadline = clock()
     completed = 0
     while completed < ticks and not stop_event.is_set():
-        remaining = deadline - clock()
-        if remaining > 0:
-            sleep_interruptible(remaining)
-            if stop_event.is_set():
+        # Early wakeups are not deadlines: recheck a monotonic clock before
+        # the next committed tick and stay interruptible by SIGTERM/Ctrl-C.
+        while not stop_event.is_set():
+            remaining = deadline - clock()
+            if remaining <= 0:
                 break
+            sleep_interruptible(remaining)
+        if stop_event.is_set():
+            break
         # A failed SQLite CAS/append leaves committed state unchanged and is
         # never silently skipped. No synthetic user dx/dy is injected.
         aquarium.step()
@@ -135,7 +139,13 @@ def main(argv=None):
                         default="shadow")
     parser.add_argument("--expected-head",
                         help="optional independently pinned source journal SHA-256")
+    parser.add_argument("--snapshot-file", type=Path,
+                        help="opt-in PRIVATE plaintext HMAC replay cache (0600)")
+    parser.add_argument("--snapshot-key-file", type=Path,
+                        help="separate owner-only 32-byte HMAC key file (0600)")
     args = parser.parse_args(argv)
+    if (args.snapshot_file is None) != (args.snapshot_key_file is None):
+        parser.error("--snapshot-file and --snapshot-key-file must be supplied together")
     try:
         validate_plan(args.ticks, args.interval_ms)
     except PortableHostError as exc:
@@ -152,6 +162,8 @@ def main(argv=None):
             sensory_mode=args.sensory_mode,
             neural_mode=args.neural_mode,
             external_expected_head=args.expected_head,
+            replay_snapshot_file=args.snapshot_file,
+            replay_snapshot_key_file=args.snapshot_key_file,
         ) as aquarium:
             begin_tick = aquarium.tick
             committed = run_paced(
@@ -159,6 +171,8 @@ def main(argv=None):
                 stop_event=stopped,
             )
             checkpoint = aquarium.checkpoint()
+            signed_cache = (aquarium.save_replay_snapshot()
+                            if args.snapshot_file is not None else None)
             status = {
                 "schema": SCHEMA,
                 "agent_id": aquarium.agent_id,
@@ -173,6 +187,10 @@ def main(argv=None):
                 "stop_reason": "signal" if stopped.is_set() else "completed",
                 "classification": "PRIVATE_SYNTHETIC_SINGLE_DEVICE_NOT_FULL_BRAIN",
                 "journal_trust": "checksum_only_not_authenticated",
+                "snapshot_cache": (
+                    "HMAC_LOCAL_PLAINTEXT_NOT_ENCRYPTED"
+                    if signed_cache is not None else "DISABLED"
+                ),
             }
     # Metadata only; NEVER dump PRIVATE frames, genome, learner weights,
     # actual sensor history or private Noosphere events on stdout.
