@@ -52,6 +52,12 @@ def dataset(events):
     return {"projection": projection, "sha256": digest(projection)}
 
 
+def resign(source):
+    """Recompute the projection digest after adversarially changing test filters."""
+    source["sha256"] = digest(source["projection"])
+    return source
+
+
 def grant(*, consent_id="consent-1", source="sensor-a", revision="rev-1",
           topics=None, visibility=None, valid_from=0, valid_to=100,
           purpose="research", agent_id="dante"):
@@ -248,6 +254,50 @@ class NoosphereConsentTests(unittest.TestCase):
             source["sha256"] = digest(source["projection"])
             with self.subTest(payload=payload), self.assertRaises(ConsentError):
                 authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_topic_filter_is_enforced_after_digest_validation(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["topic"] = "different-topic"
+        resign(source)
+        with self.assertRaisesRegex(ConsentError, "topic filter"):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_declared_source_filter_is_enforced_after_digest_validation(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["source"] = "different-source"
+        resign(source)
+        with self.assertRaisesRegex(ConsentError, "source filter"):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_recorded_time_cutoff_is_enforced(self):
+        source = dataset([event()])
+        source["projection"]["filters"]["as_of_recorded_ns"] = 10
+        resign(source)
+        with self.assertRaisesRegex(ConsentError, "recorded-time filter"):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_valid_at_filter_is_enforced(self):
+        source = dataset([event(valid_from=20)])
+        source["projection"]["filters"]["valid_at_ns"] = 10
+        resign(source)
+        with self.assertRaisesRegex(ConsentError, "validity filter"):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_public_only_dataset_filter_rejects_private_even_with_grant(self):
+        source = dataset([event(visibility="PRIVATE")])
+        source["projection"]["filters"]["include_nonpublic"] = False
+        resign(source)
+        private_grant = grant(visibility=["PRIVATE"])
+        with self.assertRaisesRegex(ConsentError, "PUBLIC-only"):
+            authorize_dataset(source, [private_grant], as_of_ns=50, purpose="research")
+
+    def test_oversized_native_dict_rejected_before_key_snapshot(self):
+        source = dataset([event()])
+        source["projection"]["padding"] = {
+            f"extra_{index}": index for index in range(200_000)
+        }
+        with self.assertRaises(ConsentError):
+            authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
 
     def test_caller_mapping_is_not_mutated(self):
         original = dataset([event()])
