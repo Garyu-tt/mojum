@@ -58,6 +58,12 @@ class LeRobotExportTests(unittest.TestCase):
         self.assertNotIn("observation.state", json.dumps(first.summary()))
         self.assertNotIn("synthetic/held-out", json.dumps(first.summary()))
 
+    def test_checked_in_example_fixture(self):
+        folder = Path(__file__).resolve().parents[1] / "examples" / "lerobot_offline"
+        imported = load_export(folder / "manifest.json", folder / "frames.jsonl")
+        self.assertEqual(imported.episode_count, 2)
+        self.assertEqual(held_out_control(imported)["fitted_gain_mse"], 0.)
+
     def test_held_out_train_is_separate_from_control(self):
         report = held_out_control(self.load())
         self.assertEqual(report["train_pairs"], 2)
