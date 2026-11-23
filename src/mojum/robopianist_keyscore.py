@@ -210,7 +210,7 @@ def _invalid_constant(_):
 
 def read_trace(path: Path):
     """Read a small untrusted local JSON trace, not a URL or private journal."""
-    if type(path) is not Path:
+    if not isinstance(path, Path):
         raise PianoBenchmarkError("input must be a local Path")
     with path.open("rb") as handle:
         data = handle.read(MAX_BYTES + 1)
