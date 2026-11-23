@@ -14,7 +14,7 @@ from typing import Any
 _INPUT_SCHEMA = "mojum.virtual-rig/1"
 _OUTPUT_SCHEMA = "mojum.virtual-kinematics-result/1"
 _VISIBILITY = "PUBLIC_SYNTHETIC"
-_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\\Z", re.ASCII)
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\Z", re.ASCII)
 _MAX_JOINTS = 128
 _MAX_ABS_METRES = 1_000_000.0
 _MAX_ABS_ANGLE = 1_000_000.0
