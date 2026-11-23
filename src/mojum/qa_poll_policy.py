@@ -74,6 +74,8 @@ def backoff_delay(
 ) -> float:
     """Return capped exponential delay, respecting a valid Retry-After hint."""
     _int(consecutive_failures, "consecutive_failures", 0, 31)
+    if (type(now_epoch) not in (int, float) or not math.isfinite(now_epoch) or now_epoch < 0):
+        raise PollPolicyError("now_epoch must be a finite non-negative number")
     if (type(base_seconds) not in (int, float) or type(max_seconds) not in (int, float)
             or not math.isfinite(base_seconds) or not math.isfinite(max_seconds)
             or base_seconds <= 0 or max_seconds < base_seconds or max_seconds > 86400):
