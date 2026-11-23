@@ -100,8 +100,7 @@ class RigContractTests(unittest.TestCase):
 
     def test_overlong_field_name_fails_closed(self):
         rig = fixture_rig()
-        rig.pop("schema")
-        rig["a" * 4096] = RIG_SCHEMA
+        rig["a" * 4096] = rig.pop("schema")
         with self.assertRaisesRegex(RigError, "unknown or missing fields"):
             validate_rig(rig)
 
