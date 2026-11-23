@@ -79,7 +79,9 @@ function cloneFrame(frame, expectedJointIds) {
     ids.add(joint.id);
     joints.push(Object.freeze({id: joint.id, angle_rad: joint.angle_rad}));
   }
-  joints.sort((a, b) => a.id.localeCompare(b.id));
+  // ASCII-only joint IDs use locale-independent code-point order so output
+  // is stable across hosts with different default Intl locales.
+  joints.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const canonicalIds = joints.map(joint => joint.id);
   if (expectedJointIds &&
       (canonicalIds.length !== expectedJointIds.length ||
