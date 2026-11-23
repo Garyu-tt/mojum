@@ -19,9 +19,9 @@ Schema: `mojum.mujoco.cpu-profile/1`.
 | `warmup_steps` | int | 0 to 1,000,000 and no more than steps |
 | `cpu_threads` | int | 1 to 16 |
 | `integrator` | string | `euler`, `implicit`, `implicitfast` |
-| `solver` | string | `newton`, `cg`; `cg` requires an implicit integrator |
+| `solver` | string | `newton`, `cg` |
 
-The integrator and solver fields are independently allowlisted; this validator does not infer a compatibility rule absent an explicit pinned MuJoCo version/model contract. The total requested simulated duration is capped at one day. Every integer
+The integrator and solver fields are independently allowlisted; this validator does not infer a compatibility rule absent an explicit pinned MuJoCo version/model contract. Direct native mappings are rejected by field cardinality before key enumeration, and schema/option strings are length-checked before allowlist hashing. The total requested simulated duration is capped at one day. Every integer
 field requires an exact built-in `int`; booleans and floats are not accepted as
 integers. Missing or unknown keys, subclasses, unsupported values and invalid
 cross-field combinations fail closed with `ProfileError`.
