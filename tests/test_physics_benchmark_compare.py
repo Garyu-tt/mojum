@@ -44,10 +44,10 @@ class PhysicsBenchmarkCompareTests(unittest.TestCase):
                          {"numerator": 2, "denominator": 1})
 
     def test_even_median_is_exact(self):
-        result = compare_reports(report(samples=[10, 20, 30, 40]),
-                                 report("jolt", [10, 20, 30, 40]))
+        result = compare_reports(report(samples=[10, 20, 21, 40]),
+                                 report("jolt", [10, 20, 21, 40]))
         self.assertEqual(result["baseline"]["median_step_time_ns"],
-                         {"numerator": 25, "denominator": 1})
+                         {"numerator": 41, "denominator": 2})
 
     def test_p95_nearest_rank(self):
         values = [9, 1, 7, 3, 5, 11, 13, 15, 17, 19]
@@ -123,7 +123,7 @@ class PhysicsBenchmarkCompareTests(unittest.TestCase):
                               copy.deepcopy(report("candidate")))
         self.assertEqual(one, two)
         serialized = json.dumps(one, sort_keys=True)
-        self.assertNotIn("step_time_ns", serialized)
+        self.assertNotIn('"step_time_ns":', serialized)
         self.assertNotIn("model_sha256", serialized)
         self.assertIn("comparison_sha256", one)
 
