@@ -141,6 +141,32 @@ class EnergySequenceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     measure_pcm16_sequence([SILENCE], start_ns=0, threshold=threshold)
 
+    def test_oversized_list_rejected_before_tuple_allocation(self):
+        # Inject a canary constructor: old code copied the entire list first.
+        class ForbiddenSnapshot(tuple):
+            def __new__(cls, iterable=()):
+                raise AssertionError("oversized input reached tuple snapshot")
+
+        frames = [SILENCE] * (MAX_FRAMES + 1)
+        with patch("mojum.audio_energy_sequence.tuple", ForbiddenSnapshot, create=True):
+            with self.assertRaisesRegex(ValueError, "frame count outside"):
+                measure_pcm16_sequence(frames, start_ns=0)
+
+    def test_growing_list_cannot_escape_bounded_snapshot(self):
+        # Emulate another thread appending just after initial len(frames).
+        frames = [SILENCE] * MAX_FRAMES
+        native_len = len
+
+        def grow_after_count(value):
+            size = native_len(value)
+            if value is frames:
+                frames.append(SILENCE)
+            return size
+
+        with patch("mojum.audio_energy_sequence.len", grow_after_count, create=True):
+            with self.assertRaisesRegex(ValueError, "changed during snapshot"):
+                measure_pcm16_sequence(frames, start_ns=0)
+
     def test_mutating_original_input_container_does_not_change_result(self):
         frames = [SILENCE, LOUD]
         report = measure_pcm16_sequence(frames, start_ns=0)

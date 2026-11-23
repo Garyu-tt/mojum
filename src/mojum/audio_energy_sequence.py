@@ -50,11 +50,15 @@ def measure_pcm16_sequence(
     """
     if type(frames) not in (list, tuple):
         raise ValueError("frames must be a concrete list or tuple")
-    # Copy once so further caller edits to the list cannot change traversal.
-    chunks = tuple(frames)
-    count = len(chunks)
+    # Reject oversized native lists BEFORE allocating a tuple snapshot.
+    count = len(frames)
     if not 1 <= count <= MAX_FRAMES:
         raise ValueError("frame count outside 1..256 resource budget")
+    # Slice to a hard bound even if another thread extends a mutable list
+    # between the length preflight and its immutable snapshot.
+    chunks = tuple(frames[:MAX_FRAMES + 1])
+    if len(chunks) != count:
+        raise ValueError("frame count changed during snapshot")
     if type(start_ns) is not int or not 0 <= start_ns <= MAX_TIME_NS:
         raise ValueError("invalid sequence start timestamp")
     if start_ns > MAX_TIME_NS - (count - 1) * FRAME_DURATION_NS:
