@@ -146,5 +146,58 @@ assert.deepEqual(report.duplicate_expected_joint_ids, ['a']);
 assert.deepEqual(report.duplicate_available_bones, ['hips']);
 """)
 
+    def test_digest_uses_locale_independent_code_unit_order(self) -> None:
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
+const input = {
+  schema: 'mojum.vrm-binding-manifest/1',
+  expected_joint_ids: ['a', 'B'],
+  mappings: [
+    {id:'a', bone:'hips', axis:'x'},
+    {id:'B', bone:'neck', axis:'x'}
+  ],
+  available_bones: ['hips', 'neck']
+};
+const result = validateVrmBindingManifest(input);
+const canonical = {
+  schema: input.schema,
+  expected_joint_ids: ['B', 'a'],
+  mappings: [
+    {id:'B', bone:'neck', axis:'x'},
+    {id:'a', bone:'hips', axis:'x'}
+  ],
+  available_bones: ['hips', 'neck']
+};
+const expected = createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
+assert.equal(result.valid, true);
+assert.equal(result.digest, expected);
+""")
+
+    def test_proxy_trap_failures_are_normalized_to_type_error(self) -> None:
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
+const good = {
+  schema:'mojum.vrm-binding-manifest/1',
+  expected_joint_ids:['a'],
+  mappings:[{id:'a',bone:'hips',axis:'x'}],
+  available_bones:['hips']
+};
+const recordProxy = new Proxy(good, {
+  ownKeys() { throw new Error('hostile ownKeys trap'); }
+});
+assert.throws(() => validateVrmBindingManifest(recordProxy), TypeError);
+const arrayProxy = new Proxy(['a'], {
+  getPrototypeOf() { throw new Error('hostile getPrototypeOf trap'); }
+});
+assert.throws(
+  () => validateVrmBindingManifest({...good, expected_joint_ids:arrayProxy}),
+  TypeError
+);
+""")
 if __name__ == "__main__":
     unittest.main()
