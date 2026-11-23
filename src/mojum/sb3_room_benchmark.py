@@ -113,8 +113,17 @@ def evaluate(model, scenes=EVAL_SCENES, *, env_factory=_make_env, seed=TRAIN_SEE
             for steps in range(1, EPISODE_STEPS + 1):
                 raw_action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(_discrete_action(raw_action))
+                # Reject malformed upstream output before claiming a measured score.
+                # The parent point-room emits only bounded synthetic rewards.
+                if type(reward) not in (int, float) or not -1.0 <= reward <= 1.0:
+                    raise ValueError("invalid synthetic environment reward")
+                if (type(terminated) is not bool or type(truncated) is not bool
+                        or (terminated and truncated)):
+                    raise ValueError("invalid environment termination flags")
+                if type(info) is not dict or type(info.get("blocked")) is not bool:
+                    raise ValueError("invalid environment blocked metadata")
                 total += float(reward)
-                blocked += int(info.get("blocked", False))
+                blocked += int(info["blocked"])
                 if terminated or truncated:
                     success = bool(terminated)
                     break
