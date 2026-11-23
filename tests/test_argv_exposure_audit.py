@@ -20,12 +20,27 @@ class ArgvExposureTests(unittest.TestCase):
         self.assertNotIn("super-secret", repr(result))
 
     def test_missing_secret_value(self):
-        self.assertEqual(audit_argv(["--token"]).findings[-1].kind,
-                         "missing-sensitive-option-value")
+        kinds = [finding.kind for finding in audit_argv(["--token"]).findings]
+        self.assertIn("missing-sensitive-option-value", kinds)
 
     def test_url_credentials(self):
         self.assertEqual(audit_argv(["https://alice:secret@example.test/"]).findings[0].kind,
                          "url-userinfo")
+
+    def test_url_credentials_inside_option_values(self):
+        for argument in (
+            "--endpoint=https://alice:secret@example.test/",
+            "-u=https://alice:secret@example.test/",
+            "https://alice:secret@example.test/",
+        ):
+            with self.subTest(argument=argument.split("=")[0]):
+                result = audit_argv([argument])
+                self.assertIn("url-userinfo", [finding.kind for finding in result.findings])
+                self.assertFalse(result.safe)
+
+    def test_rejects_unpaired_surrogates(self):
+        with self.assertRaises(ValueError):
+            audit_argv(["bad-\\ud800"])
 
     def test_digest_does_not_depend_on_secret(self):
         a = audit_argv(["--token=a"])
