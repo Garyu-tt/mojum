@@ -118,7 +118,7 @@ def sense_sound_events(room: Room, state: RoomState, events, *,
     observed = []
     for event in normalized:
         dx = _millimetres(event["x"], "source x") - lx
-        dy = _millimetres(event["y"], "source y")
+        dy = _millimetres(event["y"], "source y") - ly
         distance = isqrt(dx * dx + dy * dy)
         occluded = any(_segment_hits_rect(state.x, state.y, event["x"], event["y"], r)
                        for r in room.obstacles)
