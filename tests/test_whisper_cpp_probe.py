@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+from unittest import mock
 import wave
 
 from mojum.whisper_cpp_probe import (
@@ -120,6 +122,37 @@ printf 'Hello world!\n' > "$out.txt"
                     self._run(manifest={**self.manifest, **update})
         with self.assertRaises(WhisperCPPProbeError):
             self._run(manifest={**self.manifest, "access_token": "secret"})
+
+    def test_manifest_discriminators_require_actual_strings(self):
+        class SpoofedStringInt(int):
+            def __eq__(self, other):
+                return other in (AUDIO_SCHEMA, "PUBLIC", "synthetic_fixture")
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+        for key in ("schema", "visibility", "origin"):
+            with self.subTest(key=key), self.assertRaisesRegex(
+                WhisperCPPProbeError, "PUBLIC synthetic fixtures"
+            ):
+                self._run(manifest={**self.manifest, key: SpoofedStringInt(7)})
+
+    def test_private_staging_survives_mutation_before_spawn(self):
+        # A file may be atomically replaced after a SHA preflight. The child
+        # must use the already-verified, private copies, never source paths.
+        original_run = subprocess.run
+        def mutate_and_run(args, **kwargs):
+            self.assertNotEqual(Path(args[0]), self.binary)
+            self.assertNotEqual(Path(args[2]), self.model)
+            self.assertEqual(Path(args[0]).stat().st_mode & 0o777, 0o700)
+            self.assertEqual(Path(args[2]).stat().st_mode & 0o777, 0o600)
+            self._fake_cli("#!/bin/sh\\nexit 91\\n")
+            self.model.write_bytes(b"mutated-unpinned-model")
+            return original_run(args, **kwargs)
+
+        with mock.patch("mojum.whisper_cpp_probe.subprocess.run", side_effect=mutate_and_run):
+            result = self._run()
+        self.assertEqual(result["transcript"], "Hello world!")
+        self.assertEqual(result["frozen_reference_score"]["word_error_rate"], 0)
 
     def test_pcm16_mono_16k_and_duration_enforced(self):
         for candidate in (
