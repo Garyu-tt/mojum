@@ -99,7 +99,7 @@ class BenchmarkTests(unittest.TestCase):
     def test_deeply_nested_json_normalizes_recursion_error(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "deep.json"
-            depth = 1200
+            depth = 12000
             path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
             with self.assertRaisesRegex(ReportError, "invalid input: RecursionError"):
                 load_report(str(path))
