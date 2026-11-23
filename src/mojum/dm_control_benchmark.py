@@ -36,6 +36,11 @@ def _number(value: float) -> str:
     return format(float(value), ".17g")
 
 
+def _sha256_hex(value: str) -> bool:
+    return (type(value) is str and len(value) == 64
+            and all(char in "0123456789abcdef" for char in value))
+
+
 @dataclass(frozen=True)
 class ProbeConfig:
     """Exact, bounded synthetic 2D point-mass workload."""
@@ -99,6 +104,30 @@ class ProbeConfig:
         object.__setattr__(self, "obstacles_m", tuple(frozen_obstacles))
 
 
+def _config_payload(config: ProbeConfig) -> dict:
+    if type(config) is not ProbeConfig:
+        raise ValueError("config must be an exact ProbeConfig")
+    return {
+        "schema": "mojum.synthetic.point-room-workload/1",
+        "width_m": float(config.width_m),
+        "height_m": float(config.height_m),
+        "start_x_m": float(config.start_x_m),
+        "start_y_m": float(config.start_y_m),
+        "steps": config.steps,
+        "timestep_ns": config.timestep_ns,
+        "control_period": config.control_period,
+        "control_pattern": [list(pair) for pair in config.control_pattern],
+        "obstacles_m": [list(rect) for rect in config.obstacles_m],
+        "point_radius_m": POINT_RADIUS_M,
+        "max_control": MAX_CONTROL,
+    }
+
+
+def _canonical_bytes(value: dict) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                      allow_nan=False).encode("utf-8")
+
+
 def build_mjcf_xml(config: ProbeConfig = ProbeConfig()) -> str:
     """Create a deterministic in-memory MJCF model with no external assets."""
     if type(config) is not ProbeConfig:
@@ -148,11 +177,6 @@ def build_mjcf_xml(config: ProbeConfig = ProbeConfig()) -> str:
     return ET.tostring(root, encoding="unicode", short_empty_elements=True)
 
 
-def _canonical_bytes(value: dict) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-                      allow_nan=False).encode("utf-8")
-
-
 def _nearest_rank(values: list[int], percentile: int) -> int:
     ordered = sorted(values)
     index = max(0, math.ceil(percentile * len(ordered) / 100) - 1)
@@ -178,7 +202,8 @@ def run_benchmark(config: ProbeConfig = ProbeConfig()) -> dict:
             "docs/DM_CONTROL_BENCHMARK_R01.md"
         ) from exc
 
-    physics = mujoco.Physics.from_xml_string(build_mjcf_xml(config))
+    mjcf = build_mjcf_xml(config)
+    physics = mujoco.Physics.from_xml_string(mjcf)
     if int(physics.model.nq) != 2 or int(physics.model.nu) != 2:
         raise RuntimeError("compiled model does not match the expected 2-DOF/2-actuator contract")
     physics.reset()
@@ -216,6 +241,7 @@ def run_benchmark(config: ProbeConfig = ProbeConfig()) -> dict:
         if tracing_started_here:
             tracemalloc.stop()
 
+    workload_bytes = _canonical_bytes(_config_payload(config))
     body = {
         "schema": SCHEMA,
         "backend": "dm_control.mujoco",
@@ -232,6 +258,8 @@ def run_benchmark(config: ProbeConfig = ProbeConfig()) -> dict:
         "peak_traced_bytes": peak_bytes,
         "final_position_m": [trace_rows[-1][1], trace_rows[-1][2]],
         "trajectory_sha256": hashlib.sha256(_canonical_bytes({"rows": trace_rows})).hexdigest(),
+        "config_sha256": hashlib.sha256(workload_bytes).hexdigest(),
+        "mjcf_sha256": hashlib.sha256(mjcf.encode("utf-8")).hexdigest(),
     }
     report = dict(body)
     report["report_sha256"] = hashlib.sha256(_canonical_bytes(body)).hexdigest()
@@ -243,16 +271,20 @@ _REPORT_KEYS = {
     "schema", "backend", "dm_control_version", "mujoco_version", "scenario",
     "step_count", "timestep_ns", "elapsed_ns", "p50_step_ns", "p95_step_ns",
     "steps_with_contact", "max_contacts", "peak_traced_bytes", "final_position_m",
-    "trajectory_sha256", "report_sha256",
+    "trajectory_sha256", "config_sha256", "mjcf_sha256", "report_sha256",
 }
 
 
 def validate_report(report: object) -> dict:
     """Validate and detach a benchmark receipt; hashes are consistency checks only."""
-    if type(report) is not dict or set(report) != _REPORT_KEYS:
-        raise ValueError("report must be a native dict with the exact versioned field set")
-    if report["schema"] != SCHEMA or report["backend"] != "dm_control.mujoco" or report["scenario"] != "mojum.synthetic.point-room/1":
-        raise ValueError("unsupported report identity")
+    if type(report) is not dict or any(type(key) is not str for key in report):
+        raise ValueError("report must be a native dict with native string keys")
+    if set(report) != _REPORT_KEYS:
+        raise ValueError("report must have the exact versioned field set")
+    for key, expected in (("schema", SCHEMA), ("backend", "dm_control.mujoco"),
+                          ("scenario", "mojum.synthetic.point-room/1")):
+        if type(report[key]) is not str or report[key] != expected:
+            raise ValueError(f"unsupported report {key}")
     for key in ("dm_control_version", "mujoco_version"):
         if type(report[key]) is not str or not 1 <= len(report[key]) <= 64:
             raise ValueError(f"invalid {key}")
@@ -276,16 +308,15 @@ def validate_report(report: object) -> dict:
     position = report["final_position_m"]
     if type(position) is not list or len(position) != 2 or not all(_finite_number(v) for v in position):
         raise ValueError("invalid final_position_m")
-    for key in ("trajectory_sha256", "report_sha256"):
-        value = report[key]
-        if type(value) is not str or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+    for key in ("trajectory_sha256", "config_sha256", "mjcf_sha256", "report_sha256"):
+        if not _sha256_hex(report[key]):
             raise ValueError(f"invalid {key}")
     if report["steps_with_contact"] > report["step_count"]:
         raise ValueError("steps_with_contact exceeds step_count")
     body = {key: value for key, value in report.items() if key != "report_sha256"}
     if hashlib.sha256(_canonical_bytes(body)).hexdigest() != report["report_sha256"]:
         raise ValueError("report digest mismatch")
-    detached["final_position_m"] = [float(position[0]), float(position[1])]
+    detached["final_position_m"] = [position[0], position[1]]
     return detached
 
 
@@ -299,6 +330,8 @@ def decode_report(payload: str) -> dict:
     def pairs_no_duplicates(pairs):
         result = {}
         for key, value in pairs:
+            if type(key) is not str:
+                raise ValueError("JSON object key must be a native string")
             if key in result:
                 raise ValueError("duplicate JSON object key")
             result[key] = value
