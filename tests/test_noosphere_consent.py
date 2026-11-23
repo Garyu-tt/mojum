@@ -3,6 +3,7 @@ from collections import UserDict
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.noosphere_consent import (
     AUTHORIZED_SCHEMA, CONSENT_SCHEMA, ConsentError, authorize_dataset,
@@ -227,6 +228,26 @@ class NoosphereConsentTests(unittest.TestCase):
         # comparing the supplied projection hash.
         with self.assertRaises(ConsentError):
             authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_oversized_payload_rejected_before_json_serialization(self):
+        source = dataset([event()])
+        source["projection"]["items"][0]["event"]["payload"] = {
+            "blob": "x" * (16 * 1024 * 1024 + 1)
+        }
+        with patch(
+            "mojum.noosphere_consent.json.dumps",
+            side_effect=AssertionError("JSON serialization must not run"),
+        ):
+            with self.assertRaises(ConsentError):
+                authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
+
+    def test_nested_non_native_json_values_rejected(self):
+        for payload in ({"value": (1, 2)}, {1: "non-string key"}):
+            source = dataset([event()])
+            source["projection"]["items"][0]["event"]["payload"] = payload
+            source["sha256"] = digest(source["projection"])
+            with self.subTest(payload=payload), self.assertRaises(ConsentError):
+                authorize_dataset(source, [grant()], as_of_ns=50, purpose="research")
 
     def test_caller_mapping_is_not_mutated(self):
         original = dataset([event()])
