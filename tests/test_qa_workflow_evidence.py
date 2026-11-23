@@ -30,6 +30,24 @@ class WorkflowEvidenceTests(unittest.TestCase):
         self.assertEqual(result.results[0].state, "PENDING")
         self.assertEqual(result.state, "HOLD")
 
+    def test_newer_run_supersedes_older_run_with_more_attempts(self):
+        result = evaluate_workflow_evidence(
+            [run(100, attempt=2, conclusion="failure"), run(101, attempt=1, conclusion="success")],
+            expected_head_sha=HEAD, required_workflow_ids=[10],
+        )
+        self.assertEqual(result.results[0].run_id, 101)
+        self.assertEqual(result.state, "PASS")
+
+    def test_neutral_and_skipped_conclusions_hold(self):
+        for conclusion in ("neutral", "skipped"):
+            with self.subTest(conclusion=conclusion):
+                result = evaluate_workflow_evidence(
+                    [run(conclusion=conclusion)],
+                    expected_head_sha=HEAD, required_workflow_ids=[10],
+                )
+                self.assertEqual(result.results[0].state, "FAILURE")
+                self.assertEqual(result.state, "HOLD")
+
     def test_failures_hold(self):
         for conclusion in ("failure", "cancelled", "timed_out", "action_required"):
             with self.subTest(conclusion=conclusion):
