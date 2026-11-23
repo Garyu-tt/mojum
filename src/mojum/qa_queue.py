@@ -174,6 +174,8 @@ class DurableTaskQueue:
             if "queue_meta" not in existing:
                 if {"queue_tasks", "queue_events"} & existing:
                     raise QueueError("unversioned queue database is refused")
+                if existing:
+                    raise QueueError("database is not empty; refusing queue initialization")
                 connection.execute(
                     "CREATE TABLE queue_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
                 )
