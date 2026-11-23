@@ -60,6 +60,10 @@ def loads(payload: bytes | str) -> GenomeLedger:
     if type(payload) is bytes:
         raw = payload
     elif type(payload) is str:
+        # UTF-8 uses at least one byte per Unicode code point. Reject an
+        # obviously oversized text payload before allocating its encoded copy.
+        if len(payload) > MAX_SNAPSHOT_BYTES:
+            raise GenesisCodecError("Snapshot exceeds the byte limit")
         try:
             raw = payload.encode("utf-8")
         except UnicodeError as exc:
