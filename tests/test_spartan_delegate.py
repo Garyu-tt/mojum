@@ -236,6 +236,29 @@ class DelegationTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_delegation_refuses_ambient_transaction_without_side_effects(self):
+        # Never dispatch after an uncommitted reservation that can be rolled back.
+        self.db.execute("BEGIN IMMEDIATE")
+        self.db.execute("CREATE TABLE caller_marker (value TEXT)")
+        self.db.execute("INSERT INTO caller_marker VALUES ('uncommitted')")
+        for call in (
+            lambda: d.reserve(self.db, self.lease, now=21),
+            lambda: d.mark_orphans(self.db, now=21),
+            lambda: d.confirm_pr(self.db, "issue-701", 1, "a" * 40,
+                                 "https://github.com/Garyu-tt/mojum/pull/999"),
+        ):
+            with self.assertRaisesRegex(d.DelegationRejected,
+                                        "finish caller transaction"):
+                call()
+            self.assertTrue(self.db.in_transaction)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM delegated_runs").fetchone()[0], 0)
+        self.db.execute("ROLLBACK")
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='caller_marker'").fetchone())
+        # Once the caller closes its own transaction, the admission is durable.
+        self.assertTrue(d.reserve(self.db, self.lease, now=21))
+        self.assertFalse(self.db.in_transaction)
+
     def test_install_needs_existing_lease_authority(self):
         empty = sqlite3.connect(":memory:", isolation_level=None)
         empty.row_factory = sqlite3.Row
