@@ -108,11 +108,10 @@ class MeshRevocationAuditTests(unittest.TestCase):
     def test_exact_keys_rejects_long_string_before_set_hashing(self):
         from mojum.mesh_revocation_audit import _exact_keys
 
-        value = {"peer_id": "node-a", "capability": "memory.read"}
-        value["x" * 100_000] = "unexpected"
-        # Use a three-key expected set so cardinality matches and the long key
-        # is rejected by its bounded-length check before set comparison.
-        expected = {"peer_id", "capability", "x" * 100_000}
+        value = {"peer_id": "node-a", "x" * 100_000: "unexpected"}
+        # Cardinality matches the fixed two-key shape; the long key must still
+        # be rejected before set comparison/hashing.
+        expected = {"peer_id", "capability"}
         with patch("mojum.mesh_revocation_audit.set", side_effect=AssertionError(
             "oversized caller key reached set hashing"
         ), create=True) as key_set:
