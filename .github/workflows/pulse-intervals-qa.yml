@@ -1,0 +1,33 @@
+name: Synthetic pulse interval QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pulse-intervals-qa.yml"
+      - "src/mojum/pulse_intervals.py"
+      - "tests/test_pulse_intervals.py"
+      - "docs/PULSE_INTERVALS_R01.md"
+
+permissions:
+  contents: read
+
+jobs:
+  pulse-intervals:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+      - name: Set up CPython
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile source and tests
+        run: python -m compileall -q src/mojum/pulse_intervals.py tests/test_pulse_intervals.py
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_pulse_intervals.py" -v
