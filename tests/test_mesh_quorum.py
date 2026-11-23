@@ -117,6 +117,12 @@ class MeshQuorumTests(unittest.TestCase):
             with self.subTest(members=members), self.assertRaises(MeshQuorumError):
                 self.evaluate([], members=members)
 
+    def test_oversized_vote_is_rejected_before_key_enumeration(self):
+        vote = self.vote("a")
+        vote.update({f"unexpected_{index}": index for index in range(20_000)})
+        with self.assertRaisesRegex(MeshQuorumError, "invalid shape"):
+            self.evaluate([vote])
+
     def test_unknown_fields_and_non_dict_receipts_rejected(self):
         vote = self.vote("a")
         vote["signature"] = "caller-claims-verified"
