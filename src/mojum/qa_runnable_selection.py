@@ -13,6 +13,7 @@ MAX_TASKS = 10_000
 MAX_BATCH = 256
 MAX_ID_LENGTH = 128
 MAX_FIELD_NAME_LENGTH = 16
+MAX_TOTAL_DEPENDENCIES = 100_000
 
 RUNNABLE_STATES = frozenset({"DISCOVERED", "RETRY"})
 BLOCKED_STATES = frozenset({
@@ -101,6 +102,7 @@ def select_runnable_tasks(
         raise SelectionError(f"tasks exceeds maximum of {MAX_TASKS}")
 
     normalized: dict[str, dict[str, Any]] = {}
+    total_dependencies = 0
     for index, item in enumerate(tasks):
         if type(item) is not dict:
             raise SelectionError(f"tasks[{index}] must be an exact dict")
@@ -109,7 +111,7 @@ def select_runnable_tasks(
         if task_id in normalized:
             raise SelectionError("duplicate task_id")
         state = fields["state"]
-        if type(state) is not str or state not in ALL_STATES:
+        if type(state) is not str or len(state) > 32 or state not in ALL_STATES:
             raise SelectionError(f"tasks[{index}].state is unsupported")
         priority = _integer(fields["priority"], f"tasks[{index}].priority", 0, 1_000_000)
         sequence = _integer(fields["sequence"], f"tasks[{index}].sequence", 0, 2**63 - 1)
@@ -117,6 +119,9 @@ def select_runnable_tasks(
         dependencies = fields.get("dependencies", [])
         if type(dependencies) is not list or len(dependencies) > 256:
             raise SelectionError(f"tasks[{index}].dependencies must be a bounded exact list")
+        total_dependencies += len(dependencies)
+        if total_dependencies > MAX_TOTAL_DEPENDENCIES:
+            raise SelectionError("aggregate dependency budget exceeded")
         deps = tuple(_identifier(dep, f"tasks[{index}].dependencies[]") for dep in dependencies)
         if len(set(deps)) != len(deps) or task_id in deps:
             raise SelectionError(f"tasks[{index}].dependencies contains duplicates or self-reference")
