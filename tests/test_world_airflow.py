@@ -181,5 +181,19 @@ class WorldAirflowTests(unittest.TestCase):
                                   "vx_mm_s": 1, "vy_mm_s": 0}])
 
 
+    def test_exact_decimal_millimetre_geometry_survives_float_representation(self):
+        room = Room(20.001, 20.005)
+        state = initial_state(room, 1.001, 1.005)
+        result = sample_room_airflow(
+            room, state,
+            tick=state.tick,
+            expected_revision=state.revision,
+            x_mm=1001,
+            y_mm=1005,
+            sources=[],
+            public_synthetic=True,
+        )
+        self.assertEqual((result.x_mm, result.y_mm), (1001, 1005))
+
 if __name__ == "__main__":
     unittest.main()
