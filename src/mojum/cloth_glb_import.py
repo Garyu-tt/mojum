@@ -175,6 +175,14 @@ def _accessor(
     stride = view.get("byteStride", elem)
     if type(stride) is not int or stride < elem or stride > 252 or stride % width:
         _reject("invalid bufferView stride")
+    # glTF 2.0 byteStride is defined only for vertex attribute bufferViews.
+    # When explicitly present, it must be a multiple of four, including
+    # uint8 JOINTS_0 where the component-alignment check alone is too weak.
+    if "byteStride" in view:
+        if semantic == "indices":
+            _reject("indices bufferView must not declare byteStride")
+        if stride % 4:
+            _reject("attribute byteStride must be a multiple of four")
     base = _uint(view.get("byteOffset", 0), len(binary), "view offset")
     view_len = _uint(view.get("byteLength"), len(binary), "view length")
     local_offset = _uint(acc.get("byteOffset", 0), view_len, "accessor offset")
@@ -262,7 +270,8 @@ def import_glb(
     if len(primitives) != 1:
         _reject("exactly one mesh primitive required")
     prim = _object(primitives[0], "primitive")
-    if prim.get("mode", 4) != 4 or "targets" in prim or "extensions" in prim:
+    mode = prim.get("mode", 4)
+    if type(mode) is not int or mode != 4 or "targets" in prim or "extensions" in prim:
         _reject("only uncompressed TRIANGLES without morph targets supported")
     attrs = _object(prim.get("attributes"), "primitive attributes")
     if any(k.startswith(("JOINTS_", "WEIGHTS_")) and k not in ("JOINTS_0", "WEIGHTS_0") for k in attrs):
