@@ -97,6 +97,10 @@ def validate_task(task: Any) -> dict:
     for field in ("schema", "provenance", "split", "sha256"):
         if type(task[field]) is not str:
             raise BenchmarkError("task textual fields must be exact native strings")
+    task_text_limits = {"schema": len(TASK_SCHEMA), "provenance": len(PROVENANCE),
+                        "split": len("held_out"), "sha256": 64}
+    if any(len(task[field]) > limit for field, limit in task_text_limits.items()):
+        raise BenchmarkError("task textual field exceeds its length budget")
     if type(task["consent"]) is not bool or task["consent"] is not True:
         raise BenchmarkError("task consent must be exact native true")
     if task["schema"] != TASK_SCHEMA or task["provenance"] != PROVENANCE:
@@ -167,6 +171,10 @@ def score_trace(task: Any, trace: Any, *, consent: bool = False) -> dict:
     for field in ("schema", "provenance", "task_sha256", "mode", "sha256"):
         if type(trace[field]) is not str:
             raise BenchmarkError("trace textual fields must be exact native strings")
+    trace_text_limits = {"schema": len(TRACE_SCHEMA), "provenance": len(PROVENANCE),
+                         "task_sha256": 64, "mode": len("policy"), "sha256": 64}
+    if any(len(trace[field]) > limit for field, limit in trace_text_limits.items()):
+        raise BenchmarkError("trace textual field exceeds its length budget")
     if type(trace["consent"]) is not bool or trace["consent"] is not True:
         raise BenchmarkError("trace consent must be exact native true")
     if (trace["schema"] != TRACE_SCHEMA or trace["provenance"] != PROVENANCE
