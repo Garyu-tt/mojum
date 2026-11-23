@@ -301,9 +301,12 @@ _REPORT_KEYS = {
 
 def validate_report(report: object) -> dict:
     """Validate and detach a benchmark receipt; hashes are consistency checks only."""
-    if type(report) is not dict or any(type(key) is not str for key in report):
+    if type(report) is not dict or len(report) != len(_REPORT_KEYS):
+        raise ValueError("report must be a native dict with the exact bounded field count")
+    keys = tuple(dict.keys(report))
+    if any(type(key) is not str for key in keys):
         raise ValueError("report must be a native dict with native string keys")
-    if set(report) != _REPORT_KEYS:
+    if set(keys) != _REPORT_KEYS:
         raise ValueError("report must have the exact versioned field set")
     for key, expected in (("schema", SCHEMA), ("backend", "dm_control.mujoco"),
                           ("scenario", "mojum.synthetic.point-room/1")):
@@ -337,6 +340,8 @@ def validate_report(report: object) -> dict:
             raise ValueError(f"invalid {key}")
     if report["steps_with_contact"] > report["step_count"]:
         raise ValueError("steps_with_contact exceeds step_count")
+    if report["p95_step_ns"] < report["p50_step_ns"]:
+        raise ValueError("p95_step_ns cannot be below p50_step_ns")
     body = {key: value for key, value in report.items() if key != "report_sha256"}
     if hashlib.sha256(_canonical_bytes(body)).hexdigest() != report["report_sha256"]:
         raise ValueError("report digest mismatch")
