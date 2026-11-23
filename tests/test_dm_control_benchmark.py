@@ -49,6 +49,20 @@ class ProbeConfigTests(unittest.TestCase):
         self.assertNotIn("file=", xml_a)
         self.assertNotIn("http://", xml_a)
 
+    def test_mutated_frozen_config_is_revalidated_before_build_or_execution(self):
+        config = benchmark.ProbeConfig()
+        object.__setattr__(config, "steps", benchmark.MAX_STEPS + 1)
+        with self.assertRaisesRegex(ValueError, "steps"):
+            benchmark.build_mjcf_xml(config)
+        # Validation must happen before the optional dependency is imported.
+        with self.assertRaisesRegex(ValueError, "steps"):
+            benchmark.run_benchmark(config)
+
+        config = benchmark.ProbeConfig()
+        object.__setattr__(config, "control_pattern", ((1000.0, 0.0),))
+        with self.assertRaisesRegex(ValueError, "force budget"):
+            benchmark._config_payload(config)
+
     def test_config_is_slotted_and_room_dimensions_are_bounded(self):
         config = benchmark.ProbeConfig()
         with self.assertRaises(AttributeError):
