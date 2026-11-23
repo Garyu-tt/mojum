@@ -26,6 +26,7 @@ class FakeAPI:
     def __init__(self, *, issue_open=True, barrier=None, comment_failure=False):
         self.issue_open = issue_open
         self.barrier = barrier
+        self.gated_reads = 0
         self.comment_failure = comment_failure
         self.refs = {"refs/heads/main": SHA}
         self.lock = Lock()
@@ -36,10 +37,16 @@ class FakeAPI:
         return self.issue_open
 
     def ref_sha(self, repo, ref):
-        if ref.startswith("refs/heads/claims/") and self.barrier:
-            self.barrier.wait(timeout=5)
+        gate = False
         with self.lock:
-            return self.refs.get(ref)
+            if ref.startswith("refs/heads/claims/") and self.barrier and self.gated_reads < 2:
+                self.gated_reads += 1
+                gate = True
+            value = self.refs.get(ref)
+        if gate:
+            self.barrier.wait(timeout=5)
+            return None  # force both preflight reads to see an absent ref
+        return value
 
     def create_ref(self, repo, ref, sha):
         with self.lock:
