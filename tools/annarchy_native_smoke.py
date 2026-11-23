@@ -203,7 +203,7 @@ def run_native_smoke(*, wall_seconds: int = 90, cpu_seconds: int = 60,
                 stderr=subprocess.DEVNULL, cwd=str(work), env=env,
                 close_fds=True, start_new_session=True, **kwargs,
             )
-        except OSError as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             raise SmokeError("could not start disposable native process") from exc
         try:
             return_code = process.wait(timeout=wall_seconds)
@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpu-seconds", type=int, default=60)
     parser.add_argument("--memory-mib", type=int, default=2048)
     parser.add_argument("--probe-source", default=None,
-                        help="directory containing moj um/annarchy_rate_probe.py")
+                        help="directory containing mojum/annarchy_rate_probe.py")
     args = parser.parse_args(argv)
     try:
         result = run_native_smoke(
