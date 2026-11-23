@@ -15,6 +15,8 @@ import unicodedata
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
+from .genesis import GENES, PHENOTYPE_SCHEMA
+
 CHROMOSOME_SCHEMA = "mojum.genesis.somatic-chromosome/1"
 BODY_SCHEMA = "mojum.genesis.body-phenotype/1"
 IDENTITY_SCHEMA = "mojum.agent.identity/1"
@@ -81,12 +83,36 @@ def _sha(value, path):
     return value
 
 
+def _json_object_copy(value, path):
+    """Return a detached native JSON object or a domain error.
+
+    Public contracts consume decoded JSON objects. Requiring a native dict
+    avoids surprising custom Mapping behavior and guarantees that nested
+    caller-owned dictionaries/lists are not retained by validation.
+    """
+    if type(value) is not dict:
+        raise BodyContractError(f"{path} must be a native JSON object")
+    try:
+        encoded = json.dumps(
+            value, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False,
+        )
+        encoded.encode("utf-8", errors="strict")
+        copied = json.loads(encoded)
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise BodyContractError(f"{path} must be canonical UTF-8 JSON") from exc
+    if type(copied) is not dict:
+        raise BodyContractError(f"{path} must be a JSON object")
+    return copied
+
+
 def _round_div(num, den):
     """Positive, deterministic half-up integer division."""
     return (num + den // 2) // den
 
 
 def validate_chromosome(chromosome):
+    chromosome = _json_object_copy(chromosome, "chromosome")
     _keys(chromosome, {"schema", "genome_id", "inherited"}, "chromosome")
     if chromosome["schema"] != CHROMOSOME_SCHEMA:
         raise BodyContractError("Unsupported somatic chromosome schema")
@@ -94,8 +120,8 @@ def validate_chromosome(chromosome):
     _keys(chromosome["inherited"], SOMATIC_GENES, "inherited somatic genes")
     for gene, (lo, hi) in SOMATIC_GENES.items():
         _int(chromosome["inherited"][gene], gene, lo, hi)
-    # A JSON round-trip also rejects unrecognized non-JSON values.
-    return json.loads(json.dumps(chromosome, ensure_ascii=False, allow_nan=False))
+    # Return only the detached copy; never retain caller-owned nested values.
+    return chromosome
 
 
 def _growth(age):
@@ -115,9 +141,10 @@ def compile_body(genesis_phenotype, chromosome, age_years):
     """
     _int(age_years, "age_years", AGE_MIN, AGE_MAX)
     body_genes = validate_chromosome(chromosome)
-    if not isinstance(genesis_phenotype, Mapping):
-        raise BodyContractError("GENESIS phenotype is not an object")
-    if genesis_phenotype.get("schema") != "mojum.genesis.phenotype/1":
+    genesis_phenotype = _json_object_copy(
+        genesis_phenotype, "GENESIS phenotype"
+    )
+    if genesis_phenotype.get("schema") != PHENOTYPE_SCHEMA:
         raise BodyContractError("GENESIS phenotype schema mismatch")
     genome_id = _str(genesis_phenotype.get("genome_id"), "phenotype.genome_id")
     if genome_id != body_genes["genome_id"]:
@@ -125,9 +152,12 @@ def compile_body(genesis_phenotype, chromosome, age_years):
     tick = _int(genesis_phenotype.get("at_tick"), "at_tick", 0, 2**63 - 1)
     revision = _sha(genesis_phenotype.get("ledger_revision"), "ledger_revision")
     params = genesis_phenotype.get("parameters")
-    if not isinstance(params, Mapping):
-        raise BodyContractError("Missing GENESIS parameters")
-    scale = _int(params.get("body_scale_milli"), "body_scale_milli", 500, 1500)
+    if type(params) is not dict:
+        raise BodyContractError("GENESIS parameters must be a native JSON object")
+    _keys(params, set(GENES), "GENESIS parameters")
+    for gene, (low, high) in GENES.items():
+        _int(params[gene], f"parameters.{gene}", low, high)
+    scale = params["body_scale_milli"]
     ref_height, ref_head, ref_leg, ref_shoulder = _growth(age_years)
     genes = body_genes["inherited"]
     height = _round_div(ref_height * scale * genes["height_bias_milli"], 1_000_000)
