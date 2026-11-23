@@ -15,6 +15,7 @@ from typing import Any
 MAX_TASKS = 10_000
 MAX_DURATION_SAMPLES = 10_000
 MAX_ID_LENGTH = 128
+MAX_FIELD_LENGTH = 32
 MAX_AGE_SECONDS = 10 * 365 * 24 * 60 * 60
 MAX_DURATION_MS = 24 * 60 * 60 * 1000
 
@@ -86,7 +87,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     if type(snapshot) is not dict or len(snapshot) > 3:
         raise MetricsInputError("snapshot must be a bounded native dict")
     snapshot_keys = tuple(snapshot)
-    if any(type(key) is not str for key in snapshot_keys):
+    if any(type(key) is not str or len(key) > MAX_FIELD_LENGTH for key in snapshot_keys):
         raise MetricsInputError("snapshot keys must be native strings")
     if set(snapshot_keys) - {"observed_at", "tasks", "duration_samples_ms"}:
         raise MetricsInputError("snapshot contains unknown fields")
@@ -107,7 +108,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         if type(task) is not dict or len(task) > 5:
             raise MetricsInputError(f"task {index} must be a bounded native dict")
         task_keys = tuple(task)
-        if any(type(key) is not str for key in task_keys):
+        if any(type(key) is not str or len(key) > MAX_FIELD_LENGTH for key in task_keys):
             raise MetricsInputError(f"task {index} keys must be native strings")
         allowed = {"id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds"}
         task_key_set = set(task_keys)
