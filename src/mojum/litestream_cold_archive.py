@@ -65,11 +65,15 @@ def _replica_path(path, *, creating):
         if path.is_symlink() or not path.is_dir():
             raise LitestreamArchiveError("existing local replica directory required")
         if path.stat().st_mode & 0o077:
-            raise LitestreamArchiveError("replica directory mustdef _archive_budget(root):
+            raise LitestreamArchiveError("replica directory must be owner-only")
+    return path.absolute()
+
+
+def _archive_budget(root):
     """Bound every tree entry and depth, including otherwise free empty dirs.
 
-    os.scandir is consumed incrementally: unlike os.walk this never builds a
-    potentially unbounded list of sibling names before checking the budget.
+    Consume os.scandir incrementally, avoiding os.walk's unbounded sibling
+    name lists before a budget violation can be detected.
     """
     total = count = directory_count = 0
     pending = [(Path(root), 0)]
@@ -95,8 +99,6 @@ def _replica_path(path, *, creating):
                         if total > MAX_ARCHIVE_BYTES or count > MAX_ARCHIVE_FILES:
                             raise LitestreamArchiveError("local replica resource budget exceeded")
                     else:
-                        # Symlinks, FIFOs, sockets and device nodes are never
-                        # traversed and cannot be interpreted as regular files.
                         raise LitestreamArchiveError("unsafe replica entry")
         except OSError:
             raise LitestreamArchiveError("cannot inspect local replica") from None
