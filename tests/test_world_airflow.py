@@ -1,6 +1,6 @@
 import unittest
 
-from mojum.world_room import Room, initial_state
+from mojum.world_room import Room, RoomState, initial_state
 from mojum.world_airflow import (
     AirflowError, MAX_SOURCES, MAX_SOURCE_SPEED_MM_S, SCHEMA,
     sample_room_airflow,
@@ -71,6 +71,25 @@ class WorldAirflowTests(unittest.TestCase):
                         expected_revision=state.revision)
         with self.assertRaises(AirflowError):
             self.sample(x_mm=20001)
+
+    def test_rejects_unbounded_forged_room_state_before_revision_hash(self):
+        huge_tick = 10 ** 10_000
+        huge_coord = 10 ** 10_000
+        forged_tick = RoomState(huge_tick, 1.0, 1.0, "0" * 64)
+        forged_coord = RoomState(0, huge_coord, 1.0, "0" * 64)
+        for forged in (forged_tick, forged_coord):
+            with self.subTest(state=forged):
+                with self.assertRaises(AirflowError):
+                    self.sample(state=forged, tick=forged.tick,
+                                expected_revision=forged.revision)
+
+    def test_rejects_hostile_revision_type_before_equality(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not run")
+        forged = RoomState(0, 1.0, 1.0, HostileString("0" * 64))
+        with self.assertRaises(AirflowError):
+            self.sample(state=forged, tick=0, expected_revision="0" * 64)
 
     def test_rejects_private_or_stale_frame(self):
         with self.assertRaises(AirflowError):
