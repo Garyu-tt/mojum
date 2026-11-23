@@ -90,7 +90,9 @@ def _validate_frame(raw: Any, label: str) -> dict[str, Any]:
     joints = frame["joints"]
     if type(joints) is not dict or not 1 <= len(joints) <= _MAX_JOINTS:
         _fail(f"{label}.joints must be a bounded non-empty native dict")
-    if any(type(name) is not str or not _ID.fullmatch(name) for name in joints):
+    # Bound attacker-controlled names before regex matching; the regex alone
+    # still scans the entire input string when a caller supplies a huge key.
+    if any(type(name) is not str or len(name) > 96 or not _ID.fullmatch(name) for name in joints):
         _fail(f"{label} joint names must be bounded native identifiers")
     detached: dict[str, tuple[float, float, float]] = {}
     for name, vector in joints.items():
