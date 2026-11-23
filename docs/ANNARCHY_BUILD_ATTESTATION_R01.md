@@ -33,9 +33,11 @@ The input is one JSON object with the exact fields below:
 | `artifact_size_bytes` | exact integer 1..512 MiB |
 
 The JSON input limit is 64 KiB. Duplicate object keys, non-finite numbers,
-unknown fields, extra nested data, control characters, unsupported flags,
-invalid numeric types (including booleans in integer fields), and over-budget
-values are rejected.
+unknown fields, non-native dictionary key types, extra nested data, control
+characters, unsupported flags, invalid numeric types (including booleans in
+integer fields), and over-budget values are rejected. The public dictionary
+validator rejects string subclasses before any set comparison, preventing
+caller-defined key equality from running during schema validation.
 
 Allowed flag metadata: `-O0`..`-O3`, `-std=c++17`, `-fopenmp`, `-DNDEBUG`,
 bounded `-march=` / `-mtune=` values, `/O1`, `/O2`, and `/openmp`. This is a
