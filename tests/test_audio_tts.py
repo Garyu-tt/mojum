@@ -150,6 +150,16 @@ class TTSContractTests(unittest.TestCase):
         with self.assertRaisesRegex(TTSError, "iter_pcm16le"):
             synthesize(request(), NoStream())
 
+    def test_materialized_backend_list_is_rejected(self):
+        class Materialized:
+            backend_id = "fake"
+            backend_version = "1"
+            local_only = True
+            def iter_pcm16le(self, req):
+                return [b"\x00\x00" * 24]
+        with self.assertRaisesRegex(TTSError, "streaming iterator"):
+            synthesize(request(), Materialized())
+
     def test_empty_output_rejected(self):
         with self.assertRaisesRegex(TTSError, "no audio"):
             synthesize(request(), FakeBackend([]))
@@ -199,7 +209,6 @@ class TTSContractTests(unittest.TestCase):
         self.assertEqual(result.pcm16le, b"\x01\x00" * 24)
 
     def test_request_validation_does_not_load_or_import_a_backend(self):
-        # Constructing/validating a request is a pure local operation.
         value = request()
         validate_request(value)
         self.assertTrue(value.consent)
