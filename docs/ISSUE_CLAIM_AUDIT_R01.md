@@ -9,7 +9,7 @@ possible; agents must recheck issue comments/PRs before claiming work.
 
 ## Explicit claim marker
 
-Place exactly one standalone line in a GitHub issue body or comment:
+Place exactly one standalone line in a GitHub issue body or comment, **outside** Markdown fenced code blocks, blockquotes and indented code:
 
 ```text
 <!-- mojum-claim/1: {"worker":"worker-20261123-abc","scope":"issue-478/claim-audit","action":"claim"} -->
@@ -57,7 +57,9 @@ this source). Example:
 `comments` may be omitted for an empty array. The tool accepts up to 2 MiB,
 300 issues, 20,000 total comments, and 16 KiB per text body; malformed data,
 duplicate JSON keys, duplicate issue/comment IDs, non-UTC timestamps, invalid
-or quoted machine markers fail closed. It does not accept source URLs, tokens,
+Unicode (including unpaired UTF-16 surrogates), incomplete issue-body metadata,
+and malformed/quoted/fenced machine markers fail closed. Code examples must
+never count as active claims. It does not accept source URLs, tokens,
 or private organism data.
 
 ## Run
