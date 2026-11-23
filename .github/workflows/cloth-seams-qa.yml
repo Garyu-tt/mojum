@@ -1,0 +1,47 @@
+name: Cloth seam admission QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/cloth_seams.py"
+      - "tests/test_cloth_seams.py"
+      - ".github/workflows/cloth-seams-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seam-admission:
+    name: seam admission / Python \${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact pull request HEAD
+        if: github.event_name == 'pull_request'
+        env:
+          EXPECTED_HEAD: \${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: \${{ matrix.python-version }}
+      - name: Compile focused module and tests
+        run: python -m py_compile src/mojum/cloth_seams.py tests/test_cloth_seams.py
+      - name: Run focused hermetic tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_cloth_seams.py" -v
+      - name: Verify package imports without optional dependencies
+        env:
+          PYTHONPATH: src
+        run: python -c "from mojum.cloth_seams import validate_seams; print(validate_seams.__module__)"
