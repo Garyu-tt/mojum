@@ -153,6 +153,20 @@ class RoboPianistBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["correct_durations"], len(task["notes"]) - 1)
         self.assertLess(report["duration_accuracy"], 1.0)
 
+    def test_rejects_oversized_envelope_text_before_comparison_or_digest(self):
+        task = make_task(31)
+        for field in ("schema", "provenance", "split", "sha256"):
+            bad = copy.deepcopy(task)
+            bad[field] = "x" * 1_000_000
+            with self.subTest(envelope="task", field=field), self.assertRaisesRegex(BenchmarkError, "length budget"):
+                validate_task(bad)
+        trace = make_trace(task)
+        for field in ("schema", "provenance", "task_sha256", "mode", "sha256"):
+            bad = copy.deepcopy(trace)
+            bad[field] = "x" * 1_000_000
+            with self.subTest(envelope="trace", field=field), self.assertRaisesRegex(BenchmarkError, "length budget"):
+                score_trace(task, bad, consent=True)
+
     def test_no_network_or_device_side_effects(self):
         task = make_task(6)
         with patch("socket.socket", side_effect=AssertionError("network forbidden")):
