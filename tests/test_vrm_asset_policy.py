@@ -78,6 +78,21 @@ class VrmAssetPolicyTests(unittest.TestCase):
         self.assertIn("asset.license", violations)
         self.assertIn("asset.media_type", violations)
 
+    def test_semver_rejects_leading_zero_and_empty_identifiers(self):
+        for version in ("01.2.3", "1.02.3", "1.2.03", "1.2.3-01",
+                        "1.2.3-", "1.2.3+.", "1.2.3-alpha..1"):
+            candidate = manifest()
+            candidate["dependencies"][0]["version"] = version
+            with self.subTest(version=version):
+                self.assertIn("dependencies[0].version",
+                              validate_manifest(candidate, POLICY)["violations"])
+
+    def test_semver_accepts_valid_prerelease_and_build_metadata(self):
+        candidate = manifest()
+        candidate["dependencies"][0]["version"] = "1.2.3-alpha.1+build.7"
+        self.assertNotIn("dependencies[0].version",
+                         validate_manifest(candidate, POLICY)["violations"])
+
     def test_reject_unpinned_or_unapproved_dependencies(self):
         candidate = manifest()
         candidate["dependencies"].append({"name": "unknown-lib", "version": "latest", "license": "MIT"})
