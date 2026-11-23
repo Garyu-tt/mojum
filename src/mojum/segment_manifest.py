@@ -18,6 +18,7 @@ MAX_SOURCE_SCHEMA = 160
 MAX_TIMESTAMP_NS = (1 << 63) - 1
 _HEX_256 = re.compile(r"[0-9a-f]{64}\\Z")
 _IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}\\Z")
+_SOURCE_SCHEMA = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,159}\\Z")
 _FIELDS = frozenset({
     "schema", "agent_id", "first_seq", "last_seq", "event_count",
     "previous_segment_head", "segment_head", "source_schema",
@@ -74,10 +75,10 @@ def canonical_json(value: Mapping[str, Any]) -> str:
         raise SegmentManifestError("manifest is not canonical JSON data") from exc
 
 
-def _identifier(value: Any, field: str, maximum: int = MAX_IDENTIFIER) -> str:
+def _identifier(value: Any, field: str, maximum: int = MAX_IDENTIFIER, pattern: re.Pattern[str] = _IDENTIFIER) -> str:
     if type(value) is not str or not value or len(value) > maximum:
         raise SegmentManifestError(f"{field} must be a non-empty bounded string")
-    if not _IDENTIFIER.fullmatch(value):
+    if not pattern.fullmatch(value):
         raise SegmentManifestError(f"{field} contains unsupported characters")
     return value
 
@@ -136,7 +137,7 @@ def build_manifest(
         "created_at_ns": created_at_ns,
     }
     # Validate every field before deriving the head.
-    validated = _validate_fields(raw, check_head=False)
+    _validate_fields(raw, check_head=False)
     raw["segment_head"] = calculate_segment_head(raw)
     return _validate_fields(raw, check_head=True)
 
@@ -158,7 +159,7 @@ def _validate_fields(data: Mapping[str, Any], *, check_head: bool) -> SegmentMan
     if last - first + 1 != count:
         raise SegmentManifestError("event_count must equal the inclusive sequence interval")
     previous = _digest(data["previous_segment_head"], "previous_segment_head", nullable=True)
-    source_schema = _identifier(data["source_schema"], "source_schema", MAX_SOURCE_SCHEMA)
+    source_schema = _identifier(data["source_schema"], "source_schema", MAX_SOURCE_SCHEMA, _SOURCE_SCHEMA)
     content_hash = _digest(data["content_sha256"], "content_sha256")
     origin = _identifier(data["origin_device_id"], "origin_device_id")
     created = _native_int(data["created_at_ns"], "created_at_ns", 0, MAX_TIMESTAMP_NS)
