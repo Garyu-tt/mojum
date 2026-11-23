@@ -44,6 +44,26 @@ class GraphRevisionDiffTests(unittest.TestCase):
         )
         self.assertFalse(any(result["change_counts"].values()))
 
+    def test_add_and_remove_isolated_sink_counts_nodes_and_edges(self):
+        after = copy.deepcopy(FIXTURE)
+        sink = copy.deepcopy(next(node for node in after["nodes"]
+                                  if node["id"] == "episode"))
+        sink["id"] = "additional-sink"
+        after["nodes"].append(sink)
+        after["edges"].extend([
+            {"from": {"node": "sense", "port": "sensory"},
+             "to": {"node": "additional-sink", "port": "sensory"}},
+            {"from": {"node": "brain", "port": "observation"},
+             "to": {"node": "additional-sink", "port": "observation"}},
+        ])
+        added = compare_revisions(FIXTURE, after)["change_counts"]
+        self.assertEqual(added["nodes_added"], 1)
+        self.assertEqual(added["edges_added"], 2)
+        self.assertEqual(added["nodes_removed"], 0)
+        removed = compare_revisions(after, FIXTURE)["change_counts"]
+        self.assertEqual(removed["nodes_removed"], 1)
+        self.assertEqual(removed["edges_removed"], 2)
+
     def test_revision_only_and_nested_config_changes_distinct(self):
         after = copy.deepcopy(FIXTURE)
         after["revision"] = "fixture-next"
