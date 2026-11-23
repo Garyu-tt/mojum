@@ -9,6 +9,7 @@ on:
       - "src/mojum/aquarium.py"
       - "src/mojum/portable_host.py"
       - "tests/test_epoch_v4.py"
+      - "tests/test_epoch_v4_native_keys.py"
       - "docs/R015_EXPLICIT_EPOCH_V4.md"
   workflow_dispatch:
 
@@ -32,6 +33,10 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p test_epoch_v4.py -v
+      - name: Reject hostile Local Cell v4 in-memory mapping keys
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_epoch_v4_native_keys.py -v
       - name: Strict compatibility with signed v1/v2/v3 journals
         env:
           PYTHONPATH: src
