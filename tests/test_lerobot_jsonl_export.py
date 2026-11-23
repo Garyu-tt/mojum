@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 
-from mojum.lerobot_trajectory import (
+from mojum.lerobot_jsonl_export import (
     MAX_FRAMES_BYTES, TrajectoryError, held_out_control, load_export,
 )
 
@@ -152,7 +152,7 @@ class LeRobotExportTests(unittest.TestCase):
         secret = "PRIVATE_DO_NOT_LEAK_01234"
         self.rows_file.write_text(secret, encoding="utf-8")
         completed = subprocess.run(
-            [sys.executable, "-m", "mojum.lerobot_trajectory", "--manifest", str(self.manifest_file),
+            [sys.executable, "-m", "mojum.lerobot_jsonl_export", "--manifest", str(self.manifest_file),
              "--frames", str(self.rows_file)], capture_output=True, text=True,
             env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}, check=False,
         )
@@ -162,7 +162,7 @@ class LeRobotExportTests(unittest.TestCase):
 
     def test_cli_clean_summary_without_state(self):
         completed = subprocess.run(
-            [sys.executable, "-m", "mojum.lerobot_trajectory", "--manifest", str(self.manifest_file),
+            [sys.executable, "-m", "mojum.lerobot_jsonl_export", "--manifest", str(self.manifest_file),
              "--frames", str(self.rows_file), "--held-out-control"],
             capture_output=True, text=True,
             env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}, check=False,

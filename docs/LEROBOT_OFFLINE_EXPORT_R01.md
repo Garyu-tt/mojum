@@ -25,10 +25,10 @@ Provide a manifest (example below; replace the fake SHA with the real hash and t
 The revision must be an exact 40-character lowercase commit hex. The manifest's `license` is **unverified source-supplied metadata**, not a security authorization. Dataset assets, model weights, videos and metadata licenses can differ from LeRobot's code license; check upstream dataset/model card before use. Input files must be created *outside* PRIVATE journal directories. Native conversion is deliberately out of this stdlib/core PR; if using LeRobot's upstream reader, run it separately with the audited/pinned `lerobot==0.7.0` dependency and your verified local dataset snapshot. Do not allow the exporter to actuate hardware or load private organism data.
 
 ```sh
-PYTHONPATH=src python -m mojum.lerobot_trajectory \
+PYTHONPATH=src python -m mojum.lerobot_jsonl_export \
   --manifest examples/lerobot_offline/manifest.json \
   --frames examples/lerobot_offline/frames.jsonl --held-out-control
-PYTHONPATH=src python -m unittest discover -s tests -p 'test_lerobot_trajectory.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_lerobot_jsonl_export.py' -v
 ```
 
 Only numeric summary data and source revision/checksum are emitted; no state/action values, raw paths, task strings or PRIVATE records are printed. Source revision is metadata, not a signature. SHA-256 protects export integrity **relative to the supplied manifest**, not authenticity; independently verify the manifest against a trusted source. Do not publish its content without authorization.
