@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -78,7 +77,9 @@ def _sha256(value: object) -> str:
 
 
 def _normalise_sample(sample: object, expected_revision: str) -> dict:
-    if type(sample) is not dict or set(sample) != _FIELDS:
+    if (type(sample) is not dict
+            or any(type(key) is not str for key in sample)
+            or set(sample) != _FIELDS):
         raise ContactTelemetryError("each sample must be a plain object with the exact field set")
     tick = _integer(sample["tick"], "tick")
     observed_at_ns = _integer(sample["observed_at_ns"], "observed_at_ns", MAX_TIME_NS)
