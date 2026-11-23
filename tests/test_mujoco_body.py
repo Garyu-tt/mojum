@@ -79,6 +79,31 @@ class RigContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(RigError, "unsupported rig schema|only one-DOF hinge"):
                     compile_mjcf(rig)
 
+    def test_hostile_field_keys_fail_closed_before_equality(self):
+        # Exact dict alone is insufficient: a str subclass can forge the
+        # expected field name while running attacker-owned __eq__ code.
+        class PoisonKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted field-key equality invoked")
+
+        for field_scope in ("rig", "joint"):
+            with self.subTest(field_scope=field_scope):
+                rig = fixture_rig()
+                target = rig if field_scope == "rig" else rig["joints"][0]
+                key = "schema" if field_scope == "rig" else "name"
+                value = target.pop(key)
+                target[PoisonKey(key)] = value
+                with self.assertRaisesRegex(RigError, "unknown or missing fields"):
+                    validate_rig(rig)
+
+    def test_overlong_field_name_fails_closed(self):
+        rig = fixture_rig()
+        rig["a" * 4096] = rig.pop("schema")
+        with self.assertRaisesRegex(RigError, "unknown or missing fields"):
+            validate_rig(rig)
+
     def test_cli_prints_mjcf_offline(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):

@@ -40,8 +40,13 @@ def _number(value, label, lo, hi):
 
 
 def _keys(obj, keys, label):
-    if type(obj) is not dict or set(obj) != set(keys):
+    # Reject hostile dict keys before hashing or comparing them.  Even a
+    # str subclass may override __eq__ or __hash__ and escape RigError.
+    if type(obj) is not dict or len(obj) != len(keys):
         raise RigError(f"{label}: unknown or missing fields")
+    for key in obj:
+        if type(key) is not str or len(key) > 40 or key not in keys:
+            raise RigError(f"{label}: unknown or missing fields")
 
 
 def _name(value):
