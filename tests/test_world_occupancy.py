@@ -142,7 +142,7 @@ class OccupancyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verify_raster(room, forged)
 
-        def test_malformed_rows_rejected_before_full_raster_recomputation(self):
+    def test_malformed_rows_rejected_before_full_raster_recomputation(self):
         room = Room(2, 2)
         baseline = rasterize(room, columns=2, rows=2)
         for row_data in ([".."] * 100_000, [".x", ".."], [".", ".."]):
