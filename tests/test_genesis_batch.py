@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mojum.genesis import ACQUISITION_SCHEMA, GenesisError, GenomeLedger
 from mojum.genesis_batch import (
+    MAX_BATCH_BYTES,
     MAX_BATCH_EVENTS,
     BatchResult,
     apply_acquisition_batch,
