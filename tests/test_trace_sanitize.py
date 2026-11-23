@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import Mock, patch
 
+from mojum import trace_sanitize
 from mojum.trace_sanitize import (
     SCHEMA,
     TraceSanitizationError,
@@ -69,6 +71,30 @@ class TraceSanitizeTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(TraceSanitizationError):
                     sanitize_trace_attributes(value)
+
+    def test_rejects_oversized_strings_before_regex(self):
+        oversized = "a" * 1_000_000
+        for field in trace_sanitize._STRING_PATTERNS:
+            with self.subTest(field=field):
+                matcher = Mock()
+                with patch.dict(trace_sanitize._STRING_PATTERNS, {field: matcher}):
+                    with self.assertRaises(TraceSanitizationError):
+                        sanitize_trace_attributes({field: oversized})
+                matcher.fullmatch.assert_not_called()
+
+    def test_accepts_each_string_field_at_its_maximum_length(self):
+        values = {
+            "trace_id": "a" * 64,
+            "lease_id": "b" * 64,
+            "head_sha": "c" * 64,
+            "event": "a" * 48,
+            "component": "a" * 32,
+            "operation": "a" * 48,
+            "outcome": "deferred",
+            "status": "incomplete",
+            "reason_code": "a" * 48,
+        }
+        self.assertEqual(sanitize_trace_attributes(values), dict(sorted(values.items())))
 
     def test_rejects_bool_negative_and_oversized_counters(self):
         for value in (True, -1, 2**63):
