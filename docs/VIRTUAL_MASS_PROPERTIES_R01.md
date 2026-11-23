@@ -34,7 +34,8 @@ All numeric fields must be native Python `int` or `float`, not booleans
 or subclasses, and finite. Position components are bounded to 10,000 m;
 inertia entries are bounded to 100,000,000 kg·m²; aggregate mass is bounded
 to 100,000 kg. Unknown/missing fields, duplicate IDs, reflections,
-non-orthonormal matrices, asymmetric/indefinite inertia, unsupported
+non-orthonormal matrices, asymmetric, indefinite, or non-realizable inertia (principal-moment
+triangle inequality), unsupported
 visibility and exhausted budgets fail closed with `MassPropertiesError`.
 
 ## Calculation
