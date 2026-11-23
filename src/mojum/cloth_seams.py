@@ -143,8 +143,12 @@ def validate_seams(vertices: list, triangles: list, seams: list, *,
     for si, seam in enumerate(seams):
         if type(seam) is not dict:
             raise ClothSeamError(f"seam {si} must be a native dictionary")
-        keys = list(seam.keys())
-        if len(keys) != 2 or any(type(key) is not str for key in keys) or set(keys) != {"id", "pairs"}:
+        # Reject impossible shape before materializing keys; otherwise a
+        # hostile oversized dict can force an unbounded temporary key list.
+        if len(seam) != 2:
+            raise ClothSeamError(f"seam {si} must have exactly native-string keys id and pairs")
+        keys = tuple(seam.keys())
+        if any(type(key) is not str for key in keys) or set(keys) != {"id", "pairs"}:
             raise ClothSeamError(f"seam {si} must have exactly native-string keys id and pairs")
         sid, pairs = seam["id"], seam["pairs"]
         if type(sid) is not str or not _ID.fullmatch(sid) or sid in ids:
