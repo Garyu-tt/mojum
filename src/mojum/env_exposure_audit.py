@@ -23,7 +23,8 @@ def audit_environment_names(names: Iterable[str]) -> dict:
         iterator = iter(names)
     except TypeError as exc:
         raise TypeError("names must be iterable") from exc
-    seen: dict[str, str] = {}
+    seen_folded: dict[str, str] = {}
+    seen_exact: set[str] = set()
     findings: list[dict[str, str]] = []
     count = 0
     for name in iterator:
@@ -35,10 +36,13 @@ def audit_environment_names(names: Iterable[str]) -> dict:
         if len(name) > MAX_NAME_LENGTH or not _NAME.fullmatch(name):
             raise ValueError("invalid environment variable name")
         folded = name.upper()
-        if folded in seen:
-            findings.append({"name": name, "code": "duplicate" if seen[folded] == name else "case_collision"})
+        if name in seen_exact:
+            findings.append({"name": name, "code": "duplicate"})
+        elif folded in seen_folded:
+            findings.append({"name": name, "code": "case_collision"})
         else:
-            seen[folded] = name
+            seen_folded[folded] = name
+        seen_exact.add(name)
         if _SENSITIVE.search(folded):
             findings.append({"name": name, "code": "sensitive_name"})
     findings.sort(key=lambda item: (item["name"], item["code"]))
