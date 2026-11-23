@@ -90,6 +90,17 @@ class PRSnapshotTests(unittest.TestCase):
             with self.subTest(deps=len(deps)), self.assertRaises(ValueError):
                 admit_pr_snapshot(raw)
 
+    def test_rejects_inconsistent_pr_lifecycle_states(self):
+        for changes in (
+            {"state": "open", "merged": True},
+            {"state": "closed", "draft": True},
+            {"state": "open", "draft": True, "merged": True},
+        ):
+            raw = fixture()
+            raw.update(changes)
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                admit_pr_snapshot(raw)
+
     def test_rejects_unknown_states_and_non_native_booleans(self):
         raw = fixture()
         raw["state"] = "pending"
@@ -114,20 +125,23 @@ class PRSnapshotTests(unittest.TestCase):
                 return super().__hash__()
 
         hostile = fixture()
-        key = HostileKey("untrusted")
-        hostile[key] = "x"
+        value = hostile.pop("mergeable")
+        key = HostileKey("mergeable")
+        hostile[key] = value
         calls_after_insertion = HostileKey.calls
         with self.assertRaises(ValueError):
             admit_pr_snapshot(hostile)
         self.assertEqual(HostileKey.calls, calls_after_insertion)
 
         raw = fixture()
-        raw[1] = "x"
+        value = raw.pop("mergeable")
+        raw[1] = value
         with self.assertRaises(ValueError):
             admit_pr_snapshot(raw)
 
         raw = fixture()
-        raw["x" * 33] = "oversized key"
+        value = raw.pop("mergeable")
+        raw["x" * 33] = value
         with self.assertRaisesRegex(ValueError, "bounded exact native strings"):
             admit_pr_snapshot(raw)
 
