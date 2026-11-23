@@ -7,12 +7,20 @@ from mojum.pulse_calibration import (
     MAX_SAMPLES,
     MAX_TICK,
     SCHEMA,
-    audit_calibration,
+    audit_calibration as _audit_calibration,
 )
 
 
 def row(tick, forecast, observed):
     return {"tick": tick, "forecast": forecast, "observed": observed}
+
+
+def audit_calibration(observations, *, bin_count=10):
+    return _audit_calibration(
+        observations,
+        source_classification="PUBLIC_SYNTHETIC",
+        bin_count=bin_count,
+    )
 
 
 class HostileString(str):
@@ -81,6 +89,14 @@ class PulseCalibrationTests(unittest.TestCase):
         for values in ([], [row(i, 0.5, False) for i in range(MAX_SAMPLES + 1)]):
             with self.subTest(length=len(values)), self.assertRaises(CalibrationError):
                 audit_calibration(values)
+
+    def test_requires_explicit_public_synthetic_classification(self):
+        sample = [row(1, 0.5, True)]
+        for classification in (None, "PRIVATE", "PUBLIC", "public_synthetic", 1):
+            with self.subTest(classification=classification), self.assertRaises(CalibrationError):
+                _audit_calibration(sample, source_classification=classification)
+        with self.assertRaises(CalibrationError):
+            _audit_calibration(sample)
 
     def test_rejects_container_subclasses(self):
         class Rows(list):
