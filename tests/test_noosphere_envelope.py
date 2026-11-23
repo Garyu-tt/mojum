@@ -45,6 +45,12 @@ class EnvelopeTests(unittest.TestCase):
         self.assertNotIn(original, sealed)
         self.assertIn(b"mojum.noosphere.encrypted-envelope/1", sealed)
 
+    def test_maximum_plaintext_round_trips_with_base64_expansion(self):
+        original = b"x" * 1_048_576
+        sealed = self.seal(original)
+        self.assertLessEqual(len(sealed), 1_048_576 * 4 // 3 + 8192 + 8)
+        self.assertEqual(self.open(sealed), original)
+
     def test_random_nonce_changes_envelope(self):
         with patch("mojum.noosphere_envelope.secrets.token_bytes",
                    side_effect=[b"1" * 12, b"2" * 12]):
