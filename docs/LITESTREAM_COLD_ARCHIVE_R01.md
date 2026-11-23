@@ -99,8 +99,10 @@ actual SQLite journal, replica bytes, signing key or personal data to Git.
    No logs, events or subprocess stderr are returned.
 
 Resource budgets are guards, **not** benchmark data: maximum SQLite file
-128 MB (existing cold-copy bound), total local replica 256 MB and 128 regular
-files, 180 seconds per subprocess. Actual CPU/RSS, sync time and RPO/RTO
+128 MB (existing cold-copy bound), total local replica 256 MB, at most 128
+regular files, 128 directories and 16 levels of nested directories, 180 seconds
+per subprocess. Archive inspection consumes directory entries incrementally and
+rejects symlinks and other nonregular filesystem entries. Actual CPU/RSS, sync time and RPO/RTO
 are **unmeasured** without the pinned real executable.
 
 ## Tests / independent acceptance
