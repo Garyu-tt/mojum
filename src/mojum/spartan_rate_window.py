@@ -33,6 +33,12 @@ def admit_request(events: tuple[RequestEvent, ...], *, now_ms: int,
     integer(max_tokens, 1, MAX_TOKENS)
     if type(events) is not tuple or len(events) > MAX_EVENTS:
         raise ValueError("invalid rate window input")
+    if new_tokens > max_tokens:
+        # No event expiry can make this request fit the configured token cap.
+        # Reject it as invalid instead of advertising a retry time that can
+        # never succeed.
+        raise ValueError("request exceeds rate window token limit")
+
     last = -1
     active = []
     for event in events:
@@ -45,8 +51,6 @@ def admit_request(events: tuple[RequestEvent, ...], *, now_ms: int,
         last = at
         if at > now_ms - WINDOW_MS:
             active.append((at, tok))
-    if new_tokens > max_tokens:
-        return False, now_ms + WINDOW_MS
     if len(active) < max_requests and sum(t for _, t in active) + new_tokens <= max_tokens:
         return True, now_ms
     count = len(active)
