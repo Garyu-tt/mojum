@@ -46,7 +46,10 @@ class DamageReport:
 def _exact_number(value: Any, name: str) -> float:
     if type(value) not in (int, float):
         raise ClothDamageError(f"{name} must be a native int or float")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise ClothDamageError(f"{name} is outside finite numeric bounds") from None
     if not math.isfinite(result):
         raise ClothDamageError(f"{name} must be finite")
     return result
