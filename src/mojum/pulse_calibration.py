@@ -122,7 +122,9 @@ def audit_calibration(
     squared_errors: list[float] = []
 
     for _tick, forecast, observed in rows:
-        slot = min(int(forecast * bin_count), bin_count - 1)
+        # Use right-closed equal-width bins (first bin includes zero): values
+        # exactly on an internal upper boundary remain in the lower bin.
+        slot = max(0, math.ceil(forecast * bin_count) - 1)
         label = 1.0 if observed else 0.0
         counts[slot] += 1
         forecast_terms[slot].append(forecast)
