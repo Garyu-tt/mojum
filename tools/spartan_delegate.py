@@ -51,8 +51,17 @@ class Ticket:
 
     def routing_packet(self, backend: str) -> dict:
         """Bounded external payload: no prompt, host, PRIVATE data or credentials."""
-        if backend not in ("ray", "temporal", "fixture"):
+        if type(backend) is not str or backend not in ("ray", "temporal", "fixture"):
             raise DelegationError("backend not allowlisted")
+        _task_id(self.task_id)
+        _integer(self.worker_id, "worker_id", 1)
+        _integer(self.attempt, "attempt", 1)
+        _integer(self.lease_until, "lease_until")
+        if self.worker_id > 300 or self.attempt > MAX_ATTEMPTS:
+            raise DelegationError("ticket capacity or attempt budget exceeded")
+        _digest(self.dispatch_id, "dispatch_id")
+        if self.dispatch_id != _dispatch_id(self.task_id, self.worker_id, self.attempt):
+            raise DelegationError("invalid dispatch identity")
         return {"schema": SCHEMA, "backend": backend,
                 "dispatch_id": self.dispatch_id, "attempt": self.attempt,
                 "deadline_s": self.lease_until, "payload": "out-of-band-authorized"}
