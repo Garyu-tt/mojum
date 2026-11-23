@@ -148,9 +148,9 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
             "path": path if _safe_relative_path(path) else "",
             "sha256": digest if type(digest) is str and len(digest) == 64 and _HEX_256.fullmatch(digest) else "",
             "size_bytes": size if type(size) is int and 0 < size <= rules["max_asset_bytes"] else 0,
-            "media_type": media_type if type(media_type) is str else "",
+            "media_type": media_type if type(media_type) is str and len(media_type) <= 127 and media_type in rules["allowed_media_types"] else "",
             "source": source if _token(source) else "",
-            "license": license_id if type(license_id) is str else "",
+            "license": license_id if type(license_id) is str and _token(license_id) and license_id in rules["allowed_licenses"] else "",
         },
         "dependencies": normalized_dependencies,
     }
