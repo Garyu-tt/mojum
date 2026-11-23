@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import importlib
-import math
 import os
 from pathlib import Path
 import re
@@ -73,6 +72,15 @@ def _verified_model_bytes(path: str | Path, expected_sha256: str) -> bytes:
     return data
 
 
+def _bounded_real(value: object, limit: int) -> bool:
+    """Fail closed on NaN, infinity and huge ints without float conversion.
+
+    math.isfinite(10**1000) raises OverflowError; bounded native comparisons
+    instead reject extreme integers without bypassing ShadowInferenceError.
+    """
+    return type(value) in (int, float) and -limit <= value <= limit
+
+
 def _metadata_matches(items: object, name: str, width: int) -> bool:
     if not isinstance(items, (list, tuple)) or len(items) != 1:
         return False
@@ -94,7 +102,7 @@ class ShadowRunner:
             raise ShadowInferenceError("source not admitted to offline shadow")
         if type(features) not in (list, tuple) or len(features) != self.spec.features:
             raise ShadowInferenceError("invalid input vector width")
-        if any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 1000 for v in features):
+        if any(not _bounded_real(v, 1000) for v in features):
             raise ShadowInferenceError("unsafe input value")
         try:
             tensor = self._tensor_factory([list(map(float, features))])
@@ -110,7 +118,7 @@ class ShadowRunner:
         if (type(output) is not list or len(output) != 1 or type(output[0]) is not list
                 or len(output[0]) != self.spec.outputs):
             raise ShadowInferenceError("unexpected output dimensions")
-        if any(type(v) not in (float, int) or not math.isfinite(v) or abs(v) > 1_000_000 for v in output[0]):
+        if any(not _bounded_real(v, 1_000_000) for v in output[0]):
             raise ShadowInferenceError("unsafe model output")
         return {"schema": SCHEMA, "mode": "SHADOW_ONLY", "provider": "CPUExecutionProvider",
                 "model_sha256": self.spec.model_sha256, "scores": tuple(float(x) for x in output[0])}
