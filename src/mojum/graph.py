@@ -249,14 +249,18 @@ def validate(graph):
     # Reject caller-controlled schema values and oversized root mappings before
     # any equality comparison or key-set operation can invoke user behavior.
     _require_native_json_tree(graph)
+    if len(graph) != 5:
+        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
     root_keys = tuple(dict.keys(graph))
-    if any(type(key) is not str for key in root_keys):
-        raise GraphError("Graph v1 root keys must be exact strings")
-    # Schema has priority over v1-only shape diagnostics. All keys are now
-    # exact built-in strings, so this lookup cannot invoke user-defined equality.
+    # Every valid v1 root key is at most eight characters. Reject oversized
+    # exact strings before dict lookup or set construction can hash them.
+    if any(type(key) is not str or len(key) > len("revision") for key in root_keys):
+        raise GraphError("Graph v1 root keys must be bounded exact strings")
+    # All keys are now bounded exact built-in strings, so the schema lookup and
+    # root-field comparison cannot trigger unbounded caller-controlled hashing.
     if dict.get(graph, "schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
-    if len(graph) != 5 or set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}:
+    if set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}:
         raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
     for field in ("id", "revision"):
         value = dict.__getitem__(graph, field)
