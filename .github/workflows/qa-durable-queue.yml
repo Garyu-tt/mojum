@@ -6,6 +6,14 @@ on:
       - "tests/test_qa_queue.py"
       - "docs/QA_QUEUE_R01.md"
       - ".github/workflows/qa-durable-queue.yml"
+  push:
+    branches:
+      - "qa/1191-close-task-queue-connections-20261123"
+    paths:
+      - "src/mojum/qa_queue.py"
+      - "tests/test_qa_queue.py"
+      - "docs/QA_QUEUE_R01.md"
+      - ".github/workflows/qa-durable-queue.yml"
   workflow_dispatch:
 
 permissions:
