@@ -167,6 +167,61 @@ class PettingZooBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(HostileKey.eq_calls, 0)
 
+    def test_dict_subclass_accessor_overrides_cannot_spoof_validated_values(self):
+        from mojum import pettingzoo_benchmark as pz
+
+        class HostileAccessors(dict):
+            def __getitem__(self, key):
+                raise RuntimeError("overridden __getitem__ must not run")
+
+            def __iter__(self):
+                raise RuntimeError("overridden __iter__ must not run")
+
+            def keys(self):
+                raise RuntimeError("overridden keys must not run")
+
+            def __len__(self):
+                raise RuntimeError("overridden __len__ must not run")
+
+        observations = HostileAccessors({AGENTS[0]: 3, AGENTS[1]: 3})
+        self.assertEqual(
+            pz._observations(observations),
+            {AGENTS[0]: 3, AGENTS[1]: 3},
+        )
+        infos = HostileAccessors({agent: {} for agent in AGENTS})
+        pz._infos(infos)
+
+        class HostileMappingEnv(FakeRPS):
+            def reset(self, seed=None, options=None):
+                self.agents = list(AGENTS)
+                self.step_count = 0
+                return (
+                    HostileAccessors({agent: 0 for agent in AGENTS}),
+                    HostileAccessors({agent: {} for agent in AGENTS}),
+                )
+
+            def step(self, actions):
+                obs, rewards, terms, truncs, info = super().step(actions)
+                return tuple(
+                    HostileAccessors(mapping)
+                    for mapping in (obs, rewards, terms, truncs, info)
+                )
+
+        env = HostileMappingEnv()
+        result = run_episode(lambda: env, seed=11, enabled=True)
+        self.assertEqual(result["cycles"], 15)
+        self.assertTrue(env.closed)
+
+    def test_agent_sequence_subclasses_are_rejected_before_iteration(self):
+        from mojum import pettingzoo_benchmark as pz
+
+        class HostileAgents(list):
+            def __iter__(self):
+                raise RuntimeError("overridden iteration must not run")
+
+        with self.assertRaises(BenchmarkError):
+            pz._agents(HostileAgents(AGENTS), AGENTS)
+
     def test_budget_and_argument_rejections_before_factory(self):
         factory = mock.Mock(side_effect=AssertionError("unexpected factory"))
         for params in ({"seed": True}, {"seed": -1}, {"seed": 2**32},
