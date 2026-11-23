@@ -78,6 +78,18 @@ class OfflineScoreTests(unittest.TestCase):
         with self.assertRaises(MidiScoreError):
             score(source_sha256="z" * 64)
 
+    def test_public_source_kind_cannot_be_comparison_spoofed(self):
+        # An int subclass can compare equal to a string but serialize as a
+        # JSON number, corrupting the visibility discriminator.
+        class PretendPublic(int):
+            def __eq__(self, other):
+                return other in ("PUBLIC_SYNTHETIC", "PUBLIC_LICENSED")
+
+        for source_kind in (PretendPublic(7), b"PUBLIC_SYNTHETIC"):
+            with self.subTest(source_kind=type(source_kind).__name__):
+                with self.assertRaisesRegex(MidiScoreError, "source kind"):
+                    score(source_kind=source_kind)
+
     def test_licensed_public_no_private_payload(self):
         a = score(source_kind="PUBLIC_LICENSED", license_id="CC0-1.0")
         self.assertEqual(a["license_id"], "CC0-1.0")
