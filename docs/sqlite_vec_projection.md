@@ -30,6 +30,11 @@ or an authenticated/encrypted distributed service. Source is still the single-ow
   do not provide at-rest encryption; only use an encrypted owner-controlled
   volume for nonpublic use. Do not serve these files over HTTP or sync them to
   an untrusted host.
+- Read/write admission rejects a symlink at the index file, its direct parent,
+  **or any ancestor path component**. This is a preflight against existing
+  aliases, not an atomic directory-descriptor traversal: a concurrent adversary
+  able to rename directories may still cause TOCTOU. Use trusted, owner-controlled
+  parent paths; do not treat this check as a secure filesystem sandbox.
 - No original event payload, source path or source revision is stored in the
   derived index. Results return source event IDs/hashes and distances only,
   never unrestricted payloads. PRIVATE/RESTRICTED queries require explicit

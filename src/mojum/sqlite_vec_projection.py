@@ -144,8 +144,17 @@ def _path_guard(index_path, source_path=None, *, nonpublic=False):
     path = Path(index_path)
     if str(path) == ":memory:" or path.suffix != ".sqlite" or not path.name:
         raise VectorIndexError("index must be a separate .sqlite disk file")
-    if path.is_symlink() or path.parent.is_symlink() or not path.parent.is_dir():
-        raise VectorIndexError("unsafe index path")
+    # Check all existing path components before touching either public or
+    # nonpublic derived storage. Checking only the leaf and direct parent
+    # accepts e.g. /safe/alias/owned/index.sqlite when alias is a symlink.
+    # absolute() deliberately does NOT resolve aliases before this inspection.
+    try:
+        absolute = path.absolute()
+        if (any(component.is_symlink() for component in
+                (absolute, *absolute.parents)) or not path.parent.is_dir()):
+            raise VectorIndexError("unsafe index path")
+    except (OSError, RuntimeError) as exc:
+        raise VectorIndexError("unsafe index path") from exc
     if path.exists() and not path.is_file():
         raise VectorIndexError("index destination is not a regular file")
     if source_path is not None and path.resolve() == Path(source_path).resolve():
