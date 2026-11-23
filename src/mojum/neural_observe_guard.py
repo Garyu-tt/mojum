@@ -21,6 +21,9 @@ class NeuralObserveGuardError(ValueError):
 def _exact_keys(value, expected, label):
     if type(value) is not dict:
         raise NeuralObserveGuardError(f"{label} must be a native dict")
+    # The schema cardinality is fixed; reject large exact dicts before iteration.
+    if len(value) != len(expected):
+        raise NeuralObserveGuardError(f"{label} has missing or unknown fields")
     # Check native key types before set/equality; hostile str subclasses may
     # execute user code from hashing or equality operations.
     for key in dict.keys(value):
