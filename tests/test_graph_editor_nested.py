@@ -128,9 +128,16 @@ class NestedGraphEditorTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate_nested(parent, containers * 65)
 
+    def test_multiple_containers_cannot_claim_one_parent_node(self):
+        parent, containers = fixture()
+        second = copy.deepcopy(containers[0])
+        second["id"] = "another-container"
+        with self.assertRaisesRegex(GraphError, "already claimed"):
+            validate_nested(parent, containers + [second])
+
     def test_hostile_python_values_and_invalid_positions_rejected(self):
         parent, containers = fixture()
-        for value in (float("nan"), float("inf"), True, "10", 100001):
+        for value in (float("nan"), float("inf"), True, "10", 100001, 10 ** 400):
             bad = copy.deepcopy(containers)
             bad[0]["position"]["x"] = value
             with self.subTest(value=repr(value)), self.assertRaises(GraphError):
