@@ -1,0 +1,32 @@
+name: graph-editor-nested-qa
+on:
+  pull_request:
+    paths:
+      - "src/mojum/graph_editor_nested.py"
+      - "tests/test_graph_editor_nested.py"
+      - "docs/GRAPH_EDITOR_NESTED_R01.md"
+      - ".github/workflows/graph-editor-nested-qa.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nested-editor-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify exact checkout
+        if: github.event.pull_request
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Run focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_graph_editor_nested.py' -v
