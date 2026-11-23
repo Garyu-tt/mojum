@@ -13,6 +13,13 @@ class _HostileEquality:
         raise AssertionError("untrusted equality must not be evaluated")
 
 
+class HostileStringKey(str):
+    def __eq__(self, _other):
+        raise AssertionError("untrusted key equality must not run")
+
+    __hash__ = str.__hash__
+
+
 class SessionControlTests(unittest.TestCase):
     def setUp(self):
         self.session = SessionController("dante-fixture")
@@ -171,6 +178,23 @@ class SessionControlTests(unittest.TestCase):
         # Keep the old checksum; malformed native types must be caught before
         # relying on a matching checksum.
         with self.assertRaisesRegex(SessionControlError, "sequence"):
+            SessionController.from_snapshot(snapshot)
+
+
+    def test_rejects_hostile_string_subclass_snapshot_key_before_comparison(self):
+        snapshot = self.session.snapshot()
+        schema = snapshot.pop("schema")
+        snapshot[HostileStringKey("schema")] = schema
+        with self.assertRaisesRegex(SessionControlError, "native strings"):
+            SessionController.from_snapshot(snapshot)
+
+    def test_rejects_hostile_string_subclass_event_key_before_comparison(self):
+        self.apply("start", "start-1", 0)
+        snapshot = self.session.snapshot()
+        event = snapshot["events"][0]
+        event_id = event.pop("event_id")
+        event[HostileStringKey("event_id")] = event_id
+        with self.assertRaisesRegex(SessionControlError, "native strings"):
             SessionController.from_snapshot(snapshot)
 
 
