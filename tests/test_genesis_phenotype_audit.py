@@ -1,7 +1,8 @@
 import copy, unittest, json
 from unittest.mock import patch
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
-from mojum.genesis_phenotype_audit import (MAX_AUDIT_EVENTS, MAX_INPUT_BYTES,\n    PhenotypeAuditError, audit_phenotype_snapshot)
+from mojum.genesis_phenotype_audit import (MAX_AUDIT_EVENTS, MAX_INPUT_BYTES,
+    PhenotypeAuditError, audit_phenotype_snapshot)
 
 SEED = {"schema":"mojum.genesis.genotype/1","genome_id":"public-synthetic-test","revision":"seed-r1","inherited":{"heartbeat_bpm":60,"body_scale_milli":1000,"sensory_gain_milli":1000}}
 def make_ledger():
