@@ -65,6 +65,12 @@ class VrmResourceBudgetTests(unittest.TestCase):
         with self.assertRaises(ResourceBudgetError):
             assess_vrm_resource_budget(inventory(vertex_count={"nested": [1]}))
 
+    def test_rejects_excess_inventory_cardinality_before_iteration(self):
+        candidate = inventory()
+        candidate.update({f\"extra-{index}\": 0 for index in range(100_000)})
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(candidate)
+
     def test_rejects_oversized_key_before_hashing(self):
         candidate = inventory()
         candidate["x" * 1_000_000] = 1
