@@ -170,12 +170,14 @@ def apply_acquisition_batch(
     if set(snapshot_keys) != {"schema", "seed", "events", "revision"}:
         raise GenesisError("snapshot must have the exact native GENESIS ledger shape")
     base_events = dict.__getitem__(snapshot, "events")
-    if type(base_events) is not list or len(base_events) > MAX_BASE_EVENTS:
-        raise GenesisError(
-            f"base ledger event budget exceeded (maximum {MAX_BASE_EVENTS})"
-        )
+    if type(base_events) is not list:
+        raise GenesisError("snapshot events must be a native list")
     if not 1 <= len(events) <= MAX_BATCH_EVENTS:
         raise GenesisError(f"batch must contain 1..{MAX_BATCH_EVENTS} events")
+    if len(base_events) + len(events) > MAX_BASE_EVENTS:
+        raise GenesisError(
+            f"resulting ledger event budget exceeded (maximum {MAX_BASE_EVENTS})"
+        )
     snapshot_json = _bounded_json(snapshot, limit=MAX_BATCH_BYTES, label="snapshot")
     events_json = _bounded_json(events, limit=MAX_BATCH_BYTES, label="events")
     for index, event in enumerate(events):
