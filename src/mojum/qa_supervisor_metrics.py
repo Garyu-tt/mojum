@@ -125,7 +125,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         ids[task_id] = None
 
         state = task["state"]
-        if type(state) is not str or state not in STATES:
+        if type(state) is not str or len(state) > MAX_FIELD_LENGTH or state not in STATES:
             raise MetricsInputError(f"task {index} has an unknown state")
         states[state] += 1
 
@@ -135,7 +135,7 @@ def summarize_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
         reason = task.get("blocked_reason")
         if state in BLOCKED_STATES and reason is not None:
-            if type(reason) is not str or reason not in BLOCK_REASONS:
+            if type(reason) is not str or len(reason) > MAX_FIELD_LENGTH or reason not in BLOCK_REASONS:
                 raise MetricsInputError(f"task {index} has an unknown blocked reason")
             blocked[reason] += 1
         elif reason is not None:
