@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -237,8 +239,19 @@ def _load_json(path: Path) -> Any:
     read_text() is insufficient. Reject oversized data before UTF-8/JSON work.
     """
     try:
-        with path.open("rb") as stream:
-            payload = stream.read(MAX_BYTES + 1)
+        # O_NONBLOCK prevents a FIFO replacing a snapshot from hanging before
+        # fstat() can reject the non-regular descriptor. The open fd also
+        # avoids a second path lookup between type validation and reading.
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise BoardError("missing or oversized input JSON")
+            with os.fdopen(fd, "rb") as stream:
+                fd = -1  # The file object now owns and closes this descriptor.
+                payload = stream.read(MAX_BYTES + 1)
+        finally:
+            if fd >= 0:
+                os.close(fd)
         if len(payload) > MAX_BYTES:
             raise BoardError("missing or oversized input JSON")
         return json.loads(payload.decode("utf-8", errors="strict"))
