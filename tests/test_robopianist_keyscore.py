@@ -138,6 +138,56 @@ class RoboPianistKeyscoreTests(unittest.TestCase):
             with self.assertRaisesRegex(PianoBenchmarkError, "oversized trace"):
                 read_trace(path)
 
+
+    def test_hostile_direct_python_envelope_and_nested_keys_fail_closed(self):
+        # Direct Python API is also a trust boundary, not only JSON ingestion.
+        class EqualToEverything:
+            def __eq__(self, other):
+                return True
+
+        class ExplodingEquality:
+            def __eq__(self, other):
+                raise AssertionError("untrusted equality executed")
+
+        class ExplodingStringKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise AssertionError("untrusted dictionary key equality executed")
+
+        for field in ("schema", "upstream_ref"):
+            for value in (EqualToEverything(), ExplodingEquality(), str(SCHEMA) if field == "upstream_ref" else ExplodingStringKey(SCHEMA)):
+                d = demo_trace()
+                d[field] = value
+                with self.subTest(field=field, kind=type(value).__name__):
+                    with self.assertRaises(PianoBenchmarkError):
+                        score_trace(d)
+
+        cases = (
+            ("envelope", lambda d: d, "schema"),
+            ("frame", lambda d: d["frames"][0], "tick"),
+            ("contact", lambda d: d["frames"][0]["finger_contacts"][0], "hand"),
+        )
+        for label, select, key in cases:
+            d = demo_trace()
+            d["frames"][0]["finger_contacts"] = [{"hand": "left", "finger": 0, "key": 0}]
+            target = select(d)
+            original = target.pop(key)
+            target[ExplodingStringKey(key)] = original
+            with self.subTest(nested=label):
+                with self.assertRaises(PianoBenchmarkError):
+                    score_trace(d)
+
+    def test_exact_native_string_discriminators(self):
+        class CustomStr(str):
+            pass
+        for field, value in (("schema", CustomStr(SCHEMA)),
+                             ("upstream_ref", CustomStr("synthetic"))):
+            d = demo_trace()
+            d[field] = value
+            with self.subTest(field=field):
+                with self.assertRaises(PianoBenchmarkError):
+                    score_trace(d)
+
     def test_contact_bounded_and_not_assumed_real(self):
         d = demo_trace()
         d["frames"][0]["finger_contacts"] = [
