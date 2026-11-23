@@ -24,7 +24,7 @@ MAX_SEGMENTS = 64
 MAX_MODEL_BYTES = 16 * 1024 * 1024
 MAX_TIME_NS = (1 << 63) - 1
 PINNED_SHERPA_VERSION = "2.0.3"
-_SHA256 = re.compile(r"[0-9a-f]{64}\\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _verified_local_model(path: str, expected_sha256: str) -> str:
@@ -33,7 +33,7 @@ def _verified_local_model(path: str, expected_sha256: str) -> str:
     The native library re-opens the path. This is not an OS-level immutable mount
     or a sandbox; see security limitations in the companion document.
     """
-    if type(path) is not str or not path or not os.path.isabs(path) or "\\x00" in path:
+    if type(path) is not str or not path or not os.path.isabs(path) or os.path.normpath(path) != path or "\x00" in path:
         raise ValueError("model must be an absolute local path")
     if type(expected_sha256) is not str or _SHA256.fullmatch(expected_sha256) is None:
         raise ValueError("invalid model SHA-256 pin")
