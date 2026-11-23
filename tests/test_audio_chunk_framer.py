@@ -92,6 +92,18 @@ class PCM16ChunkFramerTests(unittest.TestCase):
         self.assertEqual(frame.observed_at_ns, 123)
         self.assertEqual(f.start_ns, 123)
 
+    def test_private_clock_origin_cannot_be_rebased_or_deleted(self):
+        f = new_framer(start_ns=123)
+        for name, operation in (
+            ("assign", lambda: setattr(f, "_start_ns", -1)),
+            ("delete", lambda: delattr(f, "_start_ns")),
+        ):
+            with self.subTest(operation=name), self.assertRaises(AttributeError):
+                operation()
+        frame, = f.feed(bytes(FRAME_BYTES), chunk_index=0, byte_offset=0)
+        self.assertEqual(frame.observed_at_ns, 123)
+        self.assertEqual(f.start_ns, 123)
+
     def test_invalid_constructor_arguments(self):
         for start in (True, -1, 2**63, 1.0, "0", None):
             with self.subTest(start=start), self.assertRaises(ValueError):
