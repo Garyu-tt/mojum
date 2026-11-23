@@ -4,7 +4,7 @@ import math
 import unittest
 
 from mojum.lerobot_trajectory import (
-    BENCHMARK_SCHEMA, MAX_FRAMES, Provenance, TrajectoryError,
+    BENCHMARK_SCHEMA, MAX_FRAMES, Provenance, TrajectoryError, Trajectory, Frame,
     benchmark, import_decoded_rows, import_lerobot_dataset, replay,
 )
 
@@ -115,6 +115,26 @@ class LeRobotTrajectoryTests(unittest.TestCase):
         self.assertTrue(math.isfinite(result["frozen_zero_mse"]))
         # No promise that nearest-neighbor is superior on contradictory labels.
         self.assertGreaterEqual(result["nearest_state_mse"], 0)
+
+    def test_public_trajectory_constructor_rejects_invalid_frames(self):
+        with self.assertRaises(TrajectoryError):
+            Trajectory(self.provenance, 0, (Frame(0., 0, (0.,), (0.,)),
+                                           Frame(0., 1, (0.,), (0.,))))
+        with self.assertRaises(TrajectoryError):
+            Trajectory(self.provenance, 0, (Frame(0., 0, (0.,), (10**1000,)),))
+        with self.assertRaises(TrajectoryError):
+            import_decoded_rows([dict(self.rows()[0], action=[10**1000])],
+                                provenance=self.provenance, episode_index=0)
+
+    def test_benchmark_total_budget_is_bounded(self):
+        episodes = []
+        for ep in range(3):
+            rows = [{"episode_index": ep, "frame_index": i,
+                     "timestamp": float(i), "observation.state": [0.], "action": [0.]}
+                    for i in range(180)]
+            episodes.append(import_decoded_rows(rows, provenance=self.provenance, episode_index=ep))
+        with self.assertRaisesRegex(TrajectoryError, "total frame budget"):
+            benchmark(episodes)
 
     def test_dataset_rejects_wrong_shape_before_decode(self):
         class Huge:
