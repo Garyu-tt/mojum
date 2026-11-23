@@ -1,4 +1,5 @@
 import unittest
+from collections import UserDict
 
 from mojum.qa_pr_snapshot import SCHEMA, admit_pr_snapshot
 
@@ -101,6 +102,24 @@ class PRSnapshotTests(unittest.TestCase):
     def test_rejects_non_mapping_and_non_string_keys(self):
         with self.assertRaises(ValueError):
             admit_pr_snapshot([])
+        with self.assertRaises(ValueError):
+            admit_pr_snapshot(UserDict(fixture()))
+
+        class HostileKey(str):
+            calls = 0
+
+            def __hash__(self):
+                type(self).calls += 1
+                return super().__hash__()
+
+        hostile = fixture()
+        key = HostileKey("untrusted")
+        hostile[key] = "x"
+        calls_after_insertion = HostileKey.calls
+        with self.assertRaises(ValueError):
+            admit_pr_snapshot(hostile)
+        self.assertEqual(HostileKey.calls, calls_after_insertion)
+
         raw = fixture()
         raw[1] = "x"
         with self.assertRaises(ValueError):
