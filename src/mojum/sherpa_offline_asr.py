@@ -58,7 +58,7 @@ def _checked_transcript(raw: Any) -> str:
 
 def transcribe_public_wav(wav_bytes: bytes, recognizer: Any, *,
                           enabled: bool = False,
-                          visibility: str = "PUBLIC_SYNTHETIC") -> dict[str, Any]:
+                          visibility: str | None = None) -> dict[str, Any]:
     """Decode exactly one externally authorized public synthetic fixture.
 
     Inputs are never written, printed or transmitted. The real optional
@@ -68,7 +68,7 @@ def transcribe_public_wav(wav_bytes: bytes, recognizer: Any, *,
     if enabled is not True:
         raise ASRBoundaryError("sherpa-onnx ASR requires explicit opt-in")
     if type(visibility) is not str or visibility != "PUBLIC_SYNTHETIC":
-        raise ASRBoundaryError("PRIVATE/user audio not admitted")
+        raise ASRBoundaryError("explicit PUBLIC_SYNTHETIC classification required")
     pcm = _pcm16_from_wav(wav_bytes)
     try:
         import numpy as np  # sherpa deployments normally ship NumPy
