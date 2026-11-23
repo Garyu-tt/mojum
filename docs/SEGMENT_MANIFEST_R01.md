@@ -36,7 +36,7 @@ The segment head hashes a canonical, sorted-key, compact UTF-8 JSON object conta
 - SHA-256 fields are exactly 64 lowercase hexadecimal characters.
 - Canonical JSON is UTF-8, sorted-key and compact; duplicate keys and alternate encodings are rejected.
 - Maximum encoded manifest size is 16 KiB; text labels are at most 256 characters.
-- Segment content verification accepts bytes supplied by the caller and performs no filesystem or network access.
+- Segment content verification accepts exact `bytes` supplied by the caller, capped at 64 MiB before hashing, and performs no filesystem or network access.
 
 ## Example
 
