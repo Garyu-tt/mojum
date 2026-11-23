@@ -49,7 +49,7 @@ class ObstacleGeometryTests(unittest.TestCase):
         item[huge] = None
         original_set = set
 
-        def bounded_set(values):
+        def bounded_set(values=()):
             values = tuple(values)
             self.assertTrue(
                 all(type(value) is str and len(value) <= 32 for value in values),
