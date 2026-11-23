@@ -146,6 +146,12 @@ class RetentionAuditTests(unittest.TestCase):
         with self.assertRaises(RetentionAuditError):
             audit_snapshot({"schema": SOURCE_SCHEMA})
 
+    def test_rejects_oversized_last_seen_map_before_key_comparison(self):
+        forged = valid_snapshot()
+        forged["last_seen_at"].update({f"{tick}:0:0": tick for tick in range(128)})
+        with self.assertRaises(RetentionAuditError):
+            audit_snapshot(forged)
+
     def test_empty_birth_snapshot_is_valid(self):
         snapshot = {
             "schema": SOURCE_SCHEMA, "table": {}, "updates": 0,
