@@ -137,7 +137,7 @@ class DurableWorkQueue:
         due = now if available_at is None else float(available_at)
         if not math.isfinite(now) or not math.isfinite(due):
             raise QueueError("queue timestamps must be finite")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT * FROM qa_tasks WHERE idempotency_key = ?",
@@ -175,7 +175,7 @@ class DurableWorkQueue:
         if not math.isfinite(now):
             raise QueueError("clock must return a finite timestamp")
         token = uuid.uuid4().hex
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             # Exhausted tasks are terminal after a worker crashes repeatedly.
             connection.execute(
@@ -225,7 +225,7 @@ class DurableWorkQueue:
         """Extend a still-live lease. Expired leases cannot be resurrected."""
         ttl = self._positive_seconds(lease_seconds, "lease_seconds", MAX_LEASE_SECONDS)
         now = float(self._clock())
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._owned_lease(connection, task_id, lease_token, now)
             until = now + ttl
@@ -239,7 +239,7 @@ class DurableWorkQueue:
     def complete(self, task_id: str, lease_token: str) -> dict[str, Any]:
         """Mark done only when the caller still owns an unexpired lease."""
         now = float(self._clock())
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._owned_lease(connection, task_id, lease_token, now)
             connection.execute(
@@ -262,7 +262,7 @@ class DurableWorkQueue:
         if error is not None and (not isinstance(error, str) or len(error) > 4096):
             raise QueueError("error must be a string of at most 4096 chars")
         now = float(self._clock())
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = self._owned_lease(connection, task_id, lease_token, now)
             exhausted = current["attempts"] >= current["max_attempts"]
@@ -278,14 +278,14 @@ class DurableWorkQueue:
             return self._task(row)
 
     def get(self, task_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             return self._task(connection.execute(
                 "SELECT * FROM qa_tasks WHERE task_id=?", (task_id,)
             ).fetchone())
 
     def counts(self) -> dict[str, int]:
         """Return stable state counts for a read-only dashboard."""
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 "SELECT status, COUNT(*) AS amount FROM qa_tasks GROUP BY status"
             ).fetchall()
