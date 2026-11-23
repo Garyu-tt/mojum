@@ -108,8 +108,10 @@ class SegmentManifestTests(unittest.TestCase):
             parse_manifest(raw)
 
     def test_oversized_wire_is_rejected(self):
-        with self.assertRaises(SegmentManifestError):
-            parse_manifest(b" " * (MAX_MANIFEST_BYTES + 1))
+        oversized = b" " * (MAX_MANIFEST_BYTES + 1)
+        for value in (oversized, bytearray(oversized), memoryview(oversized)):
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(SegmentManifestError):
+                parse_manifest(value)
 
     def test_mutation_of_returned_dict_does_not_change_manifest(self):
         manifest = self.make()
