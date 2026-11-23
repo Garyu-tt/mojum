@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
-from typing import Mapping
 
 SCHEMA = "mojum.trace-envelope.v1"
 MAX_FIELDS = 12
