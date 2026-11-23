@@ -64,11 +64,16 @@ def _require_exact_keys(value: dict[str, object], expected: set[str], field: str
     # caller-controlled mappings before allocating or traversing a key snapshot.
     if len(value) != len(expected):
         _fail(f"{field}: missing or unknown fields")
-    # Check key types BEFORE set comparison so hostile non-string keys cannot
-    # execute caller-defined equality/hash behavior at this trust boundary.
+    # Check key types and bounded length before set comparison: a fixed
+    # schema cannot contain a key longer than its longest declared field name.
+    # This avoids re-hashing an attacker-sized native string during comparison.
     keys = tuple(dict.keys(value))
-    if any(type(key) is not str for key in keys):
-        _fail(f"{field}: keys must be native strings")
+    max_key_length = max((len(name) for name in expected), default=0)
+    for key in keys:
+        if type(key) is not str:
+            _fail(f"{field}: keys must be native strings")
+        if len(key) > max_key_length:
+            _fail(f"{field}: key length exceeds the fixed schema")
     if set(keys) != expected:
         _fail(f"{field}: missing or unknown fields")
 
