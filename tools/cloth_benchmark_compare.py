@@ -153,7 +153,7 @@ def load_report(path: str):
         raise ReportError("input exceeds 1 MiB")
     try:
         return json.loads(target.read_text(encoding="utf-8"), object_pairs_hook=_pairs)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ReportError(f"invalid input: {type(exc).__name__}") from None
 
 
