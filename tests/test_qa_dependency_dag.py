@@ -143,7 +143,9 @@ class DependencyDagTests(unittest.TestCase):
     def test_rejects_non_native_dict_keys(self):
         class HostileString(str):
             def __hash__(self):
-                raise AssertionError("hostile hash executed")
+                # Permit fixture insertion; validation must reject the subclass
+                # by exact type before treating it as an ordinary string.
+                return str.__hash__(self)
         record = row("a")
         record[HostileString("extra")] = "value"
         with self.assertRaisesRegex(ValueError, "native strings"):
