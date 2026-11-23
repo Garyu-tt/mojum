@@ -3,7 +3,7 @@
 An offline, standard-library-only admission helper for optional VRM viewers. It consumes caller-supplied metadata; it does not parse GLB/VRM bytes, load textures, allocate GPU resources, inspect browser memory, or prove declared counts match an asset.
 
 ## Contract
-- Schema identifier: moj um.vrm-resource-budget/1 (exact spelling is defined by the SCHEMA constant in the module).
+- Schema identifier: mojum.vrm-resource-budget/1.
 - Exact fields: schema, vertex_count, index_count, material_count, texture_bytes, joint_count.
 - Counts are native non-negative integers; booleans are rejected. Index count must be divisible by three.
 - Encoded inventory is capped at 16 KiB; hard ceilings bound metadata and arithmetic.
