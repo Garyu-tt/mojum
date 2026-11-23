@@ -138,7 +138,7 @@ def admit_episode(record) -> EpisodeReceipt:
             lambda v, n: v if type(v) is bool else (_ for _ in ()).throw(ValueError(n + " must be bool")), scalar_budget)
         truncations = _agent_map(
             step["truncations"], agents, "truncations",
-            lambda v, n: v if type(v) is bool else (_ for _ in ()).throw(ValueError(n + " must be bool")))
+            lambda v, n: v if type(v) is bool else (_ for _ in ()).throw(ValueError(n + " must be bool")), scalar_budget)
         normalized.append((tick, observations, actions, rewards,
                            terminations, truncations))
 
