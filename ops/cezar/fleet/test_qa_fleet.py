@@ -90,6 +90,19 @@ class QAFleetTests(unittest.TestCase):
         self.assertEqual(snap["completed_tasks"],2)
         self.assertEqual(snap["failed_tasks"],1)
 
+    def test_home_symlink_rejected_without_chmod_target(self):
+        # A malicious pre-existing symlink must not change the destination mode.
+        target=Path(self.t.name)/"unrelated"
+        target.mkdir(mode=0o755)
+        target.chmod(0o755)
+        self.home.rmdir()
+        self.home.symlink_to(target,target_is_directory=True)
+        before=target.stat().st_mode & 0o777
+        with self.assertRaises(RuntimeError):
+            fleet.main(["--dry-run","--max-workers","1"])
+        self.assertEqual(target.stat().st_mode & 0o777,before)
+        self.assertFalse((target/"lock").exists())
+
     def test_mirror_symlink_rejected(self):
         actual=self.mirror.with_name("source.json")
         self.mirror.rename(actual)
