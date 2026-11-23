@@ -46,7 +46,7 @@ class PhenotypeAuditTests(unittest.TestCase):
     def test_nonfinite_and_surrogate_rejected(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected["bad"]=float("nan")
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
-        expected=ledger.phenotype(5); expected["bad"]="\ud800"
+        expected=ledger.phenotype(5); expected["bad"]="\\ud800"
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
     def test_depth_and_byte_budgets(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); cursor=expected
@@ -63,5 +63,11 @@ class PhenotypeAuditTests(unittest.TestCase):
         ledger=make_ledger(); first=self.audit(ledger,ledger.phenotype(5))
         second=audit_phenotype_snapshot(copy.deepcopy(ledger.snapshot()),copy.deepcopy(ledger.phenotype(5)),source_classification="PUBLIC_SYNTHETIC")
         self.assertEqual(first.to_dict(),second.to_dict())
+    def test_numerically_equal_different_json_types_are_rejected(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        expected["parameters"]["heartbeat_bpm"] = float(expected["parameters"]["heartbeat_bpm"])
+        result=self.audit(ledger, expected)
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.mismatch_fields, ("parameters",))
 
 if __name__ == "__main__": unittest.main()
