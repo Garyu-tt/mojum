@@ -42,7 +42,7 @@ class ClothContactTelemetryTests(unittest.TestCase):
         self.assertTrue(all(x.count == 0 for x in report.contacts))
 
     def test_digest_is_deterministic_and_input_order_sensitive(self):
-        a, b = sample(1), sample(2, "hand", 50, 10)
+        a, b = sample(1), sample(1, "hand", 50, 10)
         self.assertEqual(reduce_contacts([a, b]), reduce_contacts([dict(a), dict(b)]))
         self.assertNotEqual(
             reduce_contacts([a, b]).input_sha256,
