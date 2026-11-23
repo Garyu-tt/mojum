@@ -34,6 +34,18 @@ class ArchivePathAdmissionTests(unittest.TestCase):
             with self.subTest(path=repr(path)), self.assertRaises(ArchivePathError):
                 validate_member_path(path)
 
+    def test_windows_reserved_device_names(self):
+        bad = (
+            "CON", "con.txt", "NUL.txt", "AUX.log", "PRN",
+            "COM1", "COM9.data", "LPT1", "LPT9.data",
+            "COM¹", "COM².txt", "COM³", "LPT¹", "LPT².log", "LPT³",
+            "folder/CON", "folder/NUL.txt", "folder/COM1.log",
+            "CON .txt", "NUL .log",
+        )
+        for path in bad:
+            with self.subTest(path=path), self.assertRaises(ArchivePathError):
+                validate_member_path(path)
+
     def test_non_strings(self):
         for path in (None, 3, b"a", StringSubclass("safe/path")):
             with self.subTest(path=path), self.assertRaises(ArchivePathError):
