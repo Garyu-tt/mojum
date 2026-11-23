@@ -26,7 +26,7 @@ class MassPropertiesError(ValueError):
     """Raised when a mass-property fixture is malformed or exceeds its budget."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MassProperties:
     """Detached aggregate properties in world coordinates and SI units."""
 
