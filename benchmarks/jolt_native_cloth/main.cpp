@@ -144,7 +144,7 @@ int main() {
     auto shared = MakeCloth(count_x, count_z, 0.12f);
 
     SoftBodyCreationSettings body_settings(
-        shared, RVec3(0.0_r, spawn_y, 0.0_r),
+        shared, RVec3(0, spawn_y, 0),
         Quat::sIdentity(), kMovingLayer);
     body_settings.mAllowSleeping = false;
     body_settings.mNumIterations = 10;
