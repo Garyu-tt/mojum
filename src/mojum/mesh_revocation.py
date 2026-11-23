@@ -51,10 +51,15 @@ class VerifiedRevocationSnapshot:
     digest: str
 
 
-# A WeakSet avoids a transferable marker on the object itself. eq=False above
-# makes membership identity-based; copied/reconstructed dataclass instances
-# are not accepted as products of verify_snapshot().
-_VERIFIED_SNAPSHOTS: weakref.WeakSet[VerifiedRevocationSnapshot] = weakref.WeakSet()
+# Keep the authoritative verified fields outside the public dataclass. A
+# frozen dataclass can still be changed with object.__setattr__; storing only
+# immutable primitive tuples here prevents such changes from altering a
+# revocation decision. Weak keys preserve identity-based provenance without
+# retaining unused snapshots forever.
+_VERIFIED_SNAPSHOTS: weakref.WeakKeyDictionary[
+    VerifiedRevocationSnapshot,
+    tuple[str, str, int, int, int, tuple[tuple[str, str, int, int], ...], str],
+] = weakref.WeakKeyDictionary()
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +218,16 @@ def verify_snapshot(envelope: Any, *, authority_keys: dict[str, bytes],
         generation=normalized["generation"], issued_at_tick=normalized["issued_at_tick"],
         expires_at_tick=normalized["expires_at_tick"], entries=entries, digest=digest,
     )
-    _VERIFIED_SNAPSHOTS.add(verified)
+    _VERIFIED_SNAPSHOTS[verified] = (
+        verified.authority_id,
+        verified.key_id,
+        verified.generation,
+        verified.issued_at_tick,
+        verified.expires_at_tick,
+        tuple((entry.enrollment_id, entry.node_id, entry.sequence, entry.revoked_at_tick)
+              for entry in entries),
+        verified.digest,
+    )
     return verified
 
 
@@ -225,27 +239,63 @@ def check_peer_access(snapshot: VerifiedRevocationSnapshot, *, node_id: str,
     A positive result means only that the pair is absent from this fresh,
     verified snapshot. It does not authenticate the peer or grant storage access.
     """
-    if (type(snapshot) is not VerifiedRevocationSnapshot
-            or snapshot not in _VERIFIED_SNAPSHOTS):
+    if type(snapshot) is not VerifiedRevocationSnapshot:
         raise MeshRevocationError("a verified snapshot is required")
+    verified_state = _VERIFIED_SNAPSHOTS.get(snapshot)
+    if verified_state is None:
+        raise MeshRevocationError("a verified snapshot is required")
+
+    # Frozen dataclasses are a convenience, not a security boundary:
+    # object.__setattr__ can alter even a slots/frozen instance. Refuse a
+    # modified public view, and use the registry's primitive tuples below as
+    # the authoritative state for every decision.
+    (authority_id, key_id, generation, issued_at, expires_at,
+     verified_entries, snapshot_digest) = verified_state
+    try:
+        if (type(snapshot.authority_id) is not str
+                or type(snapshot.key_id) is not str
+                or type(snapshot.generation) is not int
+                or type(snapshot.issued_at_tick) is not int
+                or type(snapshot.expires_at_tick) is not int
+                or type(snapshot.entries) is not tuple
+                or type(snapshot.digest) is not str):
+            raise MeshRevocationError("verified snapshot object was modified")
+        public_entries = []
+        for entry in snapshot.entries:
+            if (type(entry) is not RevocationEntry
+                    or type(entry.enrollment_id) is not str
+                    or type(entry.node_id) is not str
+                    or type(entry.sequence) is not int
+                    or type(entry.revoked_at_tick) is not int):
+                raise MeshRevocationError("verified snapshot object was modified")
+            public_entries.append((
+                entry.enrollment_id, entry.node_id, entry.sequence, entry.revoked_at_tick
+            ))
+        if ((snapshot.authority_id, snapshot.key_id, snapshot.generation,
+             snapshot.issued_at_tick, snapshot.expires_at_tick,
+             tuple(public_entries), snapshot.digest) != verified_state):
+            raise MeshRevocationError("verified snapshot object was modified")
+    except AttributeError as exc:
+        raise MeshRevocationError("verified snapshot object was modified") from exc
+
     node = _identifier(node_id, "node id")
     enrollment = _identifier(enrollment_id, "enrollment id")
     if type(operation) is not str or operation not in ("read", "write"):
         raise MeshRevocationError("operation must be read or write")
     now = _tick(now_tick, "now_tick")
-    if not snapshot.issued_at_tick <= now <= snapshot.expires_at_tick:
+    if not issued_at <= now <= expires_at:
         raise MeshRevocationError("verified snapshot expired or not yet valid")
 
-    match = next((entry for entry in snapshot.entries
-                  if entry.enrollment_id == enrollment or entry.node_id == node), None)
+    match = next((entry for entry in verified_entries
+                  if entry[0] == enrollment or entry[1] == node), None)
     allowed, reason = True, "not_listed_as_revoked"
     if match is not None:
-        if match.enrollment_id != enrollment or match.node_id != node:
+        if match[0] != enrollment or match[1] != node:
             allowed, reason = False, "revocation_identity_mismatch"
-        elif match.revoked_at_tick <= now:
+        elif match[3] <= now:
             allowed, reason = False, "peer_revoked"
     return RevocationDecision(
         operation=operation, node_id=node, enrollment_id=enrollment,
         allowed_by_revocation_check=allowed, reason=reason,
-        generation=snapshot.generation, snapshot_digest=snapshot.digest,
+        generation=generation, snapshot_digest=snapshot_digest,
     )
