@@ -38,6 +38,22 @@ class CIEvidenceTests(unittest.TestCase):
             evaluate_ci_evidence(b, now=NOW).evidence_sha256,
         )
 
+    def test_non_native_key_rejected_before_hashing(self):
+        class HostileKey(str):
+            def __init__(self, value):
+                self.explode = False
+            def __hash__(self):
+                if self.explode:
+                    raise RuntimeError("hostile hash executed")
+                return str.__hash__(self)
+
+        snapshot = fixture()
+        key = HostileKey("schema")
+        snapshot[key] = snapshot.pop("schema")
+        key.explode = True
+        with self.assertRaisesRegex(EvidenceError, "keys must be native strings"):
+            evaluate_ci_evidence(snapshot, now=NOW)
+
     def test_incomplete_snapshot_rejected(self):
         x = fixture()
         x["complete"] = False
