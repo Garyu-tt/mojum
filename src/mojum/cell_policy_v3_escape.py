@@ -152,6 +152,9 @@ class CellExplorerV3Escape:
     def snapshot(self):
         return {
             "schema": SCHEMA,
+            "snapshot_version": SNAPSHOT_VERSION,
+            "history_complete": self.history_complete,
+            "outcome_tail": copy.deepcopy(self.outcome_tail),
             "cell_size_m": STEP_METERS,
             "last_tick": self.last_tick,
             "updates": self.updates,
@@ -353,6 +356,14 @@ class CellExplorerV3Escape:
             self.consecutive_blocked_probes = (
                 self.consecutive_blocked_probes + 1 if blocked else 0
             )
+        self.outcome_tail.append({
+            "tick": sense.tick, "cell": cell,
+            "action": action, "blocked": blocked,
+        })
+        if len(self.outcome_tail) > MAX_OUTCOME_TAIL:
+            self.outcome_tail.pop(0)
+        if len(self.outcome_tail) == MAX_OUTCOME_TAIL:
+            self.history_complete = True
         return {
             "schema": LEARNING_SCHEMA,
             "action": action,
