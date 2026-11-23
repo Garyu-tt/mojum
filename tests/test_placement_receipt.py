@@ -186,6 +186,14 @@ class PlacementReceiptTests(unittest.TestCase):
         with self.assertRaises(PlacementError):
             parse_receipt("not-bytes")
 
+    def test_size_limits_rejected_before_bulk_record_reconstruction(self):
+        # An adversary may send huge collections of malformed objects. Reject
+        # counts before attempting to inspect each untrusted record.
+        with self.assertRaisesRegex(PlacementError, "oversized"):
+            self.seal(jobs=[object()] * 257)
+        with self.assertRaisesRegex(PlacementError, "oversized"):
+            self.seal(nodes=[object()] * 65)
+
     def test_invalid_safety_plan_never_receives_receipt(self):
         malformed = (
             PlacementPlan((Assignment("a", "server"),
