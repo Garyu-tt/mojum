@@ -38,7 +38,7 @@ Run zero-native-dependency tests:
 
     PYTHONPATH=src python -m unittest discover -s tests -p test_sherpa_vad.py -v
 
-Do not put the ONNX file in the repository, install models automatically, or run untrusted models within the main organism process. For independent exact-head QA: execute in a network-denied immutable-model sandbox; measure p50/p95 CPU, RSS, silence/voice errors, repeated deterministic synthetic stimuli, model hash replacement and aborts, and check wheel ABI on Python 3.11-3.13 and Android separately. The fake backend tests prove only the adapter's safety boundary and sample/segment contract, not native recognition accuracy or measured performance.
+Do not put the ONNX file in the repository, install models automatically, or run untrusted models within the main organism process. For independent exact-head QA: execute in a network-denied immutable-model sandbox; measure p50/p95 CPU, RSS, silence/voice errors, repeated deterministic synthetic stimuli, model hash replacement and aborts, and check wheel ABI on Python 3.11-3.13 and Android separately. The fake backend tests prove only the adapter's safety boundary and sample/segment contract, not native recognition accuracy or measured performance. When test-only _sherpa/_numpy/_backend_version injection is used, the output is explicitly tagged `unverified-test-double-vad`, never the real native backend. A partial injection fails closed.
 
 Upstream references:
 
