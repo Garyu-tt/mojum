@@ -1,0 +1,38 @@
+name: Mojum Projects v2 snapshot byte-bound QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/project_v2_board.py'
+      - 'tests/test_project_v2_board*.py'
+      - '.github/workflows/project-v2-board-qa.yml'
+  push:
+    paths:
+      - 'src/mojum/project_v2_board.py'
+      - 'tests/test_project_v2_board*.py'
+      - '.github/workflows/project-v2-board-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  board-stdlib:
+    name: board-stdlib (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Snapshot and race-safety regression
+        run: |
+          PYTHONPATH=src python -m unittest discover -s tests -p 'test_project_v2_board_snapshot_bound.py' -v
+      - name: Projects v2 board regression
+        run: |
+          PYTHONPATH=src python -m unittest discover -s tests -p 'test_project_v2_board.py' -v
