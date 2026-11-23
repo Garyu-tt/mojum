@@ -146,7 +146,7 @@ def partition_fixture() -> dict:
     ]
     b = [
         event("r2", 1, "view.v1.x", -5),
-        event("r2", 2, "view.v2.y", None),
+        event("r2", 4, "view.v2.y", None),
         event("r2", 3, "view.v2.x", 25),
     ]
     left, right = Replica(), Replica()
