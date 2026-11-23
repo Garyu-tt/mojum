@@ -44,6 +44,13 @@ class ProviderMatrixTests(unittest.TestCase):
         self.assertEqual(result["bursts"][3]["reasons"],
                          {"slots_or_decode_capacity_exhausted": 4})
 
+    def test_worker_lease_limit_admits_partial_burst(self):
+        out = run(parse(fixture()), counts=(4,), worker_leases=2)
+        burst = out["bursts"][0]
+        self.assertEqual(burst["admitted"], 2)
+        self.assertEqual(burst["denied"], 2)
+        self.assertEqual(burst["reasons"], {"worker_lease_bound": 2})
+
     def test_memory_counts_resident_even_when_slot_busy(self):
         obj = fixture(slots_free=0, ram_mib=8192)
         self.assertEqual(run(parse(obj), ram_budget_mib=8000)["bursts"][0]["reasons"],
