@@ -27,6 +27,27 @@ MAX_JSON_DEPTH = 64
 MAX_JSON_NODES = 50_000
 
 
+def _json_string_size(value):
+    """Return exact UTF-8 JSON string bytes without allocating escaped output."""
+    if len(value) > MAX_BYTES:
+        raise GraphError("nested editor JSON text exceeds byte limit")
+    try:
+        size = len(value.encode("utf-8", errors="strict")) + 2
+    except UnicodeEncodeError as exc:
+        raise GraphError("nested editor JSON text is not valid UTF-8") from exc
+    # json.dumps(ensure_ascii=False) still escapes quotes, backslashes and
+    # every U+0000..U+001F control. Account for expansion before serialization.
+    for char in value:
+        codepoint = ord(char)
+        if char in ('"', "\\\\") or codepoint in (8, 9, 10, 12, 13):
+            size += 1
+        elif codepoint < 0x20:
+            size += 5
+        if size > MAX_BYTES:
+            raise GraphError("nested editor payload exceeds byte limit")
+    return size
+
+
 def _preflight_json(value):
     """Bound and validate an exact-native JSON tree before serialization.
 
@@ -60,15 +81,7 @@ def _preflight_json(value):
             for key, child in item.items():
                 if type(key) is not str:
                     raise GraphError("nested editor JSON keys must be native strings")
-                if len(key) > MAX_BYTES:
-                    raise GraphError("nested editor JSON key exceeds byte limit")
-                try:
-                    key_bytes = len(key.encode("utf-8", errors="strict"))
-                except UnicodeEncodeError as exc:
-                    raise GraphError("nested editor JSON key is not valid UTF-8") from exc
-                if key_bytes > MAX_BYTES:
-                    raise GraphError("nested editor JSON key exceeds byte limit")
-                estimated_bytes += key_bytes
+                estimated_bytes += _json_string_size(key)
                 if estimated_bytes > MAX_BYTES:
                     raise GraphError("nested editor payload exceeds byte limit")
                 stack.append((child, depth + 1))
@@ -85,12 +98,7 @@ def _preflight_json(value):
                 raise GraphError("nested editor payload exceeds byte limit")
             stack.extend((child, depth + 1) for child in item)
         elif kind is str:
-            if len(item) > MAX_BYTES:
-                raise GraphError("nested editor JSON text exceeds byte limit")
-            try:
-                estimated_bytes += len(item.encode("utf-8", errors="strict")) + 2
-            except UnicodeEncodeError as exc:
-                raise GraphError("nested editor JSON text is not valid UTF-8") from exc
+            estimated_bytes += _json_string_size(item)
         elif kind is int:
             if item.bit_length() > 64:
                 raise GraphError("nested editor JSON integer exceeds limit")
