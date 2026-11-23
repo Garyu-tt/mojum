@@ -15,7 +15,9 @@ canonical Graph IR, Noosphere, Aquarium or SQLite journals.
   `/v1/models`, `/health` and `/slots` before each **single** completion.
   Duplicate model names or slot IDs, missing real boolean busy flags, bad
   context, unexpected response model, invalid or oversized JSON and excessive
-  returned token usage fail closed.
+  returned token usage fail closed. A completion only passes with exact
+  `finish_reason="stop"`; truncated and tool/function-call completions are
+  refused instead of forwarding partial or executable results.
 - `admit()` checks **all-or-nothing** requested concurrency against observed
   free slots, per-process cap, conservative context/token limits, explicit
   operator-supplied RAM/VRAM headroom and integer micro-USD allowances. The
@@ -23,7 +25,10 @@ canonical Graph IR, Noosphere, Aquarium or SQLite journals.
 - `Session.complete()` calls only `POST /v1/chat/completions` using the pinned
   model and zero-temperature, non-streaming request; returns the text in memory
   without logging it. It probes afresh first and limits simultaneous requests
-  through its own in-process semaphore. No retries after uncertain delivery.
+  through a **shared in-process semaphore per localhost port**, across
+  separate `Session` instances. Concurrent Sessions cannot declare conflicting
+  limits for the same endpoint while an earlier one is alive. No retries after
+  uncertain delivery. This does not enforce cross-process quotas.
 - Fixed API paths/ports and literal IPv4 loopback; Python `ProxyHandler({})`
   disables proxy environment variables, redirects are denied, timeouts and
   request/response byte sizes are bounded. There are **no** API keys,
@@ -75,7 +80,7 @@ resource budget ledger, or Cezar task ownership.
 | Gate | This slice | Still required before deployment |
 | --- | --- | --- |
 | Local wire | Real loopback `/models`, `/health`, `/slots`, `/chat/completions`; deterministic test HTTP server | Exact running llama.cpp build, model file SHA-256, actual chat-template behavior |
-| Concurrency | Validated free-slot snapshot and in-process semaphore | Cross-process/host reservations; handling the probe-to-call TOCTOU race |
+| Concurrency | Validated free-slot snapshot and shared process-local endpoint semaphore | Cross-process/host reservations; handling the probe-to-call TOCTOU race |
 | Cost | Integer **configured** maximum and no silent paid-cloud provider | Provider receipts, power/hosting accounting, durable cross-worker budgets |
 | RAM/VRAM | Explicit **operator estimates**, fail when not sufficient | Real p50/p95 memory and token throughput on target hardware and 1/2/4/8 physical calls |
 | LiteLLM | Model-catalog probe only; zero admitted calls | Audited entirely local routes, scoped keys, vulnerability/version checks, measured underlying slots, controlled egress |
