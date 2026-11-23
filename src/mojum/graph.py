@@ -101,7 +101,7 @@ def load_graph(path):
                           parse_float=_parse_json_float)
     except GraphError:
         raise
-    except (ValueError, RecursionError) as exc:
+    except (ValueError, UnicodeError, RecursionError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
 
