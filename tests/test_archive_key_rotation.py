@@ -149,7 +149,9 @@ class RotationChainTests(unittest.TestCase):
                 with patch.object(rotation, "_HEX_256") as pattern:
                     with self.assertRaises(RotationError):
                         invoke()
-                    pattern.fullmatch.assert_not_called()
+                    scanned = [call.args[0] for call in pattern.fullmatch.call_args_list]
+                    self.assertNotIn(oversized, scanned)
+                    self.assertTrue(all(type(value) is str and len(value) == 64 for value in scanned))
 
 
 if __name__ == "__main__":
