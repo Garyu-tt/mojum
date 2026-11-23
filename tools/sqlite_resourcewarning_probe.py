@@ -33,7 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     env = dict(os.environ)
     env["PYTHONWARNINGS"] = "error::ResourceWarning"
-    # The target is a separate process, so no project state is mutated by this runner.
+    # The runner itself does not write project state. Target tests execute with
+    # the caller's normal filesystem permissions and may have their usual side effects.
     completed = subprocess.run(build_command(args.python, args.targets), env=env, check=False)
     return completed.returncode
 
