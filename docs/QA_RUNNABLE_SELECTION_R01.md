@@ -20,7 +20,7 @@ bounded task snapshots. Each task requires:
 Optional fields:
 
 - `not_before`: logical tick at which a retry becomes eligible (default 0).
-- `dependencies`: up to 256 task IDs that must all have state `MERGED`.
+- `dependencies`: up to 256 task IDs per task and 100,000 total dependency IDs across the full snapshot; all must have state `MERGED`.
 
 The result is immutable and contains selected IDs, deferred IDs with reason
 codes, and ignored active/terminal IDs. It never returns caller payloads.
@@ -36,7 +36,7 @@ codes, and ignored active/terminal IDs. It never returns caller payloads.
 - A missing or non-merged dependency defers only its dependent task.
 - Order is deterministic: priority descending, enqueue sequence ascending,
   task ID ascending. Items beyond the batch limit are reported as deferred.
-- Unknown fields/states, duplicate IDs, malformed dependencies, booleans in
+- Unknown fields/states, oversized state labels, duplicate IDs, malformed dependencies, booleans in
   integer fields, hostile container subclasses and over-budget input fail closed.
 
 ## Safety and integration boundary
