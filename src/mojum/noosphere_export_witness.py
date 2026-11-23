@@ -45,6 +45,11 @@ def _validate_filters(filters: object) -> dict:
         return {}
     if type(filters) is not dict:
         raise NoosphereError("filters must be a native dictionary")
+    # Every admitted filter must use one of the four allowlisted keys. Check
+    # cardinality before materializing keys so hostile oversized mappings do
+    # not trigger an O(N) duplicate allocation before the bounded rejection.
+    if len(filters) > len(_ALLOWED_FILTERS):
+        raise NoosphereError("too many export filters")
     keys = list(filters)
     if any(type(key) is not str for key in keys):
         raise NoosphereError("filter keys must be native strings")

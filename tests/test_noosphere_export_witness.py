@@ -3,6 +3,7 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mojum.noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from mojum.noosphere_export_witness import (
@@ -118,6 +119,17 @@ class ExportWitnessTests(unittest.TestCase):
                 raise RuntimeError("must not compare hostile key")
         with self.assertRaises(NoosphereError):
             create_public_export_witness(self.store, filters={HostileKey("topic"): "x"})
+        self.assertFalse(self.store._db.in_transaction)
+
+    def test_rejects_oversized_filter_mapping_before_key_snapshot(self):
+        filters = {f"unknown-{index}": "x" for index in range(100)}
+        with patch(
+            "mojum.noosphere_export_witness.list",
+            side_effect=AssertionError("oversized mapping must be rejected before list()"),
+            create=True,
+        ):
+            with self.assertRaisesRegex(NoosphereError, "too many export filters"):
+                create_public_export_witness(self.store, filters=filters)
         self.assertFalse(self.store._db.in_transaction)
 
     def test_limit_type_and_bounds(self):
