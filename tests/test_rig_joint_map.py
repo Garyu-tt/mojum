@@ -142,7 +142,7 @@ class JointMapTests(unittest.TestCase):
 
     def test_unicode_c1_control_characters_rejected(self):
         # C1 controls are Unicode category Cc even though they are above ASCII DEL.
-        for control in ("\\u0085", "\\u009f"):
+        for control in ("\u0085", "\u009f"):
             with self.subTest(control=hex(ord(control))):
                 with self.assertRaises(JointMapError):
                     build_joint_map(src(["hip" + control]), dst(), links())
