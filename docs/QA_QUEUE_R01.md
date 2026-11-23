@@ -15,7 +15,9 @@ secrets, PRIVATE Noosphere records, credentials, or raw private diffs.
 
 ## Contract
 
-- SQLite WAL mode, foreign keys, busy timeout and bounded JSON payloads.
+- SQLite WAL mode, foreign keys, busy timeout and bounded JSON payloads. Every operational connection is explicitly closed on success and failure.
+- A persisted `schema_version=1` marker is required. Fresh empty databases are initialized as version 1; unversioned or unknown-version databases are refused without an implicit migration.
+- The bearer lease token is returned only by `claim()`. Ordinary `get()` and other non-claim projections redact it.
 - Every enqueue/claim/lease transition uses an explicit `BEGIN IMMEDIATE`
   transaction. Independent processes serialize ownership changes through
   SQLite's writer lock.
@@ -31,7 +33,8 @@ secrets, PRIVATE Noosphere records, credentials, or raw private diffs.
 - Append-only queue events record enqueue, claim, expiry, heartbeat, completion
   and failure transitions. Event rows contain metadata only, never payloads.
 - Payloads are plain dictionaries serialized as canonical finite JSON, capped
-  at 64 KiB by default. Event reads are capped at 1,000 rows.
+  at 64 KiB by default, with at most 10,000 JSON nodes, depth 32 and aggregate
+  UTF-8 text bounded by the configured payload byte limit before serialization. Event reads are capped at 1,000 rows.
 
 ## Minimal use
 
