@@ -144,6 +144,28 @@ class PlacementReceiptTests(unittest.TestCase):
         with self.assertRaises(PlacementError):
             receipt_bytes(None)
 
+    def test_forged_receipt_cannot_execute_deepcopy_before_validation(self):
+        class Hostile:
+            def __deepcopy__(self, memo):
+                raise RuntimeError("untrusted deepcopy executed")
+
+        valid = dataclasses.asdict(self.seal())
+        for field in valid:
+            with self.subTest(field=field):
+                forged = object.__new__(PlacementReceipt)
+                for key, value in valid.items():
+                    object.__setattr__(
+                        forged, key, Hostile() if key == field else value,
+                    )
+                with self.assertRaises(PlacementError):
+                    receipt_bytes(forged)
+                with self.assertRaises(PlacementError):
+                    self.verify(forged)
+
+        missing = object.__new__(PlacementReceipt)
+        with self.assertRaises(PlacementError):
+            receipt_bytes(missing)
+
     def test_wire_duplicate_extra_and_malformed_fields_rejected(self):
         wire = receipt_bytes(self.seal())
         dictionary = json.loads(wire)
