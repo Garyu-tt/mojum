@@ -45,6 +45,8 @@ def _time_us(value: Fraction) -> int:
 def _source(sha256: str, source_kind: str, license_id: str | None) -> None:
     if type(sha256) is not str or _SHA256.fullmatch(sha256) is None:
         raise MidiScoreError("invalid exact source SHA-256")
+    if type(source_kind) is not str:
+        raise MidiScoreError("invalid MIDI source kind")
     if source_kind == "PUBLIC_SYNTHETIC":
         if license_id is not None:
             raise MidiScoreError("synthetic input must not assert an external license")
