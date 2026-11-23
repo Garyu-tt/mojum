@@ -50,14 +50,26 @@ def rasterize(room: Room, *, columns: int = 32, rows: int = 32) -> dict:
 
     x_edges = _edges(room.width, columns)
     y_edges = _edges(room.height, rows)
-    # 16,384 bytes at most, regardless of the original room's dimensions.
-    bits = [bytearray(columns) for _ in range(rows)]
+    # 2D difference grid: 4 updates per obstacle, then one O(cells) scan.
+    # This avoids 4096 full-room obstacles causing ~67 million cell writes.
+    delta = [[0] * (columns + 1) for _ in range(rows + 1)]
     for x, y, width, height in room.obstacles:
         first_x, last_x = _intersecting_cells(x_edges, x, x + width)
         first_y, last_y = _intersecting_cells(y_edges, y, y + height)
-        for j in range(first_y, last_y + 1):
-            for i in range(first_x, last_x + 1):
-                bits[j][i] = 1
+        delta[first_y][first_x] += 1
+        delta[first_y][last_x + 1] -= 1
+        delta[last_y + 1][first_x] -= 1
+        delta[last_y + 1][last_x + 1] += 1
+
+    blocked_rows = []
+    for j in range(rows):
+        row_sum = 0
+        cells = []
+        for i in range(columns):
+            row_sum += delta[j][i]
+            delta[j][i] = row_sum + (delta[j - 1][i] if j else 0)
+            cells.append("#" if delta[j][i] > 0 else ".")
+        blocked_rows.append("".join(cells))
 
     geometry_json = json.dumps(
         [room.width, room.height, room.obstacles],
@@ -69,7 +81,7 @@ def rasterize(room: Room, *, columns: int = 32, rows: int = 32) -> dict:
         "columns": columns,
         "rows": rows,
         "row_order": "bottom_to_top",
-        "blocked_rows": ["".join("#" if v else "." for v in line) for line in bits],
+        "blocked_rows": blocked_rows,
         "provenance": "offline-point-room-authoring-qa-only",
     }
 
