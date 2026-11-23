@@ -246,6 +246,43 @@ class TemporalOutcomeAquariumTests(unittest.TestCase):
                           model.predict(before, action))
         self.assertEqual(model.snapshot(), snapshot)
 
+    def test_schema_and_prediction_equality_spoofs_are_rejected(self):
+        class EqualitySpoof:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ForgedPrediction(dict):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        model = RangeOutcomeMemory()
+        forged_snapshot = model.snapshot()
+        forged_snapshot["schema"] = EqualitySpoof()
+        with self.assertRaises(TemporalOutcomeError):
+            RangeOutcomeMemory.from_snapshot(forged_snapshot)
+
+        with self.baby(neural_mode="disabled") as baby:
+            evidence = baby.step()["temporal_range"]
+        before, after, action = (evidence["before"], evidence["after"],
+                                 evidence["action"])
+        forged_prior = ForgedPrediction({
+            "observations": 99, "next_bucket": 6, "blocked": True,
+        })
+        with self.assertRaises(TemporalOutcomeError):
+            model.observe(before, action, after, False, forged_prior)
+        with self.assertRaises(TemporalOutcomeError):
+            model.observe(before, action, after, False, {
+                "observations": EqualitySpoof(),
+                "next_bucket": None, "blocked": None,
+            })
+        self.assertEqual(model.snapshot(), RangeOutcomeMemory().snapshot())
+
     def test_cli_resume_and_preflight_validation_without_sqlite_side_effect(self):
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
         command = [sys.executable, "-m", "mojum.aquarium",
