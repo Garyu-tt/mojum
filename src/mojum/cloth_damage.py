@@ -75,9 +75,11 @@ def audit_damage(request: Any) -> DamageReport:
         "schema", "provenance", "consent", "profile_revision", "threshold", "samples"
     }:
         raise ClothDamageError("request fields do not match schema")
-    if request["schema"] != SCHEMA:
+    schema = request["schema"]
+    provenance = request["provenance"]
+    if type(schema) is not str or schema != SCHEMA:
         raise ClothDamageError("unsupported schema")
-    if request["provenance"] != PROVENANCE or request["consent"] is not True:
+    if type(provenance) is not str or provenance != PROVENANCE or request["consent"] is not True:
         raise ClothDamageError("PUBLIC_SYNTHETIC provenance and explicit consent required")
 
     revision = request["profile_revision"]
