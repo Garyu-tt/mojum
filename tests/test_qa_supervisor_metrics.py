@@ -77,6 +77,55 @@ class SupervisorMetricsTests(unittest.TestCase):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [{"id": str(i), "state": "READY"} for i in range(10001)]})
 
+    def test_hostile_snapshot_key_rejected_before_hash(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            explode = False
+            def __hash__(self):
+                if self.explode:
+                    raise RuntimeError("hostile hash executed")
+                return str.__hash__(self)
+
+        snapshot = {"observed_at": 1, "tasks": []}
+        key = HostileKey("observed_at")
+        snapshot[key] = snapshot.pop("observed_at")
+        key.explode = True
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot(snapshot)
+
+    def test_mapping_and_container_subclasses_rejected(self):
+        class TaskDict(dict):
+            pass
+        class TaskList(list):
+            pass
+
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot(TaskDict(observed_at=1, tasks=[]))
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": TaskList()})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [TaskDict(id="x", state="READY")]})
+
+    def test_task_record_cardinality_and_native_key_types(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            explode = False
+            def __hash__(self):
+                if self.explode:
+                    raise RuntimeError("hostile hash executed")
+                return str.__hash__(self)
+
+        task = {"id": "x", "state": "READY"}
+        key = HostileKey("id")
+        task[key] = task.pop("id")
+        key.explode = True
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [task]})
+        oversized = {"id": "x", "state": "READY"}
+        oversized.update({f"extra-{i}": None for i in range(10_000)})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [oversized]})
+
 
 if __name__ == "__main__":
     unittest.main()
