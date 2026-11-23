@@ -190,7 +190,7 @@ class ClothGLBTests(unittest.TestCase):
         encoded = json.dumps(doc, separators=(",", ":")).encode()
         encoded = encoded[:-1] + b',"untrusted_number":' + b"9" * 5000 + b"}"
         encoded += b" " * (-len(encoded) % 4)
-        blob += b"\\x00" * (-len(blob) % 4)
+        blob += bytes(-len(blob) % 4)
         length = 12 + 8 + len(encoded) + 8 + len(blob)
         malformed = (struct.pack("<4sII", b"glTF", 2, length) +
                      struct.pack("<II", len(encoded), 0x4E4F534A) + encoded +
