@@ -49,7 +49,10 @@ class STDPCase:
 def _finite_num(value: Any, name: str, lower: float, upper: float, *, strict=False) -> float:
     if type(value) not in (int, float):
         raise STDPInputError(f"{name} must be a finite number")
-    value = float(value)
+    try:
+        value = float(value)
+    except OverflowError as exc:
+        raise STDPInputError(f"{name} outside allowed range") from exc
     if not math.isfinite(value) or not (lower < value <= upper if strict else lower <= value <= upper):
         raise STDPInputError(f"{name} outside allowed range")
     return value
@@ -59,7 +62,8 @@ def parse_case(payload: Mapping[str, Any]) -> STDPCase:
     """Accept only fixed-size, explicitly public synthetic numerical events."""
     if type(payload) is not dict or set(payload) != PARAMETERS:
         raise STDPInputError("invalid schema keys; additional fields are forbidden")
-    if payload["schema"] != SCHEMA or payload["visibility"] != VISIBILITY:
+    if (type(payload["schema"]) is not str or payload["schema"] != SCHEMA
+            or type(payload["visibility"]) is not str or payload["visibility"] != VISIBILITY):
         raise STDPInputError("unsupported schema or non-synthetic visibility")
     dt = _finite_num(payload["dt_ms"], "dt_ms", 0.1, 10)
     tau_pre = _finite_num(payload["tau_pre_ms"], "tau_pre_ms", 0.1, 1000)
