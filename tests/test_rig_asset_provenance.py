@@ -138,6 +138,23 @@ class RigAssetProvenanceTests(unittest.TestCase):
         self.reject()
 
 
+    def test_manifest_schema_value_never_calls_untrusted_equality(self):
+        # The schema discriminant must be exact native str *before* equality.
+        class HostileSchema:
+            def __ne__(self, other):
+                raise AssertionError("untrusted schema inequality")
+
+        class HostileString(str):
+            def __ne__(self, other):
+                raise AssertionError("subclass schema inequality")
+
+        for schema in (HostileSchema(), HostileString(SCHEMA)):
+            with self.subTest(kind=type(schema).__name__):
+                manifest, contents = fixture()
+                manifest["schema"] = schema
+                with self.assertRaises(RigProvenanceError):
+                    verify_rig_assets(manifest, contents)
+
     def test_hostile_string_subclass_dict_keys_fail_closed(self):
         # An exact dict can still contain a str subclass with hostile __eq__.
         # Key primitives must be checked before constructing/comparing sets.
