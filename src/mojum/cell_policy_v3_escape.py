@@ -293,7 +293,8 @@ class CellExplorerV3Escape:
             raise CellV3EscapeError("forgotten observations without eviction")
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
-        _validate_outcome_tail(state)
+        # Preserve the established retention/streak error precedence for
+        # legacy invariants before applying the new chronological witness.
         _check_streak_counters(state)
 
         # Each observation belongs to exactly one cell and tick. A live
@@ -318,6 +319,10 @@ class CellExplorerV3Escape:
                 raise CellV3EscapeError(
                     "combined escape cell observations exceed elapsed ticks"
                 )
+
+        # Validate the v2 chronology witness after the pre-existing retention
+        # and streak invariants so callers retain stable, specific failures.
+        _validate_outcome_tail(state)
 
         model = cls()
         model.last_tick = state["last_tick"]
