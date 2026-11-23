@@ -113,6 +113,13 @@ class BenchmarkTests(unittest.TestCase):
             with self.assertRaises(ReportError):
                 load_report(str(path))
 
+    def test_duplicate_json_keys_keep_specific_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duplicate.json"
+            path.write_text('{"schema":"first","schema":"second"}', encoding="utf-8")
+            with self.assertRaisesRegex(ReportError, "duplicate JSON object key"):
+                load_report(str(path))
+
     def test_oversized_integer_token_is_normalized(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "integer.json"
