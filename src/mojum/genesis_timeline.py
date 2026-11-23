@@ -33,7 +33,14 @@ def audit_timeline(snapshot: Mapping[str, Any], *, max_boundaries: int = MAX_BOU
     if type(seed) is not dict or type(seed.get("inherited")) is not dict:
         raise GenesisError("Snapshot seed must use exact built-in dicts")
     events_input = snapshot.get("events")
-    if type(events_input) is not list or any(type(event) is not dict for event in events_input):
+    if type(events_input) is not list:
+        raise GenesisError("Snapshot events must be an exact built-in list")
+    # Reject oversized lists before traversing their contents. GenomeLedger
+    # enforces the same canonical cap, but this preflight must precede any()
+    # so a hostile caller cannot force an unbounded validation scan here.
+    if len(events_input) > GenomeLedger.MAX_EVENTS:
+        raise GenesisError("Snapshot event limit exceeded")
+    if any(type(event) is not dict for event in events_input):
         raise GenesisError("Snapshot events must be an exact built-in list of dicts")
 
     ledger = GenomeLedger.from_snapshot(snapshot)
