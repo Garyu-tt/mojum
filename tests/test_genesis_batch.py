@@ -43,6 +43,8 @@ def apply(events, *, seed_snapshot=None):
 class GenesisBatchTests(unittest.TestCase):
 
     def test_snapshot_and_events_share_one_total_input_budget(self):
+        from unittest.mock import patch
+
         ledger = GenomeLedger(SEED)
         snapshot = {"payload": "s" * (MAX_BATCH_BYTES // 2)}
         events = [{"payload": "e" * (MAX_BATCH_BYTES // 2)}]
