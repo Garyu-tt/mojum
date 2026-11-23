@@ -27,18 +27,21 @@ def _check_json_tree(value):
 
     Exact built-in types avoid invoking caller-defined comparison, iteration,
     hashing or serialization methods while processing an untrusted object.
+    Child cardinality is checked before enumeration so a hostile container
+    cannot force an oversized temporary traversal stack.
     """
     stack = [(value, 0)]
-    nodes = 0
+    scheduled_nodes = 1
     while stack:
         item, depth = stack.pop()
-        nodes += 1
-        if nodes > MAX_JSON_NODES:
-            raise AttributionError("snapshot node limit exceeded")
         if depth > MAX_JSON_DEPTH:
             raise AttributionError("snapshot nesting limit exceeded")
         kind = type(item)
         if kind is dict:
+            child_count = len(item)
+            if child_count > MAX_JSON_NODES - scheduled_nodes:
+                raise AttributionError("snapshot node limit exceeded")
+            scheduled_nodes += child_count
             for key, child in item.items():
                 if type(key) is not str:
                     raise AttributionError("snapshot object keys must be strings")
@@ -50,6 +53,10 @@ def _check_json_tree(value):
                     raise AttributionError("snapshot key must be valid UTF-8") from exc
                 stack.append((child, depth + 1))
         elif kind is list:
+            child_count = len(item)
+            if child_count > MAX_JSON_NODES - scheduled_nodes:
+                raise AttributionError("snapshot node limit exceeded")
+            scheduled_nodes += child_count
             for child in item:
                 stack.append((child, depth + 1))
         elif kind is str:
