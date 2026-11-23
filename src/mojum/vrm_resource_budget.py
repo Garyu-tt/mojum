@@ -59,6 +59,9 @@ def assess_vrm_resource_budget(inventory, limits=None):
         limits = ResourceLimits()
     if type(limits) is not ResourceLimits:
         raise ResourceBudgetError("limits must be a ResourceLimits instance")
+    # frozen dataclasses can be mutated via object.__setattr__; revalidate
+    # configured limits at this public trust boundary.
+    limits.__post_init__()
     if type(inventory) is not dict:
         raise ResourceBudgetError("inventory must be a native dict")
 
