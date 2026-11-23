@@ -32,7 +32,7 @@ def canonical(value):
             value, sort_keys=True, ensure_ascii=False, allow_nan=False,
             separators=(",", ":"),
         ).encode("utf-8")
-    except (TypeError, ValueError, OverflowError) as exc:
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise SnapshotError("snapshot must be canonical finite JSON") from exc
     if len(wire) > MAX_SNAPSHOT_BYTES:
         raise SnapshotError("snapshot exceeds 1 MiB PRIVATE sidecar budget")
@@ -118,7 +118,7 @@ def load_snapshot(snapshot_file, key_file):
     raw = _open_regular(path, secret=False)
     try:
         envelope = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
-    except (ValueError, UnicodeError, TypeError) as exc:
+    except (ValueError, UnicodeError, TypeError, RecursionError) as exc:
         raise SnapshotError("invalid UTF-8 JSON snapshot") from exc
     if (type(envelope) is not dict or set(envelope) !=
             {"schema", "state", "hmac_sha256"}

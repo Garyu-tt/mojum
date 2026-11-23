@@ -257,6 +257,30 @@ class SignedReplayCacheQA(unittest.TestCase):
                              results[-1]["journal_head"])
             self.assertEqual(q.tick, 8)
 
+    def test_deeply_nested_snapshot_json_fails_closed_before_sqlite_bootstrap(self):
+        # Optimized CPython JSON paths can exceed Python's nominal
+        # recursion limit. 15k nesting levels reliably exceed the real
+        # decoder limit across 3.11-3.13, yet occupy under 32 KiB.
+        raw = "[" * 15_000 + "0" + "]" * 15_000
+        self.snapshot.write_text(raw, encoding="utf-8")
+        if os.name == "posix":
+            self.snapshot.chmod(0o600)
+        self.assertFalse(self.db.exists())
+        with self.assertRaisesRegex(SnapshotError, "invalid UTF-8 JSON snapshot"):
+            self.aquarium()
+        self.assertFalse(self.db.exists())
+
+    def test_deeply_nested_python_state_rejected_as_snapshot_error(self):
+        from mojum.verified_snapshot import canonical
+
+        state = 0
+        # The C JSON encoder also accepts thousands of array levels.
+        for _ in range(15_000):
+            state = [state]
+        with self.assertRaisesRegex(
+                SnapshotError, "snapshot must be canonical finite JSON"):
+            canonical(state)
+
     def test_invalid_key_and_missing_file_never_birth_new_organism(self):
         other = self.root / "new.sqlite3"
         secret = self.root / "bad-key"
