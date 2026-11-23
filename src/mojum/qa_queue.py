@@ -237,7 +237,7 @@ class DurableTaskQueue:
         payload_json = self._payload_json(payload)
         now = _timestamp(now_ns)
         available = now if available_at_ns is None else _timestamp(available_at_ns)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT * FROM queue_tasks WHERE idempotency_key = ?",
@@ -272,7 +272,7 @@ class DurableTaskQueue:
         lease_until = now + lease_seconds * 1_000_000_000
         if lease_until > 9_223_372_036_854_775_807:
             raise ValueError("lease expiry exceeds signed 64-bit timestamp range")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """SELECT * FROM queue_tasks
@@ -315,7 +315,7 @@ class DurableTaskQueue:
         until = now + lease_seconds * 1_000_000_000
         if until > 9_223_372_036_854_775_807:
             raise ValueError("lease expiry exceeds signed 64-bit timestamp range")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """SELECT * FROM queue_tasks WHERE task_id=? AND state='leased'
@@ -357,7 +357,7 @@ class DurableTaskQueue:
         lease_token = _text(lease_token, "lease_token", maximum=128)
         now = _timestamp(now_ns)
         available = now if available_at_ns is None else _timestamp(available_at_ns)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """SELECT * FROM queue_tasks WHERE task_id=? AND state='leased'
@@ -380,7 +380,7 @@ class DurableTaskQueue:
 
     def get(self, task_id: int) -> Task | None:
         task_id = _positive_int(task_id, "task_id", maximum=9_223_372_036_854_775_807)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 "SELECT * FROM queue_tasks WHERE task_id=?", (task_id,)
             ).fetchone()
@@ -389,7 +389,7 @@ class DurableTaskQueue:
     def events(self, task_id: int, *, limit: int = 100) -> tuple[QueueEvent, ...]:
         task_id = _positive_int(task_id, "task_id", maximum=9_223_372_036_854_775_807)
         limit = _positive_int(limit, "limit", maximum=1_000)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 """SELECT event_id,task_id,event,worker_id,at_ns,detail
                    FROM queue_events WHERE task_id=? ORDER BY event_id LIMIT ?""",
