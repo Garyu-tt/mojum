@@ -1,5 +1,12 @@
 # ANNarchy native smoke subprocess (R0.1)
 
+> **Work reservation (2026-11-23): IN PROGRESS.** This branch reserves the
+> #691 ANNarchy native subprocess-watchdog slice and the four files listed in
+> this document's implementation. Please do not duplicate this exact scope.
+> The GitHub issue-comment claim could not be published because GitHub returned
+> a secondary content-creation rate limit; the branch and this note are the
+> current visible reservation. No merge or QA acceptance is implied.
+>
 Status: opt-in research/CI probe only. This does not activate ANNarchy in
 GENESIS or the Aquarium and makes no biological, learning, STDP, or motor
 claims.
