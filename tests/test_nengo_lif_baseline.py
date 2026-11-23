@@ -11,6 +11,34 @@ from mojum.nengo_lif_baseline import (
 )
 
 
+class _Array(list):
+    """Minimal stdlib NumPy stand-in for optional-boundary unit tests only."""
+    def fill(self, value):
+        self[:] = [value] * len(self)
+
+    def __setitem__(self, index, value):
+        if isinstance(index, slice) and type(value) in (int, float):
+            value = [value] * len(self[index])
+        super().__setitem__(index, value)
+
+    def __lt__(self, value):
+        return [v < value for v in self]
+
+
+class _Finite(list):
+    def all(self):
+        return all(self)
+
+
+FAKE_NUMPY = types.SimpleNamespace(
+    float64=float,
+    zeros=lambda n, dtype=None: _Array([0.0] * n),
+    asarray=lambda values, dtype=None: _Array(values),
+    isfinite=lambda values: _Finite([__import__("math").isfinite(v) for v in values]),
+    any=any,
+)
+
+
 class NengoLIFBaselineTests(unittest.TestCase):
     def test_reference_deterministic(self):
         spec = fixture(1000)
@@ -71,12 +99,12 @@ class NengoLIFBaselineTests(unittest.TestCase):
                 self.kwargs = kwargs
 
             def step(self, dt, j, output, voltage, refractory):
-                output[:] = (j > 1.0) / dt
+                output[:] = [1.0 / dt if value > 1.0 else 0.0 for value in j]
                 voltage[:] = 0.0
                 refractory[:] = 0.0
 
         fake = types.SimpleNamespace(__version__=NENGO_PIN, LIF=FakeLIF)
-        with mock.patch.dict(sys.modules, {"nengo": fake}):
+        with mock.patch.dict(sys.modules, {"nengo": fake, "numpy": FAKE_NUMPY}):
             r = run_nengo(fixture(5))
         self.assertEqual(r.counts, (0, 0, 5, 5, 5))
         self.assertEqual(r.events[0], (0, 0, 1, 1, 1))
@@ -90,7 +118,7 @@ class NengoLIFBaselineTests(unittest.TestCase):
                 output[:] = float("nan")
 
         fake = types.SimpleNamespace(__version__=NENGO_PIN, LIF=BadLIF)
-        with mock.patch.dict(sys.modules, {"nengo": fake}):
+        with mock.patch.dict(sys.modules, {"nengo": fake, "numpy": FAKE_NUMPY}):
             with self.assertRaisesRegex(ValueError, "invalid Nengo"):
                 run_nengo(fixture(2))
 
@@ -100,10 +128,10 @@ class NengoLIFBaselineTests(unittest.TestCase):
                 pass
 
             def step(self, dt, j, output, voltage, refractory):
-                output[:] = (j > 1.0) / dt
+                output[:] = [1.0 / dt if value > 1.0 else 0.0 for value in j]
 
         fake = types.SimpleNamespace(__version__=NENGO_PIN, LIF=FakeLIF)
-        with mock.patch.dict(sys.modules, {"nengo": fake}):
+        with mock.patch.dict(sys.modules, {"nengo": fake, "numpy": FAKE_NUMPY}):
             out = compare(fixture(20))
         self.assertIs(out["approved"], False)
         self.assertEqual(len(out["nengo_rates_hz"]), 5)
