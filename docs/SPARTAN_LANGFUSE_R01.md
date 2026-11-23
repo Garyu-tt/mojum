@@ -32,8 +32,8 @@ packages in Mojum's normal Python 3.11+ CPU-first install.
   proof of successful delivery. Langfuse itself may buffer and retry; this
   bridge does not persist an outbox or guarantee once-only network ingestion.
 - The local `summarize` function rejects conflicting replay sequence IDs,
-  deduplicates identical events, and allows **at most 10,000** distinct events
-  per call. It is an ephemeral dashboard counter, not canonical SQLite
+  deduplicates identical events, and processes **at most 10,000** input
+  events per call (including duplicates). It is an ephemeral dashboard counter, not canonical SQLite
   history, not a durable audit log, and not a source of acceptance authority.
 
 ## Optional upstream compatibility and licensing
@@ -82,7 +82,7 @@ print(summarize([event]))  # local only: ci_false_success = 1
   86,400,000 ms latency, 100,000,000 tokens per direction,
   100,000,000,000 micro-USD, 10,000 attempts, 2^63-1 fence.
   All numeric bounds reject bools, negatives and overflow.
-- Offline counters are O(n) with a 10,000-event cap; HMAC and JSON hashing
+- Offline counters are O(n) with a 10,000-input-event cap; HMAC and JSON hashing
   are bounded per record. These are **design limits**, not measured CPU/RAM
   utilization. Production benchmarks and exporter queue budgets are pending.
 - Regression: `python -m unittest discover -s tests -p 'test_spartan_langfuse.py' -v`.
