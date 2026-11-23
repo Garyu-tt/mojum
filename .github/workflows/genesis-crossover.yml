@@ -1,0 +1,30 @@
+name: GENESIS crossover
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/genesis.py"
+      - "src/mojum/genesis_crossover.py"
+      - "tests/test_genesis_crossover.py"
+      - ".github/workflows/genesis-crossover.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crossover:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Focused GENESIS crossover tests
+        run: |
+          python -m compileall -q src/mojum/genesis.py src/mojum/genesis_crossover.py tests/test_genesis_crossover.py
+          PYTHONPATH=src python -m unittest discover -s tests -p 'test_genesis_crossover.py' -v
