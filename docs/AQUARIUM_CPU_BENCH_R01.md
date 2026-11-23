@@ -69,8 +69,10 @@ offline tick-duration histogram. OS page cache, antivirus, thermal throttling,
 disk filesystem and Python version alter results. Use multiple repetitions
 on the *same machine* and compare distributions, not one noisy number.
 
-The test suite exercises the harness through a fake runner and does not assert
-fixed wall-time thresholds. Running the CLI command above is the separate
-real-runtime smoke test. Independent exact-head GitHub CI/QA remains necessary
-before any merge. No existing runtime, Noosphere, Graph IR, or acceptance gate
+The test suite exercises malformed/error paths through fake child runners **and**
+executes a two-process real SQLite cold/restart smoke on a disposable one-tick
+PUBLIC_SYNTHETIC fixture (never a user journal). It asserts no fixed timing
+threshold beyond a positive observed wall duration. Running the CLI command
+above additionally produces multi-sample operator measurements. Independent
+exact-head GitHub CI/QA remains necessary before any merge. No existing runtime, Noosphere, Graph IR, or acceptance gate
 is modified by this change.
