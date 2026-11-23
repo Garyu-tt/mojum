@@ -10,6 +10,8 @@ const EPOCH = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const JOINT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const MAX_FRAMES = 10000;
 const MAX_JOINTS = 128;
+// Bound aggregate allocation as well as each independent input dimension.
+const MAX_JOINT_SAMPLES = 256_000;
 
 function exactRecord(value, keys, name) {
   if (value === null || typeof value !== 'object' || Array.isArray(value) ||
@@ -114,9 +116,14 @@ export function createVrmPoseTimeline(inputFrames) {
   let lastSequence = null;
   let lastTick = null;
   let lastTime = null;
+  let totalJointSamples = 0;
 
   for (const input of inputFrames) {
     const frame = cloneFrame(input, expectedJointIds);
+    totalJointSamples += frame.joints.length;
+    if (totalJointSamples > MAX_JOINT_SAMPLES) {
+      throw new RangeError('timeline exceeds ' + MAX_JOINT_SAMPLES + ' joint samples');
+    }
     if (firstEpoch === null) {
       firstEpoch = frame.epoch;
       firstRevision = frame.revision;
