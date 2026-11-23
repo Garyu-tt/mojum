@@ -51,6 +51,20 @@ class VrmResourceBudgetTests(unittest.TestCase):
     def test_limits_bool_rejected(self):
         with self.assertRaises(ResourceBudgetError):
             ResourceLimits(max_vertices=True)
+    def test_rejects_oversized_integer_before_serialization(self):
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(inventory(vertex_count=10 ** 100_000))
+
+    def test_revalidates_mutated_frozen_limits(self):
+        limits = ResourceLimits()
+        object.__setattr__(limits, "max_vertices", -1)
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(inventory(), limits)
+
+    def test_rejects_nested_value_without_serializing_it(self):
+        with self.assertRaises(ResourceBudgetError):
+            assess_vrm_resource_budget(inventory(vertex_count={"nested": [1]}))
+
     def test_report_detached(self):
         data = inventory()
         report = assess_vrm_resource_budget(data)
