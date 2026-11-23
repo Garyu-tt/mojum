@@ -205,6 +205,20 @@ class BudgetLedgerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BudgetLedger(self.path, BudgetCaps(999, 999, 999))
 
+    def test_mutating_public_caps_cannot_bypass_persisted_policy(self):
+        self.ledger.reserve("first", "m", 50, 100, now_s=120)
+        self.ledger.reserve("second", "m", 50, 100, now_s=120)
+        # A caller can assign a different object even though BudgetCaps is
+        # frozen. That must not alter SQLite's persisted quota contract.
+        self.ledger.caps = BudgetCaps(999, 10_000, 10_000)
+        with self.assertRaisesRegex(BudgetDenied, "caps mismatch"):
+            self.ledger.reserve("bypass", "m", 1, 1, now_s=120)
+        with self.assertRaisesRegex(BudgetDenied, "caps mismatch"):
+            self.ledger.reserve("first", "m", 50, 100, now_s=120)
+        reopened = BudgetLedger(self.path, self.caps)
+        with self.assertRaisesRegex(BudgetDenied, "rate or daily"):
+            reopened.reserve("bypass", "m", 1, 1, now_s=120)
+
     def test_clock_rollback_is_closed(self):
         self.ledger.reserve("a", "m", 1, 1, now_s=180)
         with self.assertRaises(BudgetDenied):
