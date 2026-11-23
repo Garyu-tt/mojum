@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 import multiprocessing
 import sqlite3
 
@@ -22,6 +23,21 @@ def _claim_process(path, worker_number, result_queue):
         result_queue.put(("ok", claimed))
     except BaseException as exc:
         result_queue.put(("error", repr(exc)))
+
+
+def test_public_query_inputs_are_bounded_before_sqlite_or_membership(tmp_path):
+    class ExplodingStatusSet:
+        def __contains__(self, value):
+            raise AssertionError("oversized status reached membership hashing")
+
+    with QAWorkQueue(str(tmp_path / "query-bounds.db")) as q:
+        with pytest.raises(QueueError, match="SQLite integer"):
+            q.get(10**10000)
+        with pytest.raises(QueueError, match="SQLite integer"):
+            q.audit(10**10000)
+        with patch("mojum.qa_work_queue._VALID_STATUSES", ExplodingStatusSet()):
+            with pytest.raises(QueueError, match="status filter"):
+                q.list_jobs(status="x" * 1_000_000)
 
 
 def test_huge_numeric_configuration_raises_queue_error():
