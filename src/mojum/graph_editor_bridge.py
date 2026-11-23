@@ -86,7 +86,7 @@ def export_editor(graph, backend, *, allow_private=False):
     PRIVATE/RESTRICTED graph contents are *not* exported without an explicit
     local opt-in. No packages are imported and no network requests are made.
     """
-    if backend not in BACKENDS or type(backend) is not str:
+    if type(backend) is not str or backend not in BACKENDS:
         raise GraphError("unknown editor backend")
     checked = _copy_json(graph)
     if not isinstance(checked, dict) or checked.get("schema") != V2_SCHEMA:
