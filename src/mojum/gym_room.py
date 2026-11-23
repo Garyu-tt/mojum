@@ -63,7 +63,7 @@ class PointRoomEpisode:
                 "physical_contact": False, "seed": self._seed}
 
     def reset(self, *, seed=None, options=None):
-        if (seed is not None and (type(seed) is not int or not 0 <= seed < 2**32)):
+        if (seed is not None and (type(seed) is not int or seed < 0)):
             raise ValueError("invalid seed")
         if options is not None and (type(options) is not dict or options):
             raise ValueError("reset options are not supported")

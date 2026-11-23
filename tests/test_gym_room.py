@@ -86,11 +86,21 @@ class PointRoomGymTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 self.episode(**kwargs)
         episode = self.episode()
-        for seed in (-1, True, 2**32, "3"):
+        for seed in (-1, True, "3"):
             with self.assertRaises(ValueError):
                 episode.reset(seed=seed)
         with self.assertRaises(ValueError):
             episode.reset(options={"start": [3, 2]})
+
+    def test_large_nonnegative_seed_is_accepted_and_replayed(self):
+        for seed in (2**32, 2**64 + 17, 2**128):
+            with self.subTest(seed=seed):
+                episode = self.episode()
+                first = episode.reset(seed=seed)
+                self.assertEqual(first[1]["seed"], seed)
+                action = episode.step(1)
+                self.assertEqual(episode.reset(seed=seed), first)
+                self.assertEqual(episode.step(1), action)
 
     def test_optional_gym_missing_fails_without_importing_on_module_load(self):
         # Guard the optional factory independently of the developer's environment.

@@ -1,0 +1,53 @@
+name: Gymnasium point-room CPU contract
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/gym_room.py'
+      - 'src/mojum/world_room.py'
+      - 'tests/test_gym_room.py'
+      - '.github/workflows/gymnasium-point-room-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gymnasium-check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install optional upstream contract checker
+        run: python -m pip install 'gymnasium==1.2.2' 'numpy>=1.26,<3'
+      - name: Run deterministic point-room regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_gym_room.py' -v
+      - name: Run actual Gymnasium environment checker
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          from gymnasium.utils.env_checker import check_env
+          from mojum.gym_room import make_gymnasium_env
+          from mojum.world_room import Room
+
+          env = make_gymnasium_env(Room(4, 4), start=(1, 1), goal=(3, 3))
+          try:
+              check_env(env, skip_render_check=True)
+              for seed in (2**32, 2**64 + 17, 2**128):
+                  obs, info = env.reset(seed=seed)
+                  assert env.observation_space.contains(obs)
+                  assert info["seed"] == seed
+          finally:
+              env.close()
+          PY
