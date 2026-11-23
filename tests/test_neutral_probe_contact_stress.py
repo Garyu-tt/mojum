@@ -1,6 +1,11 @@
 """Contact-exposure stress gate tests for the neutral-probe research arms."""
 import json
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
+
+import mojum.neutral_probe_contact_stress as stress
 
 from mojum.neutral_probe_contact_stress import (
     ARMS, CASES, CLASSIFICATION, MIN_CONTACT_SCENES, evaluate, main,
@@ -76,6 +81,22 @@ class ContactRichStressTests(unittest.TestCase):
             "fewer_blocks", "equal_blocks", "more_blocks"
         )), len(CASES))
         # Do NOT assert a winner: recording poor results is essential.
+
+    def test_cli_nonzero_when_frozen_contact_exposure_gate_fails(self):
+        # Force an unreachable threshold without rewriting the frozen suite.
+        # The report must still be printed to preserve adverse evidence.
+        output = StringIO()
+        with patch.object(stress, "MIN_CONTACT_SCENES", len(CASES) + 1):
+            with redirect_stdout(output):
+                with self.assertRaisesRegex(SystemExit, "contact-exposure QA gate failed"):
+                    main()
+        report = json.loads(output.getvalue())
+        self.assertFalse(report["evidence_quality"]["passes_contact_gate"])
+        self.assertEqual(report["evidence_quality"]["status"],
+                         "INSUFFICIENT_CONTACT_EXPOSURE")
+        self.assertEqual(report["evidence_quality"]["contact_scene_count"], len(CASES))
+        self.assertEqual(report["evidence_quality"]["min_required_contact_scenes"],
+                         len(CASES) + 1)
 
     def test_reproducible_without_private_state_or_external_calls(self):
         a, b = evaluate(), evaluate()
