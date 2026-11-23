@@ -113,6 +113,29 @@ class SupervisorMetricsTests(unittest.TestCase):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [], "duration_samples_ms": [FloatSubclass(1.0)]})
 
+    def test_rejects_hostile_string_subclass_mapping_keys(self):
+        class HostileKey(str):
+            active = False
+
+            def __hash__(self):
+                if self.active:
+                    raise AssertionError("hostile hash must not execute")
+                return str.__hash__(self)
+
+        top_key = HostileKey("unexpected")
+        snapshot = {"observed_at": 1, "tasks": []}
+        snapshot[top_key] = "ignored"
+        top_key.active = True
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot(snapshot)
+
+        task_key = HostileKey("unexpected")
+        task = {"id": "x", "state": "READY"}
+        task[task_key] = "ignored"
+        task_key.active = True
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [task]})
+
     def test_task_limit_enforced(self):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": 1, "tasks": [{"id": str(i), "state": "READY"} for i in range(10001)]})
