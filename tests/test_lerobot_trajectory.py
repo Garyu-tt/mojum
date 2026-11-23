@@ -96,6 +96,27 @@ class LeRobotTrajectoryTests(unittest.TestCase):
                                "model_id": "local.policy", "model_revision": "c" * 40})
         self.assertEqual(policy.model_revision, "c" * 40)
 
+    def test_exact_revision_width_and_provenance_types(self):
+        data = vars(self.provenance).copy()
+        # A 41..63-digit string is not an immutable SHA-1/SHA-256 revision.
+        for width in (39, 41, 63, 65):
+            with self.subTest(width=width), self.assertRaises(TrajectoryError):
+                Provenance(**{**data, "dataset_revision": "a" * width})
+        self.assertEqual(
+            Provenance(**{**data, "dataset_revision": "a" * 64}).dataset_revision,
+            "a" * 64,
+        )
+
+        class Spoof(str):
+            def __eq__(self, other):
+                return True
+
+        with self.assertRaises(TrajectoryError):
+            Provenance(**{**data, "collector": Spoof("invalid")})
+        with self.assertRaises(TrajectoryError):
+            Trajectory(self.provenance, 0, (Frame(0., 0, (0.,), (0.,)),),
+                       schema=Spoof("invalid"))
+
     def test_frozen_comparator_fixed_seed_heldout_and_no_leakage(self):
         episodes = [self.load(i) for i in range(6)]
         first = benchmark(episodes, seed=42)
