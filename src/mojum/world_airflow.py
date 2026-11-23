@@ -231,9 +231,10 @@ def sample_room_airflow(room, state, *, tick, expected_revision,
         vy_total += _round_div(vy * weight, WEIGHT_SCALE)
         contributing.append(source_id)
 
-    magnitude = math.isqrt(vx_total * vx_total + vy_total * vy_total)
-    if magnitude > MAX_RESULT_SPEED_MM_S:
+    magnitude_squared = vx_total * vx_total + vy_total * vy_total
+    if magnitude_squared > MAX_RESULT_SPEED_MM_S * MAX_RESULT_SPEED_MM_S:
         raise AirflowError("combined airflow exceeds the bounded output speed")
+    magnitude = math.isqrt(magnitude_squared)
     digest_payload = {
         "schema": SCHEMA,
         "tick": tick,
