@@ -62,6 +62,11 @@ class RigDOFLimits:
 
 
 def _exact_keys(value: dict, expected: set[str], where: str) -> None:
+    # Reject cardinality before materializing or inspecting caller-controlled keys.
+    if len(value) != len(expected):
+        raise DOFLimitsError(
+            f"{where} keys mismatch (expected {len(expected)}, got {len(value)})"
+        )
     keys = tuple(value.keys())
     if any(type(key) is not str for key in keys):
         raise DOFLimitsError(f"{where} keys must be exact strings")
