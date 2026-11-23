@@ -1,5 +1,6 @@
 """Offline CPU-only tests; no native extension or Noosphere required."""
 import base64
+import contextlib
 import hashlib
 from itertools import count
 import json
@@ -125,13 +126,13 @@ class BoundaryTests(unittest.TestCase):
             cr.export_changes(conn)
 
     def test_real_plain_sqlite_must_not_be_mistaken_for_extension(self):
-        with sqlite3.connect(":memory:") as conn:
+        with contextlib.closing(sqlite3.connect(":memory:")) as conn:
             with self.assertRaises(sqlite3.OperationalError):
                 cr.export_changes(conn)
 
     def test_filedb_is_never_used_even_with_crr_schema(self):
         with tempfile.TemporaryDirectory() as root:
-            with sqlite3.connect(str(Path(root) / "private.db")) as conn:
+            with contextlib.closing(sqlite3.connect(str(Path(root) / "private.db"))) as conn:
                 with self.assertRaisesRegex(ValueError, "in-memory"):
                     cr.export_changes(conn)
                 with self.assertRaisesRegex(ValueError, "in-memory"):
