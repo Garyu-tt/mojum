@@ -39,13 +39,19 @@ def _unique_object(pairs):
 
 
 def _checkpoint(raw, *, tick, events):
-    if type(raw) is not str or len(raw.encode("utf-8")) > MAX_OUTPUT:
+    if type(raw) is not str:
+        raise SmokeFailure("CLI checkpoint must be text")
+    try:
+        output_bytes = len(raw.encode("utf-8"))
+    except UnicodeError as exc:
+        raise SmokeFailure("CLI checkpoint is not valid UTF-8") from exc
+    if output_bytes > MAX_OUTPUT:
         raise SmokeFailure("CLI checkpoint exceeds output budget")
     try:
         result = json.loads(raw, object_pairs_hook=_unique_object,
                             parse_constant=lambda _: (_ for _ in ()).throw(
                                 SmokeFailure("nonfinite checkpoint number")))
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, RecursionError) as exc:
         raise SmokeFailure("CLI emitted invalid checkpoint JSON") from exc
     if type(result) is not dict:
         raise SmokeFailure("CLI checkpoint must be an object")
@@ -57,7 +63,7 @@ def _checkpoint(raw, *, tick, events):
     for key, value in checks.items():
         if type(result.get(key)) is not type(value) or result[key] != value:
             raise SmokeFailure("invalid checkpoint " + key)
-    for key in ("journal_head", "manifest_sha256"):
+    for key in ("journal_head", "manifest_sha256", "world_revision", "genome_revision"):
         if type(result.get(key)) is not str or HEX_SHA256.fullmatch(result[key]) is None:
             raise SmokeFailure("invalid checkpoint " + key)
     if type(result.get("agent_id")) is not str or not result["agent_id"]:
@@ -65,7 +71,7 @@ def _checkpoint(raw, *, tick, events):
     if type(result.get("status")) is not str or not result["status"].startswith(
             "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO"):
         raise SmokeFailure("CLI reported a non-synthetic mode")
-    for key in ("sim_time_ns", "world_revision", "genome_revision"):
+    for key in ("sim_time_ns",):
         if type(result.get(key)) is not int or result[key] < 0:
             raise SmokeFailure("invalid checkpoint " + key)
     return result
@@ -120,7 +126,7 @@ def run_audit(*, first_ticks=3, second_ticks=2, timeout=45, runner=None):
                 proc = runner(command, cwd=str(ROOT), env=env,
                               capture_output=True, text=True, timeout=timeout,
                               check=False)
-            except (OSError, subprocess.TimeoutExpired) as exc:
+            except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
                 raise SmokeFailure("Aquarium subprocess could not complete") from exc
             if proc.returncode != 0:
                 # Do not forward child stderr: it may contain a disposable path
@@ -131,8 +137,10 @@ def run_audit(*, first_ticks=3, second_ticks=2, timeout=45, runner=None):
                 for key in ("agent_id", "manifest_sha256", "genome_revision"):
                     if state[key] != previous[key]:
                         raise SmokeFailure("cold restart changed " + key)
-                if state["world_revision"] < previous["world_revision"]:
-                    raise SmokeFailure("world revision regressed")
+                if tick_batch == 0 and state["world_revision"] != previous["world_revision"]:
+                    raise SmokeFailure("zero-tick reopen changed world revision")
+                if tick_batch > 0 and state["world_revision"] == previous["world_revision"]:
+                    raise SmokeFailure("world revision did not advance")
                 if state["sim_time_ns"] < previous["sim_time_ns"]:
                     raise SmokeFailure("virtual clock regressed")
                 if tick_batch == 0 and state["journal_head"] != previous["journal_head"]:
