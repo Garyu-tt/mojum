@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.mesh_revocation_audit import (
     MAX_EVENTS,
@@ -92,6 +93,32 @@ class MeshRevocationAuditTests(unittest.TestCase):
         item["extra"] = True
         with self.assertRaises(RevocationAuditError):
             audit_peer_revocations(document(events=[item]))
+
+    def test_exact_keys_rejects_oversized_mapping_before_key_snapshot(self):
+        from mojum.mesh_revocation_audit import _exact_keys
+
+        oversized = {f"unexpected-{index}": index for index in range(50_000)}
+        with patch("mojum.mesh_revocation_audit.tuple", side_effect=AssertionError(
+            "key snapshot must not be allocated before cardinality rejection"
+        ), create=True) as key_snapshot:
+            with self.assertRaises(RevocationAuditError):
+                _exact_keys(oversized, {"peer_id", "capability"}, "query")
+            key_snapshot.assert_not_called()
+
+    def test_exact_keys_rejects_long_string_before_set_hashing(self):
+        from mojum.mesh_revocation_audit import _exact_keys
+
+        value = {"peer_id": "node-a", "capability": "memory.read"}
+        value["x" * 100_000] = "unexpected"
+        # Use a three-key expected set so cardinality matches and the long key
+        # is rejected by its bounded-length check before set comparison.
+        expected = {"peer_id", "capability", "x" * 100_000}
+        with patch("mojum.mesh_revocation_audit.set", side_effect=AssertionError(
+            "oversized caller key reached set hashing"
+        ), create=True) as key_set:
+            with self.assertRaises(RevocationAuditError):
+                _exact_keys(value, expected, "query")
+            key_set.assert_not_called()
 
     def test_duplicate_event_ids_rejected(self):
         with self.assertRaises(RevocationAuditError):
