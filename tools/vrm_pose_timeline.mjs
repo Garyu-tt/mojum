@@ -10,7 +10,6 @@ const EPOCH = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const JOINT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const MAX_FRAMES = 10000;
 const MAX_JOINTS = 128;
-const MAX_TICK = Number.MAX_SAFE_INTEGER;
 
 function exactRecord(value, keys, name) {
   if (value === null || typeof value !== 'object' || Array.isArray(value) ||
@@ -87,6 +86,7 @@ export function createVrmPoseTimeline(inputFrames) {
   const frames = [];
   let expectedJointIds = null;
   let firstEpoch = null;
+  let firstRevision = null;
   let lastSequence = null;
   let lastTick = null;
   let lastTime = null;
@@ -95,9 +95,12 @@ export function createVrmPoseTimeline(inputFrames) {
     const frame = cloneFrame(input, expectedJointIds);
     if (firstEpoch === null) {
       firstEpoch = frame.epoch;
+      firstRevision = frame.revision;
       expectedJointIds = frame.joints.map(joint => joint.id);
     } else if (frame.epoch !== firstEpoch) {
       throw new TypeError('timeline cannot mix body epochs');
+    } else if (frame.revision !== firstRevision) {
+      throw new TypeError('timeline cannot mix body revisions');
     }
     if (lastSequence !== null &&
         (frame.sequence !== lastSequence + 1 ||
