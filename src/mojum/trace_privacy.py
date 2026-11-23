@@ -15,6 +15,8 @@ from typing import Mapping
 SCHEMA = "mojum.trace-envelope.v1"
 MAX_FIELDS = 12
 MAX_STRING_LENGTH = 128
+MAX_INTEGER = 2**63 - 1
+MAX_PR_NUMBER = 2**31 - 1
 _SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _TRACE_ID_RE = re.compile(r"[0-9a-f]{32,64}\Z")
@@ -90,10 +92,12 @@ def _required_text(raw: Mapping[str, object], key: str, pattern: re.Pattern[str]
     return value
 
 
-def _required_int(raw: Mapping[str, object], key: str, minimum: int) -> int:
+def _required_int(
+    raw: Mapping[str, object], key: str, minimum: int, maximum: int = MAX_INTEGER
+) -> int:
     value = raw.get(key)
-    if type(value) is not int or value < minimum:
-        raise TracePrivacyError(f"{key} must be an integer >= {minimum}")
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise TracePrivacyError(f"{key} must be an integer in [{minimum}, {maximum}]")
     return value
 
 
@@ -101,8 +105,8 @@ def _optional_int(raw: Mapping[str, object], key: str) -> int | None:
     if key not in raw or raw[key] is None:
         return None
     value = raw[key]
-    if type(value) is not int or value < 0:
-        raise TracePrivacyError(f"{key} must be a non-negative integer")
+    if type(value) is not int or not 0 <= value <= MAX_INTEGER:
+        raise TracePrivacyError(f"{key} must be an integer in [0, {MAX_INTEGER}]")
     return value
 
 
@@ -149,7 +153,7 @@ def sanitize_trace_event(raw: object) -> TraceEnvelope:
         trace_id=_required_text(raw, "trace_id", _TRACE_ID_RE),
         lease_id=_required_text(raw, "lease_id", _ID_RE),
         fencing_token=_required_int(raw, "fencing_token", 1),
-        pr_number=_required_int(raw, "pr_number", 1),
+        pr_number=_required_int(raw, "pr_number", 1, MAX_PR_NUMBER),
         head_sha=_required_text(raw, "head_sha", _SHA_RE),
         event_type=event_type,
         timestamp_ms=_required_int(raw, "timestamp_ms", 0),
