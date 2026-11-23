@@ -140,7 +140,7 @@ class ClothSeamTests(unittest.TestCase):
     def test_non_manifold_edge_rejected(self):
         v, t, s = fixture()
         v.extend([[0.5, -1.0, 0.0]])
-        t.append([0, 1, 8])
+        t.append([0, 2, 8])
         with self.assertRaises(ClothSeamError):
             self.admit(vertices=v, triangles=t, seams=s)
 
