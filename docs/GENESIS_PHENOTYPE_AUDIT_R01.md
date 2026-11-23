@@ -14,7 +14,8 @@ print(report.to_dict())
 ## Admission and resource limits
 - Both inputs must be exact built-in dictionaries containing JSON-native data.
 - Source classification must be explicitly PUBLIC_SYNTHETIC.
-- Maximum canonical input size: 1 MiB per input.
+- Maximum compact canonical JSON size: 1 MiB per input, preflighted before serialization including quoted/escaped string values, object keys, separators and scalar representations.
+- Integers are restricted to the signed 64-bit range before conversion or serialization; non-finite floats and unpaired Unicode surrogates are rejected.
 - Maximum nesting depth: 24; maximum traversed nodes: 20,000 per input.
 - Strings are UTF-8 encodable and at most 16,384 characters.
 - Non-finite numbers, custom mappings/containers, non-string keys and unsupported objects are rejected.
