@@ -29,6 +29,16 @@ class ClothMaterialProfile:
 
     SCHEMA: ClassVar[str] = "mojum.cloth.material-profile/1"
     CLASSIFICATION: ClassVar[str] = "PUBLIC_SYNTHETIC"
+    _BOUNDS: ClassVar[tuple[tuple[str, int, int], ...]] = (
+        # Upper bounds are admission/resource-safety limits, not material claims.
+        ("areal_density_ug_m2", 1, 1_000_000_000_000),
+        ("thickness_nm", 1, 1_000_000_000),
+        ("stretch_stiffness_uN_m", 1, 1_000_000_000_000_000),
+        ("bend_stiffness_uNm", 0, 1_000_000_000_000),
+        ("damping_ratio_ppm", 0, 1_000_000),
+        ("static_friction_ppm", 0, 10_000_000),
+        ("dynamic_friction_ppm", 0, 10_000_000),
+    )
 
     schema: str
     classification: str
@@ -40,24 +50,16 @@ class ClothMaterialProfile:
     static_friction_ppm: int
     dynamic_friction_ppm: int
 
-    _BOUNDS: ClassVar[dict[str, tuple[int, int]]] = {
-        # Upper bounds are admission/resource-safety limits, not material claims.
-        "areal_density_ug_m2": (1, 1_000_000_000_000),
-        "thickness_nm": (1, 1_000_000_000),
-        "stretch_stiffness_uN_m": (1, 1_000_000_000_000_000),
-        "bend_stiffness_uNm": (0, 1_000_000_000_000),
-        "damping_ratio_ppm": (0, 1_000_000),
-        "static_friction_ppm": (0, 10_000_000),
-        "dynamic_friction_ppm": (0, 10_000_000),
-    }
-
     def __post_init__(self) -> None:
+        # Prevent subclasses from replacing attribute access or validation behavior.
+        if type(self) is not ClothMaterialProfile:
+            raise ClothMaterialError("material profile subclasses are not supported")
         if type(self.schema) is not str or self.schema != self.SCHEMA:
             raise ClothMaterialError("unsupported material profile schema")
         if type(self.classification) is not str or self.classification != self.CLASSIFICATION:
             raise ClothMaterialError("material profile must be PUBLIC_SYNTHETIC")
-        for field, (minimum, maximum) in self._BOUNDS.items():
-            value = getattr(self, field)
+        for field, minimum, maximum in self._BOUNDS:
+            value = object.__getattribute__(self, field)
             if type(value) is not int:
                 raise ClothMaterialError(f"{field} must be an exact integer")
             if value < minimum or value > maximum:
@@ -92,7 +94,9 @@ class ClothMaterialProfile:
 
         # The exact dict check above means these lookups cannot dispatch to user code.
         fields = {key: dict.__getitem__(value, key) for key in expected}
-        return cls(**fields)
+        if cls is not ClothMaterialProfile:
+            raise ClothMaterialError("material profile subclasses are not supported")
+        return ClothMaterialProfile(**fields)
 
     def to_mapping(self) -> dict[str, str | int]:
         """Return a detached canonical mapping; callers may mutate it safely."""
