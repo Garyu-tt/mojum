@@ -47,8 +47,9 @@ def _policy(policy: Any) -> dict[str, Any]:
         values = policy[key]
         if type(values) not in (list, tuple) or len(values) > 128:
             raise AssetPolicyError(f"{key} must be a bounded list or tuple")
-        if any(not _token(item) for item in values) or len(set(values)) != len(values):
-            raise AssetPolicyError(f"{key} contains invalid or duplicate tokens")
+        valid = _MEDIA_TYPE.fullmatch if key == "allowed_media_types" else _token
+        if any(type(item) is not str or valid(item) is None for item in values) or len(set(values)) != len(values):
+            raise AssetPolicyError(f"{key} contains invalid or duplicate values")
     if type(policy["max_asset_bytes"]) is not int or not 1 <= policy["max_asset_bytes"] <= 2**40:
         raise AssetPolicyError("max_asset_bytes must be an exact int in range")
     if type(policy["max_dependencies"]) is not int or not 0 <= policy["max_dependencies"] <= 128:
