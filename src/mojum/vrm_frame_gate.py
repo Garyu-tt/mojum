@@ -145,9 +145,14 @@ class PoseFrameGate:
         if type(raw_joints) is not dict or not 1 <= len(raw_joints) <= self._max_joints:
             raise FrameGateError("invalid joint map size")
         normalized: list[tuple[str, tuple[float, float, float]]] = []
+        seen_joint_names: set[str] = set()
         for name, coordinates in raw_joints.items():
             if type(name) is not str or not _JOINT_RE.fullmatch(name):
                 raise FrameGateError("invalid joint name")
+            folded_name = name.casefold()
+            if folded_name in seen_joint_names:
+                raise FrameGateError("joint names must be unique ignoring ASCII case")
+            seen_joint_names.add(folded_name)
             if type(coordinates) not in (list, tuple) or len(coordinates) != 3:
                 raise FrameGateError("each joint must have three coordinates")
             xyz: list[float] = []
