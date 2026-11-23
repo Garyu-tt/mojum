@@ -21,7 +21,10 @@ packages in Mojum's normal Python 3.11+ CPU-first install.
   typed values. Use a distinct key per environment, handle it outside the
   repository and rotate deliberately (rotation changes correlation).
 - `ci_complete` and `qa_review` require measured booleans; QA must carry
-  both CI and independently observed QA outcomes. A CI pass with a QA failure
+  both CI and independently observed QA outcomes. Their status cannot contradict
+  the corresponding measured result: only a true outcome can carry `success`;
+  false outcomes may be `failure`, `blocked` or `deferred`.
+  A CI pass with a QA failure
   increments `ci_false_success` in the offline summary. Unknown is never
   silently treated as a passing check.
 - Every PR/CI/QA record carries the exact PR commit SHA. Callers must verify

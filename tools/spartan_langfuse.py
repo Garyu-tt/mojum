@@ -84,6 +84,10 @@ def validate_event(event: SafeEvent) -> None:
             raise ValueError("QA event needs both CI and independent QA results")
     elif event.ci_passed is not None or event.qa_passed is not None:
         raise ValueError("non-CI/QA events cannot assert acceptance results")
+    if event.stage in {"ci_complete", "qa_review"}:
+        measured = event.ci_passed if event.stage == "ci_complete" else event.qa_passed
+        if (event.status == "success") is not measured:
+            raise ValueError("status contradicts measured CI/QA result")
 
 
 def _key(secret: bytes) -> bytes:
