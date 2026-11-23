@@ -36,6 +36,20 @@ test('seek, step in both directions and rewind are deterministic', () => {
   assert.equal(timeline.position(), 0);
 });
 
+test('joint canonical order is locale-independent ASCII code-point order', () => {
+  const mixedCase = frame(0, {
+    joints: [
+      {id: 'a', angle_rad: 0.1},
+      {id: 'A', angle_rad: 0.2},
+      {id: 'B', angle_rad: 0.3},
+      {id: 'b', angle_rad: 0.4},
+    ],
+  });
+  const timeline = createVrmPoseTimeline([mixedCase]);
+  assert.deepEqual(timeline.current().joints.map(joint => joint.id),
+    ['A', 'B', 'a', 'b']);
+});
+
 test('frame and joint data are detached and immutable', () => {
   const first = frame(0);
   const timeline = createVrmPoseTimeline([first, frame(1)]);
