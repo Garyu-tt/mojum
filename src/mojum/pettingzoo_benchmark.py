@@ -95,10 +95,10 @@ def run_episode(factory, *, seed, policy="frozen", cycles=MAX_CYCLES, enabled=Fa
     """
     if enabled is not True:
         raise BenchmarkError("explicit enabled=True required")
-    _index(seed, 0, 2**32 - 1, "seed")
+    seed = _index(seed, 0, 2**32 - 1, "seed")
     if policy not in ("frozen", "online_transition"):
         raise BenchmarkError("unknown policy")
-    _index(cycles, 1, 64, "cycles")
+    cycles = _index(cycles, 1, 64, "cycles")
     env = factory()
     if env is None:
         raise BenchmarkError("environment factory returned None")
@@ -164,7 +164,10 @@ def run_benchmark(factory, *, enabled=False, seeds=HELD_OUT_SEEDS):
         raise BenchmarkError("explicit enabled=True required")
     if type(seeds) not in (tuple, list) or not 1 <= len(seeds) <= 4:
         raise BenchmarkError("bounded held-out seed list required")
-    if len(set(_index(s, 0, 2**32 - 1, "seed") for s in seeds)) != len(seeds):
+    # Freeze validated scalars once. Never reuse caller-owned __index__ objects
+    # after validation: later calls may return a different, unbounded value.
+    seeds = tuple(_index(s, 0, 2**32 - 1, "seed") for s in seeds)
+    if len(set(seeds)) != len(seeds):
         raise BenchmarkError("duplicate or invalid held-out seed")
     episodes = [run_episode(factory, seed=s, policy=p, enabled=True)
                 for s in seeds for p in ("frozen", "online_transition")]
