@@ -15,9 +15,19 @@ SCHEMA = "mojum.gym.point-room/1"
 ACTIONS = ((0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0))
 
 
+def _finite_scalar(value):
+    """Reject bool, nonfinite and integer overflow with a stable validation result."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _point(value, label):
     if (type(value) not in (tuple, list) or len(value) != 2
-            or any(type(x) not in (int, float) or not math.isfinite(x) for x in value)):
+            or not all(_finite_scalar(x) for x in value)):
         raise ValueError(f"invalid {label}")
     return tuple(float(x) for x in value)
 
@@ -35,10 +45,10 @@ class PointRoomEpisode:
         # Validate both endpoints against the authoritative room collision rules.
         initial_state(room, *self.start)
         initial_state(room, *self.goal)
-        if (type(step_m) not in (int, float) or not math.isfinite(step_m)
+        if (not _finite_scalar(step_m)
                 or not 0 < step_m <= 1):
             raise ValueError("invalid step size")
-        if (type(goal_radius_m) not in (int, float) or not math.isfinite(goal_radius_m)
+        if (not _finite_scalar(goal_radius_m)
                 or not 0 <= goal_radius_m <= 1):
             raise ValueError("invalid goal radius")
         if type(max_steps) is not int or not 1 <= max_steps <= 10000:
