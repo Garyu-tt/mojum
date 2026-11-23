@@ -16,6 +16,8 @@ SCHEMA = "mojum.cloth.damage-audit/1"
 PROVENANCE = "PUBLIC_SYNTHETIC"
 MAX_SAMPLES = 4096
 MAX_EDGE_ID = 96
+MAX_FIELD_KEY = 64
+MAX_PROFILE_REVISION = 96
 _REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}\Z")
 
 
@@ -69,7 +71,7 @@ def audit_damage(request: Any) -> DamageReport:
     if len(request) != 6:
         raise ClothDamageError("request fields do not match schema")
     request_keys = tuple(request)
-    if any(type(key) is not str for key in request_keys):
+    if any(type(key) is not str or len(key) > MAX_FIELD_KEY for key in request_keys):
         raise ClothDamageError("request fields do not match schema")
     if set(request_keys) != {
         "schema", "provenance", "consent", "profile_revision", "threshold", "samples"
@@ -83,7 +85,8 @@ def audit_damage(request: Any) -> DamageReport:
         raise ClothDamageError("PUBLIC_SYNTHETIC provenance and explicit consent required")
 
     revision = request["profile_revision"]
-    if type(revision) is not str or not _REVISION.fullmatch(revision):
+    if (type(revision) is not str or len(revision) > MAX_PROFILE_REVISION
+            or not _REVISION.fullmatch(revision)):
         raise ClothDamageError("invalid profile_revision")
 
     threshold = _exact_number(request["threshold"], "threshold")
@@ -103,7 +106,7 @@ def audit_damage(request: Any) -> DamageReport:
         if len(sample) != 3:
             raise ClothDamageError(f"sample {index} has invalid fields")
         sample_keys = tuple(sample)
-        if any(type(key) is not str for key in sample_keys):
+        if any(type(key) is not str or len(key) > MAX_FIELD_KEY for key in sample_keys):
             raise ClothDamageError(f"sample {index} has invalid fields")
         if set(sample_keys) != {"tick", "edge_id", "stretch_ratio"}:
             raise ClothDamageError(f"sample {index} has invalid fields")
