@@ -67,6 +67,7 @@ def _canonical_digest(payload: dict) -> str:
 def audit_calibration(
     observations: list[dict] | tuple[dict, ...],
     *,
+    source_classification: object = None,
     bin_count: int = 10,
 ) -> CalibrationReport:
     """Audit ordered {tick, forecast, observed} PUBLIC_SYNTHETIC pairs.
@@ -76,6 +77,8 @@ def audit_calibration(
     subclasses and extra fields rather than invoking custom mapping behavior.
     Empty bins are included with None statistics.
     """
+    if type(source_classification) is not str or source_classification != PROVENANCE:
+        raise CalibrationError("explicit PUBLIC_SYNTHETIC classification required")
     if type(observations) not in (list, tuple):
         raise CalibrationError("observations must be a native list or tuple")
     if not 1 <= len(observations) <= MAX_SAMPLES:
@@ -91,8 +94,10 @@ def audit_calibration(
         if len(row) != 3:
             raise CalibrationError(f"row {index} has an unexpected field count")
         keys = tuple(row.keys())
-        if any(type(key) is not str for key in keys):
-            raise CalibrationError(f"row {index} has a non-native field name")
+        # All schema keys are at most eight ASCII characters. Reject long
+        # caller-controlled names before hashing them in a temporary set.
+        if any(type(key) is not str or len(key) > 8 for key in keys):
+            raise CalibrationError(f"row {index} has an invalid field name")
         if set(keys) != {"tick", "forecast", "observed"}:
             raise CalibrationError(f"row {index} has an unexpected schema")
 
