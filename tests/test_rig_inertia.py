@@ -189,6 +189,26 @@ class RigInertiaTests(unittest.TestCase):
         ]
         self.assertEqual(len(validate_rig_inertia(value).sha256), 64)
 
+    def test_tiny_scaled_positive_definite_tensor_is_accepted(self):
+        value = packet()
+        value["links"][0]["inertia_kg_m2"] = [
+            [1e-200, 0.0, 0.0],
+            [0.0, 1e-200, 0.0],
+            [0.0, 0.0, 1e-200],
+        ]
+        result = validate_rig_inertia(value)
+        self.assertEqual(len(result.sha256), 64)
+
+    def test_tiny_scaled_triangle_inequality_is_still_enforced(self):
+        value = packet()
+        value["links"][0]["inertia_kg_m2"] = [
+            [1e-320, 0.0, 0.0],
+            [0.0, 1e-320, 0.0],
+            [0.0, 0.0, 3e-320],
+        ]
+        with self.assertRaises(RigInertiaError):
+            validate_rig_inertia(value)
+
     def test_tensor_rejects_boolean_and_nonfinite_values(self):
         for bad in (True, float("nan"), float("inf"), 10**1000):
             with self.subTest(bad=repr(bad)[:30]):
