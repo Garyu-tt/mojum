@@ -75,7 +75,11 @@ def read_target_visibility(
     Both endpoints must lie inside the room, but a target can lie on/in an
     obstacle and is then occluded. Source state is never advanced or modified.
     """
-    if type(opt_in) is not bool or opt_in is not True or visibility != PUBLIC_SYNTHETIC or type(visibility) is not str:
+    # Admit exact native types before comparing labels: hostile objects and
+    # str subclasses may override comparison operators and escape ValueError.
+    if (type(opt_in) is not bool or opt_in is not True
+            or type(visibility) is not str
+            or visibility != PUBLIC_SYNTHETIC):
         raise ValueError("explicit PUBLIC_SYNTHETIC opt-in required")
     _validate_source(room, state, expected_tick, expected_revision)
     if type(targets) not in (list, tuple) or not 1 <= len(targets) <= MAX_TARGETS:
