@@ -11,6 +11,7 @@ HARD = {"vertex_count": 2_000_000, "index_count": 12_000_000, "material_count": 
 COST = {"vertex_count": 32, "index_count": 4, "material_count": 256,
         "texture_bytes": 1, "joint_count": 256}
 FIELDS = ("vertex_count", "index_count", "material_count", "texture_bytes", "joint_count")
+EXPECTED_KEYS = frozenset(("schema", *FIELDS))
 
 
 class ResourceBudgetError(ValueError):
@@ -64,20 +65,18 @@ def assess_vrm_resource_budget(inventory, limits=None):
         limits = ResourceLimits()
     if type(limits) is not ResourceLimits:
         raise ResourceBudgetError("limits must be a ResourceLimits instance")
-    # Frozen dataclasses can still be altered with object.__setattr__; revalidate
-    # at the trust boundary instead of relying solely on constructor validation.
     limits.__post_init__()
     if type(inventory) is not dict:
         raise ResourceBudgetError("inventory must be a native dict")
-    # Validate shape and primitive bounds BEFORE serializing caller-controlled
-    # values. Serializing first can allocate an unbounded string for a huge int,
-    # deeply nested value, or oversized key despite the later 16 KiB check.
-    # Reject hostile/oversized keys before set construction can hash or
-    # compare caller-controlled str subclasses or scan unbounded key strings.
+    # O(1) cardinality gate before iterating caller-controlled keys.
+    if len(inventory) != len(EXPECTED_KEYS):
+        raise ResourceBudgetError("inventory fields must exactly match the versioned schema")
+    # Check exact key primitives and short lengths before hashing or comparing
+    # caller-controlled keys in a set operation.
     for key in inventory:
         if type(key) is not str or not key or len(key) > 32:
             raise ResourceBudgetError("inventory field names must be bounded native strings")
-    if set(inventory) != {"schema", *FIELDS}:
+    if set(inventory) != EXPECTED_KEYS:
         raise ResourceBudgetError("inventory fields must exactly match the versioned schema")
     if type(inventory["schema"]) is not str or inventory["schema"] != SCHEMA:
         raise ResourceBudgetError("unsupported inventory schema")
