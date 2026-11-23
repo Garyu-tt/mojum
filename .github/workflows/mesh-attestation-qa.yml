@@ -1,0 +1,35 @@
+name: Mesh attestation focused QA
+on:
+  pull_request:
+    paths:
+      - "src/mojum/mesh_attestation.py"
+      - "tests/test_mesh_attestation.py"
+      - "docs/MESH_ATTESTATION_R01.md"
+      - ".github/workflows/mesh-attestation-qa.yml"
+permissions:
+  contents: read
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Assert exact pull request head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile implementation and tests
+        run: python -m py_compile src/mojum/mesh_attestation.py tests/test_mesh_attestation.py
+      - name: Run focused mesh attestation tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_mesh_attestation.py" -v
