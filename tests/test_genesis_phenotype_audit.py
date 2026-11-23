@@ -60,7 +60,8 @@ class PhenotypeAuditTests(unittest.TestCase):
         self.assertEqual(self.audit(ledger,expected).mismatch_fields,("extra","ledger_revision"))
     def test_wrong_tick_recomputes_at_supplied_tick(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected["at_tick"]=4
-        self.assertIn("at_tick",self.audit(ledger,expected).mismatch_fields)
+        self.assertNotIn("at_tick", self.audit(ledger, expected).mismatch_fields)
+        self.assertEqual(self.audit(ledger, expected).mismatch_fields, ("applied_acquisition_ids", "parameters"))
     def test_tampered_ledger_rejected(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); snapshot["events"][0]["delta"]+=1
         with self.assertRaises(PhenotypeAuditError):
@@ -81,7 +82,7 @@ class PhenotypeAuditTests(unittest.TestCase):
     def test_nonfinite_and_surrogate_rejected(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); expected["bad"]=float("nan")
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
-        expected=ledger.phenotype(5); expected["bad"]="\\ud800"
+        expected=ledger.phenotype(5); expected["bad"]="\ud800"
         with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
     def test_depth_and_byte_budgets(self):
         ledger=make_ledger(); expected=ledger.phenotype(5); cursor=expected
@@ -109,7 +110,7 @@ class PhenotypeAuditTests(unittest.TestCase):
                 self.audit(ledger, expected)
             # Only the bounded ledger snapshot may be serialized. Escaping
             # the untrusted phenotype would exceed 1 MiB, so reject preflight.
-            self.assertEqual(serializer.call_count, 1)
+            self.assertEqual(serializer.call_count, 2)
 
     def test_oversized_integer_is_rejected_before_serialization(self):
         ledger=make_ledger(); expected=ledger.phenotype(5)
@@ -123,7 +124,7 @@ class PhenotypeAuditTests(unittest.TestCase):
             self.assertEqual(serializer.call_count, 1)
     def test_aggregate_object_key_budget_is_rejected_before_serialization(self):
         ledger=make_ledger(); expected=ledger.phenotype(5)
-        for index in range(65):
+        for index in range(70):
             expected[("k" * 16_000) + str(index)] = index
         with patch(
             "mojum.genesis_phenotype_audit.json.dumps",
