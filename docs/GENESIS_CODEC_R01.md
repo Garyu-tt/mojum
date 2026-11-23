@@ -17,7 +17,9 @@ assert restored.revision == ledger.revision
   produce byte-identical output.
 - Rejects duplicate object keys at every nesting level, invalid UTF-8, UTF-8
   BOM, malformed JSON, non-finite numeric constants, empty input, non-object
-  roots and payloads larger than 1 MiB.
+  roots and payloads larger than 1 MiB. String inputs are first rejected by
+  Unicode code-point count before UTF-8 encoding, then checked against the exact
+  encoded-byte limit.
 - Restores through `GenomeLedger.from_snapshot`, preserving the existing
   GENESIS schema, event validation, event-count bound and content-revision
   verification. This codec adds no parallel interpretation of the wire format.
