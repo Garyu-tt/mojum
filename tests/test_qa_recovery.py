@@ -95,6 +95,31 @@ class RecoveryTests(unittest.TestCase):
                         task("active", state, attempt=0, lease=20)
                     ], observed_at=10)
 
+    def test_oversized_identifier_rejected_before_utf8_work(self):
+        with self.assertRaises(RecoveryError):
+            plan_recovery([task("x" * 1_000_000)], observed_at=0)
+
+    def test_hostile_string_subclass_field_key_rejected_before_hashing(self):
+        class HostileKey(str):
+            active = False
+
+            def __hash__(self):
+                if self.active:
+                    raise AssertionError("hostile hash must not run")
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                if self.active:
+                    raise AssertionError("hostile equality must not run")
+                return str.__eq__(self, other)
+
+        item = task("safe")
+        key = HostileKey("task_id")
+        item[key] = item.pop("task_id")
+        key.active = True
+        with self.assertRaises(RecoveryError):
+            plan_recovery([item], observed_at=0)
+
     def test_bounds_and_exact_types(self):
         with self.assertRaises(RecoveryError):
             plan_recovery([task("a")] * 501, observed_at=0)
