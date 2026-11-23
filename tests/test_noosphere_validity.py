@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.noosphere_validity import (
     SCHEMA,
@@ -128,6 +129,17 @@ class NoosphereValidityTests(unittest.TestCase):
             audit_json(json.dumps({"schema": "wrong", "facts": []}))
         with self.assertRaises(ValidityAuditError):
             audit_json(b" " * (8 * 1024 * 1024 + 1))
+
+    def test_value_fanout_is_rejected_before_stack_or_entry_materialization(self):
+        oversized_list = list(range(100_001))
+        oversized_dict = {f"key-{index}": index for index in range(100_001)}
+
+        for value in (oversized_list, oversized_dict):
+            with self.subTest(value_type=type(value).__name__):
+                with patch("mojum.noosphere_validity.json.dumps") as dumps:
+                    with self.assertRaisesRegex(ValidityAuditError, "node budget"):
+                        audit_validity([fact("oversized", value=value)])
+                    dumps.assert_not_called()
 
     def test_budgets_bound_pathological_overlap(self):
         rows = [fact(str(i), start=0, end=None, value="same") for i in range(800)]
