@@ -186,14 +186,24 @@ class BorgColdArchiveTests(unittest.TestCase):
 
     def test_second_archive_can_recover_after_first_corrupted(self):
         self._make_journal()
+        # Two independently initialized *local repo paths*, not two
+        # archives within the same Borg repository. Different host/failure
+        # domain recovery is still beyond this controlled fake-Borg test.
+        repo2 = self.root / "second-repository"
+        repo2.mkdir()
         a = self._archive("copy-a")
-        b = self._archive("copy-b")
+        b = archive_cold_copy(self.source, repo2, "copy-b", SEED, GRAPH,
+                              agent_id=OWNER)
         self.fake.archives["copy-a"] = b"broken"
         with self.assertRaises(ValueError):
             self._restore(a, destination=self.root / "bad.sqlite3")
         self.assertFalse((self.root / "bad.sqlite3").exists())
-        recovered = self._restore(b)
-        self.assertEqual(recovered["journal_head"], a["journal_head"])
+        recovered = restore_cold_copy(
+            repo2, "copy-b", self.restored, SEED, GRAPH,
+            agent_id=OWNER, expected_head=a["journal_head"],
+            expected_sha256=a["db_sha256"], expected_tick=a["tick"],
+        )
+        self.assertEqual(recovered["journal_head"], b["journal_head"])
         self.assertEqual(recovered["tick"], 4)
 
 
