@@ -12,7 +12,7 @@ PBD, GLB skinning, collision detection, self-contact, equip/unequip inside a run
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_garment_contract.py' -v
 ~~~
 
-Seven deterministic unittest methods include malformed JSON and manifest fields,
+Eight deterministic unittest methods include malformed JSON and manifest fields,
 path traversal, symlink rejection, changed GLB hashes, conflicting slots,
 stale revisions, rig changes, age-range rejection, and fail-closed rebinding.
 All synthetic mesh bytes are built by the tests. Baseline Python stdlib only,
@@ -64,7 +64,8 @@ a multi-process or distributed CAS without an authoritative store.
   revisions <=2^63-1. All schema fields fail closed on unexpected
   keys and bool-as-int; input is detached before any state change.
 - Isolated local tests completed on Python 3.13.5 with all 7
-  methods passing. No MuJoCo/Jolt/Android benchmark or latency
+  original methods passing. An eighth regression guards exact schema string
+  discrimination; final-HEAD GitHub CI evidence is required for the combined suite. No MuJoCo/Jolt/Android benchmark or latency
   measurements claimed.
 - Feature is opt-in by import. No change to Aquarium, default
   package dependencies, canonical Graph IR or private Noosphere.
