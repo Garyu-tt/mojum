@@ -87,17 +87,24 @@ class CausalTailTests(unittest.TestCase):
 
     def test_hostile_mapping_keys_and_schema_values_are_rejected_before_comparison(self):
         class HostileKey(str):
+            armed = False
             def __hash__(self):
-                raise AssertionError("hostile key hash executed")
+                if self.armed:
+                    raise AssertionError("hostile key hash executed")
+                return str.__hash__(self)
             def __eq__(self, other):
-                raise AssertionError("hostile key equality executed")
+                if self.armed:
+                    raise AssertionError("hostile key equality executed")
+                return str.__eq__(self, other)
 
         class HostileText(str):
             def __eq__(self, other):
                 raise AssertionError("hostile schema equality executed")
 
         snapshot = CellExplorerV3Escape().snapshot()
-        snapshot[HostileKey("schema")] = snapshot.pop("schema")
+        root_key = HostileKey("schema")
+        snapshot[root_key] = snapshot.pop("schema")
+        root_key.armed = True
         with self.assertRaisesRegex(CellV3EscapeError, "mapping keys"):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
@@ -107,9 +114,11 @@ class CausalTailTests(unittest.TestCase):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
         snapshot = CellExplorerV3Escape().snapshot()
+        tail_key = HostileKey("tick")
         snapshot["outcome_tail"] = [{
-            HostileKey("tick"): 0, "cell": "0:0", "action": "rest", "blocked": False,
+            tail_key: 0, "cell": "0:0", "action": "rest", "blocked": False,
         }]
+        tail_key.armed = True
         snapshot["last_tick"] = 0
         snapshot["updates"] = 1
         snapshot["records"] = {"0:0": {"rest": [1, 0]}}
