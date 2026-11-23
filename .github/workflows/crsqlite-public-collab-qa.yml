@@ -1,0 +1,35 @@
+name: CR-SQLite PUBLIC synthetic metadata boundary QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/crsqlite_collab.py'
+      - 'tests/test_crsqlite_collab.py'
+      - '.github/workflows/crsqlite-public-collab-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stdlib-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run PUBLIC-only fake/native-preflight regressions (no extension loaded)
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_crsqlite_collab.py -v
