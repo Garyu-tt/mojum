@@ -130,6 +130,35 @@ assert.equal(a.digest, b.digest);
 assert.equal(JSON.stringify(original), before);
 """)
 
+
+    def test_digest_order_does_not_depend_on_locale_collation(self) -> None:
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
+const input = {
+  schema:'mojum.vrm-binding-manifest/1',
+  expected_joint_ids:['a', 'A', 'z'],
+  mappings:[
+    {id:'z', bone:'head', axis:'z'},
+    {id:'a', bone:'hips', axis:'x'},
+    {id:'A', bone:'hips', axis:'y'}
+  ],
+  available_bones:['hips', 'head']
+};
+const original = String.prototype.localeCompare;
+String.prototype.localeCompare = function() {
+  throw new Error('locale-dependent collation must not be used');
+};
+try {
+  const result = validateVrmBindingManifest(input);
+  assert.equal(result.valid, true);
+  assert.match(result.digest, /^[0-9a-f]{64}$/);
+} finally {
+  String.prototype.localeCompare = original;
+}
+""")
+
     def test_rejects_duplicate_expected_and_available_inventory(self) -> None:
         self.run_node(r"""
 import assert from 'node:assert/strict';
