@@ -10,9 +10,11 @@ authority-signed revocation snapshot.
   already-authorized issuer or synthetic fixture.
 - verify_snapshot(..., authority_keys, now_tick, minimum_generation) validates
   schema, bounded key inventory, signature, validity window and caller-supplied
-  rollback floor.
+  rollback floor, then returns an in-process verified snapshot object.
 - check_peer_access(..., operation="read"|"write") returns the revocation-list
-  decision for one attempted protected read or write.
+  decision for one attempted protected read or write. It accepts only the exact
+  object instance returned by verify_snapshot(); reconstructed or copied
+  dataclass instances do not inherit verification provenance.
 
 Authority keys are supplied out of band and must be 32..128 bytes. Snapshot
 generations are monotonic only relative to the caller-supplied minimum_generation;
