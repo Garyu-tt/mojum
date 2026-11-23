@@ -34,7 +34,7 @@ bound. Boolean values are not numbers in this contract.
 
 The total position matrix is capped at 65,536 scalar values in addition to
 per-axis bounds, preventing a maximum-frame by maximum-joint Cartesian product.
-The limits argument is an exact native dictionary whose keys exactly match
+The limits argument is an exact native dictionary with at most 256 entries; its cardinality is checked before scanning keys, and its keys exactly match
 the joint names. Each limit is a positive, finite native int/float in
 position-units per second squared. The input is intentionally in-memory only;
 this helper does not parse untrusted JSON or read files.
