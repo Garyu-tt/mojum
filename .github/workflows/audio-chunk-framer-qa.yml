@@ -1,0 +1,42 @@
+name: Mojum audio chunk framer exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/audio_chunk_framer.py'
+      - 'tests/test_audio_chunk_framer.py'
+      - 'src/mojum/audio_energy.py'
+      - '.github/workflows/audio-chunk-framer-qa.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  audio-chunk-framer-stdlib:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    name: audio-chunk-framer-stdlib (${{ matrix.python-version }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact PR head
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+      - name: Run actual PCM16 chunk framer + energy compatibility tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_audio_chunk_framer.py' -v
