@@ -121,7 +121,11 @@ def _room(room):
 
 
 def _command(value):
-    if type(value) is not dict or set(value) != _COMMAND_KEYS:
+    # Check native key types before set equality: hostile key objects can spoof
+    # the hash/equality of expected string keys and pass the old set guard.
+    if (type(value) is not dict
+            or any(type(key) is not str for key in value)
+            or set(value) != _COMMAND_KEYS):
         _fail("invalid command keys")
     dx = _number(value["dx"], 1000)
     dy = _number(value["dy"], 1000)
