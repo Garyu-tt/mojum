@@ -94,18 +94,28 @@ class ClothDamageTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 with self.assertRaises(ClothDamageError):
                     audit_damage(bad)
-        with self.assertRaises(ClothDamageError):
-            audit_damage(request(profile_revision="../escape"))
+        for revision in ("../escape", "r" * 97):
+            with self.subTest(revision_length=len(revision)), self.assertRaises(ClothDamageError):
+                audit_damage(request(profile_revision=revision))
 
     def test_rejects_oversized_schema_mappings_before_key_validation(self):
         oversized_request = request(extra_1=1, extra_2=2)
         with self.assertRaises(ClothDamageError):
             audit_damage(oversized_request)
 
+        long_request_key = request()
+        long_request_key["x" * 65] = None
+        with self.assertRaises(ClothDamageError):
+            audit_damage(long_request_key)
+
         oversized_sample = {"tick": 1, "edge_id": "e", "stretch_ratio": 1.1}
         oversized_sample.update({f"extra_{i}": i for i in range(100)})
         with self.assertRaises(ClothDamageError):
             audit_damage(request([oversized_sample]))
+
+        long_sample_key = {"tick": 1, "edge_id": "e", "stretch_ratio": 1.1, "x" * 65: None}
+        with self.assertRaises(ClothDamageError):
+            audit_damage(request([long_sample_key]))
 
     def test_digest_changes_with_measurement(self):
         a = audit_damage(request([{"tick": 1, "edge_id": "e", "stretch_ratio": 1.1}]))
