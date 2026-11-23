@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from contextlib import closing
 import os
 from pathlib import Path
 import re
@@ -235,7 +236,8 @@ def restore_verified(executable: str, replica_dir: str, output: str, *,
         if any(Path(str(staged) + suffix).exists() for suffix in ("-wal", "-shm")):
             raise SafetyError("restore produced unverified SQLite sidecars")
         try:
-            with sqlite3.connect(staged.as_uri() + "?mode=ro&immutable=1", uri=True) as db:
+            # sqlite3.Connection.__exit__ commits/rolls back but never closes.
+            with closing(sqlite3.connect(staged.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
                 result = db.execute("PRAGMA integrity_check").fetchall()
                 if result != [("ok",)]:
                     raise SafetyError("SQLite integrity check failed")
