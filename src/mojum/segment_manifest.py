@@ -205,8 +205,11 @@ def parse_manifest(raw: bytes | bytearray | memoryview) -> SegmentManifest:
     """Parse canonical UTF-8 JSON, rejecting duplicate keys and wire ambiguity."""
     if type(raw) not in (bytes, bytearray, memoryview):
         raise SegmentManifestError("manifest wire input must be bytes-like")
+    raw_size = raw.nbytes if type(raw) is memoryview else len(raw)
+    if raw_size == 0 or raw_size > MAX_MANIFEST_BYTES:
+        raise SegmentManifestError("manifest wire size is outside the supported range")
     wire = bytes(raw)
-    if not wire or len(wire) > MAX_MANIFEST_BYTES:
+    if len(wire) != raw_size:
         raise SegmentManifestError("manifest wire size is outside the supported range")
 
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
