@@ -33,7 +33,7 @@ def fake_request(port, path, body=None, timeout=5):
                 {"id": 1, "is_processing": False, "n_ctx": 4096}]
     if path == "/v1/chat/completions":
         return {"model": body["model"], "choices": [
-            {"message": {"content": "proposal only"}}],
+            {"finish_reason": "stop", "message": {"content": "proposal only"}}],
             "usage": {"completion_tokens": 7}}
     raise AssertionError("unsupported test API")
 
@@ -148,7 +148,16 @@ class AdmissionTests(unittest.TestCase):
         for mutation in ({"model": "other"}, {"choices": []},
                          {"choices": [{"message": {"content": " "}}]},
                          {"usage": {"completion_tokens": 101}},
-                         {"usage": {"prompt_tokens": 101}}):
+                         {"usage": {"prompt_tokens": 101}},
+                         {"choices": [{"finish_reason": "length",
+                                      "message": {"content": "truncated"}}]},
+                         {"choices": [{"finish_reason": "tool_calls",
+                                      "message": {"content": "text",
+                                                  "tool_calls": [{"type": "function"}]}}]},
+                         {"choices": [{"finish_reason": "stop",
+                                      "message": {"content": "text", "tool_calls": []}}]},
+                         {"choices": [{"finish_reason": "stop",
+                                      "message": {"content": "text", "function_call": {}}}]}):
             def changed(port, path, body=None, timeout=5):
                 out = fake_request(port, path, body, timeout)
                 if path == "/v1/chat/completions":
@@ -182,6 +191,39 @@ class AdmissionTests(unittest.TestCase):
         t.join(3)
         self.assertFalse(t.is_alive())
         self.assertEqual(results, ["proposal only"])
+
+    def test_concurrent_sessions_share_one_endpoint_semaphore(self):
+        start, finish = Event(), Event()
+        p = provider(max_concurrent_calls=1)
+        def request(port, path, body=None, timeout=5):
+            if path == "/v1/chat/completions":
+                start.set()
+                if not finish.wait(4):
+                    raise RuntimeError("test timeout")
+            return fake_request(port, path, body, timeout)
+        first = ad.Session(p, request=request)
+        second = ad.Session(p, request=request)
+        self.assertIs(first._semaphore, second._semaphore)
+        # A second configuration must not reset or enlarge the same port gate.
+        with self.assertRaisesRegex(ad.AdmissionError, "conflicting"):
+            ad.Session(provider(max_concurrent_calls=2))
+        values = []
+        worker = Thread(target=lambda: values.append(first.complete(
+            "first", prompt_tokens_cap=100, completion_tokens_cap=100,
+            headroom=self.headroom)))
+        worker.start()
+        try:
+            self.assertTrue(start.wait(2))
+            with self.assertRaisesRegex(ad.AdmissionError, "parallel-call cap"):
+                second.complete("second", prompt_tokens_cap=100,
+                                completion_tokens_cap=100, headroom=self.headroom)
+        finally:
+            finish.set()
+            worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(values, ["proposal only"])
+        self.assertEqual(second.complete("third", prompt_tokens_cap=100,
+                         completion_tokens_cap=100, headroom=self.headroom), "proposal only")
 
     def test_caller_cannot_understate_prompt_token_budget(self):
         with self.assertRaisesRegex(ad.AdmissionError, "token ceiling cannot cover"):
@@ -237,7 +279,8 @@ class LocalHTTPTests(unittest.TestCase):
                 data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 assert self.path == "/v1/chat/completions"
                 raw = json.dumps({"model": data["model"], "choices": [
-                    {"message": {"content": "real localhost mock"}}]}).encode()
+                    {"finish_reason": "stop",
+                     "message": {"content": "real localhost mock"}}]}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
