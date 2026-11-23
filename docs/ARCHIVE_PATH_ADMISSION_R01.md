@@ -6,7 +6,9 @@ modify canonical Noosphere journals, authorize a restore, or attest contents.
 
 ## API
 
-`validate_member_path(path)` accepts one relative POSIX member name.
+`validate_member_path(path)` accepts one exact built-in string containing a
+relative POSIX member name. Ill-formed Unicode (including unpaired surrogates)
+is rejected as `ArchivePathError`; UTF-8 encoding errors never escape the API.
 `admit_member_paths(iterable, max_members=4096)` returns a tuple, preserving
 manifest order. The input is consumed once. Each UTF-8 name is limited to
 1024 bytes, each component to 255 bytes. The manifest is limited to 4096
@@ -32,5 +34,5 @@ not change existing archive serialization, schema or restore policy.
 
 `PYTHONPATH=src python -m unittest discover -s tests -p 'test_archive_path_admission.py' -v`
 
-Expected: eight hermetic tests; CI and independent QA must verify exact PR
+Expected: ten hermetic tests; CI and independent QA must verify exact PR
 head before merge. This submission does not claim a complete #141 fix.
