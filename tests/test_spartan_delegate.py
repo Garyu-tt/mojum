@@ -212,6 +212,26 @@ class DelegationTests(unittest.TestCase):
             finally:
                 db.close()
 
+    def test_install_preserves_caller_transaction_and_rollback(self):
+        # SQLite executescript() silently commits an active transaction.
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        try:
+            db.execute("CREATE TABLE tasks (id TEXT)")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT INTO tasks VALUES ('uncommitted')")
+            d.install(db)
+            self.assertTrue(db.in_transaction)
+            db.execute("ROLLBACK")
+            self.assertEqual(db.execute("SELECT count(*) FROM tasks").fetchone()[0], 0)
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='delegated_runs'"
+            ).fetchone())
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='delegated_pr_intents'"
+            ).fetchone())
+        finally:
+            db.close()
+
     def test_install_needs_existing_lease_authority(self):
         empty = sqlite3.connect(":memory:", isolation_level=None)
         try:
