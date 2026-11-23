@@ -179,12 +179,18 @@ def verify_witness(room, report):
     """
     expected = {"schema", "status", "start_revision", "goal", "grid",
                 "sampled_cells", "walkable_centers", "visited_vertices", "path"}
-    if type(report) is not dict or set(report) != expected:
+    if (type(report) is not dict
+            or any(type(key) is not str for key in report)
+            or set(report) != expected):
         raise ValueError("invalid route witness shape")
-    if report["schema"] != SCHEMA or report["status"] != "witness_found":
+    if (type(report["schema"]) is not str or report["schema"] != SCHEMA
+            or type(report["status"]) is not str
+            or report["status"] != "witness_found"):
         raise ValueError("no route witness to verify")
     grid = report["grid"]
-    if type(grid) is not dict or set(grid) != {"columns", "rows"}:
+    if (type(grid) is not dict
+            or any(type(key) is not str for key in grid)
+            or set(grid) != {"columns", "rows"}):
         raise ValueError("invalid grid metadata")
     columns, rows = grid["columns"], grid["rows"]
     _guard(room, columns, rows)
@@ -203,6 +209,7 @@ def verify_witness(room, report):
     state = None
     for step, frame in enumerate(path):
         if (type(frame) is not dict
+                or any(type(key) is not str for key in frame)
                 or set(frame) != {"tick", "position", "revision"}
                 or type(frame["tick"]) is not int or frame["tick"] != step
                 or type(frame["revision"]) is not str
@@ -212,7 +219,8 @@ def verify_witness(room, report):
         point = _point(frame["position"], "position")
         if step == 0:
             state = initial_state(room, *point)
-            if report["start_revision"] != state.revision:
+            if (type(report["start_revision"]) is not str
+                    or report["start_revision"] != state.revision):
                 raise ValueError("mismatched start revision")
         else:
             state, observation = advance(
