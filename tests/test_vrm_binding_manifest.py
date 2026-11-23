@@ -180,6 +180,29 @@ assert.deepEqual(report.duplicate_available_bones, ['hips']);
 """)
 
 
+    def test_rejects_trailing_line_terminators_in_joint_identifiers(self) -> None:
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const {validateVrmBindingManifest} = await import(pathToFileURL(process.argv[1]));
+const lineTerminators = ['\\n', '\\r', '\\u2028', '\\u2029'];
+for (const suffix of lineTerminators) {
+  const invalid = 'joint' + suffix;
+  assert.throws(() => validateVrmBindingManifest({
+    schema:'mojum.vrm-binding-manifest/1',
+    expected_joint_ids:[invalid],
+    mappings:[{id:invalid,bone:'hips',axis:'x'}],
+    available_bones:['hips']
+  }), TypeError);
+  assert.throws(() => validateVrmBindingManifest({
+    schema:'mojum.vrm-binding-manifest/1',
+    expected_joint_ids:['joint'],
+    mappings:[{id:invalid,bone:'hips',axis:'x'}],
+    available_bones:['hips']
+  }), TypeError);
+}
+""")
+
     def test_proxy_trap_failures_are_normalized_to_type_error(self) -> None:
         self.run_node(r"""
 import assert from 'node:assert/strict';
