@@ -9,20 +9,19 @@ from mojum.cell_policy_v4 import CellExplorerV4, CellV4Error
 from mojum.epoch_sense_v2 import EpochProprioception
 
 
-class _RehashBomb:
-    """Hash once for insertion; fail if a validator re-hashes it."""
+class _EqualityBomb:
+    """Collision with a valid string name must not invoke foreign equality."""
 
-    def __init__(self):
-        self.hash_calls = 0
+    def __init__(self, name):
+        self.name = name
+        self.equality_calls = 0
 
     def __hash__(self):
-        self.hash_calls += 1
-        if self.hash_calls > 1:
-            raise AssertionError("untrusted dict key hashed by validator")
-        return 123456789
+        return hash(self.name)
 
     def __eq__(self, other):
-        return self is other
+        self.equality_calls += 1
+        raise AssertionError("untrusted key equality invoked by validation")
 
 
 class _EqualitySpoof(str):
@@ -47,24 +46,29 @@ class SnapshotNativeKeyAdmissionQA(unittest.TestCase):
         valid = _valid_snapshot()
         self.assertEqual(CellExplorerV4.from_snapshot(valid).snapshot(), valid)
 
-    def test_non_native_key_is_rejected_before_rehash_in_every_mapping(self):
+    def test_non_native_key_rejected_before_hash_collision_equality(self):
         for location in ("outer", "records", "last_seen_at", "actions"):
             with self.subTest(location=location):
                 state = deepcopy(_valid_snapshot())
-                poison = _RehashBomb()
                 if location == "outer":
-                    state[poison] = None
+                    mapping, name = state, "schema"
                 elif location == "records":
-                    state["records"][poison] = {"rest": [1, 0]}
+                    mapping = state["records"]
+                    name = next(iter(mapping))
                 elif location == "last_seen_at":
-                    state["last_seen_at"][poison] = 0
+                    mapping = state["last_seen_at"]
+                    name = next(iter(mapping))
                 else:
                     cell = next(iter(state["records"]))
-                    state["records"][cell][poison] = [1, 0]
-                self.assertEqual(poison.hash_calls, 1)
+                    mapping = state["records"][cell]
+                    name = next(iter(mapping))
+                value = mapping.pop(name)
+                poison = _EqualityBomb(name)
+                mapping[poison] = value
+                self.assertEqual(poison.equality_calls, 0)
                 with self.assertRaises(CellV4Error):
                     CellExplorerV4.from_snapshot(state)
-                self.assertEqual(poison.hash_calls, 1)
+                self.assertEqual(poison.equality_calls, 0)
 
     def test_string_subclass_cannot_forge_schema_equality(self):
         state = _valid_snapshot()
