@@ -150,6 +150,91 @@ class DatasetSplitTests(unittest.TestCase):
             with self.subTest(value=str(value)[:40]), self.assertRaises(ValueError):
                 split_public_view(mutated)
 
+    def test_reject_hostile_scalar_subclasses_before_equality(self):
+        class HostileStr(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise RuntimeError("untrusted eq hook")
+            def __ne__(self, other):
+                raise RuntimeError("untrusted ne hook")
+
+        for field in ("schema",):
+            forged = dict(self.view)
+            forged[field] = HostileStr(forged[field])
+            with self.assertRaises(ValueError):
+                split_public_view(forged)
+
+        for field in ("id", "source", "observation"):
+            forged = copy.deepcopy(self.view)
+            forged["records"][0][field] = HostileStr(forged["records"][0][field])
+            with self.subTest(record=field), self.assertRaises(ValueError):
+                split_public_view(forged)
+
+        class HostileTick(int):
+            pass
+        forged = copy.deepcopy(self.view)
+        forged["records"][0]["tick"] = HostileTick(forged["records"][0]["tick"])
+        with self.assertRaises(ValueError):
+            split_public_view(forged)
+
+        for field in ("schema", "assignment"):
+            forged = split_public_view(self.view)
+            forged[field] = HostileStr(forged[field])
+            with self.subTest(manifest=field), self.assertRaises(ValueError):
+                verify_public_split(self.view, forged)
+
+    def test_reject_hostile_mapping_keys_before_comparing(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise RuntimeError("untrusted dict key equality")
+
+        def poison_key(original, key):
+            data = dict(original)
+            value = data.pop(key)
+            data[HostileKey(key)] = value
+            return data
+
+        bad = poison_key(self.view, "schema")
+        with self.assertRaises(ValueError):
+            split_public_view(bad)
+        bad = copy.deepcopy(self.view)
+        bad["records"][0] = poison_key(bad["records"][0], "id")
+        with self.assertRaises(ValueError):
+            split_public_view(bad)
+        for selector in ("manifest", "weights", "partition", "record"):
+            bad = split_public_view(self.view)
+            if selector == "manifest":
+                bad = poison_key(bad, "schema")
+            elif selector == "weights":
+                bad["weights"] = poison_key(bad["weights"], "train")
+            elif selector == "partition":
+                bad["train"] = poison_key(bad["train"], "schema")
+            else:
+                part = next(p for p in ("train", "validation", "test")
+                            if bad[p]["records"])
+                bad[part]["records"][0] = poison_key(bad[part]["records"][0], "id")
+            with self.subTest(location=selector), self.assertRaises(ValueError):
+                verify_public_split(self.view, bad)
+
+    def test_reject_unbounded_and_nested_manifest_before_encoding(self):
+        out = split_public_view(self.view)
+        part = next(p for p in ("train", "validation", "test") if out[p]["records"])
+        out[part]["records"][0]["observation"] = "x" * (1_000_000)
+        with self.assertRaises(ValueError):
+            verify_public_split(self.view, out)
+        out = split_public_view(self.view)
+        part = next(p for p in ("train", "validation", "test") if out[p]["records"])
+        nested = []
+        cursor = nested
+        for _ in range(1200):
+            child = []
+            cursor.append(child)
+            cursor = child
+        out[part]["records"][0]["observation"] = nested
+        with self.assertRaises(ValueError):
+            verify_public_split(self.view, out)
+
     def test_returns_detached_records(self):
         out = split_public_view(self.view)
         rec = next(r for p in ("train", "validation", "test")
