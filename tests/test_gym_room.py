@@ -98,6 +98,30 @@ class PointRoomGymTests(unittest.TestCase):
         self.assertEqual(observation["tick"], 1)
         self.assertEqual(observation["position"], [1.125, 2.0])
 
+    def test_mutated_goal_start_or_room_cannot_forge_reward(self):
+        # Replacing the goal with the current point must not produce a fake
+        # terminal +1 reward. Restore the config and verify the state was idle.
+        for field, replacement in (
+            ("goal", (1.0, 2.0)),
+            ("start", (3.0, 2.0)),
+            ("room", Room(4, 4)),
+        ):
+            with self.subTest(field=field):
+                episode = self.episode()
+                episode.reset()
+                original = getattr(episode, field)
+                setattr(episode, field, replacement)
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.step(0)
+                self.assertEqual(episode._state.tick, 0)
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.reset()
+                setattr(episode, field, original)
+                obs, reward, terminated, _, _ = episode.step(0)
+                self.assertEqual(obs["tick"], 1)
+                self.assertFalse(terminated)
+                self.assertEqual(reward, -0.01)
+
     def test_bad_episode_inputs_fail_closed(self):
         for kwargs in ({"step_m": float("nan")}, {"step_m": 0},
                        {"max_steps": True}, {"goal": (2, 2)},
