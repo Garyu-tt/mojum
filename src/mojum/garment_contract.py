@@ -99,7 +99,7 @@ def validate_garment(value):
         raise GarmentContractError("unsupported wardrobe slot")
     source = value["source"]
     _keys(source, ("origin", "license_spdx", "attribution"), "source")
-    if source["origin"] not in ("manual-export", "procedural-synthetic") or type(source["origin"]) is not str:
+    if type(source["origin"]) is not str or source["origin"] not in ("manual-export", "procedural-synthetic"):
         raise GarmentContractError("unsupported asset origin")
     _token(source["license_spdx"], "SPDX license identifier")
     _attribution(source["attribution"])

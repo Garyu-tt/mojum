@@ -61,6 +61,22 @@ class GarmentContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(GarmentContractError, "schema"):
                     validate(payload)
 
+    def test_origin_discriminator_rejects_hostile_equality(self):
+        class HostileOrigin:
+            def __eq__(self, other):
+                raise RuntimeError("untrusted equality executed")
+
+        class EqualitySpoof:
+            def __eq__(self, other):
+                return True
+
+        for origin in (HostileOrigin(), EqualitySpoof(), 0, None):
+            with self.subTest(origin=type(origin).__name__):
+                payload = garment()
+                payload["source"]["origin"] = origin
+                with self.assertRaisesRegex(GarmentContractError, "origin"):
+                    validate_garment(payload)
+
     def test_invalid_manifest_fail_closed(self):
         edits = [
             lambda x: x.update(schema='unversioned'),
