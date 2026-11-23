@@ -278,6 +278,22 @@ class GitHubLifecycleTests(unittest.TestCase):
                 self.assertEqual(result["merged_in_visible_sample"], 1)
                 self.assertEqual(result["closed_unmerged_in_visible_sample"], 1)
 
+    def test_duplicate_cached_pr_ids_are_rejected_and_refetched(self):
+        # A valid private cache must not double-count the same merged PR.
+        rows = f._closed_from_response(self._closed())
+        invalid = {"schema": "cezar.github-closed-cache/1",
+                   "observed_at": self.now.isoformat(),
+                   "recent": [rows[0], dict(rows[0])]}
+        self.cache.write_text(json.dumps(invalid), encoding="utf-8")
+        self.cache.chmod(0o600)
+        with self.assertRaisesRegex(f.CorruptClosedCache, "duplicate"):
+            f._load_closed_cache()
+        with patch.object(f, "_fetch_closed_rest", return_value=rows) as fetch:
+            result = f._github_closed_history(self.now)
+        fetch.assert_called_once_with()
+        self.assertEqual(result["merged_in_visible_sample"], 1)
+        self.assertEqual(result["closed_unmerged_in_visible_sample"], 1)
+
     def test_stale_cache_is_labelled_stale_on_public_api_failure(self):
         with patch.object(f, "_fetch_closed_rest",
                           return_value=f._closed_from_response(self._closed())):
