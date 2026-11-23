@@ -13,6 +13,7 @@ from typing import Any
 SCHEMA = "mojum.qa-work-queue/1"
 MAX_PAYLOAD_BYTES = 65_536
 MAX_AUDIT_ROWS = 10_000
+MAX_EXPIRY_BATCH = 500
 
 
 class QueueError(ValueError):
@@ -301,15 +302,21 @@ class QAWorkQueue:
         return self.get(row["id"]), inserted
 
     def _expire(self, stamp: float) -> None:
-        rows = self._db.execute(
-            "SELECT id,attempts,max_attempts FROM qa_jobs WHERE status='leased' AND lease_until<=?",
-            (stamp,)).fetchall()
-        for row in rows:
-            final = row["attempts"] >= row["max_attempts"]
-            self._db.execute(
-                "UPDATE qa_jobs SET status=?,lease_owner=NULL,lease_token=NULL,lease_until=NULL,updated_at=?,last_error_code=? WHERE id=?",
-                ("failed" if final else "queued", stamp, "LEASE_EXPIRED" if final else None, row["id"]))
-            self._audit(row["id"], "LEASE_EXPIRED_FINAL" if final else "LEASE_EXPIRED_REQUEUED", stamp)
+        # Bound resident rows even when a large worker outage leaves many leases
+        # expired at once. Each batch is removed from the predicate as it updates.
+        while True:
+            rows = self._db.execute(
+                "SELECT id,attempts,max_attempts FROM qa_jobs "
+                "WHERE status='leased' AND lease_until<=? ORDER BY id LIMIT ?",
+                (stamp, MAX_EXPIRY_BATCH)).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                final = row["attempts"] >= row["max_attempts"]
+                self._db.execute(
+                    "UPDATE qa_jobs SET status=?,lease_owner=NULL,lease_token=NULL,lease_until=NULL,updated_at=?,last_error_code=? WHERE id=?",
+                    ("failed" if final else "queued", stamp, "LEASE_EXPIRED" if final else None, row["id"]))
+                self._audit(row["id"], "LEASE_EXPIRED_FINAL" if final else "LEASE_EXPIRED_REQUEUED", stamp)
 
     def claim(self, worker: str, *, lease_seconds: float = 60,
               now: float | None = None) -> Lease | None:
