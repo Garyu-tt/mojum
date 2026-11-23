@@ -61,6 +61,13 @@ class ClothDamageTests(unittest.TestCase):
                 {"tick": 1, "edge_id": "b", "stretch_ratio": 1.1},
             ]))
 
+    def test_rejects_oversized_integer_before_float_conversion(self):
+        huge = 10 ** 10000
+        with self.assertRaisesRegex(ClothDamageError, "finite numeric bounds"):
+            audit_damage(request(threshold=huge))
+        with self.assertRaisesRegex(ClothDamageError, "finite numeric bounds"):
+            audit_damage(request([{"tick": 1, "edge_id": "e", "stretch_ratio": huge}]))
+
     def test_rejects_bool_and_nonfinite_numbers(self):
         for value in (True, float("nan"), float("inf"), 0, -1):
             with self.subTest(value=value):
