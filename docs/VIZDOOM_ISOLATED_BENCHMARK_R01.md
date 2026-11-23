@@ -26,6 +26,13 @@ invalid seeds, oversized episodes, and guaranteed `close()` after errors.
 The only computed visual features are coarse region brightness values,
 not privileged geometry.
 
+A bounded synthetic grid obstacle is visibly dark. For example, with
+`--seed 7 --steps 32`, the frozen control scores **-4.0** (32 ticks,
+repeatedly blocked), and the camera-reactive policy scores **13.85**
+(13 ticks, goal reached). These are **synthetic regression outputs only**,
+not evidence of real ViZDoom navigation or learning. The test suite repeats
+this comparison over five synthetic held-out seeds.
+
 ## Separately installed real-engine smoke (explicit opt-in)
 
 Upstream: https://github.com/Farama-Foundation/ViZDoom
