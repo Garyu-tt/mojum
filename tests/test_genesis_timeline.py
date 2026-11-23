@@ -134,6 +134,21 @@ class GenesisTimelineTests(unittest.TestCase):
             attest_timeline(ledger.snapshot(), start_tick=0,
                             through_tick=300, public_synthetic=True)
 
+    def test_excessive_boundaries_refused_before_expensive_snapshot_replay(self):
+        # 256 distinct interior ticks plus the two window endpoints exceed
+        # the 256-row output cap. No ledger replay is needed to reject this.
+        # Stub the validator to catch a regression in call order; this input
+        # is deliberately not a valid signed/revision-pinned ledger snapshot.
+        from unittest.mock import patch
+        malicious = {"events": [{"valid_from_tick": tick}
+                                for tick in range(1, 257)]}
+        with patch.object(GenomeLedger, "from_snapshot",
+                          side_effect=AssertionError("replay reached")) as replay:
+            with self.assertRaisesRegex(GenesisError, "boundary budget"):
+                attest_timeline(malicious, start_tick=0, through_tick=300,
+                                public_synthetic=True)
+            replay.assert_not_called()
+
     def test_dense_same_tick_events_count_as_one_boundary(self):
         ledger = GenomeLedger(SEED)
         for i in range(256):
