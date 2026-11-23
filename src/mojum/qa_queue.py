@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+MAX_PAYLOAD_NODES = 10_000
+
 
 class QueueError(Exception):
     """Base class for queue contract violations."""
@@ -74,37 +76,54 @@ def _timestamp(value: object) -> int:
     return value
 
 
-def _validate_json_value(value: object, depth: int = 0) -> None:
-    if depth > 32:
-        raise ValueError("payload nesting exceeds 32 levels")
-    if value is None or type(value) is bool:
-        return
-    if type(value) is str:
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError as exc:
-            raise ValueError("payload strings must be valid UTF-8") from exc
-        return
-    if type(value) is int:
-        if value < -9_223_372_036_854_775_808 or value > 9_223_372_036_854_775_807:
-            raise ValueError("payload integers must fit signed 64-bit range")
-        return
-    if type(value) is float:
-        if not math.isfinite(value):
-            raise ValueError("payload floats must be finite")
-        return
-    if type(value) is list:
-        for item in value:
-            _validate_json_value(item, depth + 1)
-        return
-    if type(value) is dict:
-        for key, item in value.items():
-            if type(key) is not str:
-                raise ValueError("payload object keys must be plain strings")
-            _validate_json_value(key, depth + 1)
-            _validate_json_value(item, depth + 1)
-        return
-    raise ValueError("payload must contain only plain JSON values")
+def _validate_json_value(value: object, *, max_text_bytes: int) -> None:
+    """Iteratively admit bounded native JSON values before serialization."""
+    stack: list[tuple[object, int]] = [(value, 0)]
+    nodes = 0
+    text_bytes = 0
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_PAYLOAD_NODES:
+            raise ValueError("payload exceeds maximum node count")
+        if depth > 32:
+            raise ValueError("payload nesting exceeds 32 levels")
+        if item is None or type(item) is bool:
+            continue
+        if type(item) is str:
+            if len(item) > max_text_bytes:
+                raise ValueError("payload aggregate text exceeds max_payload_bytes")
+            try:
+                size = len(item.encode("utf-8"))
+            except UnicodeEncodeError as exc:
+                raise ValueError("payload strings must be valid UTF-8") from exc
+            text_bytes += size
+            if text_bytes > max_text_bytes:
+                raise ValueError("payload aggregate text exceeds max_payload_bytes")
+            continue
+        if type(item) is int:
+            if item < -9_223_372_036_854_775_808 or item > 9_223_372_036_854_775_807:
+                raise ValueError("payload integers must fit signed 64-bit range")
+            continue
+        if type(item) is float:
+            if not math.isfinite(item):
+                raise ValueError("payload floats must be finite")
+            continue
+        if type(item) is list:
+            if len(item) > MAX_PAYLOAD_NODES or nodes + len(item) + len(stack) > MAX_PAYLOAD_NODES:
+                raise ValueError("payload exceeds maximum node count")
+            stack.extend((child, depth + 1) for child in item)
+            continue
+        if type(item) is dict:
+            if len(item) > MAX_PAYLOAD_NODES or nodes + 2 * len(item) + len(stack) > MAX_PAYLOAD_NODES:
+                raise ValueError("payload exceeds maximum node count")
+            for key, child in item.items():
+                if type(key) is not str:
+                    raise ValueError("payload object keys must be plain strings")
+                stack.append((child, depth + 1))
+                stack.append((key, depth + 1))
+            continue
+        raise ValueError("payload must contain only plain JSON values")
 
 
 class DurableTaskQueue:
@@ -145,6 +164,28 @@ class DurableTaskQueue:
 
     def _initialize(self) -> None:
         with closing(self._connect()) as connection:
+            # Refuse unknown or legacy unversioned queue schemas. Only a truly
+            # empty database is initialized as schema version 1.
+            existing = {
+                row["name"] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if "queue_meta" not in existing:
+                if {"queue_tasks", "queue_events"} & existing:
+                    raise QueueError("unversioned queue database is refused")
+                connection.execute(
+                    "CREATE TABLE queue_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO queue_meta(key,value) VALUES('schema_version','1')"
+                )
+            else:
+                version = connection.execute(
+                    "SELECT value FROM queue_meta WHERE key='schema_version'"
+                ).fetchone()
+                if version is None or version["value"] != "1":
+                    raise QueueError("unsupported or missing queue schema version")
             # Use WAL for durable file-backed worker coordination.
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
@@ -188,7 +229,7 @@ class DurableTaskQueue:
     def _payload_json(self, payload: object) -> str:
         if type(payload) is not dict:
             raise ValueError("payload must be a plain dict")
-        _validate_json_value(payload)
+        _validate_json_value(payload, max_text_bytes=self.max_payload_bytes)
         try:
             encoded = json.dumps(
                 payload, sort_keys=True, separators=(",", ":"),
@@ -201,7 +242,7 @@ class DurableTaskQueue:
         return encoded
 
     @staticmethod
-    def _task(row: sqlite3.Row) -> Task:
+    def _task(row: sqlite3.Row, *, include_lease_token: bool = False) -> Task:
         return Task(
             task_id=row["task_id"],
             task_key=row["task_key"],
@@ -211,7 +252,7 @@ class DurableTaskQueue:
             attempts=row["attempts"],
             available_at_ns=row["available_at_ns"],
             lease_owner=row["lease_owner"],
-            lease_token=row["lease_token"],
+            lease_token=row["lease_token"] if include_lease_token else None,
             lease_until_ns=row["lease_until_ns"],
         )
 
@@ -237,7 +278,7 @@ class DurableTaskQueue:
         payload_json = self._payload_json(payload)
         now = _timestamp(now_ns)
         available = now if available_at_ns is None else _timestamp(available_at_ns)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT * FROM queue_tasks WHERE idempotency_key = ?",
@@ -299,7 +340,7 @@ class DurableTaskQueue:
                 "SELECT * FROM queue_tasks WHERE task_id=?", (row["task_id"],)
             ).fetchone()
             connection.commit()
-            return self._task(claimed)
+            return self._task(claimed, include_lease_token=True)
 
     def heartbeat(self, task_id: int, worker_id: str, lease_token: str, *,
                   lease_seconds: int = 60, now_ns: int | None = None) -> Task:
