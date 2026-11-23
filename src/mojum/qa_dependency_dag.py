@@ -5,7 +5,6 @@ worker execution, or merge authorization.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from typing import Any
 
 SCHEMA = "mojum.qa-dependency-dag/1"
@@ -15,20 +14,19 @@ _STATES = frozenset({"OPEN", "MERGED", "CLOSED"})
 
 
 def evaluate_dependency_dag(
-    records: Sequence[Mapping[str, Any]],
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     max_nodes: int = MAX_NODES,
     max_edges: int = MAX_EDGES,
 ) -> dict[str, Any]:
     """Return a stable dependency-first plan or raise ValueError.
 
-    Each record has exactly id (non-empty string), state (OPEN, MERGED,
-    CLOSED), and depends_on (list/tuple of distinct PR ids). An OPEN PR is
-    READY only when every direct dependency is MERGED. CLOSED dependencies
-    do not satisfy a dependency and therefore block it.
+    Only exact built-in list/tuple/dict/str containers and values are admitted.
+    Each record has exactly id, state and depends_on. An OPEN PR is READY only
+    when every direct dependency is MERGED. CLOSED dependencies remain blocking.
     """
-    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
-        raise ValueError("records must be a sequence")
+    if type(records) not in (list, tuple):
+        raise ValueError("records must be a native list or tuple")
     if type(max_nodes) is not int or not 1 <= max_nodes <= MAX_NODES:
         raise ValueError("max_nodes must be an integer in [1, 500]")
     if type(max_edges) is not int or not 0 <= max_edges <= MAX_EDGES:
@@ -41,25 +39,30 @@ def evaluate_dependency_dag(
     edge_count = 0
 
     for record in records:
-        if not isinstance(record, Mapping):
-            raise ValueError("each record must be a mapping")
-        if set(record) != {"id", "state", "depends_on"}:
+        if type(record) is not dict:
+            raise ValueError("each record must be a native dict")
+        keys = tuple(record.keys())
+        if any(type(key) is not str for key in keys):
+            raise ValueError("record keys must be native strings")
+        if set(keys) != {"id", "state", "depends_on"}:
             raise ValueError("record must contain exactly id, state, depends_on")
+
         node_id, state, raw_deps = record["id"], record["state"], record["depends_on"]
-        if not isinstance(node_id, str) or not node_id or len(node_id) > 128:
+        if type(node_id) is not str or not node_id or len(node_id) > 128:
             raise ValueError("invalid PR id")
         if node_id in states:
             raise ValueError("duplicate PR id")
-        if not isinstance(state, str) or state not in _STATES:
+        if type(state) is not str or state not in _STATES:
             raise ValueError("invalid PR state")
-        if isinstance(raw_deps, (str, bytes)) or not isinstance(raw_deps, (list, tuple)):
-            raise ValueError("depends_on must be a list or tuple")
+        if type(raw_deps) not in (list, tuple):
+            raise ValueError("depends_on must be a native list or tuple")
         if len(raw_deps) > max_edges:
             raise ValueError("edge budget exceeded")
+
         deps: list[str] = []
         seen: set[str] = set()
         for dep in raw_deps:
-            if not isinstance(dep, str) or not dep or len(dep) > 128:
+            if type(dep) is not str or not dep or len(dep) > 128:
                 raise ValueError("invalid dependency id")
             if dep == node_id:
                 raise ValueError("self dependency")
