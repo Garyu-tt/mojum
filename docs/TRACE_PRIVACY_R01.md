@@ -61,7 +61,7 @@ not buffer, persist, or transmit anything.
 Run with CPython 3.11+:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_trace_privacy -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_trace_privacy.py' -v
 ```
 
 The focused tests cover allowlist admission, identifier and numeric strictness,
