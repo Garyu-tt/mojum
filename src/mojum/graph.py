@@ -244,11 +244,16 @@ def validate(graph):
     # Check exact root keys and identity fields with native dict operations
     # before the general JSON walk, so a malformed surrogate can be attributed
     # to its id/revision field without invoking caller-controlled behavior.
-    if type(graph) is not dict or len(graph) != 5:
-        raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
+    if type(graph) is not dict:
+        raise GraphError("Graph v1 requires a native root object")
     root_keys = tuple(dict.keys(graph))
-    if (any(type(key) is not str for key in root_keys)
-            or set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}):
+    if any(type(key) is not str for key in root_keys):
+        raise GraphError("Graph v1 root keys must be exact strings")
+    # Schema has priority over v1-only shape diagnostics. All keys are now
+    # exact built-in strings, so this lookup cannot invoke user-defined equality.
+    if dict.get(graph, "schema") != SCHEMA:
+        raise GraphError("Unsupported or absent graph schema")
+    if len(graph) != 5 or set(root_keys) != {"schema", "id", "revision", "nodes", "edges"}:
         raise GraphError("Graph v1 requires exact root fields (unsupported v1 field)")
     for field in ("id", "revision"):
         value = dict.__getitem__(graph, field)
