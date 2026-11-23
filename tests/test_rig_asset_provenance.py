@@ -138,5 +138,32 @@ class RigAssetProvenanceTests(unittest.TestCase):
         self.reject()
 
 
+    def test_hostile_string_subclass_dict_keys_fail_closed(self):
+        # An exact dict can still contain a str subclass with hostile __eq__.
+        # Key primitives must be checked before constructing/comparing sets.
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key comparison")
+
+        for location in ("manifest", "source", "joint", "asset", "contents"):
+            with self.subTest(location=location):
+                manifest, contents = fixture()
+                if location == "manifest":
+                    target, original = manifest, "schema"
+                elif location == "source":
+                    target, original = manifest["source"], "repository"
+                elif location == "joint":
+                    target, original = manifest["joints"][0], "id"
+                elif location == "asset":
+                    target, original = manifest["assets"][0], "path"
+                else:
+                    target, original = contents, "assets/body.mjcf"
+                value = target.pop(original)
+                target[HostileKey(original)] = value
+                with self.assertRaises(RigProvenanceError):
+                    verify_rig_assets(manifest, contents)
+
 if __name__ == "__main__":
     unittest.main()
