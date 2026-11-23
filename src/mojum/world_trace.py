@@ -119,7 +119,7 @@ def verify_trace(document: dict) -> RoomState:
     _mapping(document, frozenset((
         "schema", "room", "start", "frames", "final_revision"
     )), "trace")
-    if document["schema"] != SCHEMA:
+    if type(document["schema"]) is not str or document["schema"] != SCHEMA:
         raise TraceError("unsupported trace schema")
     _mapping(document["room"], frozenset(("width", "height", "obstacles")), "room")
     room_wire = document["room"]
