@@ -41,6 +41,18 @@ def apply(events, *, seed_snapshot=None):
 
 
 class GenesisBatchTests(unittest.TestCase):
+
+    def test_snapshot_and_events_share_one_total_input_budget(self):
+        ledger = GenomeLedger(SEED)
+        snapshot = {"payload": "s" * (MAX_BATCH_BYTES // 2)}
+        events = [{"payload": "e" * (MAX_BATCH_BYTES // 2)}]
+        with patch("mojum.genesis_batch.canonical") as serializer:
+            with self.assertRaisesRegex(GenesisError, "JSON byte budget"):
+                apply_acquisition_batch(
+                    snapshot, events, expected_base_revision=ledger.revision
+                )
+            self.assertEqual(serializer.call_count, 1)
+
     def test_applies_multiple_events_in_recorded_order(self):
         result = apply([
             event("first", tick=10, delta=2, recorded=200),
