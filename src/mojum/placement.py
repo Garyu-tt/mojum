@@ -25,6 +25,10 @@ def _check_id(value):
 
 
 def _check_capabilities(capabilities):
+    # Keep admission primitives exact: str/tuple subclasses may override
+    # equality, hashing or iteration after constructor-time checks.
+    if type(capabilities) is not tuple or any(type(name) is not str for name in capabilities):
+        raise PlacementError("invalid capability set")
     try:
         _validated(Offer(PROTOCOL, "fixture", capabilities))
     except ValueError as exc:
@@ -73,6 +77,29 @@ class StatelessJob:
             raise PlacementError("unsupported job budget or stateful job")
 
 
+def _snapshot_records(jobs, nodes):
+    """Rebuild validated immutable inputs at each public admission boundary.
+
+    Frozen dataclasses can still be changed with object.__setattr__ or forged
+    with object.__new__. Never trust that __post_init__ ran on caller-owned
+    records, and never consume their fields after this admission snapshot.
+    """
+    try:
+        canonical_jobs = tuple(
+            StatelessJob(job.job_id, job.cpu_slots, job.memory_mib,
+                         job.required_capabilities, job.priority, job.stateless)
+            for job in jobs
+        )
+        canonical_nodes = tuple(
+            NodeBudget(node.node_id, node.cpu_slots, node.memory_mib,
+                       node.capabilities, node.online)
+            for node in nodes
+        )
+    except (AttributeError, TypeError) as exc:
+        raise PlacementError("incomplete or malformed placement record") from exc
+    return canonical_jobs, canonical_nodes
+
+
 @dataclass(frozen=True)
 class Assignment:
     job_id: str
@@ -103,6 +130,7 @@ def plan(jobs, nodes, *, local_node_id, trusted_remote_ids=frozenset()):
             or any(type(n) is not NodeBudget for n in nodes)
             or any(type(x) is not str for x in trusted_remote_ids)):
         raise PlacementError("invalid planner records")
+    jobs, nodes = _snapshot_records(jobs, nodes)
     all_nodes = {n.node_id: n for n in nodes}
     all_jobs = {j.job_id: j for j in jobs}
     if len(all_nodes) != len(nodes) or len(all_jobs) != len(jobs):
