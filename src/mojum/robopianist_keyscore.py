@@ -63,7 +63,9 @@ def _contacts(values):
     seen = set()
     result = []
     for contact in values:
-        if type(contact) is not dict or set(contact) != {"hand", "finger", "key"}:
+        if (type(contact) is not dict
+                or any(type(key) is not str for key in contact)
+                or set(contact) != {"hand", "finger", "key"}):
             raise PianoBenchmarkError("invalid finger contact")
         hand = contact["hand"]
         if type(hand) is not str or hand not in ("left", "right"):
@@ -121,18 +123,20 @@ def score_trace(trace):
     Score is an observational evaluation only. No learning, control, motor
     intent, teacher grading or inferred hardware contacts.
     """
-    if type(trace) is not dict or set(trace) != {
+    if (type(trace) is not dict
+            or any(type(key) is not str for key in trace)
+            or set(trace) != {
         "schema", "source", "upstream_ref", "seed", "frames"
-    }:
+    }):
         raise PianoBenchmarkError("invalid trace envelope")
-    if trace["schema"] != SCHEMA:
+    if type(trace["schema"]) is not str or trace["schema"] != SCHEMA:
         raise PianoBenchmarkError("unknown trace schema")
     source = trace["source"]
     if type(source) is not str or source not in ("synthetic", "robopianist-explicit-export"):
         raise PianoBenchmarkError("invalid source classification")
     ref = trace["upstream_ref"]
     if source == "synthetic":
-        if ref != "synthetic":
+        if type(ref) is not str or ref != "synthetic":
             raise PianoBenchmarkError("synthetic source must identify synthetic provenance")
     elif (type(ref) is not str or len(ref) != 40
           or any(ch not in "0123456789abcdef" for ch in ref)):
@@ -145,10 +149,12 @@ def score_trace(trace):
     tp = fp = fn = exact = silence_exact = sustain_exact = contact_hits = 0
     tick0 = timestamp0 = previous_ns = None
     for i, frame in enumerate(frames):
-        if type(frame) is not dict or set(frame) != {
+        if (type(frame) is not dict
+                or any(type(key) is not str for key in frame)
+                or set(frame) != {
             "tick", "timestamp_ns", "target_keys", "pressed_keys",
             "target_sustain", "pressed_sustain", "finger_contacts"
-        }:
+        }):
             raise PianoBenchmarkError("invalid frame fields")
         tick = _integer(frame["tick"], "tick", 0, 2**63 - 1)
         timestamp = _integer(frame["timestamp_ns"], "timestamp_ns")
