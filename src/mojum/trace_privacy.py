@@ -14,9 +14,9 @@ import re
 SCHEMA = "mojum.trace-envelope.v1"
 MAX_FIELDS = 12
 MAX_STRING_LENGTH = 128
-_SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-_TRACE_ID_RE = re.compile(r"[0-9a-f]{32,64}\Z")
+_SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
+_TRACE_ID_RE = re.compile(r"[0-9a-f]{32,64}\\Z")
 
 _ALLOWED_EVENTS = frozenset({
     "provider.admitted",
@@ -111,7 +111,10 @@ def _optional_cost(raw: Mapping[str, object]) -> float | None:
     value = raw["cost_usd"]
     if type(value) not in (int, float):
         raise TracePrivacyError("cost_usd must be a finite non-negative number")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise TracePrivacyError("cost_usd must be a finite non-negative number") from None
     if not math.isfinite(result) or result < 0:
         raise TracePrivacyError("cost_usd must be a finite non-negative number")
     return result
@@ -132,7 +135,6 @@ def sanitize_trace_event(raw: object) -> TraceEnvelope:
         raise TracePrivacyError("trace keys must be strings")
     unknown = set(raw) - _ALLOWED_KEYS
     if unknown:
-        # Do not echo rejected key names: callers may have supplied secret labels.
         raise TracePrivacyError("trace event contains fields outside the metadata allowlist")
     if raw.get("schema") != SCHEMA:
         raise TracePrivacyError("unsupported trace schema")
@@ -164,7 +166,5 @@ class OfflineTraceSink:
 
     def emit(self, event: object) -> bool:
         """Return False to report that no remote or local persistence occurred."""
-        # Validate even in no-op mode so callers cannot mistake unsafe data for
-        # an accepted trace event. The validated value is deliberately discarded.
         sanitize_trace_event(event)
         return False
