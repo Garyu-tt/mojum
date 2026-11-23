@@ -1,0 +1,36 @@
+name: QA durable work queue
+
+on:
+  pull_request:
+    paths:
+      - "tools/qa_work_queue.py"
+      - "tests/test_qa_work_queue.py"
+      - ".github/workflows/qa-work-queue.yml"
+  push:
+    branches:
+      - "feature/1179-durable-queue-slice-20261123-gpt6"
+    paths:
+      - "tools/qa_work_queue.py"
+      - "tests/test_qa_work_queue.py"
+      - ".github/workflows/qa-work-queue.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  queue-tests:
+    name: queue tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run durable queue regression tests
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -p 'test_qa_work_queue.py' -v
