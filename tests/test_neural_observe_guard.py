@@ -84,6 +84,14 @@ class NeuralObserveGuardTests(unittest.TestCase):
             observe_public_synthetic(model, bad, visibility=PUBLIC_SYNTHETIC)
         self.assertEqual(model.updates, 0)
 
+    def test_rejects_oversized_native_frame_before_key_enumeration(self):
+        bad = sample()
+        bad.update({f"extra_{index}": index for index in range(25_000)})
+        with self.assertRaises(NeuralObserveGuardError):
+            observe_public_synthetic(
+                PulsePredictor(), bad, visibility=PUBLIC_SYNTHETIC
+            )
+
     def test_rejects_missing_and_unknown_outer_fields(self):
         for mutate in (lambda x: x.pop("heartbeat"), lambda x: x.update(extra=0)):
             bad = sample()
