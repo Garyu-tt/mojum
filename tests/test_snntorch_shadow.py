@@ -71,6 +71,14 @@ class ShadowTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(s.ShadowError):
                 s._validate_output(*bad, 1, 1)
 
+    def test_huge_integer_membrane_output_fails_closed(self):
+        # math.isfinite(10**1000) raises OverflowError; this boundary
+        # must issue ShadowError for both signs without leaking that exception.
+        for value in (10**1000, -(10**1000)):
+            with self.subTest(positive=value > 0):
+                with self.assertRaisesRegex(s.ShadowError, "invalid backend membrane"):
+                    s._validate_output(((0,),), ((value,),), 1, 1)
+
     def test_native_optional_version_gate(self):
         class FakeSNN:
             __version__ = "0.0"
