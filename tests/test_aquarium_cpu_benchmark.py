@@ -158,5 +158,21 @@ class BenchmarkTests(unittest.TestCase):
                                 clock=wall, cpu_clock=cpu)
 
 
+    def test_real_disposable_aquarium_cold_restart(self):
+        """Run two true Python/SQLite processes against a disposable fixture."""
+        import os
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(TOOL.parents[1] / "src")
+
+        def real_runner(command, **kwargs):
+            return subprocess.run(command, env=environment, **kwargs)
+
+        report = bench.benchmark(1, 1, 30, runner=real_runner)
+        self.assertEqual(report["repetitions"], 1)
+        self.assertEqual(report["ticks_per_phase"], 1)
+        self.assertGreater(report["median_cold_wall_ns"], 0)
+        self.assertGreater(report["median_restart_wall_ns"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
