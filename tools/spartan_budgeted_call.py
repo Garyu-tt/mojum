@@ -62,6 +62,8 @@ def dispatch(
     """
     if type(db) is not sqlite3.Connection:
         raise TypeError("db must be an exact sqlite3.Connection")
+    if db.row_factory is not sqlite3.Row:
+        raise TypeError("db must use sqlite3.Row; open it with spartan_budget.connect()")
     if not callable(invoke) or not callable(receipt_extractor):
         raise TypeError("invoke and receipt_extractor must be callable")
     if _is_async_callable(invoke) or _is_async_callable(receipt_extractor):
