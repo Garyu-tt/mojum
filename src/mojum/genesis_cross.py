@@ -139,12 +139,14 @@ def verify_cross_receipt(result: object) -> bool:
     }
     if type(receipt) is not dict or set(receipt) != required:
         raise GenesisError("invalid cross receipt fields")
-    if receipt["schema"] != CROSS_SCHEMA:
+    if type(receipt["schema"]) is not str or receipt["schema"] != CROSS_SCHEMA:
         raise GenesisError("unsupported cross receipt schema")
     _validate_cross_seed(receipt["cross_seed"])
-    if receipt["method"] != "sha256-bit-per-gene-parent-selection/1":
+    if (type(receipt["method"]) is not str
+            or receipt["method"] != "sha256-bit-per-gene-parent-selection/1"):
         raise GenesisError("unsupported cross selection method")
-    if receipt["integrity_notice"] != "consistency_digest_not_authentication":
+    if (type(receipt["integrity_notice"]) is not str
+            or receipt["integrity_notice"] != "consistency_digest_not_authentication"):
         raise GenesisError("invalid receipt integrity notice")
     for key in ("parent_a", "parent_b"):
         parent = receipt[key]
@@ -165,10 +167,24 @@ def verify_cross_receipt(result: object) -> bool:
         receipt["parent_a"]["genome_id"], receipt["parent_b"]["genome_id"]
     }:
         raise GenesisError("child identity collides with a parent")
-    if sha256(child) != receipt["child_seed_sha256"]:
+    child_digest = receipt["child_seed_sha256"]
+    if type(child_digest) is not str or len(child_digest) != 64:
+        raise GenesisError("invalid child seed digest")
+    try:
+        int(child_digest, 16)
+    except ValueError as exc:
+        raise GenesisError("invalid child seed digest") from exc
+    if sha256(child) != child_digest:
         raise GenesisError("child seed digest mismatch")
     body = {key: receipt[key] for key in required if key != "receipt_sha256"}
-    if sha256(body) != receipt["receipt_sha256"]:
+    receipt_digest = receipt["receipt_sha256"]
+    if type(receipt_digest) is not str or len(receipt_digest) != 64:
+        raise GenesisError("invalid receipt digest")
+    try:
+        int(receipt_digest, 16)
+    except ValueError as exc:
+        raise GenesisError("invalid receipt digest") from exc
+    if sha256(body) != receipt_digest:
         raise GenesisError("cross receipt digest mismatch")
     if type(receipt["selections"]) is not dict or set(receipt["selections"]) != set(GENES):
         raise GenesisError("invalid gene selection inventory")
