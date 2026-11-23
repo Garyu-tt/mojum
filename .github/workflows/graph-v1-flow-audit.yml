@@ -7,6 +7,14 @@ on:
       - "tests/test_graph_v1_flow_audit.py"
       - "docs/GRAPH_V1_FLOW_AUDIT_R01.md"
       - ".github/workflows/graph-v1-flow-audit.yml"
+  push:
+    branches:
+      - "qa/**"
+    paths:
+      - "src/mojum/graph_v1_flow_audit.py"
+      - "tests/test_graph_v1_flow_audit.py"
+      - "docs/GRAPH_V1_FLOW_AUDIT_R01.md"
+      - ".github/workflows/graph-v1-flow-audit.yml"
   workflow_dispatch:
 
 permissions:

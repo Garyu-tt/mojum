@@ -50,7 +50,13 @@ print(report.to_dict())
 
 Invalid canonical graphs, malformed sidecars, stale bindings, non-JSON Python
 objects, non-finite values, excess depth/items, and canonical JSON larger than
-256 KiB fail closed with `GraphV1FlowAuditError`. The underlying canonical
+256 KiB fail closed with `GraphV1FlowAuditError`. Native dict/list cardinality
+is checked before scheduling child traversal entries. Preflight counts the
+exact compact JSON wire-size envelope, including quoted/escaped strings and
+keys, container delimiters, commas, colons and scalar tokens; control-character
+expansion is rejected before `JSONEncoder` allocates an escaped chunk. Oversized
+native integer tokens are rejected by bit-length estimate before decimal
+serialization. The underlying canonical
 `mojum.graph.validate()` remains the authority for the executable v1 graph
 contract, including endpoint and typed-port checks.
 
