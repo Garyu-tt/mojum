@@ -1,0 +1,185 @@
+from __future__ import annotations
+
+import sqlite3
+import unittest
+
+from tools import spartan_budget
+from tools.spartan_budgeted_call import (
+    BudgetedCallError,
+    dispatch,
+)
+
+
+class BudgetedDispatchTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(self.db.close)
+        spartan_budget.schema(self.db)
+        spartan_budget.configure(self.db, token_limit=1000, micro_usd_limit=50000)
+
+    def call(self, response=None, receipts=None):
+        calls = []
+
+        def invoke():
+            calls.append("called")
+            return response if response is not None else {"private": "model output"}
+
+        def extract(value):
+            return receipts if receipts is not None else {
+                "actual_tokens": 12,
+                "actual_micro_usd": 340,
+            }
+
+        return calls, invoke, extract
+
+    def test_reserves_before_invocation_and_settles_exact_usage(self):
+        calls, invoke, extract = self.call()
+        result = dispatch(
+            self.db, request_id="request-1", worker=1,
+            reserve_tokens=100, reserve_micro_usd=1000,
+            invoke=invoke, receipt_extractor=extract,
+        )
+        self.assertEqual(calls, ["called"])
+        self.assertTrue(result.dispatched)
+        self.assertTrue(result.settled)
+        self.assertEqual((result.actual_tokens, result.actual_micro_usd), (12, 340))
+        self.assertEqual(result.response, {"private": "model output"})
+        status = spartan_budget.status(self.db)
+        self.assertEqual(status["debited_tokens"], 100)
+        self.assertEqual(status["reported_tokens"], 12)
+        self.assertEqual(status["unsettled"], 0)
+
+    def test_duplicate_id_never_invokes_provider_again(self):
+        calls, invoke, extract = self.call()
+        kwargs = dict(
+            request_id="request-dup", worker=2,
+            reserve_tokens=100, reserve_micro_usd=1000,
+            invoke=invoke, receipt_extractor=extract,
+        )
+        first = dispatch(self.db, **kwargs)
+        second = dispatch(self.db, **kwargs)
+        self.assertTrue(first.dispatched)
+        self.assertFalse(second.dispatched)
+        self.assertFalse(second.settled)
+        self.assertEqual(second.state, "settled")
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(spartan_budget.status(self.db)["requests"], 1)
+
+    def test_exhausted_budget_denies_before_provider_invocation(self):
+        calls, invoke, extract = self.call()
+        with self.assertRaises(spartan_budget.BudgetError):
+            dispatch(
+                self.db, request_id="too-large", worker=1,
+                reserve_tokens=1001, reserve_micro_usd=1,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(spartan_budget.status(self.db)["requests"], 0)
+
+    def test_provider_exception_keeps_full_reservation_debited(self):
+        calls = []
+
+        def invoke():
+            calls.append("called")
+            raise TimeoutError("ambiguous delivery")
+
+        with self.assertRaises(TimeoutError):
+            dispatch(
+                self.db, request_id="provider-timeout", worker=3,
+                reserve_tokens=80, reserve_micro_usd=800,
+                invoke=invoke, receipt_extractor=lambda _: {},
+            )
+        self.assertEqual(calls, ["called"])
+        status = spartan_budget.status(self.db)
+        self.assertEqual(status["debited_tokens"], 80)
+        self.assertEqual(status["unsettled"], 1)
+
+    def test_receipt_extractor_exception_keeps_full_reservation(self):
+        calls, invoke, _ = self.call()
+        with self.assertRaisesRegex(RuntimeError, "bad receipt"):
+            dispatch(
+                self.db, request_id="bad-extractor", worker=4,
+                reserve_tokens=80, reserve_micro_usd=800,
+                invoke=invoke,
+                receipt_extractor=lambda _: (_ for _ in ()).throw(RuntimeError("bad receipt")),
+            )
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(spartan_budget.status(self.db)["unsettled"], 1)
+
+    def test_invalid_receipt_shape_fails_closed(self):
+        calls, invoke, extract = self.call(receipts={"actual_tokens": 1})
+        with self.assertRaises(BudgetedCallError):
+            dispatch(
+                self.db, request_id="bad-shape", worker=5,
+                reserve_tokens=80, reserve_micro_usd=800,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(spartan_budget.status(self.db)["unsettled"], 1)
+
+    def test_bool_is_not_accepted_as_receipt_integer(self):
+        calls, invoke, extract = self.call(
+            receipts={"actual_tokens": True, "actual_micro_usd": 1}
+        )
+        with self.assertRaises(BudgetedCallError):
+            dispatch(
+                self.db, request_id="bool-receipt", worker=6,
+                reserve_tokens=80, reserve_micro_usd=800,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(spartan_budget.status(self.db)["unsettled"], 1)
+
+    def test_provider_usage_overrun_freezes_ledger(self):
+        calls, invoke, extract = self.call(
+            receipts={"actual_tokens": 101, "actual_micro_usd": 500}
+        )
+        with self.assertRaises(spartan_budget.BudgetError):
+            dispatch(
+                self.db, request_id="overrun", worker=7,
+                reserve_tokens=100, reserve_micro_usd=500,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, ["called"])
+        self.assertTrue(spartan_budget.status(self.db)["frozen"])
+        with self.assertRaises(spartan_budget.BudgetError):
+            spartan_budget.reserve(self.db, "after-freeze", 8, 1, 0)
+
+    def test_contradictory_duplicate_reservation_is_rejected(self):
+        calls, invoke, extract = self.call()
+        dispatch(
+            self.db, request_id="conflict", worker=9,
+            reserve_tokens=100, reserve_micro_usd=1000,
+            invoke=invoke, receipt_extractor=extract,
+        )
+        with self.assertRaises(spartan_budget.BudgetError):
+            dispatch(
+                self.db, request_id="conflict", worker=9,
+                reserve_tokens=99, reserve_micro_usd=1000,
+                invoke=invoke, receipt_extractor=extract,
+            )
+        self.assertEqual(calls, ["called"])
+
+    def test_invalid_callbacks_are_rejected_before_reservation(self):
+        with self.assertRaises(TypeError):
+            dispatch(
+                self.db, request_id="no-callback", worker=10,
+                reserve_tokens=10, reserve_micro_usd=100,
+                invoke=None, receipt_extractor=lambda _: {},
+            )
+        self.assertEqual(spartan_budget.status(self.db)["requests"], 0)
+
+    def test_response_is_not_written_to_budget_tables(self):
+        marker = "NEVER-PERSIST-MODEL-OUTPUT-9e31"
+        calls, invoke, extract = self.call(response={"content": marker})
+        dispatch(
+            self.db, request_id="redaction", worker=11,
+            reserve_tokens=100, reserve_micro_usd=1000,
+            invoke=invoke, receipt_extractor=extract,
+        )
+        rows = self.db.execute("SELECT * FROM requests").fetchall()
+        self.assertNotIn(marker, repr([tuple(row) for row in rows]))
+
+
+if __name__ == "__main__":
+    unittest.main()
