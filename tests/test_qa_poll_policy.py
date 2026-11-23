@@ -100,6 +100,32 @@ class PollPolicyTests(unittest.TestCase):
     def test_retry_after_rejects_integer_overflow(self):
         self.assertIsNone(parse_retry_after(10**10000, now_epoch=0))
 
+    def test_public_numeric_parameters_normalize_integer_overflow(self):
+        huge = 10**10000
+        for kwargs in (
+            {"now_epoch": huge},
+            {"base_seconds": huge},
+            {"max_seconds": huge},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(PollPolicyError):
+                backoff_delay(0, **kwargs)
+        with self.assertRaises(PollPolicyError):
+            circuit_transition(Circuit(), "success", now_epoch=huge)
+        with self.assertRaises(PollPolicyError):
+            poll_permitted(Circuit(), now_epoch=huge)
+        with self.assertRaises(PollPolicyError):
+            poll_permitted(Circuit(), now_epoch=0, reset_after=huge)
+        with self.assertRaises(PollPolicyError):
+            circuit_transition(Circuit(), "success", now_epoch=0, reset_after=huge)
+        with self.assertRaises(PollPolicyError):
+            poll_permitted(Circuit(status="open", failures=5, opened_at=huge),
+                           now_epoch=0)
+
+    def test_retry_after_rejects_oversized_clock(self):
+        self.assertIsNone(parse_retry_after(
+            "Thu, 01 Jan 1970 00:02:30 GMT", now_epoch=10**10000
+        ))
+
     def test_retry_after_rejects_string_subclasses(self):
         class HostileString(str):
             def strip(self):
