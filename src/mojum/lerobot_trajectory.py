@@ -21,6 +21,9 @@ MAX_SHARD_BYTES = 128 * 1024 * 1024
 MAX_FRAMES = 8192
 MAX_EPISODES = 128
 MAX_DIM = 128
+# Cap finite values before squaring/aggregating up to MAX_FRAMES * MAX_DIM entries.
+# 1e100 stays safely below double overflow even for worst-case MSE sums.
+MAX_VECTOR_ABS = 1e100
 BATCH_SIZE = 128
 COLUMNS = ("episode_index", "frame_index", "timestamp", "task_index",
            "observation.state", "action")
@@ -106,7 +109,10 @@ def validate_info(info):
 def _vector(value, size, name):
     if type(value) not in (list, tuple) or len(value) != size:
         raise LeRobotImportError(f"{name}: invalid vector length")
-    return tuple(_real(x, name) for x in value)
+    numbers = tuple(_real(x, name) for x in value)
+    if any(abs(x) > MAX_VECTOR_ABS for x in numbers):
+        raise LeRobotImportError(f"{name}: magnitude exceeds bounded MSE budget")
+    return numbers
 
 
 def _source(dataset_id, dataset_revision, dataset_license):
