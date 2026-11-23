@@ -84,7 +84,10 @@ def parse_snapshot(raw: bytes) -> Snapshot:
     try:
         data = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs,
                           parse_constant=_constant)
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+    except AdmissionError:
+        raise
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        # Python 3.11+ raises bare ValueError for overlong JSON integer text.
         raise AdmissionError("invalid JSON snapshot") from exc
     _fields(data, ("schema", "evidence", "models"), "snapshot")
     if data["schema"] != SCHEMA:
