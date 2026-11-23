@@ -59,6 +59,26 @@ class RigContractTests(unittest.TestCase):
             with self.subTest(case=str(x)[:100]), self.assertRaises(RigError):
                 compile_mjcf(x)
 
+    def test_schema_discriminators_require_exact_builtin_str(self):
+        # A custom integer may compare equal to an allowed string but serialize
+        # as a JSON number. The rig wire must reject that type confusion.
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other in ("mojum.body.rig/1", "hinge")
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+        for field in ("schema", "type"):
+            with self.subTest(field=field):
+                rig = copy.deepcopy(self.rig)
+                if field == "schema":
+                    rig["schema"] = PretendInt(7)
+                else:
+                    rig["joints"][0]["type"] = PretendInt(7)
+                with self.assertRaisesRegex(RigError, "unsupported rig schema|only one-DOF hinge"):
+                    compile_mjcf(rig)
+
     def test_cli_prints_mjcf_offline(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
