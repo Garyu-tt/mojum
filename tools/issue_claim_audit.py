@@ -21,7 +21,9 @@ MAX_ISSUES = 300
 MAX_COMMENTS = 20000
 MAX_BODY_BYTES = 16384
 MAX_MARKERS_PER_SOURCE = 1
-CLAIM_MARKER = re.compile(r"^\s*<!-- mojum-claim/1: (\{[^\r\n]*\}) -->\s*$", re.M)
+# Only up to 3 spaces: a four-space indent is a Markdown code example.
+CLAIM_MARKER = re.compile(r"^ {0,3}<!-- mojum-claim/1: (\{[^\r\n]*\}) -->[ \t]*$", re.M)
+FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 MARKER_HINT = re.compile(r"mojum-claim/1", re.I)
 LEGACY_CLAIM_HINT = re.compile(r"(?:🔒|\bCLAIMED\b|\bCLAIM\s*/\s*IN\s+PROGRESS\b|\bCLAIM\s+UPDATE\b)", re.I)
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,95}\Z")
@@ -58,7 +60,13 @@ def _name(value: Any, what: str) -> str:
 
 
 def _body(value: Any) -> str:
-    if not isinstance(value, str) or len(value.encode("utf-8")) > MAX_BODY_BYTES:
+    if not isinstance(value, str):
+        raise ClaimAuditError("body must be UTF-8 text")
+    try:
+        size = len(value.encode("utf-8", errors="strict"))
+    except UnicodeError as exc:
+        raise ClaimAuditError("body must be valid UTF-8 text") from exc
+    if size > MAX_BODY_BYTES:
         raise ClaimAuditError("body must be text of at most 16 KiB")
     return value
 
@@ -75,6 +83,21 @@ def _time(value: Any) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _inside_fenced_code(body: str, offset: int) -> bool:
+    """Fail closed on markers quoted inside Markdown code fences."""
+    fence: tuple[str, int] | None = None
+    for line in body[:offset].splitlines():
+        match = FENCE_LINE.match(line)
+        if match is None:
+            continue
+        marker, rest = match.groups()
+        if fence is None:
+            fence = (marker[0], len(marker))
+        elif marker[0] == fence[0] and len(marker) >= fence[1] and not rest.strip():
+            fence = None
+    return fence is not None
+
+
 def _marker_payload(body: str) -> tuple[dict[str, str] | None, bool]:
     """Return exact standalone claim marker, and whether any untrusted hint exists."""
     matches = list(CLAIM_MARKER.finditer(body))
@@ -83,6 +106,8 @@ def _marker_payload(body: str) -> tuple[dict[str, str] | None, bool]:
     # A malformed or quoted marker must not be mistaken for a clean audit.
     if len(MARKER_HINT.findall(body)) != len(matches):
         raise ClaimAuditError("malformed or non-standalone claim marker")
+    if matches and _inside_fenced_code(body, matches[0].start()):
+        raise ClaimAuditError("claim marker inside fenced code example")
     if not matches:
         return None, bool(LEGACY_CLAIM_HINT.search(body))
     try:
@@ -111,6 +136,7 @@ def audit(snapshot: Any) -> dict[str, Any]:
     if not isinstance(issues, list) or len(issues) > MAX_ISSUES:
         raise ClaimAuditError("issues must be a list with at most 300 entries")
     numbers: set[int] = set()
+    seen_comments: set[int] = set()  # GitHub comment IDs are global across issues.
     total_comments = 0
     results: list[dict[str, Any]] = []
     for item in issues:
@@ -130,7 +156,6 @@ def audit(snapshot: Any) -> dict[str, Any]:
         if "body" in item:
             sources.append((_time(item.get("created_at")), 0,
                             _name(item.get("author"), "issue author"), _body(item["body"])))
-        seen_comments: set[int] = set()
         for comment in comments:
             if not isinstance(comment, dict):
                 raise ClaimAuditError("comment must be an object")
