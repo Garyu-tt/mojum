@@ -75,8 +75,11 @@ def _integrity_check(db_path):
     if not db_path.is_file():
         raise SmokeFailure("fixture SQLite file is absent")
     # The URI is constructed exclusively from a TemporaryDirectory path.
-    with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
-        response = conn.execute("PRAGMA integrity_check").fetchall()
+    try:
+        with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+            response = conn.execute("PRAGMA integrity_check").fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        raise SmokeFailure("SQLite integrity_check could not complete") from exc
     if response != [("ok",)]:
         raise SmokeFailure("SQLite integrity_check failed")
 
