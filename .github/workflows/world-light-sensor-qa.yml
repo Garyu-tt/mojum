@@ -1,0 +1,51 @@
+name: World light sensor exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/world-light-sensor-qa.yml"
+      - "src/mojum/world_light_sensor.py"
+      - "tests/test_world_light_sensor.py"
+      - "docs/WORLD_LIGHT_SENSOR_R01.md"
+  push:
+    branches:
+      - "qa/**"
+    paths:
+      - ".github/workflows/world-light-sensor-qa.yml"
+      - "src/mojum/world_light_sensor.py"
+      - "tests/test_world_light_sensor.py"
+      - "docs/WORLD_LIGHT_SENSOR_R01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact submitted revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile sensor and regression tests
+        run: python -m py_compile src/mojum/world_light_sensor.py tests/test_world_light_sensor.py
+      - name: Run focused sensor regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_world_light_sensor.py" -v
