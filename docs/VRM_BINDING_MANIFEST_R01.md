@@ -19,7 +19,7 @@ Malformed types and unsupported schema/fields throw `TypeError`. A structurally 
 
 ## Digest and determinism
 
-The SHA-256 digest covers canonical normalized input metadata. Joint inventories, mappings and available bones are sorted before serialization, so permutations of equivalent input lists produce the same digest. The digest is a consistency fingerprint, **not authentication**.
+The SHA-256 digest covers canonical normalized input metadata. Joint inventories, mappings and available bones use locale-independent code-point ordering before serialization, so permutations of equivalent input lists produce the same digest regardless of host locale. The digest is a consistency fingerprint, **not authentication**.
 
 ## Run
 
