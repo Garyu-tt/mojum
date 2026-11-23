@@ -49,6 +49,39 @@ class DeterministicCoordinationEnvTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             env.step({"agent_0": 0, "agent_1": 0})
 
+    def test_adapter_action_normalization_is_bounded_before_copy(self):
+        from examples.pettingzoo.benchmark import _normalize_adapter_actions
+
+        active = ["agent_0", "agent_1"]
+        self.assertEqual(
+            _normalize_adapter_actions({"agent_0": 0, "agent_1": 1}, active),
+            {"agent_0": 0, "agent_1": 1},
+        )
+        with self.assertRaises(ValueError):
+            _normalize_adapter_actions(
+                {"agent_0": 0, "agent_1": 1, **{f"extra-{i}": 0 for i in range(1000)}},
+                active,
+            )
+
+        class HostileKey(str):
+            armed = False
+
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile hash must not execute")
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("hostile equality must not execute")
+                return str.__eq__(self, other)
+
+        key = HostileKey("agent_0")
+        actions = {key: 0, "agent_1": 1}
+        key.armed = True
+        with self.assertRaises(ValueError):
+            _normalize_adapter_actions(actions, active)
+
     def test_rejects_incomplete_or_hostile_actions(self):
         env = DeterministicCoordinationEnv()
         env.reset(seed=1)
