@@ -106,5 +106,27 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(dst.read_text(encoding="utf-8"), "keep")
 
 
+    def test_deeply_nested_json_is_normalized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "deep.json"
+            path.write_text("[" * 12000 + "0" + "]" * 12000, encoding="utf-8")
+            with self.assertRaises(ReportError):
+                load_report(str(path))
+
+    def test_duplicate_json_keys_keep_specific_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duplicate.json"
+            path.write_text('{"schema":"first","schema":"second"}', encoding="utf-8")
+            with self.assertRaisesRegex(ReportError, "duplicate JSON object key"):
+                load_report(str(path))
+
+    def test_oversized_integer_token_is_normalized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "integer.json"
+            path.write_text("{" + '"value":' + ("9" * 5000) + "}", encoding="utf-8")
+            with self.assertRaises(ReportError):
+                load_report(str(path))
+
+
 if __name__ == "__main__":
     unittest.main()
