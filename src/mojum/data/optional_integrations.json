@@ -1,0 +1,267 @@
+{
+  "schema": "mojum.optional-integrations/1",
+  "default_enabled": false,
+  "cpu_baseline": "stdlib-unchanged",
+  "entries": [
+    {
+      "key": "physics",
+      "issue": 689,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "mujoco",
+          "url": "https://github.com/google-deepmind/mujoco"
+        },
+        {
+          "name": "mujoco_menagerie",
+          "url": "https://github.com/google-deepmind/mujoco_menagerie"
+        }
+      ]
+    },
+    {
+      "key": "gym",
+      "issue": 690,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "gymnasium",
+          "url": "https://gymnasium.farama.org/"
+        },
+        {
+          "name": "stable_baselines3",
+          "url": "https://stable-baselines3.readthedocs.io/"
+        },
+        {
+          "name": "dm_control",
+          "url": "https://github.com/google-deepmind/dm_control"
+        }
+      ]
+    },
+    {
+      "key": "brain",
+      "issue": 691,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "annarchy",
+          "url": "https://annarchy.github.io/"
+        },
+        {
+          "name": "brian2",
+          "url": "https://brian2.readthedocs.io/"
+        },
+        {
+          "name": "nengo",
+          "url": "https://www.nengo.ai/"
+        },
+        {
+          "name": "snntorch",
+          "url": "https://snntorch.readthedocs.io/"
+        }
+      ]
+    },
+    {
+      "key": "memory_index",
+      "issue": 692,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "sqlite_vec",
+          "url": "https://github.com/asg017/sqlite-vec"
+        }
+      ]
+    },
+    {
+      "key": "backup",
+      "issue": 693,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "litestream",
+          "url": "https://github.com/benbjohnson/litestream"
+        },
+        {
+          "name": "borgbackup",
+          "url": "https://github.com/borgbackup/borg"
+        }
+      ]
+    },
+    {
+      "key": "speech",
+      "issue": 694,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "sherpa_onnx",
+          "url": "https://github.com/k2-fsa/sherpa-onnx"
+        },
+        {
+          "name": "whisper_cpp",
+          "url": "https://github.com/ggml-org/whisper.cpp"
+        }
+      ]
+    },
+    {
+      "key": "avatar",
+      "issue": 695,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "three_vrm",
+          "url": "https://github.com/pixiv/three-vrm"
+        }
+      ]
+    },
+    {
+      "key": "fleet",
+      "issue": 696,
+      "priority": "P0",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "llama_cpp",
+          "url": "https://github.com/ggml-org/llama.cpp"
+        },
+        {
+          "name": "litellm",
+          "url": "https://docs.litellm.ai/"
+        }
+      ]
+    },
+    {
+      "key": "eval",
+      "issue": 697,
+      "priority": "P1",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "langfuse",
+          "url": "https://github.com/langfuse/langfuse"
+        }
+      ]
+    },
+    {
+      "key": "multi",
+      "issue": 698,
+      "priority": "P1",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "nats_jetstream",
+          "url": "https://docs.nats.io/concepts/jetstream"
+        },
+        {
+          "name": "cr_sqlite",
+          "url": "https://github.com/vlcn-io/cr-sqlite"
+        }
+      ]
+    },
+    {
+      "key": "graphui",
+      "issue": 699,
+      "priority": "P1",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "react_flow",
+          "url": "https://reactflow.dev/"
+        },
+        {
+          "name": "rete_js",
+          "url": "https://retejs.org/"
+        }
+      ]
+    },
+    {
+      "key": "education",
+      "issue": 700,
+      "priority": "P1",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "lerobot",
+          "url": "https://github.com/huggingface/lerobot"
+        },
+        {
+          "name": "robopianist",
+          "url": "https://github.com/google-research/robopianist"
+        },
+        {
+          "name": "pettingzoo",
+          "url": "https://github.com/Farama-Foundation/PettingZoo"
+        },
+        {
+          "name": "vizdoom",
+          "url": "https://github.com/Farama-Foundation/ViZDoom"
+        }
+      ]
+    },
+    {
+      "key": "schedule",
+      "issue": 701,
+      "priority": "P1",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "ray",
+          "url": "https://docs.ray.io/"
+        },
+        {
+          "name": "temporal",
+          "url": "https://temporal.io/"
+        }
+      ]
+    },
+    {
+      "key": "kinematics",
+      "issue": 702,
+      "priority": "P1",
+      "status": "planned",
+      "optional": true,
+      "license_review": "required",
+      "packages": [
+        {
+          "name": "pinocchio",
+          "url": "https://github.com/stack-of-tasks/pinocchio"
+        },
+        {
+          "name": "jolt_physics",
+          "url": "https://github.com/jrouwe/JoltPhysics"
+        }
+      ]
+    }
+  ]
+}
