@@ -33,6 +33,10 @@ def _checked_parent(value: object, field: str) -> dict:
     # hostile Mapping implementations cannot execute arbitrary methods here.
     if (type(value) is not dict
             or any(type(key) is not str for key in value)
+            or set(value) != {"schema", "genome_id", "revision", "inherited"}
+            or type(value.get("schema")) is not str
+            or type(value.get("genome_id")) is not str
+            or type(value.get("revision")) is not str
             or type(value.get("inherited")) is not dict
             or any(type(key) is not str for key in value["inherited"])):
         raise RecombinationError(f"{field} must be a native GENESIS seed object")
