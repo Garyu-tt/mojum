@@ -154,12 +154,21 @@ class VirtualMassPropertiesTests(unittest.TestCase):
             build_mass_properties(fixture(segment("bad", inertia=tensor)))
 
     def test_hostile_non_string_mapping_key_is_rejected_before_comparison(self):
+        raw = fixture(segment("ok"))
+        # The hostile key must not collide with an existing str key while the
+        # fixture is constructed; otherwise dict insertion invokes __eq__
+        # before build_mass_properties() gets a chance to reject the key.
+        occupied_hashes = {hash(key) for key in dict.keys(raw)}
+        hostile_hash = 0
+        while hostile_hash in occupied_hashes:
+            hostile_hash += 1
+
         class HostileKey:
             def __hash__(self):
-                return hash("schema")
+                return hostile_hash
             def __eq__(self, other):
                 raise AssertionError("hostile equality must not run")
-        raw = fixture(segment("ok"))
+
         raw[HostileKey()] = "unexpected"
         with self.assertRaises(MassPropertiesError):
             build_mass_properties(raw)
