@@ -136,8 +136,6 @@ def _normalize(value):
         raise ProfileError("unsupported integrator")
     if type(solver) is not str or solver not in _SOLVERS:
         raise ProfileError("unsupported solver")
-    if solver == "cg" and integrator == "euler":
-        raise ProfileError("cg solver requires an implicit integrator")
     normalized["integrator"] = integrator
     normalized["solver"] = solver
     return normalized
