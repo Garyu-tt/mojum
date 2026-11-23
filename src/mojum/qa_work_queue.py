@@ -40,7 +40,6 @@ class Job:
     created_at: float
     updated_at: float
     lease_owner: str | None = None
-    lease_token: str | None = None
     lease_until: float | None = None
     last_error_code: str | None = None
 
@@ -67,13 +66,30 @@ def _number(value: object, name: str, low: float, high: float) -> float:
     return result
 
 
-def _validate(value: object, depth: int = 0, budget: list[int] | None = None) -> None:
+def _validate(
+    value: object,
+    depth: int = 0,
+    budget: list[int] | None = None,
+    text_budget: list[int] | None = None,
+) -> None:
     if budget is None:
         budget = [10_000]
+    if text_budget is None:
+        text_budget = [MAX_PAYLOAD_BYTES]
     budget[0] -= 1
     if budget[0] < 0 or depth > 32:
         raise QueueError("payload exceeds structural limits")
-    if value is None or type(value) in (str, bool, int):
+    if type(value) is str:
+        # Check character count first: UTF-8 bytes can never be fewer than
+        # code points, so oversized strings are rejected before encoding.
+        if len(value) > text_budget[0]:
+            raise QueueError("payload text exceeds byte budget")
+        size = len(value.encode("utf-8"))
+        if size > text_budget[0]:
+            raise QueueError("payload text exceeds byte budget")
+        text_budget[0] -= size
+        return
+    if value is None or type(value) in (bool, int):
         return
     if type(value) is float:
         if not math.isfinite(value):
@@ -81,13 +97,19 @@ def _validate(value: object, depth: int = 0, budget: list[int] | None = None) ->
         return
     if type(value) is list:
         for item in value:
-            _validate(item, depth + 1, budget)
+            _validate(item, depth + 1, budget, text_budget)
         return
     if type(value) is dict:
         for key, item in value.items():
             if type(key) is not str:
                 raise QueueError("payload keys must be plain strings")
-            _validate(item, depth + 1, budget)
+            if len(key) > text_budget[0]:
+                raise QueueError("payload text exceeds byte budget")
+            key_size = len(key.encode("utf-8"))
+            if key_size > text_budget[0]:
+                raise QueueError("payload text exceeds byte budget")
+            text_budget[0] -= key_size
+            _validate(item, depth + 1, budget, text_budget)
         return
     raise QueueError("payload must contain exact native JSON values")
 
@@ -95,7 +117,7 @@ def _validate(value: object, depth: int = 0, budget: list[int] | None = None) ->
 def _payload(value: object) -> tuple[str, dict[str, Any]]:
     if type(value) is not dict:
         raise QueueError("payload must be a plain dictionary")
-    _validate(value)
+    _validate(value, text_budget=[MAX_PAYLOAD_BYTES])
     try:
         encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
                              ensure_ascii=False, allow_nan=False)
@@ -125,6 +147,28 @@ class QAWorkQueue:
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
+        has_jobs = self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_jobs'"
+        ).fetchone() is not None
+        has_meta = self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_meta'"
+        ).fetchone() is not None
+        if has_jobs and not has_meta:
+            self._db.close()
+            raise QueueError("unversioned queue database; refusing implicit adoption")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS qa_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        version = self._db.execute(
+            "SELECT value FROM qa_meta WHERE key='schema_version'"
+        ).fetchone()
+        if version is None:
+            self._db.execute(
+                "INSERT INTO qa_meta(key,value) VALUES('schema_version',?)", (SCHEMA,)
+            )
+        elif version["value"] != SCHEMA:
+            self._db.close()
+            raise QueueError("unsupported queue schema version")
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS qa_jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,7 +232,7 @@ class QAWorkQueue:
         return Job(row["id"], row["idempotency_key"], row["kind"],
                    json.loads(row["payload_json"]), row["status"], row["attempts"],
                    row["max_attempts"], row["available_at"], row["created_at"],
-                   row["updated_at"], row["lease_owner"], row["lease_token"],
+                   row["updated_at"], row["lease_owner"],
                    row["lease_until"], row["last_error_code"])
 
     def get(self, job_id: int) -> Job:
