@@ -35,7 +35,10 @@ class GraphV1RootMetadataTests(unittest.TestCase):
                 with self.subTest(field=field, value=repr(value)):
                     graph = copy.deepcopy(FIXTURE)
                     graph[field] = value
-                    with self.assertRaisesRegex(GraphError, field):
+                    expected_error = "UTF-8" if (
+                        type(value) is str and any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+                    ) else field
+                    with self.assertRaisesRegex(GraphError, expected_error):
                         validate(graph)
                     with self.assertRaises(GraphError):
                         Simulation(graph)
