@@ -77,8 +77,8 @@ def verify_rotation_chain(
 ) -> RotationReport:
     """Verify a bounded, contiguous chain against an independently pinned final key.
 
-    keyring maps fingerprints to key bytes for verification only. It must contain
-    the initial and each intermediate signing key. No key bytes are returned.
+    keyring maps fingerprints to intermediate signing-key bytes for verification
+    only. The initial key is supplied separately; no key bytes are returned.
     """
     if type(initial_epoch) is not int or not 0 <= initial_epoch <= 2**31 - 1:
         raise RotationError("initial_epoch must be a bounded native integer")
