@@ -61,9 +61,15 @@ def _integer(value, name: str, minimum: int = 0, maximum: int = 2**31 - 1) -> in
 
 
 def _number(value, name: str, minimum: float = -1e6, maximum: float = 1e6) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or not minimum <= value <= maximum:
+    if type(value) not in (int, float):
         raise TrajectoryError(f"invalid {name}")
-    return float(value)
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise TrajectoryError(f"invalid {name}") from exc
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        raise TrajectoryError(f"invalid {name}")
+    return number
 
 
 def _vector(value, name: str, dimension: int) -> tuple[float, ...]:
