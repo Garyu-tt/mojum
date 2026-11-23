@@ -1,6 +1,7 @@
 """Adversarial tests for the offline mesh revocation policy oracle."""
 from dataclasses import replace
 import unittest
+from unittest.mock import patch
 
 from mojum.mesh_revocation import (
     MeshRevocationError, VerifiedRevocationSnapshot, check_peer_access,
@@ -137,6 +138,18 @@ class MeshRevocationTests(unittest.TestCase):
         oversized_entry.update({f"extra-{index}": index for index in range(25_000)})
         with self.assertRaises(MeshRevocationError):
             envelope(revocations=[oversized_entry])
+
+    def test_oversized_schema_key_rejected_before_set_hashing(self):
+        value = envelope()
+        value.pop("schema")
+        value["s" * 100_000] = "mojum.mesh.revocations/1"
+
+        with patch("mojum.mesh_revocation.set", side_effect=AssertionError(
+            "oversized schema key reached set hashing"
+        ), create=True) as key_set:
+            with self.assertRaisesRegex(MeshRevocationError, "bounded native strings"):
+                verify_snapshot(value, authority_keys=KEYS, now_tick=150)
+            key_set.assert_not_called()
 
     def test_unbounded_and_invalid_key_maps_rejected(self):
         many = {f"key-{i}": KEY for i in range(129)}
