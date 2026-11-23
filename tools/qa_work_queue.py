@@ -7,7 +7,7 @@ guarded so stale workers cannot complete work after it has been reclaimed.
 
 from __future__ import annotations
 
-from concurrent.futures import Future
+from contextlib import closing
 import json
 import math
 from pathlib import Path
@@ -45,10 +45,12 @@ class DurableWorkQueue:
 
     def __init__(self, database: str | Path, *, clock: Callable[[], float] = time.time):
         self.database = str(database)
+        if self.database == ":memory:":
+            raise QueueError("durable queue requires a filesystem-backed SQLite database")
         self._clock = clock
         if self.database != ":memory:":
             Path(self.database).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(
                 """
