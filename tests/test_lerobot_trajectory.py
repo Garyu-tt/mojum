@@ -53,6 +53,11 @@ class LeRobotTrajectoryTests(unittest.TestCase):
         self.assertEqual(a.frames[0].action, (0.0, 0.0))
         self.assertEqual(a.dataset_revision, "a" * 40)
         self.assertEqual(a.shard_sha256, "c" * 64)
+        self.assertIsNone(a.asset_sha256)
+        self.assertIsNone(a.model_sha256)
+        pinned = self.imported(asset_sha256="d" * 64, model_sha256="e" * 64)
+        self.assertEqual(pinned.asset_sha256, "d" * 64)
+        self.assertNotEqual(pinned.digest, a.digest)
         original = a.frames
         result = heldout_zero_baseline(a, seed=123)
         self.assertEqual(original, a.frames)
@@ -118,6 +123,8 @@ class LeRobotTrajectoryTests(unittest.TestCase):
             {"dataset_id": "../private"},
             {"dataset_license": ""},
             {"metadata_sha256": "abc"},
+            {"asset_sha256": "not-a-digest"},
+            {"model_sha256": "f" * 63},
         ):
             with self.subTest(source=source), self.assertRaises(LeRobotImportError):
                 self.imported(**source)
@@ -160,8 +167,10 @@ class LeRobotTrajectoryTests(unittest.TestCase):
             symlink.symlink_to(root / "data" / "chunk-000" / "file-000.parquet")
             with self.assertRaises(LeRobotImportError):
                 self.load(root, shard="data/link.parquet")
-            with self.assertRaisesRegex(LeRobotImportError, "pyarrow"):
-                self.load(root)
+            # Work identically even if a developer has pyarrow in their venv.
+            with mock.patch.dict(sys.modules, {"pyarrow": None, "pyarrow.parquet": None}):
+                with self.assertRaisesRegex(LeRobotImportError, "pyarrow"):
+                    self.load(root)
 
     def test_duplicate_metadata_keys_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -179,8 +188,8 @@ class LeRobotTrajectoryTests(unittest.TestCase):
             schema_arrow = types.SimpleNamespace(names=list(COLUMNS) + ["observation.images.front"])
             def __init__(self, path):
                 recorded.append(path)
-            def iter_batches(self, *, batch_size, columns):
-                self_ref = (batch_size, columns)
+            def iter_batches(self, *, batch_size, columns, use_threads):
+                self_ref = (batch_size, columns, use_threads)
                 recorded.append(self_ref)
                 yield Batch()
         pyarrow = types.ModuleType("pyarrow")
@@ -193,7 +202,7 @@ class LeRobotTrajectoryTests(unittest.TestCase):
                 a = self.load(root)
                 b = self.load(root)
             self.assertEqual(a, b)
-            self.assertEqual(recorded[1], (128, list(COLUMNS)))
+            self.assertEqual(recorded[1], (128, list(COLUMNS), False))
             self.assertEqual(len(a.frames), 6)
             self.assertNotIn("PRIVATE-VISUAL", repr(a))
             self.assertEqual(a.metadata_sha256, b.metadata_sha256)
