@@ -229,6 +229,8 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         # chronology gate; zero terminal counters need no streak attestation.
         snapshot["history_complete"] = False
         snapshot["outcome_tail"] = []
+        snapshot["consecutive_rests"] = 0
+        snapshot["consecutive_blocked_probes"] = 0
         with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
