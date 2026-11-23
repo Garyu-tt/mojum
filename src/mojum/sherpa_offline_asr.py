@@ -74,12 +74,21 @@ def transcribe_public_wav(wav_bytes: bytes, recognizer: Any, *,
             getattr(recognizer, "decode_stream", None)):
         raise ASRBoundaryError("invalid sherpa-onnx recognizer interface")
     try:
-        import numpy as np  # only with installed sherpa; no mandatory deps
-    except ImportError as exc:
-        raise ASRBoundaryError("NumPy unavailable; no dependency auto-install") from exc
-    floats = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-    if not np.isfinite(floats).all():
-        raise ASRBoundaryError("invalid audio samples")
+        import numpy as np  # sherpa deployments normally ship NumPy
+    except ImportError:
+        # Keep the stdlib synthetic fixture truly dependency-free.
+        # A real sherpa recognizer normally needs its own NumPy dependency.
+        from array import array
+        import sys
+        signed_samples = array("h")
+        signed_samples.frombytes(pcm)
+        if sys.byteorder != "little":
+            signed_samples.byteswap()
+        floats = array("f", (sample / 32768.0 for sample in signed_samples))
+    else:
+        floats = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        if not np.isfinite(floats).all():
+            raise ASRBoundaryError("invalid audio samples")
     # External model execution is trusted only inside an OS-level sandbox.
     stream = recognizer.create_stream()
     if not callable(getattr(stream, "accept_waveform", None)):
