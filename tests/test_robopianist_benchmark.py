@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from mojum.robopianist_benchmark import (
-    BenchmarkError, compare_controls, make_task, make_trace, score_trace, validate_task,
+    BenchmarkError, compare_controls, make_task, make_trace, score_trace, validate_task, _digest,
 )
 
 
@@ -132,6 +132,26 @@ class RoboPianistBenchmarkTests(unittest.TestCase):
         bad_trace["mode"] = HostileText("policy")
         with self.assertRaises(BenchmarkError):
             score_trace(task, bad_trace, consent=True)
+
+    def test_rejects_nonchronological_trace_with_valid_digest(self):
+        task = make_task(21)
+        trace = make_trace(task)
+        bad = copy.deepcopy(trace)
+        bad["events"][1]["tick"] = bad["events"][0]["tick"]
+        unsigned = {k: bad[k] for k in ("schema", "provenance", "consent", "task_sha256", "mode", "events")}
+        bad["sha256"] = _digest(unsigned)
+        with self.assertRaisesRegex(BenchmarkError, "strictly increasing"):
+            score_trace(task, bad, consent=True)
+
+    def test_duration_accuracy_is_reported(self):
+        task = make_task(22)
+        trace = make_trace(task)
+        trace["events"][0]["duration_ticks"] += 1
+        unsigned = {k: trace[k] for k in ("schema", "provenance", "consent", "task_sha256", "mode", "events")}
+        trace["sha256"] = _digest(unsigned)
+        report = score_trace(task, trace, consent=True)
+        self.assertEqual(report["correct_durations"], len(task["notes"]) - 1)
+        self.assertLess(report["duration_accuracy"], 1.0)
 
     def test_no_network_or_device_side_effects(self):
         task = make_task(6)
