@@ -57,9 +57,9 @@ def _canonical(record: Any) -> bytes:
     if seq > MAX_RECORDS:
         raise AuditChainError("seq exceeds the supported record bound")
     _native_int(admitted["at_ms"], "at_ms", 0)
-    if type(admitted["kind"]) is not str or admitted["kind"] not in KINDS:
+    if type(admitted["kind"]) is not str or len(admitted["kind"]) > 32 or admitted["kind"] not in KINDS:
         raise AuditChainError("unsupported event kind")
-    if type(admitted["state"]) is not str or admitted["state"] not in STATES:
+    if type(admitted["state"]) is not str or len(admitted["state"]) > 32 or admitted["state"] not in STATES:
         raise AuditChainError("unsupported task state")
     if (type(admitted["task_key"]) is not str or len(admitted["task_key"]) > MAX_TASK_KEY
             or not _TOKEN.fullmatch(admitted["task_key"])):
@@ -107,9 +107,9 @@ def verify_audit_chain(records: Any, *, max_records: int = MAX_RECORDS) -> dict[
             raise AuditChainError("sequence must be contiguous and start at 1")
         if at_ms < previous_at:
             raise AuditChainError("timestamps must be nondecreasing")
-        if type(item["kind"]) is not str or item["kind"] not in KINDS:
+        if type(item["kind"]) is not str or len(item["kind"]) > 32 or item["kind"] not in KINDS:
             raise AuditChainError("unsupported event kind")
-        if type(item["state"]) is not str or item["state"] not in STATES:
+        if type(item["state"]) is not str or len(item["state"]) > 32 or item["state"] not in STATES:
             raise AuditChainError("unsupported task state")
         if (type(item["task_key"]) is not str or len(item["task_key"]) > MAX_TASK_KEY
                 or not _TOKEN.fullmatch(item["task_key"])):
