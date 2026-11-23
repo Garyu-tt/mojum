@@ -66,6 +66,13 @@ def _number(value: object, name: str, low: float, high: float) -> float:
     return result
 
 
+def _utf8_size(value: str) -> int:
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise QueueError("payload text must be valid UTF-8") from exc
+
+
 def _validate(
     value: object,
     depth: int = 0,
@@ -84,12 +91,16 @@ def _validate(
         # code points, so oversized strings are rejected before encoding.
         if len(value) > text_budget[0]:
             raise QueueError("payload text exceeds byte budget")
-        size = len(value.encode("utf-8"))
+        size = _utf8_size(value)
         if size > text_budget[0]:
             raise QueueError("payload text exceeds byte budget")
         text_budget[0] -= size
         return
-    if value is None or type(value) in (bool, int):
+    if value is None or type(value) is bool:
+        return
+    if type(value) is int:
+        if value.bit_length() > 4096:
+            raise QueueError("payload integer exceeds bit budget")
         return
     if type(value) is float:
         if not math.isfinite(value):
@@ -105,7 +116,7 @@ def _validate(
                 raise QueueError("payload keys must be plain strings")
             if len(key) > text_budget[0]:
                 raise QueueError("payload text exceeds byte budget")
-            key_size = len(key.encode("utf-8"))
+            key_size = _utf8_size(key)
             if key_size > text_budget[0]:
                 raise QueueError("payload text exceeds byte budget")
             text_budget[0] -= key_size
@@ -163,6 +174,9 @@ class QAWorkQueue:
             "SELECT value FROM qa_meta WHERE key='schema_version'"
         ).fetchone()
         if version is None:
+            if has_jobs:
+                self._db.close()
+                raise QueueError("queue schema version is missing; refusing implicit adoption")
             self._db.execute(
                 "INSERT INTO qa_meta(key,value) VALUES('schema_version',?)", (SCHEMA,)
             )
