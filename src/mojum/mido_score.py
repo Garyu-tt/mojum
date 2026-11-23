@@ -136,8 +136,11 @@ def normalize_tracks(
             if tempo_count > MAX_TEMPOS:
                 raise MidiScoreError("tempo change budget exceeded")
             continue
-        if kind in ("sysex", "control_change", "pitchwheel"):
-            raise MidiScoreError("unsupported MIDI controller/sysex semantics")
+        if kind in ("sysex", "control_change", "pitchwheel",
+                    "program_change", "aftertouch", "polytouch"):
+            # These can change instrument, pitch or expression; omitting them
+            # would yield a plausible but musically false note-only score.
+            raise MidiScoreError("unsupported MIDI performance semantics")
         if kind not in ("note_on", "note_off"):
             # Lyrics, filenames, vendor metadata are never exported.
             continue
