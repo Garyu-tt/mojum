@@ -58,6 +58,12 @@ class PRSnapshotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             admit_pr_snapshot(raw)
 
+    def test_rejects_invalid_repository_components(self):
+        raw = fixture()
+        raw["repository"] = "../mojum"
+        with self.assertRaises(ValueError):
+            admit_pr_snapshot(raw)
+
     def test_rejects_invalid_sha_and_ref(self):
         for key, value in (("head_sha", "z" * 40), ("base_ref", "../main")):
             raw = fixture()
