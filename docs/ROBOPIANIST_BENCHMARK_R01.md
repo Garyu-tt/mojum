@@ -19,7 +19,7 @@ the supplied values; they do not authenticate an author or prove consent.
   representation.
 - `make_trace(task, mode="policy"|"frozen")`: produce a perfect reference
   trace or a deliberately simple frozen-key control.
-- `score_trace(task, trace, consent=True)`: report pitch accuracy and bounded
+- `score_trace(task, trace, consent=True)`: report pitch accuracy, duration accuracy and bounded
   mean absolute timing error.
 - `compare_controls(task)`: compare the two fixtures without claiming
   learning, transfer, physical fidelity, or generalization.
