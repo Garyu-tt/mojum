@@ -51,7 +51,7 @@ class CRSQLiteMetadataFixtureTests(unittest.TestCase):
     def test_native_output_rejects_nonpublic_cells(self):
         self.assertEqual(_checked_native_projection({"label.good": "public ASCII"}),
                          {"label.good": "public ASCII"})
-        for data in ({"label.good": ""}, {"label.good": "secret\\nvalue"},
+        for data in ({"label.good": ""}, {"label.good": "secret\nvalue"},
                      {"note.a": "snowman \u2603"}, {"layout.x": "x" * 257},
                      {"motor.gate": "x"}, {123: "numeric-key"}):
             with self.subTest(data=data), self.assertRaises(MetadataBoundaryError):
