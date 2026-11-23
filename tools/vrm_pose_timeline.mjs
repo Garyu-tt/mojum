@@ -105,7 +105,7 @@ function cloneFrame(frame, expectedJointIds) {
  * Build an immutable timeline from a bounded sequence of measured frames.
  * Sequence numbers must be contiguous; logical time/tick must strictly rise.
  */
-export function createVrmPoseTimeline(inputFrames) {
+function createVrmPoseTimelineUnchecked(inputFrames) {
   exactArray(inputFrames, 1, MAX_FRAMES, 'frames');
 
   const frames = [];
@@ -180,4 +180,16 @@ export function createVrmPoseTimeline(inputFrames) {
     frameAt: seek,
     position: () => cursor,
   });
+}
+
+
+/** Normalize hostile reflection/proxy failures at the public input boundary. */
+export function createVrmPoseTimeline(inputFrames) {
+  try {
+    return createVrmPoseTimelineUnchecked(inputFrames);
+  } catch (error) {
+    // Preserve the documented validation and resource-boundary categories.
+    if (error instanceof TypeError || error instanceof RangeError) throw error;
+    throw new TypeError('VRM timeline input could not be safely inspected');
+  }
 }
