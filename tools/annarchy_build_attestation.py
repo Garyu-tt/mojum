@@ -63,9 +63,15 @@ def validate_manifest(record: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and detach one strict, bounded ANNarchy CPU build manifest."""
     if type(record) is not dict:
         raise ManifestError("manifest must be a JSON object")
-    if set(record) != _KEYS:
-        missing = sorted(_KEYS - set(record))
-        extra = sorted(set(record) - _KEYS)
+    # Reject subclasses before any hash/equality-based set comparison. A
+    # caller-supplied str subclass can override __eq__ and execute code during
+    # set membership even though the outer mapping is an exact built-in dict.
+    keys = tuple(dict.keys(record))
+    if any(type(key) is not str for key in keys):
+        raise ManifestError("manifest keys must be native strings")
+    if set(keys) != _KEYS:
+        missing = sorted(_KEYS - set(keys))
+        extra = sorted(set(keys) - _KEYS)
         raise ManifestError(f"manifest keys mismatch (missing={missing}, extra={extra})")
 
     if record["schema"] != SCHEMA:
