@@ -108,10 +108,15 @@ class WorldAcousticTests(unittest.TestCase):
             self.sense([event("same"), event("same")])
 
     def test_invalid_source_coordinates_rejected(self):
-        for x, y in ((-1.0, 1.0), (11.0, 1.0), (1.0, 1.0)):
+        for x, y in ((-1.0, 1.0), (11.0, 1.0)):
             with self.subTest(x=x, y=y):
                 with self.assertRaises(AcousticError):
                     self.sense([event(x=x, y=y)])
+
+    def test_co_located_source_is_valid(self):
+        item = self.sense([event(x=1.0, y=1.0)])["events"][0]
+        self.assertEqual(item["distance_mm"], 0)
+        self.assertTrue(item["audible"])
 
     def test_budgets_are_strict_and_bounded(self):
         with self.assertRaises(AcousticError):
