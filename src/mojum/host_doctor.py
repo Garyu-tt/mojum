@@ -25,7 +25,9 @@ def _reject_constant(_token):
 
 def _read(root, name, limit):
     try:
-        raw = root.joinpath(name).read_bytes()
+        resource = root.joinpath(name)
+        with resource.open("rb") as stream:
+            raw = stream.read(limit + 1)
     except (OSError, TypeError, AttributeError):
         return None, "RESOURCE_UNAVAILABLE"
     if len(raw) > limit:
