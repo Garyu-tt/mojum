@@ -103,6 +103,8 @@ def _preflight_json(value):
 
         kind = type(item)
         if kind is dict:
+            if nodes + len(item) > 200_000:
+                raise ConsentError("input exceeds the maximum JSON node count")
             add_size(2 + max(0, len(item) - 1))
             for key, child in item.items():
                 if type(key) is not str:
@@ -110,6 +112,8 @@ def _preflight_json(value):
                 add_size(_json_string_size(key) + 1)
                 stack.append((child, depth + 1))
         elif kind is list:
+            if nodes + len(item) > 200_000:
+                raise ConsentError("input exceeds the maximum JSON node count")
             add_size(2 + max(0, len(item) - 1))
             for child in item:
                 stack.append((child, depth + 1))
