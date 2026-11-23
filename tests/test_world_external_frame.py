@@ -60,6 +60,27 @@ class ExternalFrameTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.admit(self.frame(1, 1), tick=1)
 
+    def test_forged_frozen_grant_fails_closed_at_both_public_apis(self):
+        # frozen=True alone cannot guarantee the constructor ran: these are
+        # exact-class instances with absent or post-construction bad fields.
+        missing = object.__new__(ExternalFrameGrant)
+        corrupt_period = ExternalFrameGrant("game_fixture", "example.game",
+                                            "level01", 20_000_000)
+        object.__setattr__(corrupt_period, "tick_period_ns", "bad")
+        corrupt_scope = ExternalFrameGrant("game_fixture", "example.game",
+                                           "level01", 20_000_000)
+        object.__setattr__(corrupt_scope, "source_kind", object())
+        good_receipt = self.admit()
+        for grant in (missing, corrupt_period, corrupt_scope):
+            with self.subTest(grant=type(grant.tick_period_ns).__name__
+                              if hasattr(grant, "tick_period_ns") else "missing"):
+                with self.assertRaisesRegex(ValueError, "grant"):
+                    admit_external_frame(self.frame(), grant=grant, expected_tick=0)
+                with self.assertRaisesRegex(ValueError, "grant"):
+                    verify_external_admission(good_receipt, grant=grant,
+                                              expected_tick=0)
+        self.assertEqual(self.admit()["frame"]["tick"], 0)
+
     def test_bad_schema_audience_and_physical_flags(self):
         for key, value in (("schema", "legacy"), ("audience", "PRIVATE"),
                            ("synthetic", 1), ("physical_contact", 0),
