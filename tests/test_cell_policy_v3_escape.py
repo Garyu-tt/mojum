@@ -518,6 +518,55 @@ class OrderedOutcomeTailTests(unittest.TestCase):
         ):
             CellExplorerV3Escape.from_snapshot(forged)
 
+    def test_outcome_tail_bounds_keys_and_values_before_hash_or_regex(self):
+        policy = CellExplorerV3Escape()
+        sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
+        intent = policy.decide(sense)
+        policy.observe(sense, intent, False)
+        original = policy.snapshot()
+
+        class HostileKey(str):
+            armed = False
+            calls = 0
+
+            def __hash__(self):
+                type(self).calls += 1
+                if self.armed:
+                    raise AssertionError("hostile outcome key hash executed")
+                return str.__hash__(self)
+
+        hostile = copy.deepcopy(original)
+        entry = hostile["outcome_tail"][0]
+        key = HostileKey("tick")
+        entry[key] = entry.pop("tick")
+        key.armed = True
+        calls = HostileKey.calls
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(hostile)
+        self.assertEqual(HostileKey.calls, calls)
+
+        oversized_key = copy.deepcopy(original)
+        entry = oversized_key["outcome_tail"][0]
+        entry["x" * 17] = entry.pop("tick")
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(oversized_key)
+
+        oversized_cell = copy.deepcopy(original)
+        oversized_cell["outcome_tail"][0]["cell"] = "0" * 1_000_000
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(oversized_cell)
+
+        class HostileAction(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile action comparison executed")
+
+            __hash__ = str.__hash__
+
+        hostile_action = copy.deepcopy(original)
+        hostile_action["outcome_tail"][0]["action"] = HostileAction("rest")
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(hostile_action)
+
     def test_rejects_legacy_snapshot_without_explicit_chronology_version(self):
         legacy = CellExplorerV3Escape().snapshot()
         legacy.pop("snapshot_version")
