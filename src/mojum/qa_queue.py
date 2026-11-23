@@ -77,7 +77,13 @@ def _timestamp(value: object) -> int:
 def _validate_json_value(value: object, depth: int = 0) -> None:
     if depth > 32:
         raise ValueError("payload nesting exceeds 32 levels")
-    if value is None or type(value) in (bool, str):
+    if value is None or type(value) is bool:
+        return
+    if type(value) is str:
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("payload strings must be valid UTF-8") from exc
         return
     if type(value) is int:
         if value < -9_223_372_036_854_775_808 or value > 9_223_372_036_854_775_807:
@@ -95,6 +101,7 @@ def _validate_json_value(value: object, depth: int = 0) -> None:
         for key, item in value.items():
             if type(key) is not str:
                 raise ValueError("payload object keys must be plain strings")
+            _validate_json_value(key, depth + 1)
             _validate_json_value(item, depth + 1)
         return
     raise ValueError("payload must contain only plain JSON values")
