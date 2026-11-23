@@ -1,6 +1,7 @@
 """Offline CPU-only tests; no native extension or Noosphere required."""
 import base64
 import hashlib
+from itertools import count
 import json
 from pathlib import Path
 import sqlite3
@@ -77,6 +78,9 @@ class EnvelopeTests(unittest.TestCase):
     def test_bounded_packets_and_arrays(self):
         with self.assertRaises(ValueError):
             cr.pack_changes([change()] * (cr.MAX_CHANGES + 1))
+        # Must stop after the first excess row rather than exhaust a stream.
+        with self.assertRaises(ValueError):
+            cr.pack_changes((change() for _ in count()))
         with self.assertRaises(ValueError):
             cr.unpack_changes(b"x" * (cr.MAX_WIRE + 1))
         with self.assertRaises(ValueError):
