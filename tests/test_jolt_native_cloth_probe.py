@@ -35,7 +35,7 @@ def validate_report(raw: str) -> dict[str, Any]:
     except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError("report must be one JSON object") from exc
     if type(report) is not dict or set(report) != EXPECTED_KEYS:
-        raise ValueError("report keys do not match moj​​um.jolt-native-cloth/1")
+        raise ValueError("report keys do not match mojum.jolt-native-cloth/1")
     if report["schema"] != "mojum.jolt-native-cloth/1":
         raise ValueError("unsupported report schema")
     if report["engine_version"] != "5.7.0":
