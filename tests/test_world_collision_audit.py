@@ -135,6 +135,17 @@ class CollisionAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'observation'):
                 audit_step(self.room, self.state, dx=0, dy=0)
 
+    def test_detects_actual_subulp_wall_overrun(self):
+        # In binary float, 1.0 + 1e-16 rounds back to the wall at 1.0.
+        # The exact-input rational path crosses it; never rewrite runtime.
+        room = Room(1, 1)
+        state = initial_state(room, 1, 0.5)
+        next_state, receipt = audit_step(room, state, dx=1e-16, dy=0)
+        self.assertTrue(receipt['reference_blocked'])
+        self.assertFalse(receipt['runtime_blocked'])
+        self.assertFalse(receipt['agrees'])
+        self.assertEqual(next_state.x, 1.0)
+
     def test_input_float_not_decimal_reinterpreted(self):
         # Exactly represent float 0.1 as a binary rational, not 1/10.
         room = Room(1, 1, ((.3, .4, .01, .1),))
