@@ -47,7 +47,7 @@ CATALOG = {
 }
 
 
-def art_run(make, revise):
+def art_run(make, revise, *, sim_tick=40):
     script = {
         "observe": "I see a blank page",
         "experiment": "Try two line lengths",
@@ -57,7 +57,7 @@ def art_run(make, revise):
     }
     return run_activity(
         CATALOG, "visual_arts.starter", script,
-        sim_tick=40, learner_ref="private-learner-marker",
+        sim_tick=sim_tick, learner_ref="private-learner-marker",
     )
 
 
@@ -155,6 +155,18 @@ class SchoolArtifactReviewTests(unittest.TestCase):
             [{"x1": 0, "y1": 0, "x2": 2, "y2": 2}],
         )
         run["schema"] = Hostile()
+        with self.assertRaises(SchoolArtifactReviewError):
+            review_run(run)
+
+    def test_event_ticks_reject_bool_even_when_equal_to_integer(self):
+        run = art_run(
+            [{"x1": 0, "y1": 0, "x2": 1, "y2": 1}],
+            [{"x1": 0, "y1": 0, "x2": 2, "y2": 2}],
+            sim_tick=0,
+        )
+        # True compares equal to the expected experiment tick (1), but is not
+        # a valid exact integer in the run contract.
+        run["events"][1]["sim_tick"] = True
         with self.assertRaises(SchoolArtifactReviewError):
             review_run(run)
 
