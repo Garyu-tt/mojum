@@ -110,5 +110,47 @@ class ClothLODTests(unittest.TestCase):
         self.assertEqual(start(c), original)
 
 
+    def test_restored_snapshot_tags_reject_hostile_equality(self):
+        """No arbitrary Python __eq__/__ne__ can bypass schema or policy CAS."""
+        config = ClothLODConfig(requested="medium")
+        valid = start(config).to_snapshot()
+
+        class PretendsEqual:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ExplodesOnCompare:
+            def __eq__(self, other):
+                raise AssertionError("untrusted equality executed")
+
+            def __ne__(self, other):
+                raise AssertionError("untrusted inequality executed")
+
+        class StringSubclass(str):
+            pass
+
+        for key in ("schema", "policy_sha256"):
+            for hostile in (PretendsEqual(), ExplodesOnCompare(),
+                            StringSubclass(valid[key])):
+                with self.subTest(key=key, hostile=type(hostile).__name__):
+                    with self.assertRaises(ClothLODError):
+                        restore_state({**valid, key: hostile}, config)
+
+        # A forged policy string must never authorize replay under another
+        # config, even when the old effective mode fits the new resource caps.
+        from_low = start(ClothLODConfig(requested="low")).to_snapshot()
+        from_low["policy_sha256"] = PretendsEqual()
+        with self.assertRaises(ClothLODError):
+            restore_state(from_low, config)
+
+        # Key spelling equality is not sufficient for a strict JSON field map.
+        alias_keys = {StringSubclass(k): v for k, v in valid.items()}
+        with self.assertRaises(ClothLODError):
+            restore_state(alias_keys, config)
+
+
 if __name__ == "__main__":
     unittest.main()
