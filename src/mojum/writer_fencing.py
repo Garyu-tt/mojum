@@ -35,10 +35,13 @@ def _validated_document(value: Any) -> dict[str, Any] | None:
     """Return a fresh canonical dict, or None for malformed input."""
     if type(value) is not dict or len(value) != len(_FIELDS):
         return None
-    if any(type(key) is not str for key in dict.keys(value)):
+    keys = tuple(dict.keys(value))
+    # Allowlisted field names are all <=11 characters. Reject oversized
+    # native strings before frozenset hashes them, bounding direct API input.
+    if any(type(key) is not str or len(key) > max(map(len, _FIELDS)) for key in keys):
         return None
     try:
-        if frozenset(dict.keys(value)) != _FIELDS:
+        if frozenset(keys) != _FIELDS:
             return None
         data = {key: dict.__getitem__(value, key) for key in _FIELDS}
     except (KeyError, RuntimeError, TypeError, ValueError):
