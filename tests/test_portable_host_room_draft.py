@@ -75,6 +75,7 @@ class PortableHostCustomRoomTests(unittest.TestCase):
             )["projection"]["items"][0]["event"]
             self.assertEqual(event["payload"]["room"]["width"], 5.0)
             self.assertEqual(event["payload"]["room"]["start"], [1.0, 2.0])
+            self.assertEqual(event["payload"]["sensory_scene"]["toys"], [])
 
         second = self.invoke()
         self.assertEqual(second.returncode, 0, second.stderr)
