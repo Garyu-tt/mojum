@@ -141,6 +141,10 @@ class MeshRevocationAuditTests(unittest.TestCase):
         with self.assertRaises(RevocationAuditError):
             audit_peer_revocations(raw)
 
+    def test_oversized_text_is_rejected_by_character_preflight(self):
+        with self.assertRaisesRegex(RevocationAuditError, "byte budget"):
+            audit_peer_revocations("x" * (1_048_576 + 1))
+
     def test_input_must_be_native_string(self):
         with self.assertRaises(RevocationAuditError):
             audit_peer_revocations(123)  # type: ignore[arg-type]
