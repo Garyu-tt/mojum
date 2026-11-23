@@ -112,6 +112,10 @@ class PettingZooEpisodeTests(unittest.TestCase):
         value["steps"][0]["rewards"]["a"] = 10 ** 1000
         with self.assertRaises(ValueError):
             admit_episode(value)
+        value = sample()
+        value["steps"][0]["rewards"]["a"] = 1 << 128
+        with self.assertRaisesRegex(ValueError, "bit budget"):
+            admit_episode(value)
 
     def test_rejects_bad_flags_and_vector_bounds(self):
         value = sample()
