@@ -105,6 +105,10 @@ class TracePrivacyTests(unittest.TestCase):
                 del raw[key]
                 sanitize_trace_event(raw)
 
+    def test_rejects_cost_integer_that_overflows_float_conversion(self):
+        with self.assertRaises(TracePrivacyError):
+            sanitize_trace_event({**BASE, "cost_usd": 10**10000})
+
     def test_offline_sink_validates_but_never_persists_or_sends(self):
         sink = OfflineTraceSink()
         self.assertIs(sink.emit(BASE), False)
