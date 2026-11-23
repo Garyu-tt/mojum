@@ -84,6 +84,8 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """
     if type(snapshot) is not dict:
         raise MetricsInputError("snapshot must be a built-in dict")
+    if len(snapshot) > 3:
+        raise MetricsInputError("snapshot contains too many fields")
     # Check keys by iteration and exact type before set/dict lookup can invoke
     # a hostile str-subclass __hash__ or __eq__ implementation.
     if any(type(key) is not str for key in snapshot):
@@ -106,6 +108,8 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     for index, task in enumerate(tasks):
         if type(task) is not dict:
             raise MetricsInputError(f"task {index} must be a built-in dict")
+        if len(task) > 5:
+            raise MetricsInputError(f"task {index} contains too many fields")
         if any(type(key) is not str for key in task):
             raise MetricsInputError(f"task {index} keys must be built-in strings")
         allowed = {"id", "state", "age_seconds", "blocked_reason", "lease_remaining_seconds"}
