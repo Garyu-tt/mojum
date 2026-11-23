@@ -153,6 +153,11 @@ class GraphV1FlowAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphV1FlowAuditError, "256 KiB"):
             audit_graph_v1_flow(graph, labels_for(valid_graph()))
 
+        graph = valid_graph()
+        graph["oversized_integer"] = 1 << (256 * 1024 * 4)
+        with self.assertRaisesRegex(GraphV1FlowAuditError, "256 KiB"):
+            audit_graph_v1_flow(graph, labels_for(valid_graph()))
+
     def test_hostile_str_subclass_rejected_before_comparison(self):
         class Hostile(str):
             def __eq__(self, other):
