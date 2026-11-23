@@ -13,6 +13,8 @@ MAX_GRANTS = 128
 MAX_TOPICS = 64
 MAX_EVENTS = 10_000
 MAX_WIRE_BYTES = 16 * 1024 * 1024
+MAX_TREE_NODES = 200_000
+MAX_TREE_DEPTH = 64
 _VISIBILITY = frozenset({"PUBLIC", "RESTRICTED", "PRIVATE"})
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _GRANT_KEYS = {
@@ -139,6 +141,90 @@ def _preflight_json(value):
             raise ConsentError("value contains a non-native JSON type")
 
 
+def _json_string_size(value):
+    """Exact compact JSON string size, without allocating the encoded result."""
+    if len(value) > MAX_WIRE_BYTES:
+        raise ConsentError("JSON text exceeds the byte budget")
+    size = 2
+    short_escapes = {8, 9, 10, 12, 13}
+    for char in value:
+        code = ord(char)
+        if code in (34, 92):
+            size += 2
+        elif code < 32:
+            size += 2 if code in short_escapes else 6
+        else:
+            try:
+                size += len(char.encode("utf-8", errors="strict"))
+            except UnicodeEncodeError as exc:
+                raise ConsentError("JSON text must be valid UTF-8") from exc
+        if size > MAX_WIRE_BYTES:
+            raise ConsentError("JSON text exceeds the byte budget")
+    return size
+
+
+def _check_native_json_tree(value):
+    """Bound an untrusted JSON tree before equality, hashing, or serialization."""
+    stack = [(value, 0)]
+    seen = set()
+    nodes = 0
+    wire_bytes = 0
+
+    def add_size(amount):
+        nonlocal wire_bytes
+        wire_bytes += amount
+        if wire_bytes > MAX_WIRE_BYTES:
+            raise ConsentError("canonical JSON exceeds the 16 MiB byte budget")
+
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_TREE_NODES or depth > MAX_TREE_DEPTH:
+            raise ConsentError("JSON structure exceeds its depth or node budget")
+        kind = type(item)
+        if kind is dict:
+            identity = id(item)
+            if identity in seen:
+                raise ConsentError("JSON input must be a tree without cycles or shared containers")
+            seen.add(identity)
+            # Enforce cardinality before allocating a key snapshot.
+            if nodes + len(stack) + len(item) > MAX_TREE_NODES:
+                raise ConsentError("JSON object exceeds the node budget")
+            keys = tuple(dict.keys(item))
+            add_size(2 + max(0, len(keys) - 1))
+            if any(type(key) is not str for key in keys):
+                raise ConsentError("JSON object keys must be native strings")
+            for key in keys:
+                add_size(_json_string_size(key) + 1)
+                stack.append((item[key], depth + 1))
+        elif kind is list:
+            identity = id(item)
+            if identity in seen:
+                raise ConsentError("JSON input must be a tree without cycles or shared containers")
+            seen.add(identity)
+            if nodes + len(stack) + len(item) > MAX_TREE_NODES:
+                raise ConsentError("JSON array exceeds the node budget")
+            add_size(2 + max(0, len(item) - 1))
+            for child in item:
+                stack.append((child, depth + 1))
+        elif kind is str:
+            add_size(_json_string_size(item))
+        elif kind is int:
+            if not -(2**63) <= item <= 2**63 - 1:
+                raise ConsentError("JSON integer exceeds the signed 64-bit limit")
+            add_size(len(str(item)))
+        elif kind is float:
+            if not math.isfinite(item):
+                raise ConsentError("JSON numbers must be finite")
+            add_size(len(repr(item)))
+        elif kind is bool:
+            add_size(4 if item else 5)
+        elif item is None:
+            add_size(4)
+        else:
+            raise ConsentError("input must contain native JSON values")
+
+
 def _canonical(value):
     _preflight_json(value)
     try:
@@ -159,12 +245,10 @@ def _digest(value):
 def _exact_mapping(value, keys, field):
     if type(value) is not dict:
         raise ConsentError(f"{field} must contain exactly the documented fields")
-    if len(value) != len(keys):
-        raise ConsentError(f"{field} must contain exactly the documented fields")
-    observed = tuple(dict.keys(value))
-    if any(type(key) is not str for key in observed):
-        raise ConsentError(f"{field} keys must be exact strings")
-    if set(observed) != keys:
+    native_keys = tuple(dict.keys(value))
+    if any(type(key) is not str for key in native_keys):
+        raise ConsentError(f"{field} keys must be native strings")
+    if frozenset(native_keys) != keys:
         raise ConsentError(f"{field} must contain exactly the documented fields")
 
 
@@ -179,6 +263,7 @@ def _sorted_text_list(value, field, maximum):
 
 def validate_grant(grant):
     """Validate and detach one explicit source-consent grant."""
+    _check_native_json_tree(grant)
     _exact_mapping(grant, _GRANT_KEYS, "consent grant")
     if grant["schema"] != CONSENT_SCHEMA:
         raise ConsentError("unsupported consent grant schema")
@@ -207,6 +292,7 @@ def validate_grant(grant):
 
 
 def _validate_dataset(dataset):
+    _check_native_json_tree(dataset)
     _exact_mapping(dataset, {"projection", "sha256"}, "dataset envelope")
     projection = dataset["projection"]
     _exact_mapping(projection, _PROJECTION_KEYS, "dataset projection")
@@ -270,6 +356,22 @@ def _validate_dataset(dataset):
             raise ConsentError("event recorded_at_ns precedes observed_at_ns")
         if type(event["visibility"]) is not str or event["visibility"] not in _VISIBILITY:
             raise ConsentError("event has unsupported visibility")
+        # Re-enforce the declared dataset filters against every supplied event.
+        # A self-consistent digest does not prove the items came from the dataset API.
+        if filters["topic"] is not None and event["topic"] != filters["topic"]:
+            raise ConsentError(f"items[{index}] does not match the dataset topic filter")
+        if filters["source"] is not None and event["source"] != filters["source"]:
+            raise ConsentError(f"items[{index}] does not match the dataset source filter")
+        if (filters["as_of_recorded_ns"] is not None
+                and event["recorded_at_ns"] > filters["as_of_recorded_ns"]):
+            raise ConsentError(f"items[{index}] exceeds the dataset recorded-time filter")
+        if filters["valid_at_ns"] is not None:
+            valid_at = filters["valid_at_ns"]
+            if not (event["valid_from_ns"] <= valid_at
+                    and (event["valid_to_ns"] is None or valid_at < event["valid_to_ns"])):
+                raise ConsentError(f"items[{index}] does not match the dataset validity filter")
+        if not filters["include_nonpublic"] and event["visibility"] != "PUBLIC":
+            raise ConsentError(f"items[{index}] violates the PUBLIC-only dataset filter")
         if type(event["payload"]) is not dict:
             raise ConsentError("event payload must be an object")
         detached.append({
