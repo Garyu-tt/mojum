@@ -39,7 +39,8 @@ def validate_operation(value):
     """Reject unknown/private fields and return a bounded detached operation."""
     if type(value) is not dict or set(value) != _FIELDS:
         raise MetadataBoundaryError("unexpected metadata operation fields")
-    if value["schema"] != SCHEMA or value["audience"] != AUDIENCE:
+    if (type(value["schema"]) is not str or value["schema"] != SCHEMA or
+            type(value["audience"]) is not str or value["audience"] != AUDIENCE):
         raise MetadataBoundaryError("unsupported schema or non-public synthetic audience")
     if (type(value["workspace"]) is not str or
             not value["workspace"].startswith("demo_") or
@@ -187,6 +188,18 @@ def _sync_native(from_db, to_db):
         to_db.executemany(_INSERT_CHANGE_SQL, rows)
 
 
+def _checked_native_projection(state):
+    """Reapply the exact PUBLIC_SYNTHETIC cell contract to native outputs."""
+    if type(state) is not dict or len(state) > MAX_OPS * 2:
+        raise MetadataBoundaryError("invalid native projection size or type")
+    for key, value in state.items():
+        if (type(key) is not str or _KEY.fullmatch(key) is None or
+                type(value) is not str or not 1 <= len(value) <= 256 or
+                any(ord(ch) < 32 or ord(ch) > 126 for ch in value)):
+            raise MetadataBoundaryError("native output escaped public metadata boundary")
+    return state
+
+
 def native_partition_probe(extension_path, extension_sha256, left_ops, right_ops):
     """Opt-in real CR-SQLite two-replica test; no network or persistent databases.
 
@@ -212,9 +225,7 @@ def native_partition_probe(extension_path, extension_sha256, left_ops, right_ops
             state_r = dict(rhs.execute("SELECT key, value FROM collab_meta ORDER BY key").fetchall())
             if state_l != state_r:
                 raise MetadataBoundaryError("native replicas failed convergence")
-            for key, value in state_l.items():
-                if _KEY.fullmatch(key) is None or type(value) is not str or len(value) > 256:
-                    raise MetadataBoundaryError("native output escaped public metadata boundary")
+            _checked_native_projection(state_l)
             return {"schema": "mojum.collab-crsqlite-probe/1",
                     "upstream": UPSTREAM_VERSION, "converged": True,
                     "entries": state_l, "changes_left": len(_native_changes(lhs)),
