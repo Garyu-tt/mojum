@@ -127,6 +127,27 @@ class WorldAcousticTests(unittest.TestCase):
                 with self.assertRaises(AcousticError):
                     self.sense([], **kwargs)
 
+    def test_rejects_listener_coordinate_overflow_before_rounding(self):
+        room = Room(1e308, 1e308)
+        state = initial_state(room, 1e308, 1e308)
+        with self.assertRaisesRegex(AcousticError, "millimetre coordinate"):
+            sense_sound_events(room, state, [], expected_revision=state.revision)
+
+    def test_rejects_event_coordinate_overflow_before_rounding(self):
+        room = Room(1e308, 1e308)
+        state = initial_state(room, 1.0, 1.0)
+        with self.assertRaisesRegex(AcousticError, "millimetre coordinate"):
+            sense_sound_events(
+                room, state, [event("overflow", x=1e308, y=1.0)],
+                expected_revision=state.revision,
+            )
+
+    def test_oversized_event_mapping_rejected_before_key_enumeration(self):
+        raw = event()
+        raw.update({f"extra_{index}": 0 for index in range(25_000)})
+        with self.assertRaisesRegex(AcousticError, "exact keys"):
+            self.sense([raw])
+
     def test_inputs_are_not_mutated(self):
         events = [event()]
         before = copy.deepcopy(events)
