@@ -1,5 +1,25 @@
 import unittest
 
+
+class DictSubclass(dict):
+    pass
+
+
+class ListSubclass(list):
+    pass
+
+
+class IntSubclass(int):
+    pass
+
+
+class FloatSubclass(float):
+    pass
+
+
+class StrSubclass(str):
+    pass
+
 from mojum.qa_supervisor_metrics import MetricsInputError, summarize_snapshot
 
 
@@ -72,6 +92,26 @@ class SupervisorMetricsTests(unittest.TestCase):
     def test_boolean_not_accepted_as_integer(self):
         with self.assertRaises(MetricsInputError):
             summarize_snapshot({"observed_at": True, "tasks": []})
+
+    def test_rejects_container_subclasses(self):
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot(DictSubclass(observed_at=1, tasks=[]))
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": ListSubclass()})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [DictSubclass(id="x", state="READY")]})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [], "duration_samples_ms": ListSubclass()})
+
+    def test_rejects_scalar_subclasses(self):
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": IntSubclass(1), "tasks": []})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [{"id": StrSubclass("x"), "state": "READY"}]})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [{"id": "x", "state": "READY", "age_seconds": IntSubclass(1)}]})
+        with self.assertRaises(MetricsInputError):
+            summarize_snapshot({"observed_at": 1, "tasks": [], "duration_samples_ms": [FloatSubclass(1.0)]})
 
     def test_task_limit_enforced(self):
         with self.assertRaises(MetricsInputError):
