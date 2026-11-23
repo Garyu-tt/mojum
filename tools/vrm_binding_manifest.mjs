@@ -32,7 +32,8 @@ function plainRecord(value, requiredKeys, label) {
     if (proto !== Object.prototype && proto !== null) fail(label + ' must be a plain record');
     const keys = Reflect.ownKeys(value);
     if (keys.some(k => typeof k !== 'string') ||
-        keys.slice().sort().join('\\0') !== requiredKeys.slice().sort().join('\\0')) {
+        keys.length !== requiredKeys.length ||
+        requiredKeys.some(key => !keys.includes(key))) {
       fail(label + ' has missing or unknown fields');
     }
     const result = Object.create(null);
