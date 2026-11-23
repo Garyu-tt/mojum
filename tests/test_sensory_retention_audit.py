@@ -3,9 +3,32 @@ from copy import deepcopy
 import math
 import unittest
 
+from mojum.sensory_associations_v2 import ContactAssociationsV2
 from mojum.sensory_retention_audit import (
     SOURCE_SCHEMA, RetentionAuditError, audit_snapshot,
 )
+from mojum.sensory_play import SENSE_SCHEMA
+
+
+def sensor(tick, rgb):
+    return {
+        "schema": SENSE_SCHEMA,
+        "tick": tick,
+        "world_revision": "a" * 64,
+        "visible": True,
+        "reflectance_rgb": list(rgb),
+        "range_bucket_10cm": 0,
+        "source": "synthetic_local_proximity_not_camera",
+    }
+
+
+def measured(tick):
+    return {
+        "contact": True,
+        "measured_deflection": 0.4,
+        "instrument": "synthetic_probe_not_material_classifier",
+        "source_tick": tick,
+    }
 
 
 def valid_snapshot():
@@ -53,9 +76,9 @@ class RetentionAuditTests(unittest.TestCase):
     def test_valid_eviction_conservation_is_accepted(self):
         table, last_seen = {}, {}
         for tick in range(2, 130):
-            cue = f"{tick}:0:0"
-            table[cue] = {"count": 1, "mean_deflection": 0.5}
-            last_seen[cue] = tick
+            cue_key = f"{tick}:0:0"
+            table[cue_key] = {"count": 1, "mean_deflection": 0.5}
+            last_seen[cue_key] = tick
         snapshot = {
             "schema": SOURCE_SCHEMA, "table": table, "updates": 130,
             "last_seen_at": last_seen, "last_contact_tick": 129,
@@ -132,6 +155,30 @@ class RetentionAuditTests(unittest.TestCase):
         report = audit_snapshot(snapshot)
         self.assertEqual(report["updates"], 0)
         self.assertIsNone(report["oldest_retained_age_ticks"])
+
+    def test_actual_model_snapshot_after_4001_updates_is_auditable(self):
+        model = ContactAssociationsV2()
+        for tick in range(4001):
+            frame = sensor(tick, (42, 90, 174))
+            model.learn(frame, measured(tick), model.predict(frame))
+        report = audit_snapshot(model.snapshot())
+        self.assertEqual(report["updates"], 4001)
+        self.assertEqual(report["retained_observations"], 4001)
+        self.assertEqual(report["forgotten_observations"], 0)
+        self.assertEqual(report["last_contact_tick"], 4000)
+
+    def test_actual_model_snapshot_after_two_lru_evictions_is_auditable(self):
+        model = ContactAssociationsV2()
+        for tick in range(130):
+            rgb = (tick, 0, 0)
+            frame = sensor(tick, rgb)
+            model.learn(frame, measured(tick), model.predict(frame))
+        report = audit_snapshot(model.snapshot())
+        self.assertEqual(report["updates"], 130)
+        self.assertEqual(report["retained_cues"], 128)
+        self.assertEqual(report["retained_observations"], 128)
+        self.assertEqual(report["forgotten_observations"], 2)
+        self.assertEqual(report["evictions"], 2)
 
 
 if __name__ == "__main__":
