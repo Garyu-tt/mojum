@@ -162,6 +162,31 @@ function loadViewer() {
  assert.equal(get("play").disabled,false,"valid reload did not recover");
  assert.equal(get("tick").textContent,"0");
  assert.equal(timer.callback,null,"old timer survived valid recovery");
+ 
+ // Small malformed JSONL forces a parse failure *after* arrayBuffer(), not
+ // the earlier size rejection. Neither the old frame nor its timer may survive.
+ get("play").listeners.click();
+ assert.equal(timer.ms,200);
+ const malformed=Buffer.from("{broken jsonl\\n","utf8");
+ let malformedReads=0;
+ input.files=[{name:"malformed.private.jsonl",size:malformed.length,
+   arrayBuffer:async()=>{malformedReads++;return Uint8Array.from(malformed).buffer;}}];
+ await input.listeners.change.call(input);
+ assert.equal(malformedReads,1,"malformed replacement was not parsed");
+ assert.equal(timer.callback,null,"malformed replacement left playback running");
+ assert.equal(get("play").disabled,true,"old playback enabled after parse error");
+ assert.equal(get("seek").disabled,true,"old seek enabled after parse error");
+ assert.equal(get("seek").max,"0","malformed trace retained stale seek range");
+ assert.equal(get("tick").textContent,"—","malformed trace retained stale frame");
+ assert.match(get("status").textContent,/Не удалось открыть/,"malformed trace did not show an open error");
+ input.files=[{name:"synthetic.private.jsonl",size:bytes.length,
+   arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];
+ await input.listeners.change.call(input);
+ assert.equal(get("play").disabled,false,"valid reload after malformed file rejected");
+ assert.equal(get("seek").disabled,false,"seek not restored after valid reload");
+ assert.equal(get("seek").max,"2","valid reload did not restore seek range");
+ assert.equal(get("tick").textContent,"0");
+ assert.equal(timer.callback,null,"stale timer survived malformed-file recovery");
  process.stdout.write(JSON.stringify({ok:true,frames:3,stops:timer.stops})+"\n");
 })().catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
 """
