@@ -153,5 +153,40 @@ class CheckpointTests(unittest.TestCase):
             })
 
 
+    def test_rejects_hostile_root_keys_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("schema")
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not run")
+
+        manifest = self.make()
+        schema = manifest.pop("schema")
+        manifest[HostileKey("schema")] = schema
+        with self.assertRaises(CheckpointError):
+            verify_checkpoint(manifest)
+
+    def test_rejects_hostile_component_keys_before_set_comparison(self):
+        class HostileKey(str):
+            def __hash__(self):
+                return hash("schema")
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not run")
+
+        source = refs()
+        schema = source["brain"].pop("schema")
+        source["brain"][HostileKey("schema")] = schema
+        with self.assertRaises(CheckpointError):
+            self.make(components=source)
+
+    def test_rejects_cyclic_manifest_before_canonical_serialization(self):
+        manifest = self.make()
+        manifest["components"]["brain"]["cycle"] = manifest
+        with self.assertRaises(CheckpointError):
+            verify_checkpoint(manifest)
+
+
 if __name__ == "__main__":
     unittest.main()
