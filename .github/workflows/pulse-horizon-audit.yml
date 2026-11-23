@@ -1,0 +1,37 @@
+name: Pulse horizon audit
+on:
+  pull_request:
+    paths:
+      - "src/mojum/pulse_horizon_audit.py"
+      - "tests/test_pulse_horizon_audit.py"
+      - "docs/PULSE_HORIZON_AUDIT_R01.md"
+      - ".github/workflows/pulse-horizon-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert checked-out revision
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile module
+        run: python -m compileall -q src/mojum/pulse_horizon_audit.py
+      - name: Run focused hermetic suite
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_pulse_horizon_audit.py' -v
