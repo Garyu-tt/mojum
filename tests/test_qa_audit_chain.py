@@ -169,14 +169,22 @@ class AuditChainTests(unittest.TestCase):
             token_pattern.fullmatch.assert_not_called()
 
     def test_oversized_digest_fields_rejected_before_regex(self):
-        for field in ("previous_digest", "digest"):
-            with self.subTest(field=field):
-                row = make_chain([("enqueued", "queued", None, 1)])[0]
-                row[field] = "a" * 1_000_000
-                with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
-                    with self.assertRaises(AuditChainError):
-                        verify_audit_chain([row])
-                    hex_pattern.fullmatch.assert_not_called()
+        # An oversized previous digest must be rejected before any regex scan.
+        row = make_chain([("enqueued", "queued", None, 1)])[0]
+        row["previous_digest"] = "a" * 1_000_000
+        with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
+            with self.assertRaises(AuditChainError):
+                verify_audit_chain([row])
+            hex_pattern.fullmatch.assert_not_called()
+
+        # For an oversized current digest, the valid predecessor digest is
+        # checked first; the oversized value itself must never reach regex.
+        row = make_chain([("enqueued", "queued", None, 1)])[0]
+        row["digest"] = "a" * 1_000_000
+        with patch("mojum.qa_audit_chain._HEX") as hex_pattern:
+            with self.assertRaises(AuditChainError):
+                verify_audit_chain([row])
+            hex_pattern.fullmatch.assert_called_once_with(GENESIS)
 
     def test_record_digest_bounds_task_key_and_previous_digest(self):
         row = make_chain([("enqueued", "queued", None, 1)])[0]
