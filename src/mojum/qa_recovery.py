@@ -13,6 +13,7 @@ MAX_TASKS = 500
 MAX_DEPENDENCIES = 4000
 MAX_ID_BYTES = 128
 MAX_ATTEMPTS = 1000
+MAX_LOGICAL_TIME = 2**63 - 1
 _STATES = {
     "DISCOVERED", "CLAIMED", "RUNNING", "RETRY", "WAITING_CI",
     "BLOCKED_PERMISSION", "BLOCKED_CONFLICT", "SUCCEEDED", "FAILED",
@@ -53,16 +54,17 @@ class RecoveryReport:
         }
 
 
-def _integer(value: Any, field: str, minimum: int = 0) -> int:
-    if type(value) is not int or value < minimum:
-        raise RecoveryError(f"{field} must be a native integer >= {minimum}")
+def _integer(value: Any, field: str, minimum: int = 0,
+             maximum: int = MAX_LOGICAL_TIME) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise RecoveryError(
+            f"{field} must be a native integer in [{minimum}, {maximum}]"
+        )
     return value
 
 
 def _identifier(value: Any, field: str) -> str:
     if type(value) is not str or not value or len(value) > MAX_ID_BYTES:
-        raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
-    if len(value) > MAX_ID_BYTES:
         raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
     try:
         encoded_length = len(value.encode("utf-8"))
@@ -90,7 +92,7 @@ def plan_recovery(tasks: Any, *, observed_at: int) -> RecoveryReport:
     """Build a bounded deterministic recovery plan from a trusted queue snapshot.
 
     Task schema: task_id, state, attempt, max_attempts, lease_expires_at,
-    not_before, dependencies. Times are non-negative integer logical seconds.
+    not_before, dependencies. Times are non-negative signed-64-bit logical seconds.
     A lease expires when lease_expires_at <= observed_at.
     """
     now = _integer(observed_at, "observed_at")
@@ -114,9 +116,10 @@ def plan_recovery(tasks: Any, *, observed_at: int) -> RecoveryReport:
         state = item["state"]
         if type(state) is not str or state not in _STATES:
             raise RecoveryError(f"tasks[{index}].state is unsupported")
-        attempt = _integer(item["attempt"], f"tasks[{index}].attempt")
-        maximum = _integer(item["max_attempts"], f"tasks[{index}].max_attempts", 1)
-        if attempt > maximum or maximum > MAX_ATTEMPTS:
+        attempt = _integer(item["attempt"], f"tasks[{index}].attempt", maximum=MAX_ATTEMPTS)
+        maximum = _integer(item["max_attempts"], f"tasks[{index}].max_attempts",
+                           minimum=1, maximum=MAX_ATTEMPTS)
+        if attempt > maximum:
             raise RecoveryError(f"tasks[{index}] retry budget is invalid")
         lease = item["lease_expires_at"]
         if lease is not None:
