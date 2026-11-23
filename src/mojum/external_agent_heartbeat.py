@@ -143,16 +143,22 @@ def _open_private_sqlite(path: str | os.PathLike[str]) -> sqlite3.Connection:
     # Never persist signing keys. Restrict SQLite to a trusted local directory;
     # no symlink races from adversarial filesystem users are supported.
     conn = sqlite3.connect(str(p), timeout=5, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA synchronous=FULL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("""CREATE TABLE IF NOT EXISTS receipts (
-        source TEXT NOT NULL, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
-        seq INTEGER NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL,
-        observed_ms INTEGER NOT NULL,
-        PRIMARY KEY (source, agent_id, run_id, seq)
-    )""")
-    return conn
+    try:
+        conn.execute("PRAGMA journal_mode=DELETE")
+        conn.execute("PRAGMA synchronous=FULL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("""CREATE TABLE IF NOT EXISTS receipts (
+            source TEXT NOT NULL, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
+            seq INTEGER NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL,
+            observed_ms INTEGER NOT NULL,
+            PRIMARY KEY (source, agent_id, run_id, seq)
+        )""")
+        return conn
+    except BaseException:
+        # A failed constructor has no owner to call close(); do not leak the
+        # native SQLite handle on invalid schema or PRAGMA/DDL failures.
+        conn.close()
+        raise
 
 
 class ReceiptJournal:

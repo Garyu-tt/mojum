@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.external_agent_heartbeat import (
     ReceiptError, ReceiptJournal, SCHEMA, sign_receipt, validate_receipt,
@@ -162,6 +163,27 @@ class HeartbeatTests(unittest.TestCase):
         self.assertFalse(self.add(event(), now=1_040_000))
         self.assertTrue(self.add(event(kind="agent.heartbeat", seq=2, timestamp_ms=1_040_000), now=1_040_000))
         self.assertEqual(self.journal.status("chatgpt", "peer-1", "run-1", observed_ms=1_050_000)["state"], "active")
+
+    def test_corrupt_private_sqlite_constructor_closes_native_connection(self):
+        """A failed PRAGMA must close the real SQLite handle before raising."""
+        corrupt = Path(self.tmp.name) / "corrupt.sqlite3"
+        corrupt.write_bytes(b"not-a-sqlite-database" * 8)
+        corrupt.chmod(0o600)
+        real_connect = sqlite3.connect
+        opened = []
+
+        def observed_connect(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            opened.append(connection)  # Strong reference defeats GC masking.
+            return connection
+
+        with patch("mojum.external_agent_heartbeat.sqlite3.connect",
+                   side_effect=observed_connect):
+            with self.assertRaises(sqlite3.DatabaseError):
+                ReceiptJournal(corrupt, self.keys)
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            opened[0].execute("SELECT 1")
 
     def test_unittest_cleanup_closes_reopened_journal(self):
         """Regression: cleanup must close the replacement, not only the old DB."""
