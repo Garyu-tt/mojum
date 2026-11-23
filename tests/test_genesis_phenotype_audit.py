@@ -122,7 +122,7 @@ class PhenotypeAuditTests(unittest.TestCase):
                 audit_phenotype_snapshot(snapshot, expected, source_classification="PUBLIC_SYNTHETIC")
             # Only the bounded ledger snapshot may be serialized. Escaping
             # the untrusted phenotype would exceed 1 MiB, so reject preflight.
-            self.assertEqual(serializer.call_count, 2)
+            self.assertEqual(serializer.call_count, 1)
 
     def test_oversized_integer_is_rejected_before_serialization(self):
         ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
