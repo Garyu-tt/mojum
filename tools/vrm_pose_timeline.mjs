@@ -53,7 +53,7 @@ function exactArray(value, minimum, maximum, name) {
   return value;
 }
 
-function cloneFrame(frame, expectedJointIds) {
+function cloneFrame(frame, expectedJointIds, remainingJointSamples) {
   exactRecord(frame,
     ['schema', 'classification', 'sequence', 'epoch', 'tick', 'simulation_time_ns',
      'revision', 'joints'], 'frame');
@@ -67,6 +67,10 @@ function cloneFrame(frame, expectedJointIds) {
     throw new TypeError('invalid VRM timeline frame metadata');
   }
   exactArray(frame.joints, 1, MAX_JOINTS, 'joints');
+  // Reject the aggregate frame×joint budget before cloning any joint records.
+  if (frame.joints.length > remainingJointSamples) {
+    throw new RangeError('timeline exceeds ' + MAX_JOINT_SAMPLES + ' joint samples');
+  }
 
   const joints = [];
   const ids = new Set();
@@ -119,11 +123,10 @@ export function createVrmPoseTimeline(inputFrames) {
   let totalJointSamples = 0;
 
   for (const input of inputFrames) {
-    const frame = cloneFrame(input, expectedJointIds);
+    const frame = cloneFrame(
+      input, expectedJointIds, MAX_JOINT_SAMPLES - totalJointSamples,
+    );
     totalJointSamples += frame.joints.length;
-    if (totalJointSamples > MAX_JOINT_SAMPLES) {
-      throw new RangeError('timeline exceeds ' + MAX_JOINT_SAMPLES + ' joint samples');
-    }
     if (firstEpoch === null) {
       firstEpoch = frame.epoch;
       firstRevision = frame.revision;
