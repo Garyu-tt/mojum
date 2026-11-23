@@ -82,11 +82,11 @@ class FingerprintTests(unittest.TestCase):
             fingerprint_episode([item], episode_id="demo")
 
     def test_preflight_byte_budget_runs_before_serialization(self):
-        large = [frame(observation={"text": "x" * 4096}) for _ in range(130)]
+        oversized = {f"field-{index}": "x" * 4096 for index in range(128)}
         with patch("mojum.episode_fingerprint.json.dumps",
                    side_effect=AssertionError("serializer ran before preflight")):
             with self.assertRaises(FingerprintError):
-                fingerprint_episode(large, episode_id="demo")
+                fingerprint_episode([frame(observation=oversized)], episode_id="demo")
 
 if __name__ == "__main__":
     unittest.main()
