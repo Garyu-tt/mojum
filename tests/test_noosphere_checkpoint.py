@@ -87,6 +87,45 @@ class CheckpointTests(unittest.TestCase):
         with self.assertRaises(CheckpointError):
             create_checkpoint("dante", "c", True, refs())
 
+    def test_rejects_hostile_root_manifest_key_before_set_comparison(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, _other):
+                raise RuntimeError("hostile root key equality must not run")
+
+        manifest = self.make()
+        value = manifest.pop("schema")
+        manifest[HostileKey("schema")] = value
+        with self.assertRaises(CheckpointError):
+            verify_checkpoint(manifest)
+
+    def test_rejects_hostile_component_reference_key_before_set_comparison(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, _other):
+                raise RuntimeError("hostile component key equality must not run")
+
+        components = refs()
+        value = components["brain"].pop("schema")
+        components["brain"][HostileKey("schema")] = value
+        with self.assertRaises(CheckpointError):
+            self.make(components=components)
+
+    def test_rejects_hostile_component_map_key_before_set_comparison(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, _other):
+                raise RuntimeError("hostile component map equality must not run")
+
+        components = refs()
+        value = components.pop("brain")
+        components[HostileKey("brain")] = value
+        with self.assertRaises(CheckpointError):
+            self.make(components=components)
+
     def test_manifest_tampering_is_detected(self):
         manifest = self.make()
         tampered = copy.deepcopy(manifest)
