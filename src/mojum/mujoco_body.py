@@ -205,9 +205,16 @@ class HeadlessBody:
             contacts.append({"geom_a": a, "geom_b": b,
                              "signed_distance_m": _finite_measured(contact.dist, "contact.distance")})
         contacts.sort(key=lambda c: (c["geom_a"], c["geom_b"], c["signed_distance_m"]))
+        # The fixed 2ms solver advances exactly once per exposed virtual tick.
+        # A finite but stale/advanced/negative engine clock is still invalid.
+        sim_time = _finite_measured(self.data.time, "time")
+        expected_time = self.tick * DT
+        if sim_time < 0 or not math.isclose(
+                sim_time, expected_time, rel_tol=1e-9, abs_tol=1e-9):
+            raise RigError("inconsistent virtual simulation clock")
         return {"schema": OBS_SCHEMA, "source": f"mujoco/{PINNED_MUJOCO}",
                 "rig_revision": self.revision, "tick": self.tick,
-                "sim_time_s": _finite_measured(self.data.time, "time"),
+                "sim_time_s": sim_time,
                 "dt_seconds": DT, "joints": joints, "contacts": contacts,
                 "actuation": "disabled", "hardware_contact": False,
                 "contact_provenance": "measured_virtual_solver_contacts_not_hardware"}

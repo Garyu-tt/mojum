@@ -114,6 +114,36 @@ class RigContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RigError, "fault latched"):
             body.observe()
 
+    def test_fake_engine_clock_must_match_virtual_tick(self):
+        class BadClockEngine:
+            __version__ = PINNED_MUJOCO
+
+            class MjModel:
+                @staticmethod
+                def from_xml_string(xml):
+                    return SimpleNamespace(nu=0, nq=2, nv=2, nmocap=0,
+                                           opt=SimpleNamespace(timestep=DT))
+
+            class MjData:
+                def __init__(self, model):
+                    self.qpos = [0., 0.]
+                    self.qvel = [0., 0.]
+                    self.ncon = 0
+                    self.contact = []
+                    self.time = 0.
+
+            @staticmethod
+            def mj_step(model, data):
+                # A finite and nonnegative time can still be stale.
+                data.time = 0.
+
+        body = HeadlessBody(self.rig, mujoco_module=BadClockEngine)
+        with self.assertRaisesRegex(RigError, "fault latched"):
+            body.step(1)
+        self.assertTrue(body.faulted)
+        with self.assertRaisesRegex(RigError, "fault latched"):
+            body.observe()
+
     def test_bounded_engine_error_and_step_input(self):
         with self.assertRaisesRegex(RuntimeError, "exact MuJoCo"):
             HeadlessBody(self.rig, mujoco_module=type("Stub", (), {"__version__": "0.0"})())
