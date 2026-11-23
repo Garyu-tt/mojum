@@ -54,6 +54,10 @@ class BodyAccelerationReport:
 def _native_dict(value: object, expected: set[str], field: str) -> dict:
     if type(value) is not dict:
         raise BodyAccelerationError(f"{field} must be a native dict")
+    # The exact key count is known (at most 256 for limits); reject huge
+    # mappings before scanning their keys or constructing a set snapshot.
+    if len(value) != len(expected):
+        raise BodyAccelerationError(f"{field} has missing or unknown fields")
     # Check keys before equality/set operations to reject hostile key subclasses.
     if any(type(key) is not str for key in value):
         raise BodyAccelerationError(f"{field} keys must be native strings")
