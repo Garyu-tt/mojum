@@ -13,6 +13,10 @@ MAX_PATH_BYTES = 1024
 MAX_COMPONENT_BYTES = 255
 _DRIVE = re.compile(r"^[A-Za-z]:")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_WINDOWS_DEVICE = re.compile(
+    r"^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(?:\..*)?$",
+    re.IGNORECASE,
+)
 
 
 class ArchivePathError(ValueError):
@@ -41,6 +45,7 @@ def validate_member_path(path: str) -> str:
     if any(
         component in ("", ".", "..")
         or ":" in component
+        or _WINDOWS_DEVICE.fullmatch(component)
         or len(component.encode("utf-8")) > MAX_COMPONENT_BYTES
         or component.endswith((" ", "."))
         for component in components
@@ -54,8 +59,8 @@ def admit_member_paths(paths: Iterable[str], *, max_members: int = MAX_MEMBERS) 
 
     Prefix collisions (e.g. 'a' and 'a/b') cannot coexist as files. Casefold
     collisions are rejected for portability across case-insensitive hosts.
-    Colons are rejected in every component to exclude Windows alternate data
-    stream syntax (for example ``file.txt:payload``).
+    Colons and reserved Windows device basenames are rejected in every
+    component, including device names followed by extensions.
     """
     if type(max_members) is not int or not 1 <= max_members <= MAX_MEMBERS:
         raise ArchivePathError("invalid member limit")
