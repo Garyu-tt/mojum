@@ -102,7 +102,16 @@ def _check_json_tree(value: Any) -> None:
         elif kind is float:
             if not math.isfinite(current):
                 raise GraphV1FlowAuditError("Non-finite JSON number")
-        elif kind not in (int, bool, type(None)):
+        elif kind is int:
+            # A direct Python API caller can supply an integer far larger than
+            # any bounded JSON document. Estimate decimal token size from its
+            # bit length before JSONEncoder converts it to a string.
+            decimal_digits_upper = (current.bit_length() * 30_103) // 100_000 + 1
+            if current < 0:
+                decimal_digits_upper += 1
+            if decimal_digits_upper > MAX_JSON_BYTES:
+                raise GraphV1FlowAuditError("Canonical JSON exceeds 256 KiB")
+        elif kind not in (bool, type(None)):
             raise GraphV1FlowAuditError("Value is not an exact JSON primitive")
 
 
