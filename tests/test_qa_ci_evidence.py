@@ -60,7 +60,8 @@ class CIEvidenceTests(unittest.TestCase):
     def test_oversized_field_names_rejected_before_hashing(self):
         huge = "x" * 1_000_000
         snapshot = fixture()
-        snapshot[huge] = None
+        schema_value = snapshot.pop("schema")
+        snapshot[huge] = schema_value
         original_set = set
 
         def bounded_set(values):
@@ -76,7 +77,8 @@ class CIEvidenceTests(unittest.TestCase):
                 evaluate_ci_evidence(snapshot, now=NOW)
 
         nested = fixture()
-        nested["checks"][0][huge] = None
+        check_name = nested["checks"][0].pop("name")
+        nested["checks"][0][huge] = check_name
         with patch("mojum.qa_ci_evidence.set", side_effect=bounded_set, create=True):
             with self.assertRaises(EvidenceError):
                 evaluate_ci_evidence(nested, now=NOW)
