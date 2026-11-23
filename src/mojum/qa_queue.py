@@ -145,8 +145,7 @@ class DurableTaskQueue:
 
     def _initialize(self) -> None:
         with closing(self._connect()) as connection:
-            # WAL is persistent for file-backed databases; SQLite reports
-            # 'memory' for :memory:, which is the correct in-memory behavior.
+            # Use WAL for durable file-backed worker coordination.
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
                 """
