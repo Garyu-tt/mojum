@@ -5,8 +5,8 @@ import hashlib
 import json
 import re
 
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\\Z", re.ASCII)
-_SHA256 = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\Z", re.ASCII)
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_MICROS = 999_999_999_999
 
 
@@ -35,7 +35,7 @@ def _tokens(value):
 
 def _micros(value):
     if type(value) is not str or re.fullmatch(
-        r"(?:0|[1-9][0-9]{0,5})(?:\\.[0-9]{1,6})?", value, re.ASCII
+        r"(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?", value, re.ASCII
     ) is None:
         raise ValueError("invalid USD amount")
     return int(Decimal(value) * 1_000_000)
