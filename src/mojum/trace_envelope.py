@@ -38,26 +38,33 @@ def admit_trace(value: object) -> AdmittedTrace:
     """
     if type(value) is not dict:
         raise TraceEnvelopeError("expected plain object")
-    if len(value) != len(_ALLOWED) or set(value) != _ALLOWED:
+
+    # Do not hash, compare, or look up caller-supplied keys until their exact
+    # native type and bounded length have been established.
+    clean_input: dict[str, object] = {}
+    for key, item in dict.items(value):
+        if type(key) is not str or not key or len(key) > 32:
+            raise TraceEnvelopeError("invalid key type or length")
+        clean_input[key] = item
+    if len(clean_input) != len(_ALLOWED) or set(clean_input) != _ALLOWED:
         raise TraceEnvelopeError("invalid field set")
-    if any(type(k) is not str for k in value):
-        raise TraceEnvelopeError("invalid key type")
-    if type(value["schema"]) is not str or value["schema"] != SCHEMA:
+
+    if type(clean_input["schema"]) is not str or clean_input["schema"] != SCHEMA:
         raise TraceEnvelopeError("invalid schema")
-    if type(value["provenance"]) is not str or value["provenance"] != "PUBLIC_SYNTHETIC":
+    if type(clean_input["provenance"]) is not str or clean_input["provenance"] != "PUBLIC_SYNTHETIC":
         raise TraceEnvelopeError("invalid provenance")
-    if type(value["consent"]) is not bool or value["consent"] is not True:
+    if type(clean_input["consent"]) is not bool or clean_input["consent"] is not True:
         raise TraceEnvelopeError("explicit consent required")
-    if type(value["trace_id"]) is not str or _ID.fullmatch(value["trace_id"]) is None:
+    if type(clean_input["trace_id"]) is not str or _ID.fullmatch(clean_input["trace_id"]) is None:
         raise TraceEnvelopeError("invalid trace id")
-    if type(value["phase"]) is not str or value["phase"] not in _PHASES:
+    if type(clean_input["phase"]) is not str or clean_input["phase"] not in _PHASES:
         raise TraceEnvelopeError("invalid phase")
-    if type(value["outcome"]) is not str or value["outcome"] not in _OUTCOMES:
+    if type(clean_input["outcome"]) is not str or clean_input["outcome"] not in _OUTCOMES:
         raise TraceEnvelopeError("invalid outcome")
-    if type(value["duration_ms"]) is not int or not 0 <= value["duration_ms"] <= 86_400_000:
+    if type(clean_input["duration_ms"]) is not int or not 0 <= clean_input["duration_ms"] <= 86_400_000:
         raise TraceEnvelopeError("invalid duration")
-    if type(value["attempt"]) is not int or not 1 <= value["attempt"] <= 1000:
+    if type(clean_input["attempt"]) is not int or not 1 <= clean_input["attempt"] <= 1000:
         raise TraceEnvelopeError("invalid attempt")
-    clean = {key: value[key] for key in sorted(_ALLOWED)}
+    clean = {key: clean_input[key] for key in sorted(_ALLOWED)}
     canonical = json.dumps(clean, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     return AdmittedTrace(MappingProxyType(clean), hashlib.sha256(canonical).hexdigest())
