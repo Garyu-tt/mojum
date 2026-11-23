@@ -258,39 +258,28 @@ class SignedReplayCacheQA(unittest.TestCase):
             self.assertEqual(q.tick, 8)
 
     def test_deeply_nested_snapshot_json_fails_closed_before_sqlite_bootstrap(self):
-        # Below the 1 MiB sidecar limit, but above the CPython JSON nesting
-        # limit. Malformed attacker-controlled bytes must become SnapshotError
-        # rather than leaking RecursionError, and must not create a new DB.
-        raw = "[" * 1500 + "0" + "]" * 1500
+        # Optimized CPython JSON paths can exceed Python's nominal
+        # recursion limit. 15k nesting levels reliably exceed the real
+        # decoder limit across 3.11-3.13, yet occupy under 32 KiB.
+        raw = "[" * 15_000 + "0" + "]" * 15_000
         self.snapshot.write_text(raw, encoding="utf-8")
         if os.name == "posix":
             self.snapshot.chmod(0o600)
         self.assertFalse(self.db.exists())
-        # The combined Aquarium test runner can increase recursion_limit for
-        # other deep-replay fixtures; pin it to exercise this exact boundary.
-        original_limit = sys.getrecursionlimit()
-        try:
-            sys.setrecursionlimit(1000)
-            with self.assertRaisesRegex(SnapshotError, "invalid UTF-8 JSON snapshot"):
-                self.aquarium()
-        finally:
-            sys.setrecursionlimit(original_limit)
+        with self.assertRaisesRegex(SnapshotError, "invalid UTF-8 JSON snapshot"):
+            self.aquarium()
         self.assertFalse(self.db.exists())
 
     def test_deeply_nested_python_state_rejected_as_snapshot_error(self):
         from mojum.verified_snapshot import canonical
 
         state = 0
-        for _ in range(1500):
+        # The C JSON encoder also accepts thousands of array levels.
+        for _ in range(15_000):
             state = [state]
-        original_limit = sys.getrecursionlimit()
-        try:
-            sys.setrecursionlimit(1000)
-            with self.assertRaisesRegex(
-                    SnapshotError, "snapshot must be canonical finite JSON"):
-                canonical(state)
-        finally:
-            sys.setrecursionlimit(original_limit)
+        with self.assertRaisesRegex(
+                SnapshotError, "snapshot must be canonical finite JSON"):
+            canonical(state)
 
     def test_invalid_key_and_missing_file_never_birth_new_organism(self):
         other = self.root / "new.sqlite3"
