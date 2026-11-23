@@ -54,7 +54,89 @@ def _integer(value, field):
     return value
 
 
+def _json_string_size(value):
+    """Count the exact UTF-8 bytes emitted for one JSON string, without encoding it."""
+    if len(value) > MAX_WIRE_BYTES:
+        raise ConsentError("input exceeds the maximum canonical JSON size")
+    size = 2
+    short_escapes = {8, 9, 10, 12, 13}
+    for char in value:
+        code = ord(char)
+        if code in (34, 92):
+            size += 2
+        elif code < 32:
+            size += 2 if code in short_escapes else 6
+        elif 0xD800 <= code <= 0xDFFF:
+            raise ConsentError("value contains invalid Unicode")
+        elif code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > MAX_WIRE_BYTES:
+            raise ConsentError("input exceeds the maximum canonical JSON size")
+    return size
+
+
+def _preflight_json(value):
+    """Bound native JSON shape and encoded size before allocating serialized bytes."""
+    stack = [(value, 0)]
+    nodes = 0
+    encoded_size = 0
+
+    def add_size(amount):
+        nonlocal encoded_size
+        encoded_size += amount
+        if encoded_size > MAX_WIRE_BYTES:
+            raise ConsentError("input exceeds the maximum canonical JSON size")
+
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > 200_000:
+            raise ConsentError("input exceeds the maximum JSON node count")
+        if depth > 64:
+            raise ConsentError("input exceeds the maximum JSON nesting depth")
+
+        kind = type(item)
+        if kind is dict:
+            add_size(2 + max(0, len(item) - 1))
+            for key, child in item.items():
+                if type(key) is not str:
+                    raise ConsentError("JSON object keys must be exact strings")
+                add_size(_json_string_size(key) + 1)
+                stack.append((child, depth + 1))
+        elif kind is list:
+            add_size(2 + max(0, len(item) - 1))
+            for child in item:
+                stack.append((child, depth + 1))
+        elif kind is str:
+            add_size(_json_string_size(item))
+        elif kind is int:
+            if item.bit_length() > MAX_WIRE_BYTES * 4:
+                raise ConsentError("integer exceeds the canonical JSON size budget")
+            try:
+                add_size(len(str(item)))
+            except ValueError as exc:
+                raise ConsentError("integer exceeds the canonical JSON size budget") from exc
+        elif kind is float:
+            import math
+            if not math.isfinite(item):
+                raise ConsentError("value is not canonical UTF-8 JSON")
+            add_size(len(repr(item)))
+        elif kind is bool:
+            add_size(4 if item else 5)
+        elif item is None:
+            add_size(4)
+        else:
+            raise ConsentError("value contains a non-native JSON type")
+
+
 def _canonical(value):
+    _preflight_json(value)
     try:
         wire = json.dumps(value, ensure_ascii=False, sort_keys=True,
                           separators=(",", ":"), allow_nan=False)
