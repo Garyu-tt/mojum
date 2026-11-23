@@ -81,7 +81,7 @@ def _marker_payload(body: str) -> tuple[dict[str, str] | None, bool]:
     if len(matches) > MAX_MARKERS_PER_SOURCE:
         raise ClaimAuditError("at most one claim marker per source")
     # A malformed or quoted marker must not be mistaken for a clean audit.
-    if MARKER_HINT.search(body) and len(matches) != 1:
+    if len(MARKER_HINT.findall(body)) != len(matches):
         raise ClaimAuditError("malformed or non-standalone claim marker")
     if not matches:
         return None, bool(LEGACY_CLAIM_HINT.search(body))
