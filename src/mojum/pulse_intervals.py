@@ -47,13 +47,13 @@ def analyze_pulse_intervals(
     dt_ns: int,
     classification: str,
 ) -> dict[str, object]:
-    """Analyze rising edges in exact {"tick": int, "pulse": bool} frames.
+    """Analyze rising edges in exact ``{"tick": int, "pulse": bool}`` frames.
 
-    Ticks use a caller-declared fixed logical step dt_ns. A missing tick
+    Ticks use a caller-declared fixed logical step ``dt_ns``. A missing tick
     starts a new continuity segment: an interval is never calculated across
     that gap, and an initial high sample in any segment is not assumed to be
     a rising edge. The first edge in a segment is therefore observed only
-    after an explicit False then True transition.
+    after an explicit ``False`` then ``True`` transition.
 
     The report is a deterministic diagnostic over synthetic data, not a
     heart-rate/medical measurement or prediction.
@@ -74,7 +74,9 @@ def analyze_pulse_intervals(
     unanchored_high_segments = 0
 
     for index, frame in enumerate(frames):
-        if type(frame) is not dict or set(frame) != {"tick", "pulse"}:
+        if type(frame) is not dict or any(type(key) is not str for key in frame):
+            raise PulseIntervalError(f"frames[{index}] requires an exact native dictionary")
+        if set(frame) != {"tick", "pulse"}:
             raise PulseIntervalError(f"frames[{index}] requires exactly tick and pulse")
         tick, pulse = frame["tick"], frame["pulse"]
         if type(tick) is not int or not 0 <= tick <= max_tick:
