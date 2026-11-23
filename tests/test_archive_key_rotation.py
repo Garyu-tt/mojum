@@ -112,6 +112,7 @@ class RotationChainTests(unittest.TestCase):
 
     def test_record_rejects_string_subclass_key_before_set(self):
         class HostileString(str):
+            __hash__ = str.__hash__
             active = False
 
             def __eq__(self, other):
