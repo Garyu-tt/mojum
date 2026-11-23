@@ -397,7 +397,7 @@ class QAWorkQueue:
     def list_jobs(self, *, status: str | None = None, limit: int = 100) -> tuple[Job, ...]:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise QueueError("limit must be an integer from 1 to 500")
-        if status is not None and status not in {"queued", "leased", "succeeded", "failed"}:
+        if status is not None and (type(status) is not str or status not in {"queued", "leased", "succeeded", "failed"}):
             raise QueueError("unsupported status filter")
         sql, args = "SELECT * FROM qa_jobs", ()
         if status is not None:
@@ -408,7 +408,7 @@ class QAWorkQueue:
 
     def audit(self, job_id: int, *, limit: int = 100) -> tuple[dict[str, object], ...]:
         job_id = self._id(job_id)
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if type(limit) is not int or not 1 <= limit <= 500:
             raise QueueError("limit must be an integer from 1 to 500")
         with self._lock:
             rows = self._db.execute(
