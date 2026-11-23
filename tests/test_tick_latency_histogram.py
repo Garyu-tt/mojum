@@ -40,6 +40,26 @@ class HistogramTests(unittest.TestCase):
                 with self.assertRaises(mod.TraceError):
                     mod.analyze(case)
 
+    def test_reject_duplicate_json_keys(self):
+        cases = [
+            '{"tick":0,"duration_us":1,"visibility":"PRIVATE","visibility":"PUBLIC_SYNTHETIC"}',
+            '{"tick":0,"tick":1,"duration_us":1,"visibility":"PUBLIC_SYNTHETIC"}',
+            '{"tick":0,"duration_us":1,"duration_us":2,"visibility":"PUBLIC_SYNTHETIC"}',
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(mod.TraceError):
+                    mod.analyze([source])
+
+    def test_reject_oversized_json_integer_without_overflow(self):
+        source = '{"tick":0,"duration_us":' + "9" * 310 + ',"visibility":"PUBLIC_SYNTHETIC"}'
+        with self.assertRaises(mod.TraceError):
+            mod.analyze([source])
+
+    def test_reject_invalid_unicode_from_direct_api(self):
+        with self.assertRaises(mod.TraceError):
+            mod.analyze(["\ud800"])
+
     def test_limits(self):
         with self.assertRaises(mod.TraceError):
             mod.analyze([row(i, 1) for i in range(mod.MAX_ROWS + 1)])
