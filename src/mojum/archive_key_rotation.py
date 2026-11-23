@@ -35,6 +35,11 @@ class RotationReport:
     chain_sha256: str
 
 
+def _is_hex_256(value: object) -> bool:
+    """Admit bounded native SHA-256 hex before invoking the regex engine."""
+    return type(value) is str and len(value) == 64 and _HEX_256.fullmatch(value) is not None
+
+
 def key_fingerprint(key: bytes) -> str:
     """Return the SHA-256 fingerprint of an exact native key byte string."""
     if type(key) is not bytes or len(key) < _KEY_BYTES or len(key) > 4096:
@@ -77,8 +82,8 @@ def verify_rotation_chain(
 ) -> RotationReport:
     """Verify a bounded, contiguous chain against an independently pinned final key.
 
-    keyring maps fingerprints to intermediate signing-key bytes for verification
-    only. The initial key is supplied separately; no key bytes are returned.
+    keyring maps fingerprints to intermediate signing keys for verification only.
+    The initial key is supplied separately; no key bytes are returned.
     """
     if type(initial_epoch) is not int or not 0 <= initial_epoch <= 2**31 - 1:
         raise RotationError("initial_epoch must be a bounded native integer")
@@ -86,14 +91,14 @@ def verify_rotation_chain(
         raise RotationError("rotations must be a list/tuple of at most 32 records")
     if type(keyring) is not dict or len(keyring) > _MAX_ROTATIONS:
         raise RotationError("keyring must be a native dict of at most 32 entries")
-    if type(expected_final_fingerprint) is not str or not _HEX_256.fullmatch(expected_final_fingerprint):
+    if not _is_hex_256(expected_final_fingerprint):
         raise RotationError("expected final fingerprint must be lowercase SHA-256 hex")
 
     # Admit all keyring entries before using any key for hashing/equality/lookup.
     # Exact built-in strings/bytes prevent caller-defined methods from running.
     admitted_keyring: dict[str, bytes] = {}
     for fingerprint, key in keyring.items():
-        if type(fingerprint) is not str or not _HEX_256.fullmatch(fingerprint):
+        if not _is_hex_256(fingerprint):
             raise RotationError("keyring fingerprints must be native lowercase SHA-256 hex")
         if type(key) is not bytes:
             raise RotationError("keyring values must be native bytes")
@@ -123,13 +128,13 @@ def verify_rotation_chain(
             raise RotationError("unsupported rotation schema")
         if type(epoch) is not int or epoch != current_epoch + 1 or epoch > 2**31 - 1:
             raise RotationError("rotation epochs must be contiguous and increasing")
-        if type(previous) is not str or not _HEX_256.fullmatch(previous) or previous != current_fp:
+        if not _is_hex_256(previous) or previous != current_fp:
             raise RotationError("previous key fingerprint does not match chain head")
-        if type(following) is not str or not _HEX_256.fullmatch(following) or following == current_fp:
+        if not _is_hex_256(following) or following == current_fp:
             raise RotationError("invalid next key fingerprint")
         if following in seen:
             raise RotationError("key rotation cycle or rollback detected")
-        if type(signature) is not str or not _HEX_256.fullmatch(signature):
+        if not _is_hex_256(signature):
             raise RotationError("invalid rotation signature encoding")
 
         signing_key = initial_key if current_fp == initial_fp else admitted_keyring.get(current_fp)
