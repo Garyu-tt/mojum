@@ -88,6 +88,21 @@ class DeterministicCoordinationEnv:
         self._done = True
 
 
+def _normalize_adapter_actions(actions, active_agents: list[str]) -> dict[str, int]:
+    """Bound and validate external ParallelEnv actions before copying them."""
+    if type(actions) is not dict or len(actions) != len(active_agents):
+        raise ValueError("actions must contain exactly one action for each active agent")
+    keys = tuple(actions.keys())
+    if any(type(key) is not str or len(key) > 16 for key in keys):
+        raise ValueError("action keys must be bounded native agent identifiers")
+    if set(keys) != set(active_agents):
+        raise ValueError("actions must contain exactly one action for each active agent")
+    if any(isinstance(action, bool) or not isinstance(action, Integral)
+           for action in actions.values()):
+        raise ValueError("each action must be an integer scalar")
+    return {agent: int(action) for agent, action in actions.items()}
+
+
 def make_pettingzoo_env(horizon: int = 10):
     """Build a real PettingZoo ParallelEnv, importing optional packages lazily."""
     try:
@@ -134,14 +149,9 @@ def make_pettingzoo_env(horizon: int = 10):
 
         def step(self, actions):
             # Gymnasium Discrete.sample() returns NumPy integer scalars;
-            # normalize those at the optional adapter boundary while keeping
-            # the stdlib core's exact-native-int contract strict.
-            if type(actions) is not dict:
-                return self._core.step(actions)
-            if any(isinstance(action, bool) or not isinstance(action, Integral)
-                   for action in actions.values()):
-                raise ValueError("each action must be an integer scalar")
-            normalized_actions = {agent: int(action) for agent, action in actions.items()}
+            # normalize them only after the adapter has bounded and validated
+            # the external mapping, keeping the stdlib core strict.
+            normalized_actions = _normalize_adapter_actions(actions, self.agents)
             result = self._core.step(normalized_actions)
             self.agents = list(self._core.agents)
             return result
