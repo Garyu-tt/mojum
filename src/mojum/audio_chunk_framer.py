@@ -50,12 +50,17 @@ class PCM16ChunkFramer:
             raise ValueError("start_ns must be a bounded native integer")
         if type(provenance) is not str or provenance != PROVENANCE:
             raise ValueError("explicit PUBLIC_SYNTHETIC provenance required")
-        self.start_ns = start_ns
+        self._start_ns = start_ns
         self._pending = b""
         self._chunks_seen = 0
         self._bytes_seen = 0
         self._frames_emitted = 0
         self._finished = False
+
+    @property
+    def start_ns(self) -> int:
+        """Fixed, read-only simulated origin admitted at construction."""
+        return self._start_ns
 
     @property
     def chunks_seen(self) -> int:
@@ -101,7 +106,7 @@ class PCM16ChunkFramer:
         for index_in_chunk in range(count):
             frame_index = self._frames_emitted + index_in_chunk
             sample_offset = frame_index * SAMPLES_PER_FRAME
-            timestamp = self.start_ns + sample_offset * SAMPLE_PERIOD_NS
+            timestamp = self._start_ns + sample_offset * SAMPLE_PERIOD_NS
             if timestamp > MAX_TIME_NS - FRAME_DURATION_NS:
                 raise ValueError("frame timestamp/duration overflows 64-bit clock")
             start = index_in_chunk * FRAME_BYTES
