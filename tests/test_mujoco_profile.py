@@ -51,7 +51,7 @@ class CpuProfileTests(unittest.TestCase):
                 cpu_threads=2, integrator="implicitfast", solver="newton",
                 digest="0" * 64,
             )
-        valid = validate_profile()
+        valid = validate_profile(valid_profile())
         with self.assertRaisesRegex(ProfileError, "digest"):
             CpuProfile(
                 enabled=valid.enabled, timestep_ns=valid.timestep_ns,
