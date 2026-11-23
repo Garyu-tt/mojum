@@ -179,6 +179,18 @@ class ContactTelemetryAdmissionTests(unittest.TestCase):
         with self.assertRaises(ContactTelemetryError):
             reduce([DictSubclass(sample())])
 
+    def test_sample_rejects_string_subclass_keys(self):
+        class TextSubclass(str):
+            pass
+
+        original = sample()
+        hostile = {
+            (TextSubclass(key) if key == "tick" else key): value
+            for key, value in original.items()
+        }
+        with self.assertRaises(ContactTelemetryError):
+            reduce([hostile])
+
     def test_tick_rejects_bool_float_negative_and_overflow(self):
         for value in (True, False, 1.0, -1, 2**63):
             with self.subTest(value=value):
