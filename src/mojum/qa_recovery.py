@@ -62,6 +62,8 @@ def _integer(value: Any, field: str, minimum: int = 0) -> int:
 def _identifier(value: Any, field: str) -> str:
     if type(value) is not str or not value or len(value) > MAX_ID_BYTES:
         raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
+    if len(value) > MAX_ID_BYTES:
+        raise RecoveryError(f"{field} must be a non-empty bounded UTF-8 string")
     try:
         encoded_length = len(value.encode("utf-8"))
     except UnicodeEncodeError as exc:
