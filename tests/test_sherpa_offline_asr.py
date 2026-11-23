@@ -76,7 +76,10 @@ class SherpaOfflineTests(unittest.TestCase):
         a = Recognizer()
         with self.assertRaisesRegex(ASRBoundaryError, "opt-in"):
             transcribe_public_wav(wav(), a)
-        # Opt-in alone never classifies unknown input as public synthetic.\n        with self.assertRaisesRegex(ASRBoundaryError, "explicit PUBLIC_SYNTHETIC"):\n            transcribe_public_wav(wav(), a, enabled=True)\n        for visibility in ("PRIVATE", "PUBLIC", None, True, "PUBLIC_SYNTHETIC\n"):
+        # Opt-in alone never classifies unknown input as public synthetic.
+        with self.assertRaisesRegex(ASRBoundaryError, "explicit PUBLIC_SYNTHETIC"):
+            transcribe_public_wav(wav(), a, enabled=True)
+        for visibility in ("PRIVATE", "PUBLIC", None, True, "PUBLIC_SYNTHETIC\n"):
             with self.subTest(visibility=visibility), self.assertRaises(ASRBoundaryError):
                 transcribe_public_wav(wav(), a, enabled=True, visibility=visibility)
         self.assertEqual(a.calls, 0)
