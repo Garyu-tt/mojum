@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 import json
+import math
 import sqlite3
 import time
 from pathlib import Path
@@ -188,7 +189,7 @@ class DurableQueue:
         """Atomically claim the oldest ready job, reclaiming expired leases."""
         if not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 200:
             raise InvalidJob("worker_id must be 1..200 nonblank characters")
-        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float)) or lease_seconds <= 0:
+        if (isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float))\n                or not math.isfinite(float(lease_seconds)) or lease_seconds <= 0):
             raise InvalidJob("lease_seconds must be positive")
         now = float(self._clock())
         until = now + float(lease_seconds)
