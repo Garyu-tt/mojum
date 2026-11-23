@@ -157,6 +157,31 @@ class ObjectInteractionTests(unittest.TestCase):
             with self.subTest(index=invalid.index(fixture)), self.assertRaises(ValueError):
                 initial_objects(self.room, self.start, fixture)
 
+    def test_forged_room_fields_fail_closed_at_all_public_entrypoints(self):
+        # Frozen dataclass type checks do not defend against object.__setattr__.
+        # Both the initial Room validation and the downstream world_room
+        # functions must receive detached, constructor-validated geometry.
+        corruptions = (
+            ("width-object", "width", object()),
+            ("height-string", "height", "4"),
+            ("invalid-obstacle-entry", "obstacles", (object(),)),
+            ("invalid-obstacle-collection", "obstacles", object()),
+        )
+        good_snapshot = snapshot_objects(self.room, self.objects)
+        for label, field, payload in corruptions:
+            forged = Room(self.room.width, self.room.height, self.room.obstacles)
+            object.__setattr__(forged, field, payload)
+            endpoints = (
+                ("initial", lambda: initial_objects(forged, self.start)),
+                ("advance", lambda: self.step(room=forged)),
+                ("snapshot", lambda: snapshot_objects(forged, self.objects)),
+                ("restore", lambda: restore_objects(forged, self.start, good_snapshot)),
+            )
+            for endpoint, run in endpoints:
+                with self.subTest(corruption=label, endpoint=endpoint):
+                    with self.assertRaisesRegex(ValueError, "point-room geometry"):
+                        run()
+
     def test_snapshot_roundtrip_and_tamper(self):
         r1, o1, _ = self.step(action="pick", object_id="a")
         wire = json.loads(json.dumps(snapshot_objects(self.room, o1), sort_keys=True))
