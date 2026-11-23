@@ -6,7 +6,7 @@ proof, resource measurement, or permission to execute anything.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import hashlib
 import hmac
 import json
@@ -132,9 +132,23 @@ def receipt_bytes(receipt: PlacementReceipt) -> bytes:
     """Canonical portable JSON; does not serialize any PRIVATE job payload."""
     if type(receipt) is not PlacementReceipt:
         raise PlacementError("invalid receipt")
-    # Recheck for instances forged without dataclass constructor.
-    valid = PlacementReceipt(**asdict(receipt))
-    return json.dumps(asdict(valid), sort_keys=True, separators=(",", ":"),
+    # Validate the five raw scalar fields BEFORE attempting any copy or
+    # serialization. dataclasses.asdict() deepcopies untrusted field objects;
+    # forged constructor-bypassing instances must fail with PlacementError
+    # without executing arbitrary __deepcopy__ methods.
+    try:
+        valid = PlacementReceipt(
+            receipt.schema, receipt.epoch, receipt.inputs_sha256,
+            receipt.plan_sha256, receipt.receipt_sha256,
+        )
+    except AttributeError as exc:
+        raise PlacementError("invalid receipt fields") from exc
+    fields = {
+        "schema": valid.schema, "epoch": valid.epoch,
+        "inputs_sha256": valid.inputs_sha256, "plan_sha256": valid.plan_sha256,
+        "receipt_sha256": valid.receipt_sha256,
+    }
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=True).encode("ascii")
 
 
