@@ -53,7 +53,7 @@ def _name(value):
 def validate_rig(rig):
     """Return a detached, strictly typed, bounded rig; no silent migration."""
     _keys(rig, {"schema", "rig_id", "dt_seconds", "root_height_m", "joints"}, "rig")
-    if rig["schema"] != RIG_SCHEMA:
+    if type(rig["schema"]) is not str or rig["schema"] != RIG_SCHEMA:
         raise RigError("unsupported rig schema")
     _name(rig["rig_id"])
     if type(rig["dt_seconds"]) is not float or rig["dt_seconds"] != DT:
@@ -70,7 +70,7 @@ def validate_rig(rig):
         if name in names:
             raise RigError("duplicate joint name")
         names.add(name)
-        if joint["type"] != "hinge":
+        if type(joint["type"]) is not str or joint["type"] != "hinge":
             raise RigError("only one-DOF hinge joints supported")
         axis = joint["axis"]
         if type(axis) is not list or len(axis) != 3:
