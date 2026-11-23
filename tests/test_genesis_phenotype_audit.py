@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
@@ -108,6 +109,30 @@ class PhenotypeAuditTests(unittest.TestCase):
         observed["padding"] = "x" * (1_048_576 + 1)
         with self.assertRaises(GenesisPhenotypeAuditError):
             audit_phenotype(ledger.snapshot(), observed, 3)
+
+    def test_aggregate_input_budget_rejected_before_serialization(self):
+        ledger = make_ledger()
+        observed = ledger.phenotype(3)
+        observed["first"] = "a" * 600_000
+        observed["second"] = "b" * 600_000
+        with patch(
+            "mojum.genesis_phenotype_audit.canonical",
+            side_effect=AssertionError("canonical serialization must not run"),
+        ):
+            with self.assertRaises(GenesisPhenotypeAuditError):
+                audit_phenotype(ledger.snapshot(), observed, 3)
+
+    def test_aggregate_object_key_budget_rejected_before_serialization(self):
+        ledger = make_ledger()
+        observed = ledger.phenotype(3)
+        observed["k" * 600_000] = 1
+        observed["v" * 600_000] = 2
+        with patch(
+            "mojum.genesis_phenotype_audit.canonical",
+            side_effect=AssertionError("canonical serialization must not run"),
+        ):
+            with self.assertRaises(GenesisPhenotypeAuditError):
+                audit_phenotype(ledger.snapshot(), observed, 3)
 
     def test_excessive_nesting_rejected(self):
         ledger = make_ledger()
