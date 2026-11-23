@@ -10,6 +10,7 @@ MAX_INPUT_BYTES = 1_048_576
 MAX_TREE_NODES = 20_000
 MAX_TREE_DEPTH = 32
 MAX_TICK = 2**63 - 1
+PUBLIC_CLASSIFICATION = "PUBLIC_SYNTHETIC"
 
 
 class GenesisPhenotypeAuditError(ValueError):
@@ -115,13 +116,18 @@ def _bounded_canonical(value, path):
         raise GenesisPhenotypeAuditError(f"{path} is not canonical JSON") from exc
 
 
-def audit_phenotype(ledger_snapshot, phenotype_snapshot, tick):
+def audit_phenotype(ledger_snapshot, phenotype_snapshot, tick, *, source_classification=None):
     """Compare an observed phenotype to the canonical ledger projection.
 
     Returns a deterministic metadata-only report. Malformed inputs raise
     GenesisPhenotypeAuditError; a well-formed but incorrect projection returns
     status='mismatch'. No storage, network, or runtime state is accessed.
     """
+    if (type(source_classification) is not str
+            or source_classification != PUBLIC_CLASSIFICATION):
+        raise GenesisPhenotypeAuditError(
+            "explicit PUBLIC_SYNTHETIC classification required"
+        )
     if type(tick) is not int or not 0 <= tick <= MAX_TICK:
         raise GenesisPhenotypeAuditError("tick must be an integer in range")
     ledger_wire = _bounded_canonical(ledger_snapshot, "ledger_snapshot")
