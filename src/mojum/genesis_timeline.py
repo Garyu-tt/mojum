@@ -27,7 +27,9 @@ def _preflight_boundary_budget(snapshot: dict, start: int, end: int) -> None:
     Never invoke comparison/hash callbacks on caller-defined event/tick types.
     """
     raw_events = snapshot.get("events")
-    if type(raw_events) is not list:
+    if type(raw_events) is not list or len(raw_events) > GenomeLedger.MAX_EVENTS:
+        # Leave malformed and overlarge lists to canonical snapshot admission,
+        # which already rejects them in O(1) before replay.
         return
     ticks = {start, end}
     for event in raw_events:
