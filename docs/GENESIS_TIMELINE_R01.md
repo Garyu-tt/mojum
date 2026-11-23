@@ -38,6 +38,11 @@ window boundaries, immutability, repeatability, privacy suppression, forged
 snapshot rejection, malformed tick types, explicit opt-in and density quotas.
 The module is stdlib-only, importable on Python 3.11+, and requires no feature
 flags in the live organism. It intentionally does not emit every tick across
-a long interval. A boundary digest cannot prove that timestamps, event source
+a long interval. A bounded primitive preflight rejects provably excessive distinct timeline
+boundaries before the more expensive canonical ledger replay. It never accepts
+or attests a snapshot: every input within the budget still undergoes the full
+original `GenomeLedger.from_snapshot` validation and revision check.
+
+A boundary digest cannot prove that timestamps, event source
 assertions or observations were true, only that they are the validated content
 of a particular ledger revision.
