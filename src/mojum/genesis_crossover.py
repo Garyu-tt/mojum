@@ -21,8 +21,8 @@ from .genesis import (
 CROSSOVER_SCHEMA = "mojum.genesis.crossover/1"
 RESULT_SCHEMA = "mojum.genesis.crossover-result/1"
 MAX_SEED = 2**64 - 1
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_DOMAIN = b"mojum.genesis.crossover/1\\x00"
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_DOMAIN = b"mojum.genesis.crossover/1\x00"
 
 
 def _identifier(value: object, path: str) -> str:
@@ -153,7 +153,7 @@ def cross_genomes(
             + seed_bytes
             + bytes.fromhex(parent_a_digest)
             + bytes.fromhex(parent_b_digest)
-            + b"\\x00"
+            + b"\x00"
             + gene.encode("ascii")
         )
         choose_b = hashlib.sha256(selector_material).digest()[0] & 1
