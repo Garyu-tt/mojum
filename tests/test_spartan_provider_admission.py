@@ -97,6 +97,24 @@ class AdmissionTests(unittest.TestCase):
             ad.admit(self.p, self.proof, calls=True, prompt_tokens_cap=100,
                      completion_tokens_cap=100, headroom=self.headroom)
 
+    def test_provider_kind_and_http_path_reject_equality_spoof(self):
+        class PretendInt(int):
+            def __eq__(self, other):
+                return other in ("llama_cpp", "/health")
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+        forged = PretendInt(7)
+        # Without exact str checks, both built-in string comparisons dispatch
+        # into the forged __eq__ and silently pass the allowlist.
+        self.assertTrue(forged in ("llama_cpp", "litellm"))
+        self.assertTrue(forged in ("/health", "/slots"))
+        with self.assertRaisesRegex(ad.AdmissionError, "kind"):
+            provider(kind=forged)
+        with self.assertRaisesRegex(ad.AdmissionError, "path"):
+            ad.local_http(18182, forged)
+
     def test_backend_model_discovery_fail_closed(self):
         for models in ({"data": []}, {"data": [{"id": "wrong"}]},
                        {"data": [{"id": "x"}, {"id": "x"}]},
