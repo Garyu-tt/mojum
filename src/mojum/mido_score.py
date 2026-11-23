@@ -102,7 +102,14 @@ def normalize_tracks(
         if type(track) not in (list, tuple) and not isinstance(track, list):
             raise MidiScoreError("decoded track must be a bounded list")
         tick = 0
+        saw_end_of_track = False
         for msg_idx, msg in enumerate(track):
+            # Mido decodes events after End Of Track even though the SMF
+            # playback contract ends here. Never turn trailing data into notes.
+            if saw_end_of_track:
+                raise MidiScoreError("messages after end_of_track")
+            if getattr(msg, "type", None) == "end_of_track":
+                saw_end_of_track = True
             messages += 1
             if messages > MAX_MESSAGES:
                 raise MidiScoreError("MIDI message budget exceeded")
@@ -220,6 +227,11 @@ def read_midi_score(
         raise MidiScoreError("invalid MIDI content") from exc
     if midi.type not in (0, 1) or len(midi.tracks) != tracks or midi.ticks_per_beat != division:
         raise MidiScoreError("MIDI parser/header disagreement")
+    # An actual SMF track must end with End Of Track. The decoder accepts
+    # missing markers, so enforce this independently of chunk byte framing.
+    if any(not track or getattr(track[-1], "type", None) != "end_of_track"
+           for track in midi.tracks):
+        raise MidiScoreError("missing final end_of_track")
     return normalize_tracks(
         midi.tracks, ticks_per_beat=division,
         source_sha256=expected_sha256, source_kind=source_kind,

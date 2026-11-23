@@ -181,6 +181,43 @@ class OfflineScoreTests(unittest.TestCase):
             with self.subTest(head=str(blob)[:30]), self.assertRaises(MidiScoreError):
                 _preflight(blob)
 
+    def test_normalizer_rejects_events_after_end_of_track(self):
+        for trailing in (
+            event("track_name", 0, name="ignored-but-invalid"),
+            event("note_on", 0, channel=0, note=64, velocity=90),
+            event("end_of_track", 0),
+        ):
+            with self.subTest(type=trailing.type), self.assertRaisesRegex(
+                MidiScoreError, "messages after end_of_track"
+            ):
+                score([[event("end_of_track", 0), trailing]])
+
+    @unittest.skipUnless(find_spec("mido") is not None, "mido optional package absent")
+    def test_actual_mido_refuses_missing_or_nonterminal_end_of_track(self):
+        from importlib.metadata import version
+        if version("mido") != "1.3.3":
+            self.skipTest("other native Mido version installed")
+        # Verified upstream 1.3.3 parses notes after the first EOT, which
+        # would otherwise project music that a standards-based player stops.
+        after_eot = midi_chunk(bytes.fromhex(
+            "00 90 3c 40 81 70 80 3c 40 00 ff 2f 00 "
+            "00 90 3e 40 81 70 80 3e 40 00 ff 2f 00"
+        ))
+        missing_eot = midi_chunk(bytes.fromhex(
+            "00 90 3c 40 81 70 80 3c 40"
+        ))
+        for blob, reason in (
+            (after_eot, "messages after end_of_track"),
+            (missing_eot, "missing final end_of_track"),
+        ):
+            with self.subTest(reason=reason), self.assertRaisesRegex(
+                MidiScoreError, reason
+            ):
+                read_midi_score(
+                    blob, enabled=True, source_kind="PUBLIC_SYNTHETIC",
+                    expected_sha256=hashlib.sha256(blob).hexdigest(),
+                )
+
     def test_opt_in_refusal_before_import(self):
         blob = midi_chunk(b"\x00\xff\x2f\x00")
         sha = hashlib.sha256(blob).hexdigest()
