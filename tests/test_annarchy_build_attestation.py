@@ -180,7 +180,7 @@ class AnnarchyBuildAttestationTests(unittest.TestCase):
 
     def test_json_parser_rejects_invalid_utf8(self):
         with self.assertRaises(ManifestError):
-            parse_manifest_json(b"\\xff")
+            parse_manifest_json(b"\xff")
 
     def test_json_parser_rejects_oversized_input(self):
         with self.assertRaises(ManifestError):
