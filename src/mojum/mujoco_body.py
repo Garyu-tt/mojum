@@ -125,6 +125,8 @@ def compile_mjcf(rig):
     """Compile a synthetic articulated chain, no assets or actuator elements."""
     checked = validate_rig(rig)
     root = ET.Element("mujoco", {"model": checked["rig_id"]})
+    # MJCF defaults to degrees; the rig contract and joint limits are radians.
+    ET.SubElement(root, "compiler", {"angle": "radian"})
     ET.SubElement(root, "option", {"timestep": _f(DT), "gravity": "0 0 -9.81",
                                   "integrator": "implicitfast"})
     ET.SubElement(root, "size", {"memory": "16M"})
