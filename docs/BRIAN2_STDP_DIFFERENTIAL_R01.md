@@ -22,9 +22,11 @@ PYTHONPATH=src python -m unittest discover -s tests -p 'test_brian2_stdp.py' -v
 Optional real Brian2 validation in a dedicated virtual environment:
 
 ```sh
-python -m pip install 'brian2==2.9.0'
+python -m pip install 'numpy==1.26.4' 'brian2==2.9.0'
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_brian2_stdp.py' -v
 ```
+
+The native job pins NumPy 1.26.4 because Brian2 2.9.0 references `numpy.ndarray.ptp`, removed in NumPy 2.x. An unpinned `pip install brian2==2.9.0` has failed the actual Python 3.11 Actions job with NumPy 2.4.6 (run `45179345749`). Keep both pins together for this proof.
 
 Without Brian2, the two native tests are marked **SKIPPED**: this is NOT native integration proof. The dedicated GitHub Actions workflow installs pinned Brian2 and must complete native tests without skips. No default dependencies were added.
 
