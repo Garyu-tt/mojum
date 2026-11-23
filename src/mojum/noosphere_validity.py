@@ -85,6 +85,11 @@ def _validate_json_value(value):
             identity = id(item)
             if identity in seen_containers:
                 raise ValidityAuditError("value contains a cycle or shared container")
+            # Reject oversized fan-out before extending the traversal stack.
+            # nodes counts processed values; len(stack) counts already queued
+            # values, so this bounds both traversal work and temporary memory.
+            if len(item) > _MAX_VALUE_NODES - nodes - len(stack):
+                raise ValidityAuditError("value node budget exceeded")
             seen_containers.add(identity)
             for child in reversed(item):
                 stack.append((child, depth + 1))
@@ -93,9 +98,12 @@ def _validate_json_value(value):
             identity = id(item)
             if identity in seen_containers:
                 raise ValidityAuditError("value contains a cycle or shared container")
+            # Check cardinality before iteration and avoid materializing a
+            # second full list of entries for caller-supplied dictionaries.
+            if len(item) > _MAX_VALUE_NODES - nodes - len(stack):
+                raise ValidityAuditError("value node budget exceeded")
             seen_containers.add(identity)
-            entries = list(item.items())
-            for key, child in entries:
+            for key, child in dict.items(item):
                 if type(key) is not str or len(key) > 256:
                     raise ValidityAuditError("value object keys must be native strings of <= 256 characters")
                 try:
