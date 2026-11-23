@@ -28,7 +28,7 @@ class ProfileError(ValueError):
     """A malformed or unsupported CPU execution profile."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CpuProfile:
     """Detached, immutable normalized profile; digest is not authentication."""
 
@@ -40,6 +40,14 @@ class CpuProfile:
     integrator: str
     solver: str
     digest: str
+
+    def __post_init__(self):
+        if type(self) is not CpuProfile:
+            raise ProfileError("CPU profile subclasses are not supported")
+        normalized = _normalize(self.to_mapping())
+        expected_digest = hashlib.sha256(_canonical_bytes(normalized)).hexdigest()
+        if type(self.digest) is not str or self.digest != expected_digest:
+            raise ProfileError("profile digest does not match normalized fields")
 
     def to_mapping(self):
         """Return a new mutable mapping without exposing internal state."""
