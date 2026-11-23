@@ -132,13 +132,16 @@ def create_manifest(
     created_at_ns: int,
 ) -> SegmentManifest:
     """Build a manifest and calculate its deterministic chain head."""
+    # Validate sequence operands before arithmetic; direct callers may supply
+    # arbitrarily large Python integers.
+    first = _uint(first_seq, "first_seq", minimum=1)
+    last = _uint(last_seq, "last_seq", minimum=first)
     fields: dict[str, Any] = {
         "schema": SCHEMA,
         "agent_id": agent_id,
-        "first_seq": first_seq,
-        "last_seq": last_seq,
-        "event_count": (last_seq - first_seq + 1)
-            if type(first_seq) is int and type(last_seq) is int else None,
+        "first_seq": first,
+        "last_seq": last,
+        "event_count": last - first + 1,
         "previous_segment_head": previous_segment_head,
         "source_schema": source_schema,
         "content_sha256": content_sha256,
@@ -152,9 +155,16 @@ def create_manifest(
 
 
 def _validate_fields(value: dict[str, Any], *, check_head: bool = True) -> SegmentManifest:
-    if type(value) is not dict or set(value) != _FIELDS:
+    if type(value) is not dict or len(value) != len(_FIELDS):
         raise SegmentManifestError("manifest must contain exactly the required fields")
-    if value["schema"] != SCHEMA:
+    # Reject hostile/non-native keys before hashing or comparing them. A str
+    # subclass can override __hash__/__eq__ even when stored in an exact dict.
+    keys = tuple(value.keys())
+    if any(type(key) is not str or len(key) > _MAX_TEXT for key in keys):
+        raise SegmentManifestError("manifest keys must be bounded native strings")
+    if set(keys) != _FIELDS:
+        raise SegmentManifestError("manifest must contain exactly the required fields")
+    if type(value["schema"]) is not str or value["schema"] != SCHEMA:
         raise SegmentManifestError("unsupported segment manifest schema")
     agent_id = _text(value["agent_id"], "agent_id")
     source_schema = _text(value["source_schema"], "source_schema")
