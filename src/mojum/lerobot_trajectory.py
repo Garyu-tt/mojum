@@ -50,6 +50,8 @@ class Trajectory:
     dataset_license: str
     metadata_sha256: str
     shard_sha256: str
+    asset_sha256: str | None
+    model_sha256: str | None
     frames: tuple[Frame, ...]
     digest: str
 
@@ -121,7 +123,7 @@ def _json_bytes(value):
 
 
 def import_rows(rows, info, *, dataset_id, dataset_revision, dataset_license,
-                metadata_sha256, shard_sha256):
+                metadata_sha256, shard_sha256, asset_sha256=None, model_sha256=None):
     """Normalize an iterable of *public* LeRobot v3 tabular rows, bounded.
 
     Primarily a stdlib contract/test seam; it never opens a dataset or moves a
@@ -132,6 +134,10 @@ def import_rows(rows, info, *, dataset_id, dataset_revision, dataset_license,
     for label, value in (("metadata", metadata_sha256), ("shard", shard_sha256)):
         if type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value):
             raise LeRobotImportError(f"{label} SHA-256 is required")
+    for label, value in (("asset", asset_sha256), ("model", model_sha256)):
+        if value is not None and (type(value) is not str or
+                                  not re.fullmatch(r"[0-9a-f]{64}", value)):
+            raise LeRobotImportError(f"{label} SHA-256 must be a pinned hex digest")
     frames = []
     prior = None
     episode_count = 0
@@ -167,13 +173,15 @@ def import_rows(rows, info, *, dataset_id, dataset_revision, dataset_license,
         "schema": SCHEMA, "dataset_id": dataset_id,
         "dataset_revision": dataset_revision, "dataset_license": dataset_license,
         "metadata_sha256": metadata_sha256, "shard_sha256": shard_sha256,
+        "asset_sha256": asset_sha256, "model_sha256": model_sha256,
         "frames": [
             [f.episode_index, f.frame_index, f.timestamp, f.task_index,
              f.state, f.action] for f in frames
         ],
     }
     return Trajectory(SCHEMA, dataset_id, dataset_revision, dataset_license,
-                      metadata_sha256, shard_sha256, tuple(frames),
+                      metadata_sha256, shard_sha256, asset_sha256, model_sha256,
+                      tuple(frames),
                       hashlib.sha256(_json_bytes(payload)).hexdigest())
 
 
@@ -216,7 +224,8 @@ def _hash_file(path):
 
 
 def load_parquet_shard(root, *, shard, dataset_id, dataset_revision,
-                       dataset_license, allow_public_dataset=False):
+                       dataset_license, allow_public_dataset=False,
+                       asset_sha256=None, model_sha256=None):
     """Explicitly read an already-local v3 Parquet shard using optional pyarrow.
 
     No auto-install, network, executable code, video or robotics integration.
@@ -257,12 +266,14 @@ def load_parquet_shard(root, *, shard, dataset_id, dataset_revision,
     if not set(COLUMNS).issubset(reader.schema_arrow.names):
         raise LeRobotImportError("Parquet missing required tabular columns")
     def rows():
-        for batch in reader.iter_batches(batch_size=BATCH_SIZE, columns=list(COLUMNS)):
+        for batch in reader.iter_batches(batch_size=BATCH_SIZE, columns=list(COLUMNS),
+                                         use_threads=False):
             yield from batch.to_pylist()
     return import_rows(rows(), info, dataset_id=dataset_id,
                        dataset_revision=dataset_revision, dataset_license=dataset_license,
                        metadata_sha256=hashlib.sha256(raw).hexdigest(),
-                       shard_sha256=_hash_file(shard_path))
+                       shard_sha256=_hash_file(shard_path),
+                       asset_sha256=asset_sha256, model_sha256=model_sha256)
 
 
 def heldout_zero_baseline(trajectory, *, seed=0):
@@ -306,16 +317,21 @@ def main(argv=None):
     parser.add_argument("--revision", required=True, help="exact 40/64-hex dataset commit")
     parser.add_argument("--license", required=True, help="dataset license identifier (not clearance)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--asset-sha256", help="optional exact asset content digest")
+    parser.add_argument("--model-sha256", help="optional exact source model digest")
     parser.add_argument("--allow-public-dataset", action="store_true")
     args = parser.parse_args(argv)
     imported = load_parquet_shard(
         args.root, shard=args.shard, dataset_id=args.dataset_id,
         dataset_revision=args.revision, dataset_license=args.license,
-        allow_public_dataset=args.allow_public_dataset)
+        allow_public_dataset=args.allow_public_dataset,
+        asset_sha256=args.asset_sha256, model_sha256=args.model_sha256)
     summary = {
         "schema": SCHEMA, "digest": imported.digest,
         "metadata_sha256": imported.metadata_sha256,
         "shard_sha256": imported.shard_sha256,
+        "asset_sha256": imported.asset_sha256,
+        "model_sha256": imported.model_sha256,
         "episodes": len(imported.episodes), "frames": len(imported.frames),
         "benchmark": (heldout_zero_baseline(imported, seed=args.seed)
                       if len(imported.episodes) >= 2 else None),
