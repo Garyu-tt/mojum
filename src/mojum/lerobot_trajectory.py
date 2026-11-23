@@ -22,7 +22,7 @@ MAX_EPISODES = 64
 MAX_BENCHMARK_FRAMES = 512
 _MAX_ABS = 1_000_000.0
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/+:-]{0,95}\Z", re.ASCII)
-_SHA = re.compile(r"[0-9a-f]{40,64}\Z", re.ASCII)
+_SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z", re.ASCII)
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _LICENSE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,63}\Z", re.ASCII)
 
@@ -83,6 +83,8 @@ class Provenance:
             raise TrajectoryError("license_id: bounded SPDX-like token required")
         if self.consent_asserted is not True:
             raise TrajectoryError("explicit source consent assertion required")
+        if type(self.collector) is not str:
+            raise TrajectoryError("collector: expected teleoperator or policy")
         if self.collector == "teleoperator":
             if self.model_id is not None or self.model_revision is not None:
                 raise TrajectoryError("teleoperator cannot claim a policy model")
@@ -109,7 +111,7 @@ class Trajectory:
     schema: str = SCHEMA
 
     def __post_init__(self) -> None:
-        if self.schema != SCHEMA or type(self.provenance) is not Provenance:
+        if type(self.schema) is not str or self.schema != SCHEMA or type(self.provenance) is not Provenance:
             raise TrajectoryError("invalid trajectory schema/provenance")
         _index(self.episode_index, "episode_index")
         if type(self.frames) is not tuple or not 1 <= len(self.frames) <= MAX_FRAMES:
