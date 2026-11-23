@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -116,6 +117,44 @@ class QAFleetTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fleet.safe_load(state_path, {})
             state_path.chmod(0o600)
+
+    def test_malformed_history_shapes_recover_in_full_dry_run(self):
+        path=self.home/"history.json"
+        for value in (
+            {"cursor":"not-an-int","seen":{}},
+            {"cursor":True,"seen":{}},
+            {"cursor":-1,"seen":{}},
+            {"cursor":0,"seen":[]},
+            {"cursor":0,"seen":{"3":{"checked_at":10**500,
+                                    "updated_at":"2026-11-22T19:00:00Z"}}},
+        ):
+            with self.subTest(value=str(value)[:90]):
+                path.write_text(json.dumps(value),encoding="utf-8")
+                path.chmod(0o600)
+                with patch("sys.stdout",new_callable=io.StringIO) as stdout:
+                    self.assertEqual(fleet.main(["--dry-run","--max-workers","3"]),0)
+                result=json.loads(stdout.getvalue())
+                self.assertEqual(result["status"],"dry-run")
+                self.assertEqual(set(result["assigned"]),{1,2,3})
+
+    def test_malformed_snapshot_shapes_do_not_fabricate_completed_work(self):
+        path=self.home/"current.json"
+        for value in (
+            {"schema":fleet.SCHEMA,"cycle":"completed","workers":None},
+            {"schema":fleet.SCHEMA,"cycle":"completed","workers":{}},
+            {"schema":fleet.SCHEMA,"cycle":"completed","workers":
+                [{"state":"completed","pr":3}] * 18},
+            {"schema":"bad-version","cycle":"completed","workers":
+                [{"state":"completed","pr":3}]},
+        ):
+            with self.subTest(value=str(value)[:90]):
+                path.write_text(json.dumps(value),encoding="utf-8")
+                path.chmod(0o600)
+                with patch("sys.stdout",new_callable=io.StringIO) as stdout:
+                    self.assertEqual(fleet.main(["--dry-run","--max-workers","3"]),0)
+                result=json.loads(stdout.getvalue())
+                self.assertEqual(result["status"],"dry-run")
+                self.assertEqual(set(result["assigned"]),{1,2,3})
 
     def test_mirror_symlink_rejected(self):
         actual=self.mirror.with_name("source.json")
