@@ -112,6 +112,31 @@ class VrmAssetPolicyTests(unittest.TestCase):
         with self.assertRaises(AssetPolicyError):
             validate_manifest(manifest(), HostileDict(POLICY))
 
+    def test_reject_oversized_mapping_cardinality_before_key_iteration(self):
+        candidate = manifest()
+        candidate.update({f"unexpected-{i}": None for i in range(10000)})
+        with self.assertRaisesRegex(AssetPolicyError, "manifest has missing or unknown keys"):
+            validate_manifest(candidate, POLICY)
+
+    def test_reject_hostile_string_subclass_keys_before_hashing(self):
+        class HostileKey(str):
+            armed = False
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile hash executed")
+                return str.__hash__(self)
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("hostile equality executed")
+                return str.__eq__(self, other)
+
+        candidate = manifest()
+        key = HostileKey("schema")
+        candidate[key] = candidate.pop("schema")
+        key.armed = True
+        with self.assertRaises(AssetPolicyError):
+            validate_manifest(candidate, POLICY)
+
     def test_fail_closed_on_wrong_provenance_and_schema(self):
         candidate = manifest()
         candidate["provenance"] = "PRIVATE"
