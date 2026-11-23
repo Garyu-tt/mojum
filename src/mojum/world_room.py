@@ -106,7 +106,17 @@ def _rounded_outward_boundary_crossing(start, delta, rounded_end, upper):
     comparison when the *rounded* endpoint lies exactly on a room boundary.
     Ordinary in-room moves do not pay the Fraction conversion cost.
     """
-    if delta > 0 and rounded_end == upper:
+    if delta > 0 and (
+        rounded_end == upper
+        or (
+            # Integer room walls need not be exactly representable as float.
+            # An exact crossing may round to the float *below* that wall.
+            type(upper) is int
+            and type(rounded_end) is float
+            and rounded_end < upper
+            and rounded_end >= math.nextafter(float(upper), -math.inf)
+        )
+    ):
         return Fraction(start) + Fraction(delta) > Fraction(upper)
     if delta < 0 and rounded_end == 0:
         return Fraction(start) + Fraction(delta) < 0
