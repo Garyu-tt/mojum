@@ -101,9 +101,16 @@ def seal_placement(candidate: PlacementPlan, jobs, nodes, *, local_node_id: str,
     """Bind a valid advisory plan to an exact declared snapshot and epoch."""
     if type(epoch) is not int or not 0 <= epoch <= MAX_EPOCH:
         raise PlacementError("invalid placement epoch")
-    inputs, proposed = _snapshots(candidate, jobs, nodes,
-                                   local_node_id=local_node_id,
-                                   trusted_remote_ids=trusted_remote_ids)
+    try:
+        inputs, proposed = _snapshots(candidate, jobs, nodes,
+                                       local_node_id=local_node_id,
+                                       trusted_remote_ids=trusted_remote_ids)
+    except AttributeError as exc:
+        # Dataclass constructors can be bypassed with object.__new__.
+        # Type-exact but incompletely initialized job/node/plan records must
+        # fail through the documented PlacementError boundary, not leak raw
+        # attribute lookups from record reconstruction or verification.
+        raise PlacementError("invalid placement snapshot fields") from exc
     inputs_hash, plan_hash = _hash(inputs), _hash(proposed)
     return PlacementReceipt(SCHEMA, epoch, inputs_hash, plan_hash,
                             _receipt_hash(epoch, inputs_hash, plan_hash))
