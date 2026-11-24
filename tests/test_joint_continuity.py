@@ -28,6 +28,11 @@ class JointContinuityTests(unittest.TestCase):
     def test_bool_and_nonfinite_positions(self):
         for v in (True,float("nan"),float("inf")):
             with self.assertRaises(ValueError): audit_joint_continuity([s(0,{"j":v})],{"j":1})
+    def test_revolute_huge_finite_positions_fail_closed(self):
+        rows = [s(0, {"yaw": 1e308}), s(1, {"yaw": -1e308})]
+        with self.assertRaises(ValueError):
+            audit_joint_continuity(rows, {"yaw": 0.2}, revolute=("yaw",))
+
     def test_limits_and_revolute_validation(self):
         for limits in ({"j":0},{"j":True},{"j":float("nan")},{"j":7}):
             with self.assertRaises(ValueError): audit_joint_continuity([s(0,{"j":0})],limits)
