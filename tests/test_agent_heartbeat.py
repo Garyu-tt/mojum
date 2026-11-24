@@ -116,6 +116,27 @@ class HeartbeatAdmissionTests(unittest.TestCase):
         with self.assertRaises(HeartbeatError):
             envelope(event="restart")
 
+    def test_rejects_hostile_mapping_keys_before_hashing_or_comparison(self):
+        class HostileKey(str):
+            calls = 0
+
+            def __hash__(self):
+                type(self).calls += 1
+                return super().__hash__()
+
+        value = envelope()
+        signature = value.pop("signature")
+        value[HostileKey("signature")] = signature
+        calls_after_insert = HostileKey.calls
+        with self.assertRaisesRegex(HeartbeatError, "native strings"):
+            verify_heartbeat(value, key=KEY, now_ns=NOW)
+        self.assertEqual(HostileKey.calls, calls_after_insert)
+
+    def test_rejects_integer_literals_over_python_parser_limit(self):
+        raw = b'{"sequence":' + b"9" * 5000 + b"}"
+        with self.assertRaisesRegex(HeartbeatError, "invalid JSON"):
+            verify_heartbeat(raw, key=KEY, now_ns=NOW)
+
     def test_schema_is_versioned(self):
         self.assertEqual(SCHEMA, "mojum.agent-heartbeat/1")
 
