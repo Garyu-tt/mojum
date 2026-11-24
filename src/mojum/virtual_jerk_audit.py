@@ -89,10 +89,10 @@ def _native_text(value: object, field: str, maximum: int) -> str:
 def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkReport:
     """Estimate the third derivative of position on a nonuniform time grid.
 
-    Acceleration at each interior sample uses the nonuniform three-point
-    second derivative. Jerk at an interior acceleration sample uses the
-    nonuniform three-point first derivative of adjacent acceleration values.
-    At least five position samples are therefore required.
+    Each four-sample window uses a third divided difference on its actual
+    timestamps. Six times that divided difference is the exact third
+    derivative for cubic position trajectories, including nonuniform grids.
+    Four samples are the minimum needed for one jerk estimate.
 
     The input has exactly schema, classification, consent, stream_id,
     joint_names and samples. Each sample has exactly time_ns and positions.
@@ -127,8 +127,8 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkRepo
         raise VirtualJerkError("all jerk limits must be positive")
 
     samples = data["samples"]
-    if type(samples) is not list or not 5 <= len(samples) <= MAX_SAMPLES:
-        raise VirtualJerkError("samples must be a native list of 5..4096 frames")
+    if type(samples) is not list or not 4 <= len(samples) <= MAX_SAMPLES:
+        raise VirtualJerkError("samples must be a native list of 4..4096 frames")
     if len(samples) * len(clean_names) > MAX_POSITION_VALUES:
         raise VirtualJerkError("trajectory exceeds the total position-value budget")
 
@@ -150,43 +150,34 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkRepo
             for joint_index, value in enumerate(raw_positions)
         ))
 
-    # Use seconds relative to the first frame to avoid loss of precision from
-    # converting large absolute nanosecond timestamps to float.
+    # Relative seconds avoid loss of precision from converting large
+    # absolute nanosecond timestamps to float.
     times = [(stamp - timestamps[0]) / 1_000_000_000.0 for stamp in timestamps]
-    accelerations: list[list[float]] = [[0.0] * len(clean_names) for _ in samples]
-    for index in range(1, len(samples) - 1):
-        left = times[index] - times[index - 1]
-        right = times[index + 1] - times[index]
-        span = left + right
-        for joint_index in range(len(clean_names)):
-            v_left = (positions[index][joint_index] - positions[index - 1][joint_index]) / left
-            v_right = (positions[index + 1][joint_index] - positions[index][joint_index]) / right
-            value = 2.0 * (v_right - v_left) / span
-            if not math.isfinite(value):
-                raise VirtualJerkError("computed acceleration is not finite")
-            accelerations[index][joint_index] = value
-
     peaks = [0.0] * len(clean_names)
     violations: list[JerkViolation] = []
-    for index in range(2, len(samples) - 2):
-        left = times[index] - times[index - 1]
-        right = times[index + 1] - times[index]
-        span = left + right
+    for start_index in range(len(samples) - 3):
+        end_index = start_index + 3
         for joint_index, joint in enumerate(clean_names):
-            previous = accelerations[index - 1][joint_index]
-            current = accelerations[index][joint_index]
-            following = accelerations[index + 1][joint_index]
-            jerk = (
-                -(right / (left * span)) * previous
-                + ((right - left) / (left * right)) * current
-                + (left / (right * span)) * following
-            )
+            # Newton divided differences for four irregularly spaced samples.
+            first = [
+                (positions[start_index + offset + 1][joint_index]
+                 - positions[start_index + offset][joint_index])
+                / (times[start_index + offset + 1] - times[start_index + offset])
+                for offset in range(3)
+            ]
+            second = [
+                (first[offset + 1] - first[offset])
+                / (times[start_index + offset + 2] - times[start_index + offset])
+                for offset in range(2)
+            ]
+            third = (second[1] - second[0]) / (times[end_index] - times[start_index])
+            jerk = 6.0 * third
             if not math.isfinite(jerk):
                 raise VirtualJerkError("computed jerk is not finite")
             magnitude = abs(jerk)
             peaks[joint_index] = max(peaks[joint_index], magnitude)
             if magnitude > limits[joint_index]:
-                violations.append(JerkViolation(joint, index, jerk, limits[joint_index]))
+                violations.append(JerkViolation(joint, start_index + 1, jerk, limits[joint_index]))
 
     normalized = {
         "schema": SCHEMA,
@@ -216,7 +207,7 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkRepo
         stream_id=stream_id,
         sample_count=len(samples),
         joint_count=len(clean_names),
-        jerk_sample_count=len(samples) - 4,
+        jerk_sample_count=len(samples) - 3,
         peak_abs_jerk=tuple((name, peaks[index]) for index, name in enumerate(clean_names)),
         violations=tuple(violations),
         digest=digest,
