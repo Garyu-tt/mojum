@@ -40,7 +40,13 @@ def _failure(message: str) -> None:
 
 
 def _exact_keys(value: Any, required: frozenset[str], where: str) -> None:
-    if type(value) is not dict or value.keys() != required:
+    if type(value) is not dict or len(value) != len(required):
+        _failure(f"{where}: expected exact object keys")
+    keys = tuple(value.keys())
+    # Reject hostile str subclasses before hashing or comparing caller keys.
+    if any(type(key) is not str or len(key) > 64 for key in keys):
+        _failure(f"{where}: keys must be bounded native strings")
+    if frozenset(keys) != required:
         _failure(f"{where}: expected exact object keys")
 
 
