@@ -83,6 +83,45 @@ class SurfaceMap:
         object.__setattr__(self, "patches", tuple(detached))
 
 
+
+def _validate_surface_map(surface_map):
+    """Recheck mutable Python object state at every public trust boundary."""
+    if type(surface_map) is not SurfaceMap:
+        raise ValueError("invalid surface map")
+    if type(surface_map.schema) is not str or surface_map.schema != SCHEMA:
+        raise ValueError("unsupported surface schema")
+    if (type(surface_map.room_revision) is not str
+            or len(surface_map.room_revision) != 64
+            or any(c not in "0123456789abcdef" for c in surface_map.room_revision)):
+        raise ValueError("invalid room revision")
+    if not (_native_int(surface_map.room_width_mm, 1, MAX_ROOM_MM)
+            and _native_int(surface_map.room_height_mm, 1, MAX_ROOM_MM)):
+        raise ValueError("invalid room dimensions")
+    if type(surface_map.patches) is not tuple or len(surface_map.patches) > MAX_PATCHES:
+        raise ValueError("invalid patch collection")
+    seen = set()
+    for patch in surface_map.patches:
+        if type(patch) is not SurfacePatch:
+            raise ValueError("patch must be a native SurfacePatch")
+        if not _token(patch.patch_id) or not _token(patch.material_id):
+            raise ValueError("invalid patch or material identifier")
+        if not (_native_int(patch.x_mm, 0, MAX_ROOM_MM)
+                and _native_int(patch.y_mm, 0, MAX_ROOM_MM)
+                and _native_int(patch.width_mm, 1, MAX_ROOM_MM)
+                and _native_int(patch.height_mm, 1, MAX_ROOM_MM)):
+            raise ValueError("invalid patch geometry")
+        if not (_native_int(patch.friction_milli, 0, MAX_COEFFICIENT_MILLI)
+                and _native_int(patch.restitution_milli, 0, 1000)
+                and _native_int(patch.priority, -1000, 1000)):
+            raise ValueError("invalid surface coefficients or priority")
+        if patch.patch_id in seen:
+            raise ValueError("duplicate patch identifier")
+        seen.add(patch.patch_id)
+        if (patch.x_mm + patch.width_mm > surface_map.room_width_mm
+                or patch.y_mm + patch.height_mm > surface_map.room_height_mm):
+            raise ValueError("patch outside room")
+
+
 def _canonical_map(surface_map):
     return {
         "schema": surface_map.schema,
@@ -98,8 +137,7 @@ def _canonical_map(surface_map):
 
 
 def surface_map_digest(surface_map):
-    if type(surface_map) is not SurfaceMap:
-        raise ValueError("invalid surface map")
+    _validate_surface_map(surface_map)
     raw = json.dumps(_canonical_map(surface_map), sort_keys=True,
                      separators=(",", ":"), ensure_ascii=True).encode("ascii")
     return hashlib.sha256(raw).hexdigest()
@@ -111,8 +149,7 @@ def observe_surface(surface_map, *, x_mm, y_mm, tick, expected_room_revision):
     Patch rectangles and the room sample domain are half-open.
     Equal-priority overlaps resolve by lexicographically smallest patch_id.
     """
-    if type(surface_map) is not SurfaceMap:
-        raise ValueError("invalid surface map")
+    _validate_surface_map(surface_map)
     if (type(expected_room_revision) is not str
             or expected_room_revision != surface_map.room_revision):
         raise ValueError("stale room revision")
