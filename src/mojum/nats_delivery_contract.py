@@ -82,9 +82,12 @@ def admit_envelope(raw: Mapping[str, Any]) -> DeliveryEnvelope:
     """Validate and detach an exact-field metadata envelope."""
     if type(raw) is not dict:
         raise ContractError("envelope must be a native dict")
-    if any(type(key) is not str for key in raw):
-        raise ContractError("envelope keys must be native strings")
-    if len(raw) != len(_FIELDS) or set(raw) != _FIELDS:
+    if len(raw) != len(_FIELDS):
+        raise ContractError("envelope fields do not match the versioned schema")
+    keys = tuple(raw.keys())
+    if any(type(key) is not str or len(key) > 32 for key in keys):
+        raise ContractError("envelope keys must be short native strings")
+    if set(keys) != _FIELDS:
         raise ContractError("envelope fields do not match the versioned schema")
     if type(raw["schema"]) is not str or raw["schema"] != SCHEMA:
         raise ContractError("unsupported schema")
