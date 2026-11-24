@@ -71,6 +71,14 @@ def _inside(room: Room, x_mm: int, y_mm: int) -> bool:
     return _valid(room, x_mm / 1000, y_mm / 1000)
 
 
+def _validated_room(room: Room) -> Room:
+    """Rebuild the frozen-but-shallow room before trusting its geometry."""
+    try:
+        return Room(room.width, room.height, room.obstacles)
+    except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("invalid canonical room geometry") from exc
+
+
 def _decay_q(numerator: int, denominator: int, age: int) -> int:
     """Return floor((numerator/denominator)**age * SCALE), bounded and deterministic."""
     if age == 0 or numerator == denominator:
@@ -124,6 +132,7 @@ def sample_odor_field(
         raise ValueError("explicit PUBLIC_SYNTHETIC consent is required")
     if type(room) is not Room or type(state) is not RoomState:
         raise ValueError("expected canonical Room and RoomState")
+    room = _validated_room(room)
     if (not _native_int(state.tick, 0, _MAX_AGE_TICKS)
             or type(state.revision) is not str
             or state.revision != _revision(room, state.tick, state.x, state.y)
