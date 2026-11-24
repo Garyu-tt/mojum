@@ -97,14 +97,17 @@ class AquariumCliPreflightTests(unittest.TestCase):
         checkpoint = json.loads(first.stdout)
         anchor = ("--expected-head", checkpoint["journal_head"])
 
-        with closing(sqlite3.connect(self.db)) as writer:
-            writer.execute("BEGIN IMMEDIATE")
-            blocked = self.run_cli(1, *anchor)
+        for locking_mode, transaction in (("NORMAL", "IMMEDIATE"), ("EXCLUSIVE", "EXCLUSIVE")):
+            with self.subTest(locking_mode=locking_mode):
+                with closing(sqlite3.connect(self.db)) as writer:
+                    writer.execute(f"PRAGMA locking_mode={locking_mode}")
+                    writer.execute(f"BEGIN {transaction}")
+                    blocked = self.run_cli(1, *anchor)
 
-        self.assertEqual(blocked.returncode, 1, blocked.stderr)
-        self.assertEqual(blocked.stdout, "")
-        self.assertIn("cannot access --db SQLite journal: database is locked", blocked.stderr)
-        self.assertNotIn("Traceback", blocked.stderr)
+                self.assertEqual(blocked.returncode, 1, blocked.stderr)
+                self.assertEqual(blocked.stdout, "")
+                self.assertIn("cannot access --db SQLite journal: database is locked", blocked.stderr)
+                self.assertNotIn("Traceback", blocked.stderr)
 
         resumed = self.run_cli(1, *anchor)
         self.assertEqual(resumed.returncode, 0, resumed.stderr)

@@ -1049,10 +1049,11 @@ def main():
             # Escape Unicode so redirected legacy consoles can emit the checkpoint
             # after committing ticks, including when the genome ID is non-ASCII.
             print(json.dumps(checkpoint, indent=2, allow_nan=False))
-    except (AquariumError, NoosphereError) as exc:
+    except (AquariumError, NoosphereError, sqlite3.OperationalError) as exc:
+        storage_error = exc.__cause__ if isinstance(exc, NoosphereError) else exc
+        if isinstance(storage_error, sqlite3.OperationalError):
+            parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {storage_error}\n")
         parser.error(str(exc))
-    except sqlite3.OperationalError as exc:
-        parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {exc}\n")
 
 
 if __name__ == "__main__":
