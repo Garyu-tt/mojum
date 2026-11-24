@@ -920,6 +920,16 @@ class Aquarium:
         return state
 
 
+def load_cli_room(room_file, motor_mode):
+    """Resolve the versioned room and start used to create or replay a journal."""
+    if room_file is None:
+        return None, (1.0, 2.0)
+    if motor_mode in (V2A_ARCHIVE_MODE, V2B_MODE, V2B_WIRE_MODE,
+                      V3_MODE, V3_ESCAPE_MODE, V4_MODE):
+        raise RoomSpecError("--room-file is incompatible with fixed-geometry local-cell modes")
+    return load_runtime_room(room_file)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Mojum R0.2 CPU-only fixture aquarium")
     packaged = files("mojum").joinpath("data")
@@ -987,13 +997,8 @@ def main():
     else:
         # The internal controller selects each action from committed history.
         dx, dy = None, None
-    if args.room_file is not None and args.motor_mode in (
-            V2A_ARCHIVE_MODE, V2B_MODE, V2B_WIRE_MODE,
-            V3_MODE, V3_ESCAPE_MODE, V4_MODE):
-        parser.error("--room-file is incompatible with fixed-geometry local-cell modes")
     try:
-        room, start = (load_runtime_room(args.room_file) if args.room_file is not None
-                       else (None, (1.0, 2.0)))
+        room, start = load_cli_room(args.room_file, args.motor_mode)
     except RoomSpecError as exc:
         parser.error(str(exc))
     seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
