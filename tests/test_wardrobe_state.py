@@ -2,7 +2,7 @@ import unittest
 from dataclasses import replace
 
 from mojum.wardrobe_state import (
-    WardrobeError, initial_state, transition, _verify_state,
+    WardrobeError, initial_state, transition, _verify_state, _make_state,
 )
 
 
@@ -101,6 +101,12 @@ class WardrobeStateTests(unittest.TestCase):
             _verify_state(replace(self.state, schema=HostileStr("mojum.wardrobe-state/1")))
         with self.assertRaisesRegex(WardrobeError, "revision"):
             _verify_state(replace(self.state, revision=HostileStr(self.state.revision)))
+
+    def test_sequence_limit_fails_closed_before_emitting_invalid_state(self):
+        terminal = _make_state("rig-r1", 2**63 - 2, (), ())
+        with self.assertRaisesRegex(WardrobeError, "sequence limit"):
+            self.apply(terminal, "equip", "torso", "shirt", "terminal-op")
+        self.assertEqual(terminal.sequence, 2**63 - 2)
 
     def test_unsupported_slot(self):
         with self.assertRaises(WardrobeError):
