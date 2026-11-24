@@ -128,7 +128,13 @@ def _validate_command(command: Sequence[str], repository: Path) -> list[str]:
         raise SandboxError("test executable must be inside /usr or the read-only workspace")
     if resolved.name.lower() in {"sh", "bash", "dash", "zsh", "fish", "csh", "tcsh"}:
         raise SandboxError("shell interpreters are not admitted as test entrypoints")
-    result[0] = str(resolved)
+    # Host repository paths are not mounted at their original location inside
+    # Bubblewrap. Translate an executable inside the repository to its
+    # read-only /workspace mount; /usr executables retain their runtime path.
+    if workspace_executable:
+        result[0] = "/workspace/" + resolved.relative_to(repository).as_posix()
+    else:
+        result[0] = str(resolved)
     return result
 
 
