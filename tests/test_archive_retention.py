@@ -49,7 +49,7 @@ class ArchiveRetentionTests(unittest.TestCase):
         plan = plan_retention(fixture())
         self.assertEqual(plan.eligible_segment_ids, ("seg-001",))
         self.assertEqual([d.action for d in plan.decisions],
-                         ["KEEP", "KEEP", "KEEP"])
+                         ["ELIGIBLE_FOR_OPERATOR_REVIEW", "KEEP", "KEEP", "KEEP"])
         self.assertIn("restore_anchor_segment", plan.decisions[1].reasons)
         self.assertIn("required_after_restore_anchor", plan.decisions[2].reasons)
 
