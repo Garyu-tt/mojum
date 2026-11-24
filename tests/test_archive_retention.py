@@ -151,6 +151,19 @@ class ArchiveRetentionTests(unittest.TestCase):
         self.assertEqual(plan.decisions, ())
         self.assertEqual(plan.eligible_segment_ids, ())
 
+    def test_unverified_restore_anchor_is_rejected(self):
+        raw = fixture()
+        raw["segments"][1]["verified"] = False
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+    def test_genesis_anchor_keeps_all_segments_required_for_restore(self):
+        raw = fixture()
+        raw["restore_anchor"] = {"sequence": 0, "head_sha256": H0}
+        plan = plan_retention(raw)
+        self.assertEqual(plan.eligible_segment_ids, ())
+        self.assertTrue(all(d.action == "KEEP" for d in plan.decisions))
+
     def test_empty_inventory_rejects_non_genesis_head(self):
         raw = fixture()
         raw["segments"] = []
