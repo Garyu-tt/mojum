@@ -123,7 +123,14 @@ def _triangles_intersect(a, b):
     # keeps plane-side, determinant and 2D orientation tolerances dimensionless
     # and prevents small but well-separated geometry being called coplanar.
     origin = a[0]
-    scale = max(abs(p[k] - origin[k]) for p in (*a, *b) for k in range(3))
+    # Scale by triangle edge lengths, never by the distance between the pair.
+    # Including pair separation here can shrink both triangles below the
+    # dimensionless predicate tolerance when tiny meshes are far apart.
+    edges = (
+        _sub(a[1], a[0]), _sub(a[2], a[0]),
+        _sub(b[1], b[0]), _sub(b[2], b[0]),
+    )
+    scale = max(abs(component) for edge in edges for component in edge)
     if scale == 0.0:
         return False
     a = tuple(tuple((p[k] - origin[k]) / scale for k in range(3)) for p in a)
