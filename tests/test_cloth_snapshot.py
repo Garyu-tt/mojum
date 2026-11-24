@@ -119,6 +119,23 @@ class ClothSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(ClothSnapshotError, "provenance"):
             encode_snapshot(candidate)
 
+    def test_rejects_hostile_string_subclasses_before_comparison_or_key_hashing(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile equality executed")
+
+            __hash__ = str.__hash__
+
+        candidate = state()
+        candidate["provenance"] = HostileString("PUBLIC_SYNTHETIC")
+        with self.assertRaisesRegex(ClothSnapshotError, "provenance"):
+            encode_snapshot(candidate)
+
+        candidate = state()
+        candidate[HostileString("unexpected")] = None
+        with self.assertRaisesRegex(ClothSnapshotError, "shape"):
+            encode_snapshot(candidate)
+
     def test_rejects_oversized_vertex_count(self):
         candidate = state()
         candidate["positions"] = [[0, 0, 0]] * 4097
