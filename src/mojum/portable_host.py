@@ -264,7 +264,9 @@ def main(argv=None):
                     "end_tick": aquarium.tick,
                     "committed_ticks": committed,
                     "journal_head": checkpoint["journal_head"],
-                    "journal_events": aquarium.store.count(),
+                    # Bind the count to this process's verified/committed
+                    # prefix; another WAL writer may append after checkpoint.
+                    "journal_events": aquarium.stored_events,
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
                     "brain_mode": args.brain_mode,
