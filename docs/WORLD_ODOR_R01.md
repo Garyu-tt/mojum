@@ -32,6 +32,7 @@ must match before sampling.
 
 - Python standard library only; no I/O, filesystem, network, wall clock or subprocess.
 - At most 512 sources, 4,096 points and 100,000 source-point pairs.
+- Obstacle membership and occlusion work is capped at 1,000,000 geometry tests per call.
 - Exact native type checks reject bool-as-int and dataclass subclasses.
 - Duplicate IDs, malformed IDs, invalid geometry, stale room revisions,
   future source ticks, excessive values and malformed decay ratios are rejected.
