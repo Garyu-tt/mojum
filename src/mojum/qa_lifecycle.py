@@ -104,7 +104,13 @@ def _validate_evidence(target: str, evidence: object, head_sha: str | None) -> d
         _text(evidence.get("escalation_reason"), "escalation_reason", 256)
     if target == "MERGED":
         receipt = evidence.get("release_receipt")
-        if type(receipt) is not dict or set(receipt) != {"schema", "head_sha", "base_sha", "review_id", "ci_passed", "human_authorized"}:
+        receipt_fields = {"schema", "head_sha", "base_sha", "review_id", "ci_passed", "human_authorized"}
+        if type(receipt) is not dict or len(receipt) != len(receipt_fields):
+            raise LifecycleError("release_receipt has an invalid shape")
+        receipt_keys = tuple(receipt.keys())
+        if any(type(key) is not str for key in receipt_keys):
+            raise LifecycleError("release_receipt keys must be native strings")
+        if set(receipt_keys) != receipt_fields:
             raise LifecycleError("release_receipt has an invalid shape")
         if receipt["schema"] != "mojum.release-receipt/1":
             raise LifecycleError("unsupported release receipt schema")
