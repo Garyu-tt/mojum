@@ -27,6 +27,10 @@ jobs:
       - name: Assert exact checked-out head
         if: github.event_name == 'pull_request'
         run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Install Bubblewrap runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
