@@ -8,13 +8,9 @@ on:
 jobs:
   focused:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: \${{ matrix.python-version }}
-      - run: PYTHONPATH=src python -m unittest tests.test_joint_continuity -v
+      - name: Report runner Python
+        run: python3 --version
+      - name: Focused tests
+        run: PYTHONPATH=src python3 -m unittest tests.test_joint_continuity -v
