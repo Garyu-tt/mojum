@@ -150,9 +150,11 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkRepo
             for joint_index, value in enumerate(raw_positions)
         ))
 
-    # Relative seconds avoid loss of precision from converting large
-    # absolute nanosecond timestamps to float.
-    times = [(stamp - timestamps[0]) / 1_000_000_000.0 for stamp in timestamps]
+    # Keep time deltas as integers until each division. Converting absolute
+    # timestamps to float seconds can collapse distinct nanosecond ticks when
+    # a stream spans years, producing a zero denominator despite valid input.
+    deltas_ns = [timestamps[index + 1] - timestamps[index]
+                 for index in range(len(timestamps) - 1)]
     peaks = [0.0] * len(clean_names)
     violations: list[JerkViolation] = []
     for start_index in range(len(samples) - 3):
@@ -162,15 +164,17 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkRepo
             first = [
                 (positions[start_index + offset + 1][joint_index]
                  - positions[start_index + offset][joint_index])
-                / (times[start_index + offset + 1] - times[start_index + offset])
+                * 1_000_000_000.0 / deltas_ns[start_index + offset]
                 for offset in range(3)
             ]
             second = [
-                (first[offset + 1] - first[offset])
-                / (times[start_index + offset + 2] - times[start_index + offset])
+                (first[offset + 1] - first[offset]) * 1_000_000_000.0
+                / (deltas_ns[start_index + offset] + deltas_ns[start_index + offset + 1])
                 for offset in range(2)
             ]
-            third = (second[1] - second[0]) / (times[end_index] - times[start_index])
+            third = (second[1] - second[0]) * 1_000_000_000.0 / sum(
+                deltas_ns[start_index:end_index]
+            )
             jerk = 6.0 * third
             if not math.isfinite(jerk):
                 raise VirtualJerkError("computed jerk is not finite")
