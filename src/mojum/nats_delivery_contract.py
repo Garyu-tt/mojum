@@ -110,9 +110,16 @@ def admit_envelope(raw: Mapping[str, Any]) -> DeliveryEnvelope:
     )
 
 
+def _admit_envelope_object(envelope: Any) -> DeliveryEnvelope:
+    """Reject foreign objects before invoking any caller-defined method."""
+    if type(envelope) is not DeliveryEnvelope:
+        raise ContractError("native DeliveryEnvelope required")
+    return admit_envelope(envelope.to_dict())
+
+
 def delivery_key(envelope: DeliveryEnvelope) -> str:
     """Return a stable deduplication key scoped to node, stream and delivery ID."""
-    admitted = admit_envelope(envelope.to_dict())
+    admitted = _admit_envelope_object(envelope)
     material = "\n".join((admitted.node_id, admitted.stream, admitted.delivery_id))
     return hashlib.sha256(material.encode("ascii")).hexdigest()
 
@@ -124,7 +131,7 @@ def plan_delivery(
     last_sequence: int | None = None,
 ) -> DeliveryPlan:
     """Return an advisory deterministic consumer decision; never mutates state."""
-    admitted = admit_envelope(envelope.to_dict())
+    admitted = _admit_envelope_object(envelope)
     if type(seen_delivery_keys) not in (list, tuple) or len(seen_delivery_keys) > MAX_SEEN:
         raise ContractError("seen_delivery_keys must be a bounded native list or tuple")
     for item in seen_delivery_keys:
@@ -145,7 +152,7 @@ def plan_delivery(
 
 def canonical_bytes(envelope: DeliveryEnvelope) -> bytes:
     """Canonical detached JSON bytes for a metadata-only envelope."""
-    admitted = admit_envelope(envelope.to_dict())
+    admitted = _admit_envelope_object(envelope)
     return json.dumps(admitted.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
 
