@@ -12,10 +12,11 @@ The versioned schema `mojum.cloth.schedule/1` is a pure-stdlib, solver-neutral d
 | MEDIUM | 2 | 8,000 | 32,000 | 1 |
 | HIGH | 1 | 32,000 | 128,000 | 2 |
 
-These are conservative starting ceilings, not measured performance claims. CUSTOM profiles may be constructed within hard validation ceilings.
+These are conservative starting ceilings, not measured performance claims. CUSTOM profiles may be constructed within hard validation ceilings. An enabled policy must admit at least one catch-up step; zero capacity is reserved for disabled policies.
 
 ## Determinism and overload
 - Scheduling depends only on policy, logical tick and explicit arguments.
+- Policy objects are reconstructed and validated at every public use; frozen dataclasses are not treated as tamper-proof.
 - No wall-clock sampling, randomization or hidden adaptive state.
 - Non-due ticks and disabled policies admit zero steps and report all pending steps as deferred, not dropped.
 - Work above the profile ceiling is rejected and pending steps remain deferred for caller policy.
