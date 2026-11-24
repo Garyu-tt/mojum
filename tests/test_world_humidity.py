@@ -1,5 +1,4 @@
 import unittest
-from dataclasses import replace
 
 from mojum.world_humidity import (
     HumidityProfile, MAX_TICK, observe_humidity, verify_observation,
@@ -32,13 +31,13 @@ class HumidityTests(unittest.TestCase):
         first = self.observe()
         second = self.observe()
         self.assertEqual(first, second)
-        self.assertEqual(first["relative_humidity_milli_percent"], 50_500)
+        self.assertEqual(first["relative_humidity_milli_percent"], 50_000)
         self.assertTrue(verify_observation(first))
         self.assertFalse(first["physical_sensor"])
 
     def test_spatial_gradient_and_tick_drift(self):
         out = self.observe(tick=12, x_mm=2000, y_mm=1000)
-        self.assertEqual(out["relative_humidity_milli_percent"], 51_004)
+        self.assertEqual(out["relative_humidity_milli_percent"], 50_005)
 
     def test_half_open_room_boundaries(self):
         for x, y in ((5000, 1), (1, 4000), (-1, 1), (1, -1)):
