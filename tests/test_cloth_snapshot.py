@@ -5,7 +5,8 @@ import json
 import unittest
 
 from mojum.cloth_snapshot import (
-    ClothSnapshotError, decode_snapshot, encode_snapshot, verify_replay,
+    MAX_BYTES, MAX_REPLAY_BYTES, ClothSnapshotError, decode_snapshot,
+    encode_snapshot, verify_replay,
 )
 
 MESH = hashlib.sha256(b"synthetic-mesh").hexdigest()
@@ -53,6 +54,16 @@ class ClothSnapshotTests(unittest.TestCase):
         second["rig_revision"] = "rig-r2"
         with self.assertRaisesRegex(ClothSnapshotError, "configuration"):
             verify_replay([encode_snapshot(state()), encode_snapshot(second)])
+
+    def test_replay_rejects_aggregate_byte_budget_before_decoding(self):
+        # Each entry is within the per-snapshot cap, but their aggregate is not.
+        oversized_replay = [b"x" * MAX_BYTES] * (MAX_REPLAY_BYTES // MAX_BYTES + 1)
+        with self.assertRaisesRegex(ClothSnapshotError, "aggregate byte budget"):
+            verify_replay(oversized_replay)
+
+    def test_rejects_oversized_text_before_encoding(self):
+        with self.assertRaisesRegex(ClothSnapshotError, "byte size"):
+            decode_snapshot("x" * (MAX_BYTES + 1))
 
     def test_rejects_boolean_tick_even_with_recomputed_digest(self):
         forged = forged_envelope(lambda s: s.update(tick=True))
@@ -103,7 +114,7 @@ class ClothSnapshotTests(unittest.TestCase):
 
     def test_rejects_oversized_and_wrong_type_inputs(self):
         with self.assertRaises(ClothSnapshotError):
-            decode_snapshot(b"x" * (1_048_576 + 1))
+            decode_snapshot(b"x" * (MAX_BYTES + 1))
         with self.assertRaises(ClothSnapshotError):
             decode_snapshot(bytearray(encode_snapshot(state())))
         with self.assertRaises(ClothSnapshotError):
