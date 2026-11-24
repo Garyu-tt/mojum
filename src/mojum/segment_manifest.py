@@ -113,7 +113,10 @@ class SegmentManifest:
         }
 
     def canonical_bytes(self) -> bytes:
-        return _canonical(self.to_dict())
+        # Public dataclass construction can bypass create_manifest(); never
+        # serialize or hash an unvalidated instance through this API.
+        validated = validate_manifest(self.to_dict())
+        return _canonical(validated.to_dict())
 
     @property
     def manifest_sha256(self) -> str:
