@@ -289,6 +289,17 @@ class LocalNoosphere:
                 if saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
                     raise NoosphereError("read-only journal owner or schema mismatch")
             else:
+                # Refuse an existing foreign/incompatible journal before
+                # changing its persistent journal mode or file permissions.
+                # _setup still rechecks inside its write transaction because
+                # another connection can change metadata after this read.
+                if self._db.execute(
+                    "SELECT 1 FROM sqlite_schema "
+                    "WHERE type IN ('table','view') AND name='metadata' COLLATE NOCASE"
+                ).fetchone():
+                    saved = dict(self._db.execute("SELECT k,v FROM metadata"))
+                    if saved and saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
+                        raise NoosphereError("database schema or agent owner does not match")
                 self._db.execute("PRAGMA synchronous=FULL")
                 self._db.execute("PRAGMA journal_mode=WAL")
                 self._db.execute("PRAGMA foreign_keys=ON")
