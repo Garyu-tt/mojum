@@ -59,6 +59,18 @@ def _fail(message: str) -> None:
     raise RetentionError(message)
 
 
+def _check_fields(value: object, expected: set[str], label: str) -> None:
+    """Admit bounded exact-native keys before hashing or comparing them."""
+    if type(value) is not dict:
+        _fail(f"{label} must be an exact dict")
+    keys = tuple(value.keys())
+    if (len(keys) != len(expected)
+            or any(type(key) is not str or not 1 <= len(key) <= 64 for key in keys)):
+        _fail(f"invalid {label} keys")
+    if set(keys) != expected:
+        _fail(f"{label} fields do not match schema")
+
+
 def plan_retention(raw: dict) -> RetentionPlan:
     """Build a deterministic, non-destructive retention plan.
 
@@ -76,15 +88,12 @@ def plan_retention(raw: dict) -> RetentionPlan:
     This function validates internal consistency only; it does not authenticate
     that anchor, verify signatures, or inspect any archive bytes.
     """
-    if type(raw) is not dict:
-        _fail("input must be an exact dict")
     required = {
         "schema", "consent", "current_tick", "minimum_age_ticks",
         "minimum_retained_segments", "minimum_failure_domains",
         "restore_anchor", "restore_head", "segments",
     }
-    if set(raw) != required:
-        _fail("input fields do not match schema")
+    _check_fields(raw, required, "input")
     if type(raw["schema"]) is not str or raw["schema"] != SCHEMA:
         _fail("unsupported schema")
     if type(raw["consent"]) is not str or raw["consent"] != "PUBLIC_SYNTHETIC":
@@ -102,8 +111,7 @@ def plan_retention(raw: dict) -> RetentionPlan:
         _fail("minimum_failure_domains is outside bounds")
 
     anchor = raw["restore_anchor"]
-    if type(anchor) is not dict or set(anchor) != {"sequence", "head_sha256"}:
-        _fail("invalid restore anchor")
+    _check_fields(anchor, {"sequence", "head_sha256"}, "restore anchor")
     anchor_seq, anchor_head = anchor["sequence"], anchor["head_sha256"]
     if not _exact_int(anchor_seq) or not _digest(anchor_head):
         _fail("invalid restore anchor values")
@@ -129,8 +137,7 @@ def plan_retention(raw: dict) -> RetentionPlan:
             "content_sha256", "previous_head_sha256", "head_sha256",
             "failure_domains", "verified",
         }
-        if type(item) is not dict or set(item) != fields:
-            _fail("invalid segment record")
+        _check_fields(item, fields, "segment record")
         sid = item["segment_id"]
         start, end, sealed_tick = item["start_sequence"], item["end_sequence"], item["sealed_tick"]
         if not _identifier(sid) or sid in seen_ids:
