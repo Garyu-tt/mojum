@@ -143,6 +143,9 @@ def transition(state, *, action, slot, garment_id, operation_id,
         raise WardrobeError("body revision mismatch")
     if operation_id in state.recent_operations:
         raise WardrobeError("duplicate operation id")
+    # Keep every emitted state valid for at least one subsequent verification.
+    if state.sequence >= 2**63 - 2:
+        raise WardrobeError("sequence limit reached")
     if type(action) is not str or action not in {"equip", "unequip", "replace", "drop"}:
         raise WardrobeError("unsupported action")
     if type(slot) is not str or slot not in _SLOTS:
