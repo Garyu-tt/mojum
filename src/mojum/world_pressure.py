@@ -50,6 +50,16 @@ def _profile(profile):
     return profile
 
 
+def _validated_room(room):
+    """Reconstruct exact Room instances to re-run canonical geometry validation."""
+    if type(room) is not Room:
+        raise ValueError("room must be the canonical Room")
+    try:
+        return Room(room.width, room.height, room.obstacles)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("invalid canonical room geometry") from exc
+
+
 def _digest(payload):
     encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True,
                          separators=(",", ":"), allow_nan=False).encode("ascii")
@@ -60,8 +70,9 @@ def observe_pressure(profile: PressureProfile, *, room: Room, state: RoomState,
                      tick: int, x_mm: int, y_mm: int) -> dict:
     """Sample at a caller-selected point, bound to the exact canonical room state."""
     p = _profile(profile)
-    if type(room) is not Room or type(state) is not RoomState:
+    if type(state) is not RoomState:
         raise ValueError("invalid room or room-state type")
+    room = _validated_room(room)
     if (not _integer(state.tick, 0, MAX_TICK)
             or type(state.revision) is not str or _HEX.fullmatch(state.revision) is None
             or type(state.x) not in (int, float) or type(state.y) not in (int, float)
