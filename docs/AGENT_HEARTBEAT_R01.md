@@ -74,7 +74,7 @@ manager, scoped per agent, rotated, and never included in logs or source.
 Run the focused stdlib suite:
 
 ```sh
-PYTHONPATH=src python -m unittest tests.test_agent_heartbeat -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_agent_heartbeat.py' -v
 ```
 
 No third-party runtime dependencies, network, filesystem access, subprocess,
