@@ -154,6 +154,22 @@ class SegmentManifestTests(unittest.TestCase):
         with self.assertRaises(SegmentManifestError):
             verify_segment_bytes(forged, self.segment)
 
+    def test_directly_constructed_invalid_manifest_cannot_be_serialized_or_hashed(self):
+        valid = self.make()
+        forged = SegmentManifest(
+            schema=valid.schema, agent_id=valid.agent_id,
+            first_seq=valid.first_seq, last_seq=valid.last_seq,
+            event_count=valid.event_count,
+            previous_segment_head=valid.previous_segment_head,
+            segment_head="f" * 64, source_schema=valid.source_schema,
+            content_sha256=valid.content_sha256,
+            origin_device=valid.origin_device, created_at_ns=valid.created_at_ns,
+        )
+        with self.assertRaises(SegmentManifestError):
+            forged.canonical_bytes()
+        with self.assertRaises(SegmentManifestError):
+            _ = forged.manifest_sha256
+
     def test_uninitialized_manifest_is_rejected_with_contract_error(self):
         forged = object.__new__(SegmentManifest)
         with self.assertRaises(SegmentManifestError):
