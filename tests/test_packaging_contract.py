@@ -100,7 +100,7 @@ class PackagingContractTests(unittest.TestCase):
                     f"environment file packaged: {name}",
                 )
                 self.assertFalse(
-                    any(part.endswith(".dist-info") for part in parts[:-1]),
+                    any(part.endswith(".dist-info") for part in parts[1:-1]),
                     f"unexpected nested metadata path: {name}",
                 )
 
