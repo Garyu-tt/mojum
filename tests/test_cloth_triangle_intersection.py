@@ -44,6 +44,12 @@ class TriangleIntersectionTests(unittest.TestCase):
         with self.assertRaises(TriangleIntersectionError):
             audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(False,1)])
 
+    def test_oversized_integer_coordinate_uses_validation_error(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
+        vertices[0] = (10**1000, 0, 0)
+        with self.assertRaises(TriangleIntersectionError):
+            audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)])
+
     def test_digest_binds_geometry_not_only_result_counts(self):
         vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
         faces = [(0,1,2),(3,4,5)]
