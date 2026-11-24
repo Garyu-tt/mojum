@@ -63,14 +63,17 @@ def _payload(value: object) -> str:
     # Payload is intentionally a tiny public-metadata envelope. Reject nested
     # values and arbitrary text to keep accidental private data out of the DB.
     allowed = {"source", "reason", "workflow"}
-    # Check exact key types before hashing/comparing caller-controlled keys.
-    # A str subclass may override __hash__ or __eq__ with arbitrary behavior.
-    if any(type(key) is not str for key in value):
-        raise QueueError("payload keys must be native strings")
-    if set(value) - allowed:
+    # Bound cardinality and preflight exact native keys before hashing.
+    if len(value) > len(allowed):
+        raise QueueError("payload contains too many fields")
+    keys = tuple(value.keys())
+    if any(type(key) is not str or len(key) > 8 for key in keys):
+        raise QueueError("payload keys must be short native strings")
+    if set(keys) - allowed:
         raise QueueError("payload contains unsupported fields")
     clean: dict[str, str] = {}
-    for key, item in value.items():
+    for key in keys:
+        item = value[key]
         if key not in allowed or type(item) is not str or len(item) > 256:
             raise QueueError("payload values must be bounded plain strings")
         clean[key] = item
@@ -175,7 +178,7 @@ def claim(path: str, *, owner: str, now: int, lease_ms: int) -> Task | None:
             row = db.execute(
                 """SELECT * FROM qa_tasks
                 WHERE status='queued' OR (status='leased' AND lease_expires_at<=?)
-                ORDER BY created_at,task_id LIMIT 1""", (clock,)
+                ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, created_at, task_id LIMIT 1""", (clock,)
             ).fetchone()
             if row is None:
                 db.commit()
