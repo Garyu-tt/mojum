@@ -78,7 +78,7 @@ class PressureTests(unittest.TestCase):
             ("width", -1.0),
             ("obstacles", ((4.5, 3.5, 1.0, 1.0),)),
         )
-        for attribute, forged_value, _ in cases:
+        for attribute, forged_value in cases:
             with self.subTest(attribute=attribute):
                 room = Room(5.0, 4.0)
                 object.__setattr__(room, attribute, forged_value)
