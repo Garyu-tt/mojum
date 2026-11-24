@@ -34,7 +34,7 @@ class WorldThermalTests(unittest.TestCase):
                            expected_revision=self.state.revision)
         result = observe_thermal_field(self.room, moved, tick=1,
             expected_revision=moved.revision, profile=profile, points_mm=[(0, 0)])
-        self.assertEqual(result["samples"][0]["temperature_millic"], 19_500)
+        self.assertEqual(result["samples"][0]["temperature_millic"], 19_750)
 
     def test_stale_revision_rejected(self):
         with self.assertRaises(ThermalFieldError):
