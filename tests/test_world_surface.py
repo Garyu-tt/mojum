@@ -112,5 +112,26 @@ class SurfaceMapTests(unittest.TestCase):
             SurfaceMap(REV, 5000, 4000, (), schema=HostileString(SCHEMA))
 
 
+    def test_post_construction_patch_mutation_rejected_by_public_uses(self):
+        p = patch()
+        m = self.make_map([p])
+        object.__setattr__(p, "x_mm", 4500)
+        object.__setattr__(p, "width_mm", 1000)
+        with self.assertRaisesRegex(ValueError, "patch outside room"):
+            surface_map_digest(m)
+        with self.assertRaisesRegex(ValueError, "patch outside room"):
+            observe_surface(m, x_mm=10, y_mm=10, tick=0,
+                            expected_room_revision=REV)
+
+    def test_post_construction_map_mutation_rejected_by_public_uses(self):
+        m = self.make_map()
+        object.__setattr__(m, "room_width_mm", True)
+        with self.assertRaisesRegex(ValueError, "invalid room dimensions"):
+            surface_map_digest(m)
+        with self.assertRaisesRegex(ValueError, "invalid room dimensions"):
+            observe_surface(m, x_mm=1, y_mm=1, tick=0,
+                            expected_room_revision=REV)
+
+
 if __name__ == "__main__":
     unittest.main()
