@@ -66,6 +66,22 @@ class WorldTemperatureTests(unittest.TestCase):
     def test_source_count_bound(self):
         with self.assertRaises(ValueError): self.sample(sources=[source(str(i)) for i in range(65)])
 
+    def test_source_and_point_reject_hostile_string_subclass_keys(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not execute")
+
+        bad_source = source()
+        bad_source[HostileKey("id")] = bad_source.pop("id")
+        with self.assertRaises(ValueError):
+            self.sample(sources=[bad_source])
+
+        bad_point = point()
+        bad_point[HostileKey("id")] = bad_point.pop("id")
+        with self.assertRaises(ValueError):
+            self.sample(points=[bad_point])
+
     def test_result_detached_and_frozen(self):
         points = [point()]
         result = self.sample(points=points)
