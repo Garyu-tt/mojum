@@ -169,17 +169,16 @@ def plan_retention(raw: dict) -> RetentionPlan:
         })
         previous_end, previous_head = end, item["head_sha256"]
 
-    # Anchor must be the genesis boundary or an exact segment boundary.
-    anchor_matches = (
-        anchor_seq == 0
-        and anchor_head == _ZERO_HEAD
-        and normalized[0]["previous_head_sha256"] == _ZERO_HEAD
-    )
+    # The inventory always starts at the canonical genesis chain origin.
+    if normalized[0]["previous_head_sha256"] != _ZERO_HEAD:
+        _fail("segment inventory does not begin at the genesis head")
+
+    # Anchor must be genesis or an exact verified segment boundary.
+    anchor_matches = anchor_seq == 0 and anchor_head == _ZERO_HEAD
     if anchor_seq > 0:
-        anchor_matches = False
-    for segment in normalized:
-        if segment["end_sequence"] == anchor_seq and segment["head_sha256"] == anchor_head:
-            anchor_matches = segment["verified"]
+        for segment in normalized:
+            if segment["end_sequence"] == anchor_seq and segment["head_sha256"] == anchor_head:
+                anchor_matches = segment["verified"]
     if not anchor_matches:
         _fail("restore anchor is not a verified sequence boundary")
     if previous_head != restore_head:
