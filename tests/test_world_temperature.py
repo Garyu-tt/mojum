@@ -77,6 +77,17 @@ class WorldTemperatureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fields do not match schema"):
             self.sample(points=[oversized_point])
 
+    def test_source_and_point_reject_oversized_native_keys_before_hashing(self):
+        bad_source = source()
+        bad_source["x" * 1_000_000] = bad_source.pop("id")
+        with self.assertRaisesRegex(ValueError, "bounded native strings"):
+            self.sample(sources=[bad_source])
+
+        bad_point = point()
+        bad_point["x" * 1_000_000] = bad_point.pop("id")
+        with self.assertRaisesRegex(ValueError, "bounded native strings"):
+            self.sample(points=[bad_point])
+
     def test_source_and_point_reject_hostile_string_subclass_keys(self):
         class HostileKey(str):
             __hash__ = str.__hash__
