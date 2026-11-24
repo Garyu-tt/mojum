@@ -29,6 +29,22 @@ class TriangleIntersectionTests(unittest.TestCase):
         vertices = [(0,0,0),(1,0,0),(0,1,0),(1,0,0),(2,0,0),(1,1,0)]
         self.assertEqual(audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ((0,1),))
 
+    def test_small_separated_triangles_are_not_coplanar(self):
+        vertices = [(0,0,0),(1e-5,0,0),(0,1e-5,0),
+                    (0,0,1e-6),(1e-5,0,1e-6),(0,1e-5,1e-6)]
+        report = audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)])
+        self.assertEqual(report.intersection_pairs, ())
+
+    def test_scale_equivalent_intersections_and_separations(self):
+        for scale in (1e-5, 1.0, 1e5):
+            with self.subTest(scale=scale):
+                crossing = [(0,0,0),(2*scale,0,0),(0,2*scale,0),
+                            (0.5*scale,0.5*scale,-scale),(0.5*scale,0.5*scale,scale),(1.5*scale,0.5*scale,0)]
+                separated = [(0,0,0),(scale,0,0),(0,scale,0),
+                             (0,0,0.1*scale),(scale,0,0.1*scale),(0,scale,0.1*scale)]
+                self.assertEqual(audit_triangle_intersections(crossing, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ((0,1),))
+                self.assertEqual(audit_triangle_intersections(separated, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ())
+
     def test_duplicate_pair_rejected(self):
         vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
         with self.assertRaises(TriangleIntersectionError):
