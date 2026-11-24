@@ -110,6 +110,11 @@ def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
             raise HeartbeatError("envelope JSON is not in canonical form")
         return value
     if type(raw) is dict:
+        # The schema has exactly eight fields. Check cardinality before
+        # allocating a key snapshot, so hostile oversized mappings are rejected
+        # in O(1) time and without an O(N) temporary tuple.
+        if len(raw) != len(_FIELDS):
+            raise HeartbeatError("heartbeat envelope has missing or unknown fields")
         # Reject caller-defined key behavior before JSON sorting or dict copies
         # can invoke subclass hashing/comparison hooks.
         raw_keys = tuple(raw.keys())
