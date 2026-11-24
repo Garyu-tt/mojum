@@ -34,9 +34,14 @@ def _exact_int(value: Any, field: str, low: int, high: int) -> int:
 
 
 def _finite_number(value: Any, field: str, low: float, high: float) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         raise BenchmarkError(f"{field}: expected finite number")
-    result = float(value)
+    try:
+        if not math.isfinite(value):
+            raise BenchmarkError(f"{field}: expected finite number")
+        result = float(value)
+    except (OverflowError, TypeError, ValueError):
+        raise BenchmarkError(f"{field}: expected finite number") from None
     if not low <= result <= high:
         raise BenchmarkError(f"{field}: outside [{low}, {high}]")
     return result
