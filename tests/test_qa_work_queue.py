@@ -66,6 +66,22 @@ class WorkQueueTests(unittest.TestCase):
         self.assertEqual(second.task_id, first.task_id)
         self.assertEqual(second.attempts, 2)
 
+    def test_queued_work_precedes_repeatedly_expired_lease(self):
+        first = self.add(key="blocked-old", created_at=1)
+        first_lease = claim(self.db, owner="worker-a", now=1, lease_ms=1)
+        self.assertEqual(first_lease.task_id, first.task_id)
+
+        queued = self.add(key="independent-new", created_at=2)
+        independent = claim(self.db, owner="worker-b", now=2, lease_ms=10)
+        self.assertEqual(independent.task_id, queued.task_id)
+        self.assertEqual(independent.status, "leased")
+
+        # Once independent queued work is drained, the expired task remains
+        # reclaimable; it is delayed, not dropped or permanently starved.
+        reclaimed = claim(self.db, owner="worker-c", now=2, lease_ms=10)
+        self.assertEqual(reclaimed.task_id, first.task_id)
+        self.assertEqual(reclaimed.attempts, 2)
+
     def test_two_connections_have_one_claim_winner(self):
         self.add()
         barrier = threading.Barrier(2)
