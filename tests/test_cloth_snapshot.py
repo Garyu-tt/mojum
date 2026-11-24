@@ -16,6 +16,7 @@ def state(tick=0):
         "tick": tick, "time_ns": tick * 10_000_000, "dt_ns": 10_000_000,
         "mesh_sha256": MESH, "rig_revision": "rig-r1",
         "profile_revision": "shirt-r1", "solver_id": "synthetic-proxy/1",
+        "provenance": "PUBLIC_SYNTHETIC", "consent": True,
         "positions": [[0, 0, 0], [1, 0, 0]],
         "velocities": [[0, 0, 0], [0, 1, 0]],
     }
@@ -107,6 +108,16 @@ class ClothSnapshotTests(unittest.TestCase):
             decode_snapshot(bytearray(encode_snapshot(state())))
         with self.assertRaises(ClothSnapshotError):
             verify_replay([])
+
+    def test_requires_explicit_public_synthetic_consent(self):
+        candidate = state()
+        candidate["consent"] = False
+        with self.assertRaisesRegex(ClothSnapshotError, "consent"):
+            encode_snapshot(candidate)
+        candidate = state()
+        candidate["provenance"] = "PRIVATE"
+        with self.assertRaisesRegex(ClothSnapshotError, "provenance"):
+            encode_snapshot(candidate)
 
     def test_rejects_oversized_vertex_count(self):
         candidate = state()
