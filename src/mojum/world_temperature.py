@@ -41,6 +41,13 @@ def _records(value: Any, name: str, maximum: int) -> list[dict[str, Any]]:
         raise ValueError(f"{name} entries must be plain dictionaries")
     return list(value)
 
+def _require_exact_fields(row: dict[str, Any], required: set[str], name: str) -> None:
+    # Do not hash or compare untrusted key subclasses before rejecting them.
+    if any(type(key) is not str for key in row):
+        raise ValueError(f"{name} keys must be native strings")
+    if len(row) != len(required) or set(row) != required:
+        raise ValueError(f"{name} fields do not match schema")
+
 def observe_temperature(*, sources: Any, points: Any, baseline_milli_c: int,
                          tick: int, consent: bool) -> TemperatureReport:
     """Sample caller-supplied points. This is not a physical temperature model.
@@ -57,8 +64,7 @@ def observe_temperature(*, sources: Any, points: Any, baseline_milli_c: int,
     source_ids, normalized_sources = set(), []
     required = {"id", "x_mm", "y_mm", "delta_milli_c", "decay_milli_c_per_tick", "observed_tick"}
     for row in source_rows:
-        if set(row) != required:
-            raise ValueError("source fields do not match schema")
+        _require_exact_fields(row, required, "source")
         sid = _identifier(row["id"], "source id")
         if sid in source_ids:
             raise ValueError("duplicate source id")
@@ -71,8 +77,7 @@ def observe_temperature(*, sources: Any, points: Any, baseline_milli_c: int,
             _integer(row["observed_tick"], "observed_tick", 0, now)))
     point_ids, normalized_points = set(), []
     for row in point_rows:
-        if set(row) != {"id", "x_mm", "y_mm"}:
-            raise ValueError("point fields do not match schema")
+        _require_exact_fields(row, {"id", "x_mm", "y_mm"}, "point")
         pid = _identifier(row["id"], "point id")
         if pid in point_ids:
             raise ValueError("duplicate point id")
