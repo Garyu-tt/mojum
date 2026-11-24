@@ -51,6 +51,13 @@ def observe_thermal_field(room, state, *, tick, expected_revision, profile, poin
 
     if type(room) is not Room or type(state) is not RoomState:
         raise ThermalFieldError("canonical Room and RoomState required")
+    # Frozen dataclasses can still be forged with object.__setattr__. Rebuild
+    # through the canonical constructor so dimensions and every obstacle are
+    # validated and nested mutable collections are detached before use.
+    try:
+        room = Room(room.width, room.height, room.obstacles)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ThermalFieldError("invalid room geometry") from exc
     if not _valid(room, state.x, state.y):
         raise ThermalFieldError("invalid room state coordinates")
     if type(tick) is not int or type(state.tick) is not int or tick != state.tick or state.tick < 0:
