@@ -38,7 +38,7 @@ class SandboxPlannerTests(unittest.TestCase):
             self.fake_tools.append(tool)
         self.limits = sandbox.SandboxLimits(
             cpu_seconds=30, memory_bytes=512 * 1024**2,
-            process_count=32, open_files=128, wall_seconds=45,
+            process_count=512, open_files=128, wall_seconds=45,
         )
 
     def tearDown(self):
@@ -83,7 +83,7 @@ class SandboxPlannerTests(unittest.TestCase):
         self.assertEqual(argv[0], str(self.fake_tools[1]))
         self.assertIn("--cpu=30", argv)
         self.assertIn("--as=536870912", argv)
-        self.assertIn("--nproc=32", argv)
+        self.assertIn("--nproc=512", argv)
         self.assertIn("--nofile=128", argv)
         self.assertIn("45s", argv)
         self.assertIn("--unshare-all", argv)
