@@ -6,7 +6,7 @@ mojum.archive-retention-plan/1 is a deterministic, advisory plan for sealed-segm
 
 ## Input contract
 
-plan_retention(raw) accepts an exact dictionary using moj​​um.archive-retention-input/1 and explicit PUBLIC_SYNTHETIC consent. The inventory is bounded to 4,096 segments and 64 failure-domain labels per segment. Segment intervals must be contiguous, IDs unique, digests lowercase SHA-256, and the supplied previous/head chain internally consistent.
+plan_retention(raw) accepts an exact dictionary using mojum.archive-retention-input/1 and explicit PUBLIC_SYNTHETIC consent. The inventory is bounded to 4,096 segments and 64 failure-domain labels per segment. Segment intervals must be contiguous, IDs unique, digests lowercase SHA-256, and the supplied previous/head chain internally consistent.
 
 The caller supplies:
 - a logical current tick and minimum age in ticks;
