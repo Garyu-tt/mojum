@@ -31,6 +31,22 @@ class NatsDeliveryContractTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ContractError):
                 admit_envelope(raw)
 
+    def test_rejects_oversized_mapping_before_key_iteration(self):
+        raw = envelope()
+        raw.update({f"extra-{i}": i for i in range(10_000)})
+        with self.assertRaisesRegex(ContractError, "fields do not match"):
+            admit_envelope(raw)
+
+    def test_rejects_hostile_string_subclass_key_before_hashing(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not execute")
+        raw = envelope()
+        raw[HostileKey("node_id")] = raw.pop("node_id")
+        with self.assertRaisesRegex(ContractError, "native strings"):
+            admit_envelope(raw)
+
     def test_rejects_private_or_wrong_schema(self):
         for key, value in (("provenance", "PRIVATE"), ("schema", "mojum.nats-delivery/2")):
             with self.subTest(key=key), self.assertRaises(ContractError):
