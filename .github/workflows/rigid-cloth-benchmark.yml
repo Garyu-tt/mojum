@@ -8,7 +8,9 @@ on:
       - "docs/RIGID_CLOTH_BENCHMARK_R01.md"
       - ".github/workflows/rigid-cloth-benchmark.yml"
   push:
-    branches: [main]
+    branches:
+      - main
+      - "build/702-rigid-cloth-benchmark-20261124"
     paths:
       - "tools/integration_benchmarks/rigid_cloth_benchmark.py"
       - "tests/test_rigid_cloth_benchmark.py"
