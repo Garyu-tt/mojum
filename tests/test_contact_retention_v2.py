@@ -1,5 +1,6 @@
 import copy
 import unittest
+from unittest.mock import patch
 
 from mojum.contact_retention_v2 import (
     SCHEMA, ContactRetentionV2, RetentionError,
@@ -122,6 +123,54 @@ class ContactRetentionV2Tests(unittest.TestCase):
         ledger.observe(cue="b", value_milli=200, tick=6)
         self.assertEqual(set(ledger.entries), {"b"})
         self.assertEqual(ledger.expired_cues, 1)
+
+
+    def test_snapshot_bounds_are_checked_before_copy_or_digest(self):
+        ledger = ContactRetentionV2()
+        ledger.observe(cue="a", value_milli=5, tick=1)
+        cases = []
+
+        oversized_top = ledger.snapshot()
+        oversized_top["unexpected"] = "x"
+        cases.append(oversized_top)
+
+        oversized_entries = ledger.snapshot()
+        oversized_entries["entries"] = [None] * (oversized_entries["max_cues"] + 1)
+        cases.append(oversized_entries)
+
+        oversized_entry = ledger.snapshot()
+        oversized_entry["entries"][0].update({f"extra-{i}": i for i in range(1000)})
+        cases.append(oversized_entry)
+
+        for snapshot in cases:
+            with self.subTest(size=len(snapshot.get("entries", []))):
+                with patch("mojum.contact_retention_v2.copy.deepcopy",
+                           side_effect=AssertionError("must not deepcopy caller data")), \
+                     patch("mojum.contact_retention_v2._digest",
+                           side_effect=AssertionError("must not hash caller data")):
+                    with self.assertRaises(RetentionError):
+                        ContactRetentionV2.from_snapshot(snapshot)
+
+    def test_snapshot_rejects_hostile_string_subclass_keys_before_hashing(self):
+        class HostileKey(str):
+            hash_calls = 0
+
+            def __hash__(self):
+                type(self).hash_calls += 1
+                return super().__hash__()
+
+        ledger = ContactRetentionV2()
+        ledger.observe(cue="a", value_milli=5, tick=1)
+        snapshot = ledger.snapshot()
+        entry = snapshot["entries"][0]
+        entry[HostileKey("cue")] = entry.pop("cue")
+        HostileKey.hash_calls = 0
+
+        with patch("mojum.contact_retention_v2._digest",
+                   side_effect=AssertionError("must reject before digest")):
+            with self.assertRaises(RetentionError):
+                ContactRetentionV2.from_snapshot(snapshot)
+        self.assertEqual(HostileKey.hash_calls, 0)
 
 
 if __name__ == "__main__":
