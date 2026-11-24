@@ -6,6 +6,11 @@ from mojum.wardrobe_state import (
 )
 
 
+class HostileStr(str):
+    def __eq__(self, other):
+        raise AssertionError("hostile string equality must not run")
+
+
 class WardrobeStateTests(unittest.TestCase):
     def setUp(self):
         self.state = initial_state("rig-r1")
@@ -90,6 +95,12 @@ class WardrobeStateTests(unittest.TestCase):
             state, _ = self.apply(state, "equip", "torso", f"g{i}", f"op-{i}")
             state, _ = self.apply(state, "unequip", "torso", f"g{i}", f"op-{i}-off")
         self.assertLessEqual(len(state.recent_operations), 32)
+
+    def test_schema_and_revision_require_exact_native_strings(self):
+        with self.assertRaisesRegex(WardrobeError, "schema"):
+            _verify_state(replace(self.state, schema=HostileStr("mojum.wardrobe-state/1")))
+        with self.assertRaisesRegex(WardrobeError, "revision"):
+            _verify_state(replace(self.state, revision=HostileStr(self.state.revision)))
 
     def test_unsupported_slot(self):
         with self.assertRaises(WardrobeError):
