@@ -33,6 +33,8 @@ class ClothSnapshot:
     rig_revision: str
     profile_revision: str
     solver_id: str
+    provenance: str
+    consent: bool
     positions: tuple[tuple[float, float, float], ...]
     velocities: tuple[tuple[float, float, float], ...]
     sha256: str
@@ -87,7 +89,7 @@ def _state(value: Any) -> dict[str, Any]:
     if type(value) is not dict:
         raise ClothSnapshotError("state must be an exact dictionary")
     required = {"tick", "time_ns", "dt_ns", "mesh_sha256", "rig_revision",
-                "profile_revision", "solver_id", "positions", "velocities"}
+                "profile_revision", "solver_id", "provenance", "consent", "positions", "velocities"}
     if set(value) != required:
         raise ClothSnapshotError("state shape mismatch")
     tick = _native_int(value["tick"], "tick")
@@ -97,6 +99,8 @@ def _state(value: Any) -> dict[str, Any]:
     rig = _text(value["rig_revision"], "rig_revision", MAX_REVISION)
     profile = _text(value["profile_revision"], "profile_revision", MAX_REVISION)
     solver = _text(value["solver_id"], "solver_id", MAX_SOLVER_ID)
+    if value["provenance"] != "PUBLIC_SYNTHETIC" or type(value["consent"]) is not bool or value["consent"] is not True:
+        raise ClothSnapshotError("PUBLIC_SYNTHETIC provenance and explicit consent are required")
     positions = _vectors(value["positions"], "positions")
     velocities = _vectors(value["velocities"], "velocities")
     if len(positions) != len(velocities):
@@ -106,7 +110,7 @@ def _state(value: Any) -> dict[str, Any]:
     return {
         "tick": tick, "time_ns": time_ns, "dt_ns": dt_ns,
         "mesh_sha256": mesh, "rig_revision": rig, "profile_revision": profile,
-        "solver_id": solver,
+        "solver_id": solver, "provenance": "PUBLIC_SYNTHETIC", "consent": True,
         "positions": [list(row) for row in positions],
         "velocities": [list(row) for row in velocities],
     }
@@ -169,7 +173,7 @@ def decode_snapshot(data: bytes | str) -> ClothSnapshot:
         tick=normalized["tick"], time_ns=normalized["time_ns"], dt_ns=normalized["dt_ns"],
         mesh_sha256=normalized["mesh_sha256"], rig_revision=normalized["rig_revision"],
         profile_revision=normalized["profile_revision"], solver_id=normalized["solver_id"],
-        positions=tuple(tuple(row) for row in normalized["positions"]),
+        provenance=normalized["provenance"], consent=normalized["consent"], positions=tuple(tuple(row) for row in normalized["positions"]),
         velocities=tuple(tuple(row) for row in normalized["velocities"]), sha256=expected,
     )
 
