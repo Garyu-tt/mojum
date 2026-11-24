@@ -77,6 +77,12 @@ class HeartbeatAdmissionTests(unittest.TestCase):
             verify_heartbeat({k: v for k, v in value.items() if k != "event"},
                              key=KEY, now_ns=NOW)
 
+    def test_rejects_oversized_mapping_before_key_snapshot(self):
+        value = envelope()
+        value.update({f"extra-{index}": index for index in range(25_000)})
+        with self.assertRaisesRegex(HeartbeatError, "missing or unknown fields"):
+            verify_heartbeat(value, key=KEY, now_ns=NOW)
+
     def test_rejects_bool_as_sequence_and_clock(self):
         value = envelope()
         value["sequence"] = True
