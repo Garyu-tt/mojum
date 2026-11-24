@@ -19,7 +19,12 @@ MAX_PEAK_BYTES = 1_099_511_627_776
 
 
 def _finite(value: object) -> bool:
-    return type(value) in (int, float) and math.isfinite(value)
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 def _identifier(value: object, field: str) -> str:
@@ -129,7 +134,12 @@ def evaluate_ik_samples(
             raise ValueError("invalid elapsed_ns")
         if type(peak) is not int or not 0 <= peak <= MAX_PEAK_BYTES:
             raise ValueError("invalid peak_bytes")
-        residual = math.sqrt(sum((float(a) - float(b)) ** 2 for a, b in zip(target, achieved)))
+        try:
+            residual = math.hypot(*(float(a) - float(b) for a, b in zip(target, achieved)))
+        except (OverflowError, ValueError):
+            raise ValueError("coordinate residual is outside the supported numeric range") from None
+        if not math.isfinite(residual):
+            raise ValueError("coordinate residual is outside the supported numeric range")
         excursions = []
         for name, value in joints.items():
             lower, upper = limits[name]
