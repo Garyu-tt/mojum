@@ -1,0 +1,42 @@
+name: PR stack DAG audit
+on:
+  pull_request:
+    paths:
+      - "tools/pr_stack_audit.py"
+      - "tests/test_pr_stack_audit.py"
+      - "docs/PR_STACK_AUDIT_R01.md"
+      - ".github/workflows/pr-stack-audit-qa.yml"
+  push:
+    branches:
+      - "build/pr-stack-dag-audit-20261123-1710"
+    paths:
+      - "tools/pr_stack_audit.py"
+      - "tests/test_pr_stack_audit.py"
+      - "docs/PR_STACK_AUDIT_R01.md"
+      - ".github/workflows/pr-stack-audit-qa.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact submitted revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Compile audit and tests
+        run: python -m py_compile tools/pr_stack_audit.py tests/test_pr_stack_audit.py
+      - name: Run focused regression suite
+        run: python -m unittest discover -s tests -p "test_pr_stack_audit.py" -v
