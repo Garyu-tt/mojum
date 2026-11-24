@@ -1,8 +1,10 @@
-"""Aquarium CLI rejects invalid plans and seed files before writing SQLite."""
+"""Aquarium CLI rejects invalid input and reports recoverable journal errors."""
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -88,6 +90,26 @@ class AquariumCliPreflightTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.db.read_bytes(), before)
+
+    def test_busy_journal_reports_storage_error_and_can_resume(self):
+        first = self.run_cli(1)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        checkpoint = json.loads(first.stdout)
+        anchor = ("--expected-head", checkpoint["journal_head"])
+
+        with closing(sqlite3.connect(self.db)) as writer:
+            writer.execute("BEGIN IMMEDIATE")
+            blocked = self.run_cli(1, *anchor)
+
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertEqual(blocked.stdout, "")
+        self.assertIn("cannot access --db SQLite journal: database is locked", blocked.stderr)
+        self.assertNotIn("Traceback", blocked.stderr)
+
+        resumed = self.run_cli(1, *anchor)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        report = json.loads(resumed.stdout)
+        self.assertEqual((report["tick"], report["stored_events"]), (2, 3))
 
 
 if __name__ == "__main__":
