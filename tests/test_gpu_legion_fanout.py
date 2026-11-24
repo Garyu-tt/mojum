@@ -33,6 +33,22 @@ def read_only(port, path, **kwargs):
 
 
 class FanoutContract(unittest.TestCase):
+    def test_gpu_scripts_start_from_an_isolated_python(self):
+        tools_dir = Path(__file__).resolve().parents[1] / "tools"
+        cases = (
+            ("gpu_legion_fanout.py", "--tasks"),
+            ("gpu_legion_plan.py", "--inventory"),
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            for script, option in cases:
+                with self.subTest(script=script):
+                    result = subprocess.run(
+                        [sys.executable, "-I", str(tools_dir / script), "--help"],
+                        cwd=cwd, text=True, capture_output=True, timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(option, result.stdout)
+
     def test_discovers_exact_live_slots_not_300_fake_model_processes(self):
         b1=f.discover_backend(18180,request=read_only)
         b2=f.discover_backend(18181,request=read_only)

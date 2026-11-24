@@ -17,6 +17,7 @@ from collections import Counter
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
@@ -27,9 +28,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
 
 if __package__:
-    from ._json_input import backend_json_text, exceeds_json_depth
+    from . import _json_input
 else:
-    from _json_input import backend_json_text, exceeds_json_depth
+    # Isolated Python omits the script directory from its import search path.
+    _json_spec = spec_from_file_location(
+        "_json_input", Path(__file__).resolve().with_name("_json_input.py"),
+    )
+    _json_input = module_from_spec(_json_spec)
+    _json_spec.loader.exec_module(_json_input)
 
 PORTS = (18180, 18181)
 MODEL = "GPT20B"
@@ -84,8 +90,8 @@ def _request_json(port: int, path: str, *, body=None, timeout=5, opener=None):
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
         raise FanoutError(f"loopback endpoint unavailable: {type(exc).__name__}") from exc
     try:
-        text = backend_json_text(data)
-        if exceeds_json_depth(text):
+        text = _json_input.backend_json_text(data)
+        if _json_input.exceeds_json_depth(text):
             raise FanoutError("invalid JSON response")
         return json.loads(
             text,

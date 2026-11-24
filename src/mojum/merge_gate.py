@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
@@ -42,7 +43,15 @@ import sys
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import quote
 
-from ._json_nesting import exceeds_json_depth
+if __package__:
+    from . import _json_nesting
+else:
+    # The direct-file entry point has no package import context.
+    _json_spec = spec_from_file_location(
+        "_json_nesting", Path(__file__).resolve().with_name("_json_nesting.py"),
+    )
+    _json_nesting = module_from_spec(_json_spec)
+    _json_spec.loader.exec_module(_json_nesting)
 
 SCHEMA = "mojum.merge-gate.v1"
 MAX_INPUT_BYTES = 4 * 1024 * 1024
@@ -663,7 +672,7 @@ def _decode_snapshot_bytes(data: bytes) -> object:
     """Reject parser-depth exhaustion and ambiguous JSON object fields."""
     try:
         text = data.decode("utf-8")
-        if exceeds_json_depth(text):
+        if _json_nesting.exceeds_json_depth(text):
             raise SnapshotError("snapshot JSON exceeds parser nesting limit")
         return json.loads(text, object_pairs_hook=_unique_snapshot_object)
     except UnicodeDecodeError as exc:
