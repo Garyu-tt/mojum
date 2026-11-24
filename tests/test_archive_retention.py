@@ -110,6 +110,39 @@ class ArchiveRetentionTests(unittest.TestCase):
         plan_retention(raw)
         self.assertEqual(raw, before)
 
+    def test_rejects_hostile_non_native_keys_before_hashing(self):
+        class HostileKey(str):
+            def __new__(cls, value):
+                obj = super().__new__(cls, value)
+                obj.hostile = False
+                return obj
+
+            def __hash__(self):
+                if self.hostile:
+                    raise RuntimeError("hostile hash must never execute")
+                return super().__hash__()
+
+        raw = fixture()
+        key = HostileKey("schema")
+        raw[key] = raw.pop("schema")
+        key.hostile = True
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+        raw = fixture()
+        key = HostileKey("sequence")
+        raw["restore_anchor"][key] = raw["restore_anchor"].pop("sequence")
+        key.hostile = True
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+        raw = fixture()
+        key = HostileKey("segment_id")
+        raw["segments"][0][key] = raw["segments"][0].pop("segment_id")
+        key.hostile = True
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
     def test_rejects_boolean_as_integer(self):
         raw = fixture()
         raw["current_tick"] = True
