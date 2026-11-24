@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping
 from typing import Any
 
 SCHEMA = "mojum.kinematics-benchmark/1"
@@ -137,6 +136,10 @@ def verify_benchmark_report(report: Any) -> bool:
     """Fail-closed verification of a report previously produced by this module."""
     keys = {"schema", "classification", "rig", "solver", "case", "fk", "ik", "contacts", "resources", "sha256"}
     report = _mapping(report, "report", keys)
+    if type(report["schema"]) is not str or report["schema"] != SCHEMA:
+        raise BenchmarkValidationError("unsupported schema")
+    if type(report["classification"]) is not str or report["classification"] != CLASSIFICATION:
+        raise BenchmarkValidationError("unsupported classification")
     # Validate every nested mapping before canonical serialization/hashing.
     rig = _mapping(report["rig"], "rig", {"id", "revision", "dof_count"})
     solver = _mapping(report["solver"], "solver", {"name", "version", "license"})
@@ -145,6 +148,8 @@ def verify_benchmark_report(report: Any) -> bool:
     ik = _mapping(report["ik"], "ik", {"attempts", "converged", "max_residual_um", "joint_limit_violations"})
     contacts = _mapping(report["contacts"], "contacts", {"events", "authority"})
     resources = _mapping(report["resources"], "resources", {"cpu_p50_us", "cpu_p95_us", "max_rss_kib"})
+    if type(contacts["authority"]) is not str or contacts["authority"] != "SIMULATED_ONLY":
+        raise BenchmarkValidationError("unsupported contact authority")
     digest = report["sha256"]
     if type(digest) is not str or not _SHA256_RE.fullmatch(digest):
         raise BenchmarkValidationError("sha256 must be 64 lowercase hexadecimal characters")
@@ -161,8 +166,6 @@ def verify_benchmark_report(report: Any) -> bool:
         cpu_p50_us=resources["cpu_p50_us"], cpu_p95_us=resources["cpu_p95_us"],
         max_rss_kib=resources["max_rss_kib"],
     )
-    if contacts["authority"] != "SIMULATED_ONLY" or payload["schema"] != SCHEMA or payload["classification"] != CLASSIFICATION:
-        raise BenchmarkValidationError("unsupported schema, classification, or contact authority")
     if rebuilt["sha256"] != digest:
         raise BenchmarkValidationError("report semantic validation failed")
     return True
