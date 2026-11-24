@@ -211,6 +211,19 @@ class ArchiveRetentionTests(unittest.TestCase):
         self.assertEqual(plan.eligible_segment_ids, ())
         self.assertTrue(all(d.action == "KEEP" for d in plan.decisions))
 
+
+    def test_rejects_nonzero_genesis_anchor_and_chain_origin(self):
+        raw = fixture()
+        raw["restore_anchor"] = {"sequence": 0, "head_sha256": H3}
+        raw["segments"][0]["previous_head_sha256"] = H3
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+        raw = fixture()
+        raw["segments"][0]["previous_head_sha256"] = H1
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
     def test_empty_inventory_rejects_non_genesis_head(self):
         raw = fixture()
         raw["segments"] = []
