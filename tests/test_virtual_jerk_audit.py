@@ -35,7 +35,19 @@ class VirtualJerkAuditTests(unittest.TestCase):
 
     def test_large_timestamp_span_with_one_ns_steps_stays_finite(self):
         limit = (1 << 63) - 1
-        data = trajectory([0, limit - 2, limit - 1, limit], [0, 1, 2, 3])
+        data = {
+            "schema": SCHEMA,
+            "classification": PUBLIC_SYNTHETIC,
+            "consent": True,
+            "stream_id": "large-time-span",
+            "joint_names": ["elbow"],
+            "samples": [
+                {"time_ns": stamp, "positions": [position]}
+                for stamp, position in zip(
+                    [0, limit - 2, limit - 1, limit], [0, 1, 2, 3]
+                )
+            ],
+        }
         report = audit_joint_jerk(data, {"elbow": 1_000_000_000_000.0})
         self.assertEqual(report.jerk_sample_count, 1)
         self.assertTrue(report.passed)
