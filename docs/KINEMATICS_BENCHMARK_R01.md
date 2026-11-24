@@ -31,7 +31,7 @@ No third-party dependency is added. Report construction is linear in a fixed, sm
 Run:
 
 ```sh
-python -m unittest tests.test_kinematics_benchmark -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_kinematics_benchmark.py' -v
 ```
 
 The test suite covers deterministic receipts, mutation/tamper detection, exact native types, bounds, inconsistent counters, percentile ordering, and simulated-only contact semantics.
