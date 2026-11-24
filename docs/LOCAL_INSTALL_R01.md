@@ -68,7 +68,9 @@ The full stdlib suite remains:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow provisions the build tools, then builds the wheel, installs it in a fresh virtual environment, and runs both console commands outside the checkout in a Linux network namespace with only loopback. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
+`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow builds the wheel from two clean exports of the same commit using its timestamp for `SOURCE_DATE_EPOCH`, then compares the wheel bytes. It installs the wheel in a fresh virtual environment and runs the console commands in a loopback-only Linux network namespace. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
+
+The workflow also runs for release tags and checks that the installed version matches the tag. The successful Python 3.13 tag job attaches the verified wheel and `SHA256SUMS` to its workflow run.
 
 ## Limits
 
