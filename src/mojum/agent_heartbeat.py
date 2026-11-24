@@ -102,7 +102,7 @@ def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
             )
         except HeartbeatError:
             raise
-        except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
+        except (json.JSONDecodeError, UnicodeError, RecursionError, ValueError) as exc:
             raise HeartbeatError("invalid JSON envelope") from exc
         if type(value) is not dict:
             raise HeartbeatError("heartbeat envelope must be a JSON object")
@@ -110,6 +110,11 @@ def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
             raise HeartbeatError("envelope JSON is not in canonical form")
         return value
     if type(raw) is dict:
+        # Reject caller-defined key behavior before JSON sorting or dict copies
+        # can invoke subclass hashing/comparison hooks.
+        raw_keys = tuple(raw.keys())
+        if any(type(key) is not str or len(key) > 32 for key in raw_keys):
+            raise HeartbeatError("heartbeat envelope keys must be bounded native strings")
         # Round-trip through canonical JSON to detach caller-owned containers
         # and reject unsupported values before verification.
         encoded = _canonical(raw)
