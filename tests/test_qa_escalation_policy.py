@@ -30,16 +30,10 @@ class EscalationPolicyTests(unittest.TestCase):
         self.assertIn("SECURITY_SENSITIVE", result.reasons)
 
     def test_unsafe_input_escalates(self):
-        self.assertEqual(
-            decide_escalation(sample(risk_flags=["unsafe_input"])).route,
-            "ESCALATE",
-        )
+        self.assertEqual(decide_escalation(sample(risk_flags=["unsafe_input"])).route, "ESCALATE")
 
     def test_schema_migration_escalates(self):
-        self.assertEqual(
-            decide_escalation(sample(risk_flags=["schema_migration"])).route,
-            "ESCALATE",
-        )
+        self.assertEqual(decide_escalation(sample(risk_flags=["schema_migration"])).route, "ESCALATE")
 
     def test_conflicting_verdicts_escalate(self):
         result = decide_escalation(sample(qa_verdicts=["PASS", "FAIL"]))
@@ -47,14 +41,8 @@ class EscalationPolicyTests(unittest.TestCase):
         self.assertIn("CONFLICTING_QA_VERDICTS", result.reasons)
 
     def test_low_confidence_escalates_at_boundary(self):
-        self.assertEqual(
-            decide_escalation(sample(confidence_milli=599)).route,
-            "ESCALATE",
-        )
-        self.assertEqual(
-            decide_escalation(sample(confidence_milli=600)).route,
-            "LOCAL_REVIEW",
-        )
+        self.assertEqual(decide_escalation(sample(confidence_milli=599)).route, "ESCALATE")
+        self.assertEqual(decide_escalation(sample(confidence_milli=600)).route, "LOCAL_REVIEW")
 
     def test_ambiguous_authorization_blocks(self):
         result = decide_escalation(sample(risk_flags=["authorization_ambiguous"]))
@@ -62,9 +50,7 @@ class EscalationPolicyTests(unittest.TestCase):
         self.assertIn("AUTHORIZATION_AMBIGUOUS", result.reasons)
 
     def test_stale_revision_blocks_even_with_other_risks(self):
-        result = decide_escalation(sample(
-            risk_flags=["stale_revision", "security_sensitive"]
-        ))
+        result = decide_escalation(sample(risk_flags=["stale_revision", "security_sensitive"]))
         self.assertEqual(result.route, "HUMAN_BLOCK")
 
     def test_human_block_precedes_escalation(self):
@@ -97,6 +83,28 @@ class EscalationPolicyTests(unittest.TestCase):
     def test_unknown_keys_fail_closed(self):
         value = sample()
         value["model_prompt"] = "must not be admitted"
+        with self.assertRaises(EscalationInputError):
+            decide_escalation(value)
+
+    def test_oversized_mapping_rejected_before_key_snapshot(self):
+        value = sample()
+        value.update({f"extra_{index}": None for index in range(25000)})
+        with self.assertRaises(EscalationInputError):
+            decide_escalation(value)
+
+    def test_string_subclass_keys_rejected_before_hashing(self):
+        class HostileStr(str):
+            reject_hash = False
+
+            def __hash__(self):
+                if self.reject_hash:
+                    raise AssertionError("hostile key was hashed")
+                return super().__hash__()
+
+        value = sample()
+        replacement = HostileStr("schema")
+        value[replacement] = value.pop("schema")
+        HostileStr.reject_hash = True
         with self.assertRaises(EscalationInputError):
             decide_escalation(value)
 
