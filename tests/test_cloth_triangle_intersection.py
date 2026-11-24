@@ -44,6 +44,15 @@ class TriangleIntersectionTests(unittest.TestCase):
         with self.assertRaises(TriangleIntersectionError):
             audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(False,1)])
 
+    def test_digest_binds_geometry_not_only_result_counts(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
+        faces = [(0,1,2),(3,4,5)]
+        a = audit_triangle_intersections(vertices, faces, [(0,1)])
+        changed = list(vertices)
+        changed[3] = (0,0,3)
+        b = audit_triangle_intersections(changed, faces, [(0,1)])
+        self.assertNotEqual(a.digest_sha256, b.digest_sha256)
+
     def test_deterministic_digest_and_order(self):
         vertices = [(0,0,0),(2,0,0),(0,2,0),(0.5,0.5,-1),(0.5,0.5,1),(1.5,0.5,0),(0,0,3),(1,0,3),(0,1,3)]
         triangles = [(0,1,2),(3,4,5),(6,7,8)]
