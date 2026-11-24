@@ -108,6 +108,8 @@ def _validate_command(command: Sequence[str], repository: Path) -> list[str]:
     workspace_executable = _within(resolved, repository)
     if not _within(resolved, runtime_root) and not workspace_executable:
         raise SandboxError("test executable must be inside /usr or the read-only workspace")
+    if resolved.name.lower() in {"sh", "bash", "dash", "zsh", "fish", "csh", "tcsh"}:
+        raise SandboxError("shell interpreters are not admitted as test entrypoints")
     result[0] = str(resolved)
     return result
 
@@ -167,10 +169,10 @@ def build_sandbox_argv(
         "--ro-bind", str(repo), "/workspace",
         "--dir", "/scratch",
         "--bind", str(write_root), "/scratch",
-        "--dir", "/scratch/home",
+        "--dir", "/tmp/home",
         "--chdir", "/workspace",
         "--setenv", "PATH", "/usr/bin:/bin",
-        "--setenv", "HOME", "/scratch/home",
+        "--setenv", "HOME", "/tmp/home",
         "--setenv", "TMPDIR", "/scratch",
         "--setenv", "LANG", "C.UTF-8",
         "--",
