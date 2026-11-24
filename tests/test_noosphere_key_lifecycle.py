@@ -101,6 +101,26 @@ class KeyLifecycleTests(unittest.TestCase):
         with self.assertRaises(KeyLifecycleError):
             validate_keyring([key(key_id=f"k-{i}") for i in range(129)], now=30)
 
+    def test_timestamp_bounds_apply_to_both_public_apis(self):
+        limit = (1 << 63) - 1
+        huge = 1 << 10000
+        with self.assertRaisesRegex(KeyLifecycleError, "signed 64-bit"):
+            validate_keyring([key()], now=huge)
+        with self.assertRaisesRegex(KeyLifecycleError, "signed 64-bit"):
+            admit_key_operation(key(), operation="encrypt", at=huge)
+        for field in ("created_at", "activated_at", "retired_at", "revoked_at"):
+            with self.subTest(field=field):
+                with self.assertRaises(KeyLifecycleError):
+                    validate_keyring([key(**{field: huge})], now=limit)
+                with self.assertRaises(KeyLifecycleError):
+                    admit_key_operation(key(**{field: huge}), operation="decrypt", at=limit)
+        self.assertEqual(validate_keyring([key(created_at=limit, activated_at=limit)],
+                                          now=limit)["schema"],
+                         "mojum.noosphere-key-lifecycle/1")
+        self.assertTrue(admit_key_operation(
+            key(created_at=limit, activated_at=limit),
+            operation="decrypt", at=limit)["allowed"])
+
 
 if __name__ == "__main__":
     unittest.main()
