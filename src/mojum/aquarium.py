@@ -307,7 +307,9 @@ class Aquarium:
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
         self._committed_count = 0
-        first = _read_first_event(db_path, agent_id)
+        first = _read_first_event(
+            db_path, agent_id, external_expected_head=external_expected_head,
+        )
         if first is not None:
             self._check_bootstrap(first)
         elif external_expected_head is not None:
