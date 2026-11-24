@@ -53,6 +53,10 @@ class RigidClothBenchmarkTests(unittest.TestCase):
             with self.assertRaises(MODULE.BenchmarkError):
                 MODULE.summarize(data)
 
+    def test_oversized_integer_measurement_is_rejected(self):
+        with self.assertRaises(MODULE.BenchmarkError):
+            MODULE.summarize(dict(fixture(), runs=[dict(fixture()["runs"][0], cpu_ms=10 ** 1000)]))
+
     def test_rejects_bool_in_integer_fields(self):
         data = fixture()
         data["rig"]["dof"] = True
