@@ -40,6 +40,13 @@ class SurfaceMapTests(unittest.TestCase):
         self.assertIsNone(observe_surface(m, x_mm=1000, y_mm=999, tick=0,
                          expected_room_revision=REV)["patch_id"])
 
+    def test_room_upper_boundary_is_exclusive(self):
+        for x_mm, y_mm in ((5000, 1), (1, 4000)):
+            with self.subTest(x_mm=x_mm, y_mm=y_mm):
+                with self.assertRaisesRegex(ValueError, "outside room"):
+                    observe_surface(self.make_map(), x_mm=x_mm, y_mm=y_mm,
+                                    tick=0, expected_room_revision=REV)
+
     def test_priority_then_identifier_tie_break(self):
         m = self.make_map([
             patch("z", "stone", priority=4),
