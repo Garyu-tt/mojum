@@ -40,8 +40,10 @@ class NatsDeliveryContractTests(unittest.TestCase):
     def test_rejects_hostile_string_subclass_key_before_hashing(self):
         class HostileKey(str):
             __hash__ = str.__hash__
+
             def __eq__(self, other):
                 raise AssertionError("hostile key equality must not execute")
+
         raw = envelope()
         raw[HostileKey("node_id")] = raw.pop("node_id")
         with self.assertRaisesRegex(ContractError, "native strings"):
@@ -70,6 +72,22 @@ class NatsDeliveryContractTests(unittest.TestCase):
                         {"causation_id": ""}):
             with self.subTest(changes=changes), self.assertRaises(ContractError):
                 admit_envelope(envelope(**changes))
+
+    def test_public_helpers_reject_foreign_objects_before_method_calls(self):
+        class ForeignEnvelope:
+            def to_dict(self):
+                raise AssertionError("foreign method must not execute")
+
+        foreign = ForeignEnvelope()
+        operations = (
+            lambda: delivery_key(foreign),
+            lambda: plan_delivery(foreign),
+            lambda: canonical_bytes(foreign),
+            lambda: receipt_digest(foreign, "ACCEPT_CANDIDATE"),
+        )
+        for operation in operations:
+            with self.assertRaisesRegex(ContractError, "native DeliveryEnvelope"):
+                operation()
 
     def test_dedup_key_is_stable_and_scoped(self):
         first = admit_envelope(envelope())
