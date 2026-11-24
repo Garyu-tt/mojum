@@ -6,10 +6,10 @@ from mojum.wav_header_inspect import inspect_wav, WavFormatError, MAX_WAV_BYTES
 
 
 def chunk(kind, payload):
-    return kind + struct.pack("<I", len(payload)) + payload + (b"\\x00" if len(payload) % 2 else b"")
+    return kind + struct.pack("<I", len(payload)) + payload + (b"\x00" if len(payload) % 2 else b"")
 
 
-def wav(payload=b"\\x00\\x00", rate=16000, extra=b""):
+def wav(payload=b"\x00\x00", rate=16000, extra=b""):
     fmt = struct.pack("<HHIIHH", 1, 1, rate, rate * 2, 2, 16)
     body = b"WAVE" + chunk(b"fmt ", fmt) + extra + chunk(b"data", payload)
     return b"RIFF" + struct.pack("<I", len(body)) + body
@@ -17,7 +17,7 @@ def wav(payload=b"\\x00\\x00", rate=16000, extra=b""):
 
 class WavInspectionTests(unittest.TestCase):
     def test_valid(self):
-        report = inspect_wav(wav(b"\\x00\\x00" * 160))
+        report = inspect_wav(wav(b"\x00\x00" * 160))
         self.assertEqual(report["duration_ms_floor"], 10)
         self.assertEqual(report["sample_count"], 160)
         self.assertNotIn("samples", report)
@@ -37,7 +37,7 @@ class WavInspectionTests(unittest.TestCase):
 
     def test_corrupt_lengths(self):
         original = wav()
-        for value in (original[:-1], original + b"x", original[:4] + b"\\x00\\x00\\x00\\x00" + original[8:]):
+        for value in (original[:-1], original + b"x", original[:4] + b"\x00\x00\x00\x00" + original[8:]):
             with self.subTest(length=len(value)):
                 with self.assertRaises(WavFormatError):
                     inspect_wav(value)
@@ -54,7 +54,7 @@ class WavInspectionTests(unittest.TestCase):
             inspect_wav(wav(extra=chunk(b"data", b"")))
 
     def test_nonzero_padding(self):
-        invalid = wav(extra=chunk(b"JUNK", b"x").replace(b"x\\x00", b"x\\x01"))
+        invalid = wav(extra=chunk(b"JUNK", b"x").replace(b"x\x00", b"x\x01"))
         with self.assertRaises(WavFormatError):
             inspect_wav(invalid)
 
