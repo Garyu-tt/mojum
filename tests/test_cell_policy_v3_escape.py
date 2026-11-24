@@ -189,13 +189,18 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         # claims five observations despite last being seen on tick zero.
         valid = CellExplorerV3Escape().snapshot()
         valid.update({
+            "snapshot_version": 2,
             "last_tick": 99,
             "updates": 100,
             "records": {
                 "0:0": {"rest": [1, 0]},
-                "2500:0": {"rest": [99, 0]},
+                "2500:0": {"rest": [95, 0], "x+": [4, 0]},
             },
             "last_seen_at": {"0:0": 0, "2500:0": 99},
+            "outcome_tail": [
+                {"tick": tick, "cell": "2500:0", "action": "x+", "blocked": False}
+                for tick in range(96, 100)
+            ],
         })
         self.assertEqual(
             CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid,
@@ -235,6 +240,8 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             "cell_size_m": STEP_METERS,
             "consecutive_rests": 0,
             "consecutive_blocked_probes": 0,
+            "snapshot_version": 2,
+            "outcome_tail": [],
         }
         forged = {
             "two_cells_stamped_same_tick": {
