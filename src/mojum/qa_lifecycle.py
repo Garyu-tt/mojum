@@ -129,6 +129,13 @@ def _validate_evidence(target: str, evidence: object, head_sha: str | None) -> d
             raise LifecycleError("evidence integer is out of range")
     return evidence
 
+def _freeze(value: object) -> object:
+    if type(value) is dict:
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if type(value) is list:
+        return tuple(_freeze(item) for item in value)
+    return value
+
 def propose_transition(previous: object, target: object, *, reason: object,
                        head_sha: object = None, evidence: object = None) -> Transition:
     """Validate and return a detached, deterministic transition proposal."""
@@ -150,4 +157,4 @@ def propose_transition(previous: object, target: object, *, reason: object,
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     digest = hashlib.sha256(b"mojum.qa-lifecycle/1\0" + encoded).hexdigest()
     detached = json.loads(encoded.decode("ascii"))["evidence"]
-    return Transition(previous, target, reason, MappingProxyType(detached), digest)
+    return Transition(previous, target, reason, _freeze(detached), digest)
