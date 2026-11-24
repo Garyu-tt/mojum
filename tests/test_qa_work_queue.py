@@ -121,6 +121,28 @@ class WorkQueueTests(unittest.TestCase):
         with self.assertRaises(QueueError):
             claim(self.db, owner="worker", now=0, lease_ms=True)
 
+    def test_payload_rejects_oversized_key_count_before_hashing(self):
+        payload = {"source": "a", "reason": "b", "workflow": "c", "extra": "d"}
+        with self.assertRaises(QueueError):
+            enqueue(self.db, idempotency_key="oversized", kind="review", pr_number=1,
+                    head_sha=SHA, created_at=0, payload=payload)
+
+    def test_payload_rejects_string_subclass_key_without_hashing_it(self):
+        class HostileKey(str):
+            armed = False
+
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hostile key was hashed")
+                return super().__hash__()
+
+        key = HostileKey("source")
+        payload = {key: "github"}
+        key.armed = True
+        with self.assertRaises(QueueError):
+            enqueue(self.db, idempotency_key="hostile-key", kind="review", pr_number=1,
+                    head_sha=SHA, created_at=0, payload=payload)
+
     def test_expired_lease_cannot_be_heartbeated(self):
         self.add()
         task = claim(self.db, owner="worker-a", now=10, lease_ms=5)
