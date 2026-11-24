@@ -27,7 +27,7 @@ class KeyLifecycleTests(unittest.TestCase):
         with self.assertRaises(KeyLifecycleError): verification_key_id(ring,"missing",2,3)
         with self.assertRaises(KeyLifecycleError): verification_key_id(ring,"one",4,3)
     def test_overlapping_windows_rejected(self):
-        with self.assertRaises(KeyLifecycleError): build_keyring([k("a",1,2,12),k("b",8,10)])
+        with self.assertRaises(KeyLifecycleError): build_keyring([k("a",1,2,12,20),k("b",8,10)])
     def test_duplicate_ids_and_algorithm_rejected(self):
         with self.assertRaises(KeyLifecycleError): build_keyring([k("a",1,2),k("a",2,3)])
         bad=k("b",1,2); bad["algorithm"]="SHA1"
@@ -40,10 +40,25 @@ class KeyLifecycleTests(unittest.TestCase):
         with self.assertRaises(KeyLifecycleError): build_keyring([bad])
     def test_verify_until_requires_retirement(self):
         with self.assertRaises(KeyLifecycleError): build_keyring([k("a",1,2,until=10)])
+    def test_retired_key_requires_bounded_verification_retention(self):
+        with self.assertRaisesRegex(KeyLifecycleError, "require an explicit verify_until"):
+            build_keyring([k("old",1,2,10)])
     def test_digest_stable_and_detached(self):
         item=k("a",1,2); first=build_keyring([item]); item["key_id"]="changed"
         self.assertEqual(first.digest,build_keyring([k("a",1,2)]).digest)
         self.assertEqual(first.keys[0].key_id,"a")
         self.assertEqual(len(first.digest),64)
+    def test_key_metadata_mutation_is_rejected_by_both_public_apis(self):
+        ring=build_keyring([k("one",1,2)])
+        object.__setattr__(ring.keys[0], "revoked_at", 1)
+        with self.assertRaisesRegex(KeyLifecycleError, "mutated"):
+            signing_key_id(ring, 3)
+        with self.assertRaisesRegex(KeyLifecycleError, "mutated"):
+            verification_key_id(ring, "one", 2, 3)
+    def test_keyring_digest_mutation_is_rejected(self):
+        ring=build_keyring([k("one",1,2)])
+        object.__setattr__(ring, "digest", "0" * 64)
+        with self.assertRaisesRegex(KeyLifecycleError, "mutated"):
+            signing_key_id(ring, 3)
 
 if __name__=="__main__": unittest.main()
