@@ -74,6 +74,12 @@ class ArchiveRetentionTests(unittest.TestCase):
         self.assertNotIn("seg-001", plan.eligible_segment_ids)
         self.assertIn("insufficient_failure_domains", plan.decisions[0].reasons)
 
+    def test_policy_cannot_allow_single_failure_domain(self):
+        raw = fixture()
+        raw["minimum_failure_domains"] = 1
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
     def test_minimum_age_is_enforced(self):
         raw = fixture()
         raw["segments"][0]["sealed_tick"] = 95
