@@ -71,6 +71,8 @@ def _stage_sqlite(source, stage):
     uri = source.resolve().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as original:
         original.execute("PRAGMA trusted_schema=OFF")
+        # Pin the budgeted snapshot across all backup batches.
+        original.execute("BEGIN")
         _limit_source_pages(original)
         with closing(sqlite3.connect(str(stage))) as target:
             original.backup(target, pages=256, sleep=0.05)
