@@ -65,7 +65,8 @@ class VoluntaryLessonPlanTests(unittest.TestCase):
     def test_reject_unknown_duplicate_and_non_plain_section_ids(self):
         for ids in ([], ["does_not_exist"], ["music", "music"],
                     ["music", 1], ["music", True], "music", ("music",),
-                    [b"music"], ["music"] * (MAX_LESSONS + 1)):
+                    [b"music"], ["music"] * (MAX_LESSONS + 1),
+                    ["a" * 49], [""], ["Music"], ["bad-id"]):
             with self.subTest(ids=str(ids)[:80]), self.assertRaises(LessonPlanError):
                 plan_voluntary_lessons(self.catalog, ids, consent=True)
 
