@@ -12,6 +12,7 @@ A canonical ASCII JSON envelope contains:
 - tick, integer nanosecond timebase and fixed `dt_ns`;
 - SHA-256 mesh identity, rig revision, garment/profile revision and solver identifier;
 - equal-length arrays of 3D positions and velocities, with at most 4096 vertices;
+- explicit `PUBLIC_SYNTHETIC` provenance and `consent: true`;
 - SHA-256 over the normalized state payload.
 
 Numbers must be finite native integers/floats (booleans are rejected), coordinates/velocities are bounded to ±1,000,000, and `time_ns == tick * dt_ns`. Unknown/missing fields, duplicate JSON keys, non-canonical JSON, malformed digests, count mismatches, oversized payloads and digest tampering fail closed.
@@ -25,7 +26,7 @@ Numbers must be finite native integers/floats (booleans are rejected), coordinat
 Run focused tests:
 
 ```sh
-python -m unittest tests.test_cloth_snapshot -v
+python -m unittest discover -s tests -p 'test_cloth_snapshot.py' -v
 ```
 
 ## Explicit limits
