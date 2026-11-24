@@ -5,9 +5,9 @@ This package is an **experimental, CPU-first, single-device synthetic fixture**.
 ## Requirements
 
 - CPython 3.11 or newer with standard-library `sqlite3`.
-- `pip` to install a local wheel. Only source builds use `setuptools>=61` and older setuptools versions also need `wheel` available on the builder.
+- `pip` to install a local wheel. Source builds require `setuptools>=77` on the builder.
 - No mandatory third-party **runtime** dependencies and no GPU.
-- **License undecided:** this in-repository install support does not grant permission to redistribute or publish on PyPI.
+- Distribution uses the GNU General Public License version 3 or any later version. [Full license text](../LICENSE)
 
 ## Install from a local source checkout
 

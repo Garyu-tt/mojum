@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Provision the wheel builder
-        run: python -m pip install 'setuptools>=61' wheel
+        run: python -m pip install 'setuptools>=77' wheel
       - name: Build, install and resume in a network namespace with only loopback
         shell: bash
         run: |

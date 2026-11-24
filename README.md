@@ -351,7 +351,7 @@ Aquarium manifest, CLI motor modes, SQLite wire format or existing journals.
 
 Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
 
-**License:** undecided; repository visibility does not grant a license.
+Mojum is licensed under the GNU General Public License version 3 or any later version (`GPL-3.0-or-later`). [Full license text](LICENSE)
 
 ## Offline trace import safety
 
