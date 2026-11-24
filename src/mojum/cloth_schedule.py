@@ -45,6 +45,8 @@ class ClothStepPlan:
     logical_tick: int
     run: bool
     reason: str
+    admitted_steps: int
+    deferred_pending_steps: int
     admitted_vertices: int
     admitted_constraints: int
     dropped_pending_steps: int
@@ -65,7 +67,7 @@ def policy_digest(policy: ClothSchedulePolicy) -> str:
 def plan_step(policy: ClothSchedulePolicy, logical_tick: int, *,
               pending_steps: int = 1, requested_vertices: int = 0,
               requested_constraints: int = 0, enabled: bool = True) -> ClothStepPlan:
-    """Plan at most one update. Backlog is dropped, never folded into physics dt."""
+    """Admit bounded fixed-dt updates; explicitly defer or drop every pending step."""
     if not isinstance(policy, ClothSchedulePolicy):
         raise TypeError("policy must be ClothSchedulePolicy")
     for name, value in (("logical_tick", logical_tick), ("pending_steps", pending_steps),
@@ -80,13 +82,20 @@ def plan_step(policy: ClothSchedulePolicy, logical_tick: int, *,
     if type(enabled) is not bool:
         raise ValueError("enabled must be a native bool")
     digest = policy_digest(policy)
-    dropped = max(0, pending_steps - max(1, policy.max_catch_up_steps))
+
+    def no_admission(reason: str) -> ClothStepPlan:
+        return ClothStepPlan(SCHEMA, logical_tick, False, reason, 0, pending_steps,
+                             0, 0, 0, digest)
+
     if not enabled or not policy.enabled:
-        return ClothStepPlan(SCHEMA, logical_tick, False, "disabled", 0, 0, dropped, digest)
+        return no_admission("disabled")
     if logical_tick % policy.tick_divisor:
-        return ClothStepPlan(SCHEMA, logical_tick, False, "cadence", 0, 0, dropped, digest)
+        return no_admission("cadence")
     if requested_vertices > policy.max_vertices or requested_constraints > policy.max_constraints:
-        return ClothStepPlan(SCHEMA, logical_tick, False, "work-budget-exceeded", 0, 0, dropped, digest)
+        return no_admission("work-budget-exceeded")
+
+    admitted = min(pending_steps, policy.max_catch_up_steps)
+    dropped = pending_steps - admitted
     reason = "run-with-backlog-dropped" if dropped else "run"
-    return ClothStepPlan(SCHEMA, logical_tick, True, reason, requested_vertices,
-                         requested_constraints, dropped, digest)
+    return ClothStepPlan(SCHEMA, logical_tick, admitted > 0, reason, admitted, 0,
+                         requested_vertices, requested_constraints, dropped, digest)
