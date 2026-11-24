@@ -1,0 +1,20 @@
+name: joint-continuity
+on:
+  pull_request:
+    paths: ["src/mojum/joint_continuity.py", "tests/test_joint_continuity.py", "docs/JOINT_CONTINUITY_R01.md", ".github/workflows/joint-continuity.yml"]
+  push:
+    branches: [main]
+    paths: ["src/mojum/joint_continuity.py", "tests/test_joint_continuity.py", "docs/JOINT_CONTINUITY_R01.md", ".github/workflows/joint-continuity.yml"]
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: \${{ matrix.python-version }}
+      - run: PYTHONPATH=src python -m unittest tests.test_joint_continuity -v
