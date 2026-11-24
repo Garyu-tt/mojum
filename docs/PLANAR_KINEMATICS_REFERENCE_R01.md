@@ -7,6 +7,7 @@ or motor controller.
 
 ## Contract
 - Link lengths and Cartesian positions are metres; angles and limits are radians.
+- Link lengths must be at least `1e-150` metres and at most `1e100` metres, preventing denominator underflow in the analytic IK formula.
 - FK uses shoulder angle followed by relative elbow angle.
 - IK exposes elbow-up and elbow-down branches.
 - Unreachable targets and solutions outside inclusive joint limits return no
