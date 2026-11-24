@@ -36,9 +36,12 @@ def _vec3(value: object, name: str) -> tuple[float, float, float]:
         raise TriangleIntersectionError(f"{name} must be a native 3-vector")
     out = []
     for v in value:
-        if type(v) not in (int, float) or not math.isfinite(v):
+        if type(v) not in (int, float):
             raise TriangleIntersectionError(f"{name} coordinates must be finite native numbers")
-        f = float(v)
+        try:
+            f = float(v)
+        except (OverflowError, ValueError):
+            raise TriangleIntersectionError(f"{name} coordinate outside supported range") from None
         if not math.isfinite(f) or abs(f) > 1e9:
             raise TriangleIntersectionError(f"{name} coordinate outside supported range")
         out.append(f)
