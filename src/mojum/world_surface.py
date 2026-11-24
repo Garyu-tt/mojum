@@ -73,12 +73,24 @@ class SurfaceMap:
         for patch in self.patches:
             if type(patch) is not SurfacePatch:
                 raise ValueError("patch must be a native SurfacePatch")
+            # Frozen dataclasses can be changed with object.__setattr__. Revalidate
+            # every field before hashing patch_id or using geometry.
+            if not _token(patch.patch_id) or not _token(patch.material_id):
+                raise ValueError("invalid patch or material identifier")
+            if not (_native_int(patch.x_mm, 0, MAX_ROOM_MM)
+                    and _native_int(patch.y_mm, 0, MAX_ROOM_MM)
+                    and _native_int(patch.width_mm, 1, MAX_ROOM_MM)
+                    and _native_int(patch.height_mm, 1, MAX_ROOM_MM)):
+                raise ValueError("invalid patch geometry")
+            if not (_native_int(patch.friction_milli, 0, MAX_COEFFICIENT_MILLI)
+                    and _native_int(patch.restitution_milli, 0, 1000)
+                    and _native_int(patch.priority, -1000, 1000)):
+                raise ValueError("invalid surface coefficients or priority")
+            if patch.x_mm + patch.width_mm > self.room_width_mm or patch.y_mm + patch.height_mm > self.room_height_mm:
+                raise ValueError("patch outside room")
             if patch.patch_id in seen:
                 raise ValueError("duplicate patch identifier")
             seen.add(patch.patch_id)
-            if (patch.x_mm + patch.width_mm > self.room_width_mm
-                    or patch.y_mm + patch.height_mm > self.room_height_mm):
-                raise ValueError("patch outside room")
             detached.append(patch)
         object.__setattr__(self, "patches", tuple(detached))
 
