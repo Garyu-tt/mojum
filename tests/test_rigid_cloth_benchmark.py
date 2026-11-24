@@ -76,6 +76,22 @@ class RigidClothBenchmarkTests(unittest.TestCase):
             with self.assertRaises(MODULE.BenchmarkError):
                 MODULE.summarize(data)
 
+    def test_oversized_native_keys_are_rejected_before_hashing(self):
+        data = fixture()
+        data["x" * 1_000_000] = data.pop("schema")
+        with self.assertRaisesRegex(MODULE.BenchmarkError, "bounded native strings"):
+            MODULE.summarize(data)
+
+        data = fixture()
+        data["rig"]["x" * 1_000_000] = data["rig"].pop("asset_id")
+        with self.assertRaisesRegex(MODULE.BenchmarkError, "bounded native strings"):
+            MODULE.summarize(data)
+
+        data = fixture()
+        data["runs"][0]["x" * 1_000_000] = data["runs"][0].pop("cpu_ms")
+        with self.assertRaisesRegex(MODULE.BenchmarkError, "bounded native strings"):
+            MODULE.summarize(data)
+
     def test_input_is_not_mutated(self):
         data = fixture()
         before = copy.deepcopy(data)
