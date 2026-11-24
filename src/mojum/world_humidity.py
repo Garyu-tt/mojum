@@ -10,7 +10,7 @@ MAX_TICK = (1 << 53) - 1
 MAX_DIMENSION_MM = 1_000_000_000
 MAX_GRADIENT = 100_000
 MAX_TICK_DRIFT = 1_000
-_HEX = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_HEX = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -53,14 +53,17 @@ def _digest(payload):
 
 def observe_humidity(profile: HumidityProfile, *, room_revision: str,
                      tick: int, x_mm: int, y_mm: int) -> dict:
-    """Sample an affine synthetic field using only integer arithmetic."""
+    """Sample an affine synthetic field using only integer arithmetic.
+
+    Spatial coordinates use the half-open room domain [0, width) x [0, height).
+    """
     p = _profile(profile)
     if (type(room_revision) is not str or _HEX.fullmatch(room_revision) is None
             or room_revision != p.room_revision):
         raise ValueError("stale or mismatched room revision")
     if (not _integer(tick, p.epoch_tick, MAX_TICK)
-            or not _integer(x_mm, 0, p.width_mm)
-            or not _integer(y_mm, 0, p.height_mm)):
+            or not _integer(x_mm, 0, p.width_mm - 1)
+            or not _integer(y_mm, 0, p.height_mm - 1)):
         raise ValueError("tick or sample position outside profile bounds")
     raw = (p.base_milli_percent
            + (p.gradient_x_milli_percent_per_km * x_mm) // 1_000_000
@@ -92,7 +95,7 @@ def verify_observation(observation: dict) -> bool:
             or type(observation["room_revision"]) is not str or _HEX.fullmatch(observation["room_revision"]) is None
             or not _integer(observation["tick"], 0, MAX_TICK)
             or type(observation["position_mm"]) is not list or len(observation["position_mm"]) != 2
-            or not all(_integer(v, 0, MAX_DIMENSION_MM) for v in observation["position_mm"])
+            or not all(_integer(v, 0, MAX_DIMENSION_MM - 1) for v in observation["position_mm"])
             or not _integer(observation["relative_humidity_milli_percent"], 0, 100_000)
             or type(observation["provenance"]) is not str or observation["provenance"] != "public-synthetic-humidity-field/v1"
             or type(observation["physical_sensor"]) is not bool or observation["physical_sensor"] is not False
