@@ -45,8 +45,14 @@ def _sha(value: Any, field: str) -> str:
 
 
 def _exact_keys(value: Any, expected: set[str], field: str) -> dict[str, Any]:
-    if type(value) is not dict or set(value) != expected:
+    if type(value) is not dict or len(value) != len(expected):
         raise ValueError(f"{field} must be a native dict with exactly {sorted(expected)}")
+    # Bound and type-check keys before hashing them in a set comparison.
+    for key in value.keys():
+        if type(key) is not str or not key or len(key) > 64:
+            raise ValueError(f"{field} contains a non-native or oversized key")
+    if set(value.keys()) != expected:
+        raise ValueError(f"{field} must contain exactly {sorted(expected)}")
     return value
 
 
@@ -142,13 +148,20 @@ def evaluate_review_evidence(evidence: dict[str, Any]) -> ReviewGateResult:
         "reasons": reasons,
         "pr_number": e["pr_number"],
         "target_branch": target,
+        "author_login": author,
+        "last_pusher_login": pusher,
         "reviewer_login": reviewer,
+        "review_state": review_state,
         "reviewed_head_sha": reviewed_head,
         "current_head_sha": current_head,
         "reviewed_base_sha": reviewed_base,
         "current_base_sha": current_base,
         "required_jobs": list(required_names),
         "successful_jobs": successful,
+        "job_runs": [
+            {"name": name, "head_sha": run["head_sha"], "status": run["status"], "conclusion": run["conclusion"]}
+            for name, run in sorted(by_name.items())
+        ],
         "unresolved_threads": e["unresolved_threads"],
     }
     canonical = json.dumps(receipt_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
