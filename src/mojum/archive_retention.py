@@ -15,6 +15,7 @@ REPORT_SCHEMA = "mojum.archive-retention-plan/1"
 MAX_SEGMENTS = 4096
 MAX_FAILURE_DOMAINS = 64
 MAX_ID_LENGTH = 128
+MAX_LOGICAL_VALUE = (1 << 63) - 1
 _ZERO_HEAD = "0" * 64
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -43,8 +44,10 @@ class RetentionPlan:
     digest: str
 
 
-def _exact_int(value: object, *, minimum: int = 0) -> bool:
-    return type(value) is int and value >= minimum
+def _exact_int(
+    value: object, *, minimum: int = 0, maximum: int = MAX_LOGICAL_VALUE
+) -> bool:
+    return type(value) is int and minimum <= value <= maximum
 
 
 def _identifier(value: object) -> bool:
@@ -104,10 +107,10 @@ def plan_retention(raw: dict) -> RetentionPlan:
     min_segments = raw["minimum_retained_segments"]
     min_domains = raw["minimum_failure_domains"]
     if not _exact_int(current_tick) or not _exact_int(min_age):
-        _fail("tick values must be nonnegative exact integers")
-    if not _exact_int(min_segments, minimum=1) or min_segments > MAX_SEGMENTS:
+        _fail("tick values must be bounded nonnegative exact integers")
+    if not _exact_int(min_segments, minimum=1, maximum=MAX_SEGMENTS):
         _fail("minimum_retained_segments is outside bounds")
-    if not _exact_int(min_domains, minimum=2) or min_domains > MAX_FAILURE_DOMAINS:
+    if not _exact_int(min_domains, minimum=2, maximum=MAX_FAILURE_DOMAINS):
         _fail("minimum_failure_domains is outside bounds")
 
     anchor = raw["restore_anchor"]
@@ -143,7 +146,8 @@ def plan_retention(raw: dict) -> RetentionPlan:
         if not _identifier(sid) or sid in seen_ids:
             _fail("invalid or duplicate segment_id")
         seen_ids.add(sid)
-        if not _exact_int(start, minimum=1) or not _exact_int(end, minimum=1) or end < start:
+        if (not _exact_int(start, minimum=1) or not _exact_int(end, minimum=1)
+                or end < start):
             _fail("invalid segment sequence interval")
         if not _exact_int(sealed_tick) or sealed_tick > current_tick:
             _fail("invalid or future sealed_tick")
@@ -169,11 +173,9 @@ def plan_retention(raw: dict) -> RetentionPlan:
         })
         previous_end, previous_head = end, item["head_sha256"]
 
-    # The inventory always starts at the canonical genesis chain origin.
     if normalized[0]["previous_head_sha256"] != _ZERO_HEAD:
         _fail("segment inventory does not begin at the genesis head")
 
-    # Anchor must be genesis or an exact verified segment boundary.
     anchor_matches = anchor_seq == 0 and anchor_head == _ZERO_HEAD
     if anchor_seq > 0:
         for segment in normalized:
@@ -183,11 +185,6 @@ def plan_retention(raw: dict) -> RetentionPlan:
         _fail("restore anchor is not a verified sequence boundary")
     if previous_head != restore_head:
         _fail("restore_head does not match the final segment head")
-
-    # The full sequence must begin immediately after the declared genesis
-    # boundary when no checkpoint anchor is supplied; with a checkpoint anchor,
-    # earlier prefix records may be retained as history but not required for
-    # replay from that checkpoint.
     if normalized[0]["start_sequence"] != 1:
         _fail("segment inventory must include its sequence origin")
 
