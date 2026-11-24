@@ -29,7 +29,7 @@ class InstallableAquariumTests(unittest.TestCase):
     def test_package_metadata_and_console_scripts_are_declared(self):
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(metadata["project"]["name"], "mojum")
-        self.assertEqual(metadata["project"]["version"], "0.1.1")
+        self.assertEqual(metadata["project"]["version"], "0.1.2")
         self.assertEqual(metadata["project"]["dependencies"], [])
         self.assertEqual(metadata["project"]["requires-python"], ">=3.11")
         self.assertEqual(metadata["project"]["scripts"]["mojum-aquarium"], "mojum.aquarium:main")
