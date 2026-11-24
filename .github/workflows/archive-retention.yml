@@ -31,4 +31,4 @@ jobs:
       - name: Run focused tests
         env:
           PYTHONPATH: src
-        run: python -m unittest tests.test_archive_retention -v
+        run: python -m unittest discover -s tests -p test_archive_retention.py -v
