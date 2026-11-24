@@ -57,7 +57,7 @@ class ClothScheduleTests(unittest.TestCase):
         self.assertEqual(ClothSchedulePolicy("CUSTOM", 1, 0, 0, 0, False).max_catch_up_steps, 0)
 
     def test_mutated_or_subclassed_policy_is_rejected(self):
-        policy = PROFILES["LOW"]
+        policy = ClothSchedulePolicy("LOW", 4, 1, 2000, 8000)
         object.__setattr__(policy, "max_catch_up_steps", 0)
         with self.assertRaises(ValueError):
             policy_digest(policy)
