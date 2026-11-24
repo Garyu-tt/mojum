@@ -151,7 +151,9 @@ def make_trace(task: Any, *, mode: str = "policy") -> dict:
         else:
             actual_key = KEYS[0]
             actual_finger = _finger_for_key(actual_key)
-            actual_tick = tick + 1
+            # Keep the deliberately shifted control inside the admitted tick
+            # domain when a valid task uses the maximum representable tick.
+            actual_tick = tick if tick == MAX_TICK else tick + 1
         events.append({"index": index, "key": actual_key, "finger": actual_finger,
                        "tick": actual_tick, "duration_ticks": duration})
     trace = {"schema": TRACE_SCHEMA, "provenance": PROVENANCE, "consent": True,
