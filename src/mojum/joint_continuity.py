@@ -7,6 +7,7 @@ import math
 SCHEMA = "mojum.joint-continuity/1"
 TWO_PI = 2.0 * math.pi
 MAX_SAMPLES, MAX_JOINTS, MAX_ID_LENGTH = 10_000, 512, 128
+MAX_TICK = (1 << 63) - 1
 # Joint positions are radians. This generous finite domain prevents arithmetic
 # overflow while allowing many revolutions for explicitly wrapped joints.
 MAX_ABS_POSITION_RAD = 1.0e12
@@ -85,7 +86,7 @@ def audit_joint_continuity(
         if type(row) is not dict or set(row) != {"tick", "revision", "positions"}:
             raise ValueError("invalid sample shape")
         tick, row_revision, positions = row["tick"], row["revision"], row["positions"]
-        if type(tick) is not int or tick < 0:
+        if type(tick) is not int or not 0 <= tick <= MAX_TICK:
             raise ValueError("invalid tick")
         if not _identifier(row_revision):
             raise ValueError("invalid rig revision")
