@@ -164,7 +164,7 @@ def claim(path: str, *, owner: str, now: int, lease_ms: int) -> Task | None:
     duration = _integer(lease_ms, "lease_ms", 1)
     if clock > (2**63 - 1) - duration:
         raise QueueError("lease expiry overflow")
-    token = hashlib.sha256(f"{worker}\0{clock}\0{duration}\0{sqlite3.sqlite_version}".encode()).hexdigest()
+    token = secrets.token_hex(32)
     with closing(_connect(path)) as db:
         _initialize(db)
         db.execute("BEGIN IMMEDIATE")
