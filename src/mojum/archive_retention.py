@@ -186,6 +186,8 @@ def plan_retention(raw: dict) -> RetentionPlan:
     newest_ids = {s["segment_id"] for s in normalized[-min_segments:]}
     for segment in normalized:
         reasons = []
+        if segment["end_sequence"] == anchor_seq and anchor_seq > 0:
+            reasons.append("restore_anchor_segment")
         if segment["end_sequence"] > anchor_seq:
             reasons.append("required_after_restore_anchor")
         if segment["segment_id"] in newest_ids:
