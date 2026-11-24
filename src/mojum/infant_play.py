@@ -8,6 +8,7 @@ Each frame is committed into a PRIVATE per-agent SQLite Noosphere journal.
 import argparse
 import copy
 import json
+from importlib.resources import files
 import math
 from pathlib import Path
 
@@ -382,9 +383,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Mojum goal-free infant-play fixture with optional local observer trace",
     )
-    root = Path(__file__).resolve().parents[2]
+    packaged = files("mojum").joinpath("data")
     parser.add_argument("--db", type=Path, required=True)
-    parser.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
+    parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     parser.add_argument("--ticks", type=int, default=40)
     parser.add_argument("--watch", action="store_true",
                         help="opt-in PRIVATE synthetic trace on this local terminal")
