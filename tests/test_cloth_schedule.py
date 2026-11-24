@@ -51,6 +51,24 @@ class ClothScheduleTests(unittest.TestCase):
         other = ClothSchedulePolicy("CUSTOM", 4, 1, 1999, 8000)
         self.assertNotEqual(policy_digest(p), policy_digest(other))
 
+    def test_enabled_policy_cannot_have_zero_capacity(self):
+        with self.assertRaisesRegex(ValueError, "at least one catch-up step"):
+            ClothSchedulePolicy("CUSTOM", 1, 0, 100, 100, True)
+        self.assertEqual(ClothSchedulePolicy("CUSTOM", 1, 0, 0, 0, False).max_catch_up_steps, 0)
+
+    def test_mutated_or_subclassed_policy_is_rejected(self):
+        policy = PROFILES["LOW"]
+        object.__setattr__(policy, "max_catch_up_steps", 0)
+        with self.assertRaises(ValueError):
+            policy_digest(policy)
+        with self.assertRaises(ValueError):
+            plan_step(policy, 4)
+        class PolicySubclass(ClothSchedulePolicy):
+            pass
+        subclassed = PolicySubclass("CUSTOM", 1, 1, 10, 10)
+        with self.assertRaises(TypeError):
+            plan_step(subclassed, 1)
+
     def test_strict_validation(self):
         for kwargs in ({"logical_tick": True}, {"logical_tick": 1, "pending_steps": False},
                        {"logical_tick": 1, "requested_vertices": True},
