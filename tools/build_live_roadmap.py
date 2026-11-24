@@ -12,10 +12,12 @@ ROOT = "https://api.github.com"
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 
-def get_pages(path):
+def get_pages(path, max_pages=None):
     url = f"{ROOT}/repos/{REPO}/{path}"
     result = []
+    pages = 0
     while url:
+        pages += 1
         if not re.match(r"^https://api\.github\.com/(?:repos/Garyu-tt/mojum|repositories/1465824263)/", url, re.I):
             raise ValueError("Unexpected pagination host or repository")
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "mojum-roadmap"}
@@ -27,7 +29,7 @@ def get_pages(path):
                 raise ValueError("Expected paginated array")
             result.extend(payload)
             match = re.search(r'<([^>]+)>;\s*rel="next"', response.headers.get("Link", ""))
-            url = match.group(1) if match else None
+            url = match.group(1) if match and (max_pages is None or pages < max_pages) else None
     return result
 
 
@@ -52,11 +54,24 @@ def pull(record):
     return result
 
 
+def commit(record):
+    info = record.get("commit") or {}
+    return {
+        **pick(record, "sha html_url"),
+        "parents": [pick(p, "sha") for p in record.get("parents", [])],
+        "commit": {
+            "message": (info.get("message") or "").split("\n", 1)[0],
+            "committer": pick(info.get("committer") or {}, "date"),
+        },
+    }
+
+
 def build():
     return {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "issues": [issue(x) for x in get_pages("issues?state=all&per_page=100")],
         "pulls": [pull(x) for x in get_pages("pulls?state=all&per_page=100")],
+        "commits": [commit(x) for x in get_pages("commits?sha=main&per_page=100", max_pages=1)],
         "releases": [
             pick(x, "html_url name tag_name published_at created_at prerelease")
             for x in get_pages("releases?per_page=100") if not x.get("draft")
