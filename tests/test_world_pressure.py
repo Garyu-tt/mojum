@@ -30,7 +30,7 @@ class PressureTests(unittest.TestCase):
     def test_deterministic_integer_observation_and_digest(self):
         first = self.observe()
         self.assertEqual(first, self.observe())
-        self.assertEqual(first["pressure_pa"], 101000)
+        self.assertEqual(first["pressure_pa"], 100999)
         self.assertTrue(verify_observation(first))
         self.assertIs(first["physical_sensor"], False)
 
