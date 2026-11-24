@@ -1,0 +1,32 @@
+name: Agent key lifecycle QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/agent_key_lifecycle.py"
+      - "tests/test_agent_key_lifecycle.py"
+      - "docs/AGENT_KEY_LIFECYCLE_R01.md"
+      - ".github/workflows/agent-key-lifecycle.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_agent_key_lifecycle.py" -v
+      - name: Compile
+        run: python -m compileall -q src/mojum/agent_key_lifecycle.py tests/test_agent_key_lifecycle.py
