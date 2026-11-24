@@ -24,6 +24,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from tools import spartan_coordinator as coordinator
+from tools._json_input import backend_json_text, exceeds_json_depth
 
 MAX_AGENTS = 300
 MAX_PARALLEL = 32
@@ -86,7 +87,10 @@ def _http(port: int, path: str, body=None, timeout=5):
             raw = response.read(MAX_RESPONSE + 1)
         if len(raw) > MAX_RESPONSE:
             raise FleetError("model response too large")
-        return json.loads(raw, parse_constant=lambda s: (_ for _ in ()).throw(
+        text = backend_json_text(raw)
+        if exceeds_json_depth(text):
+            raise FleetError("model response JSON nesting exceeds limit")
+        return json.loads(text, parse_constant=lambda s: (_ for _ in ()).throw(
             FleetError("nonfinite JSON value")))
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
         raise TransientFleetError("model API unavailable: " + type(exc).__name__) from exc
