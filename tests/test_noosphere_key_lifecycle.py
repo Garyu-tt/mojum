@@ -122,5 +122,14 @@ class KeyLifecycleTests(unittest.TestCase):
             operation="decrypt", at=limit)["allowed"])
 
 
+    def test_oversized_field_names_rejected_before_set_comparison(self):
+        bad = key()
+        bad["x" * 33] = bad.pop("algorithm")
+        with self.assertRaisesRegex(KeyLifecycleError, "invalid shape"):
+            validate_keyring([bad], now=30)
+        with self.assertRaisesRegex(KeyLifecycleError, "invalid key record"):
+            admit_key_operation(bad, operation="encrypt", at=21)
+
+
 if __name__ == "__main__":
     unittest.main()
