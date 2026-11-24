@@ -41,7 +41,10 @@ def _text(value: Any, name: str, limit: int = _MAX_ID) -> str:
 def _finite_number(value: Any, name: str, minimum: float = 0.0, maximum: float = 1e15) -> float:
     if type(value) not in (int, float):
         raise BenchmarkValidationError(f"{name} must be a native int or float")
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        raise BenchmarkValidationError(f"{name} must be finite and in [{minimum}, {maximum}]") from None
     if not math.isfinite(number) or not minimum <= number <= maximum:
         raise BenchmarkValidationError(f"{name} must be finite and in [{minimum}, {maximum}]")
     return number
