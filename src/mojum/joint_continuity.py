@@ -44,12 +44,11 @@ def _delta(previous, current, wrap):
 
 
 def _admit_exact_keys(mapping, expected, field):
-    """Validate primitive dict keys before hashing or comparing caller keys."""
+    """Bound cardinality before iterating; validate primitive keys before hashing."""
+    if len(mapping) != len(expected):
+        raise ValueError(f"invalid {field} keys")
     keys = tuple(dict.keys(mapping))
-    if (
-        len(keys) != len(expected)
-        or any(type(key) is not str or len(key) > MAX_ID_LENGTH for key in keys)
-    ):
+    if any(type(key) is not str or len(key) > MAX_ID_LENGTH for key in keys):
         raise ValueError(f"invalid {field} keys")
     if set(keys) != expected:
         raise ValueError(f"invalid {field} shape")
@@ -74,7 +73,7 @@ def audit_joint_continuity(
         raise ValueError("invalid samples")
     if type(limits) is not dict or not limits or len(limits) > max_joints:
         raise ValueError("invalid limits")
-    if type(revolute) not in (list, tuple, set, frozenset):
+    if type(revolute) not in (list, tuple, set, frozenset) or len(revolute) > max_joints:
         raise ValueError("invalid revolute set")
     if any(not _identifier(key) for key in limits):
         raise ValueError("invalid joint id")
