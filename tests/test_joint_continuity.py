@@ -4,6 +4,19 @@ from mojum.joint_continuity import audit_joint_continuity
 
 def s(t, p, r="rig-r1"): return {"tick": t, "revision": r, "positions": p}
 
+
+class HostileString(str):
+    def __new__(cls, value):
+        instance = super().__new__(cls, value)
+        instance.explode = False
+        return instance
+
+    def __hash__(self):
+        if self.explode:
+            raise RuntimeError("hostile hash must not run")
+        return super().__hash__()
+
+
 class JointContinuityTests(unittest.TestCase):
     def test_valid_and_deterministic(self):
         rows=[s(10,{"hip":0.0,"knee":0.1}),s(11,{"hip":0.2,"knee":0.2})]
@@ -32,6 +45,22 @@ class JointContinuityTests(unittest.TestCase):
         rows = [s(0, {"yaw": 1e308}), s(1, {"yaw": -1e308})]
         with self.assertRaises(ValueError):
             audit_joint_continuity(rows, {"yaw": 0.2}, revolute=("yaw",))
+
+    def test_hostile_sample_key_rejected_before_hashing(self):
+        row = s(0, {"j": 0})
+        key = HostileString("tick")
+        row[key] = row.pop("tick")
+        key.explode = True
+        with self.assertRaises(ValueError):
+            audit_joint_continuity([row], {"j": 1})
+
+    def test_hostile_position_key_rejected_before_hashing(self):
+        positions = {"j": 0}
+        key = HostileString("j")
+        positions[key] = positions.pop("j")
+        key.explode = True
+        with self.assertRaises(ValueError):
+            audit_joint_continuity([s(0, positions)], {"j": 1})
 
     def test_limits_and_revolute_validation(self):
         for limits in ({"j":0},{"j":True},{"j":float("nan")},{"j":7}):
