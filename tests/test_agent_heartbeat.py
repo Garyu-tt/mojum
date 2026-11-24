@@ -50,6 +50,13 @@ class HeartbeatAdmissionTests(unittest.TestCase):
         self.assertEqual(verify_heartbeat(wire(value), key=KEY, now_ns=NOW),
                          verify_heartbeat(value, key=KEY, now_ns=NOW))
 
+    def test_accepts_canonical_utf8_bytes(self):
+        value = envelope()
+        self.assertEqual(
+            verify_heartbeat(wire(value).encode("utf-8"), key=KEY, now_ns=NOW),
+            verify_heartbeat(value, key=KEY, now_ns=NOW),
+        )
+
     def test_rejects_noncanonical_wire(self):
         value = envelope()
         with self.assertRaisesRegex(HeartbeatError, "canonical"):
