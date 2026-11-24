@@ -66,6 +66,20 @@ class WorkQueueTests(unittest.TestCase):
         self.assertEqual(second.task_id, first.task_id)
         self.assertEqual(second.attempts, 2)
 
+    def test_queued_work_precedes_expired_lease_reclaim(self):
+        first = self.add(key="blocked-old", created_at=1)
+        first_lease = claim(self.db, owner="worker-a", now=1, lease_ms=1)
+        self.assertEqual(first_lease.task_id, first.task_id)
+
+        queued = self.add(key="independent-new", created_at=2)
+        independent = claim(self.db, owner="worker-b", now=2, lease_ms=10)
+        self.assertEqual(independent.task_id, queued.task_id)
+        self.assertEqual(independent.status, "leased")
+
+        reclaimed = claim(self.db, owner="worker-c", now=2, lease_ms=10)
+        self.assertEqual(reclaimed.task_id, first.task_id)
+        self.assertEqual(reclaimed.attempts, 2)
+
     def test_two_connections_have_one_claim_winner(self):
         self.add()
         barrier = threading.Barrier(2)
@@ -114,6 +128,12 @@ class WorkQueueTests(unittest.TestCase):
         with self.assertRaises(QueueError):
             enqueue(self.db, idempotency_key="hostile-key", kind="review", pr_number=1,
                     head_sha=SHA, created_at=0, payload={HostileKey("source"): "github"})
+
+    def test_payload_rejects_oversized_key_count_before_hashing(self):
+        payload = {"source": "a", "reason": "b", "workflow": "c", "extra": "d"}
+        with self.assertRaises(QueueError):
+            enqueue(self.db, idempotency_key="oversized", kind="review", pr_number=1,
+                    head_sha=SHA, created_at=0, payload=payload)
 
     def test_expired_lease_cannot_be_heartbeated(self):
         self.add()
