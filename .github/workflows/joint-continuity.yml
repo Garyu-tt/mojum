@@ -8,9 +8,20 @@ on:
 jobs:
   focused:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - name: Report runner Python
-        run: python3 --version
+        with:
+          persist-credentials: false
+      - name: Assert exact PR head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
       - name: Focused tests
-        run: PYTHONPATH=src python3 -m unittest tests.test_joint_continuity -v
+        run: PYTHONPATH=src python -m unittest discover -s tests -p "test_joint_continuity.py" -v
