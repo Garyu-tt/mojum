@@ -50,6 +50,18 @@ def _name(value: Any, field: str) -> str:
     return value
 
 
+def _exact_mapping(value: Any, required: set[str], field: str) -> dict[str, Any]:
+    if type(value) is not dict or len(value) != len(required):
+        raise BenchmarkError(f"{field}: expected exactly {len(required)} fields")
+    supplied = tuple(value.keys())
+    maximum_key_length = max(map(len, required))
+    if any(type(key) is not str or len(key) > maximum_key_length for key in supplied):
+        raise BenchmarkError(f"{field}: keys must be bounded native strings")
+    if set(supplied) != required:
+        raise BenchmarkError(f"{field}: fields do not match schema")
+    return value
+
+
 def _percentile_nearest_rank(values: list[float], percentile: int) -> float:
     ordered = sorted(values)
     index = max(0, math.ceil(percentile * len(ordered) / 100) - 1)
@@ -58,10 +70,9 @@ def _percentile_nearest_rank(values: list[float], percentile: int) -> float:
 
 def validate_document(document: Any) -> dict[str, Any]:
     """Validate a PUBLIC_SYNTHETIC benchmark document and return detached data."""
-    if type(document) is not dict or set(document) != {
+    document = _exact_mapping(document, {
         "schema", "provenance", "consent", "rig", "engine", "runs"
-    }:
-        raise BenchmarkError("document must contain exactly the required top-level keys")
+    }, "document")
     if document["schema"] != SCHEMA:
         raise BenchmarkError("unsupported schema")
     if document["provenance"] != "PUBLIC_SYNTHETIC":
@@ -69,9 +80,7 @@ def validate_document(document: Any) -> dict[str, Any]:
     if document["consent"] is not True:
         raise BenchmarkError("explicit consent=true is required")
 
-    rig = document["rig"]
-    if type(rig) is not dict or set(rig) != {"asset_id", "revision", "dof", "vertices", "constraints"}:
-        raise BenchmarkError("rig must contain exactly asset_id, revision, dof, vertices, constraints")
+    rig = _exact_mapping(document["rig"], {"asset_id", "revision", "dof", "vertices", "constraints"}, "rig")
     clean_rig = {
         "asset_id": _name(rig["asset_id"], "rig.asset_id"),
         "revision": _name(rig["revision"], "rig.revision"),
@@ -80,9 +89,7 @@ def validate_document(document: Any) -> dict[str, Any]:
         "constraints": _exact_int(rig["constraints"], "rig.constraints", 0, 10_000_000),
     }
 
-    engine = document["engine"]
-    if type(engine) is not dict or set(engine) != {"name", "version", "threads", "platform"}:
-        raise BenchmarkError("engine must contain exactly name, version, threads, platform")
+    engine = _exact_mapping(document["engine"], {"name", "version", "threads", "platform"}, "engine")
     engine_name = _name(engine["name"], "engine.name")
     if engine_name not in ENGINES:
         raise BenchmarkError("unsupported engine name")
@@ -98,8 +105,7 @@ def validate_document(document: Any) -> dict[str, Any]:
         raise BenchmarkError(f"runs must contain 1..{MAX_RUNS} observations")
     clean_runs = []
     for index, run in enumerate(runs):
-        if type(run) is not dict or set(run) != {"cpu_ms", "rss_mib", "ik_residual", "limit_violations", "contact_penetration_mm"}:
-            raise BenchmarkError(f"runs[{index}] has an invalid shape")
+        run = _exact_mapping(run, {"cpu_ms", "rss_mib", "ik_residual", "limit_violations", "contact_penetration_mm"}, f"runs[{index}]")
         residual = run["ik_residual"]
         if residual is not None:
             residual = _finite_number(residual, f"runs[{index}].ik_residual", 0.0, 1e12)
