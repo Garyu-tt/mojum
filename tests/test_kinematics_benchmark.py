@@ -53,6 +53,11 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_ik_samples(bad, LIMITS, rig_revision="r")
 
+    def test_extremely_large_integer_rejected_as_coordinate(self):
+        bad = [dict(SAMPLES[0], target_m=(10 ** 1000, 0, 0))]
+        with self.assertRaises(ValueError):
+            evaluate_ik_samples(bad, LIMITS, rig_revision="r")
+
     def test_joint_mismatch_rejected(self):
         bad = [dict(SAMPLES[0], joints={"hip": 0.0})]
         with self.assertRaisesRegex(ValueError, "joint set"):
