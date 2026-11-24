@@ -7,6 +7,8 @@ on:
       - 'src/mojum/**'
       - 'tests/offline_package_smoke.sh'
       - 'tests/test_installable_package.py'
+      - 'tests/test_point_room_env.py'
+      - 'tests/test_gymnasium_adapter.py'
       - '.github/workflows/package-smoke.yml'
 
 permissions:
@@ -41,3 +43,37 @@ jobs:
           sudo unshare --net -- sudo -u "$(id -un)" -- env \
             "PATH=$PATH" "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" \
             bash tests/offline_package_smoke.sh "$RUNNER_TEMP/mojum-wheel-smoke"
+
+  # Keep optional adapter QA in a workflow already registered on main.
+  # A brand-new workflow introduced by this PR does not reliably run premerge.
+  optional-gymnasium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install isolated optional test dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --only-binary=:all: 'numpy==2.3.5' 'gymnasium==1.4.0'
+      - name: Exercise Gymnasium spaces, reset and step
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_point_room_env tests.test_gymnasium_adapter -v
+      - name: Validate Gymnasium API compatibility
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          from gymnasium.utils.env_checker import check_env
+          from mojum.gymnasium_adapter import make_gymnasium_point_room
+          from mojum.world_room import Room
+          env = make_gymnasium_point_room(Room(4, 4), start=(1, 1), max_steps=16)
+          check_env(env, skip_render_check=True)
+          env.close()
+          PY
