@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import re
 from typing import Sequence
 
 
@@ -47,7 +46,7 @@ def _real_directory(value: str | os.PathLike[str], name: str) -> Path:
     if any(parent.is_symlink() for parent in (path, *path.parents)):
         raise SandboxError(f"{name} path contains a symlink")
     try:
-        info = path.lstat()
+        path.lstat()
     except OSError as exc:
         raise SandboxError(f"{name} is unavailable") from exc
     if path.is_symlink() or not path.is_dir():
@@ -86,7 +85,6 @@ def _runtime_symlinks() -> list[tuple[str, str]]:
 
 def _private_scratch(path: Path) -> None:
     if os.name == "posix":
-        import stat
         info = path.stat()
         if info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise SandboxError("scratch directory must be owned by caller and mode 0700")
@@ -111,7 +109,7 @@ def _validate_command(command: Sequence[str], repository: Path) -> list[str]:
     if type(command) not in (list, tuple) or not 1 <= len(command) <= MAX_ARGV_ITEMS:
         raise SandboxError("command must be a bounded argv list")
     result: list[str] = []
-    for index, item in enumerate(command):
+    for item in command:
         if type(item) is not str or not item or len(item) > MAX_ARG_LENGTH or "\x00" in item:
             raise SandboxError("command arguments must be bounded nonempty strings")
         result.append(item)
@@ -171,9 +169,6 @@ def build_sandbox_argv(
     timeout_path = _absolute_file(timeout, "timeout")
     argv = _validate_command(command, repo)
 
-    # Mount only the immutable host runtime tree and two explicit task paths.
-    # Recreate host usr-merge aliases inside the namespace; the host's root-level
-    # symlinks are not inherited by Bubblewrap's new root.
     runtime_links = _runtime_symlinks()
     bubblewrap = [
         str(bwrap_path),
@@ -197,6 +192,7 @@ def build_sandbox_argv(
         "--setenv", "HOME", "/tmp/home",
         "--setenv", "TMPDIR", "/scratch",
         "--setenv", "LANG", "C.UTF-8",
+        "--setenv", "GIT_TERMINAL_PROMPT", "0",
         "--",
         *argv,
     ]
