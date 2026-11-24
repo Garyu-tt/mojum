@@ -2,12 +2,14 @@
 import importlib.util
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
 MODULE = Path(__file__).resolve().parents[1] / "tools" / "spartan_sandbox.py"
 SPEC = importlib.util.spec_from_file_location("spartan_sandbox", MODULE)
 sandbox = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = sandbox
 SPEC.loader.exec_module(sandbox)
 
 
