@@ -3,7 +3,7 @@
 Status: opt-in scheduling contract; not a cloth solver and not a CPU-time guarantee.
 
 ## Contract
-The versioned schema `mojum.cloth.schedule/1` is a pure-stdlib, solver-neutral decision function. The caller supplies a monotonically increasing logical tick and estimated work counts. At most one update decision is returned for that tick.
+The versioned schema `mojum.cloth.schedule/1` is a pure-stdlib, solver-neutral decision function. The caller supplies a monotonically increasing logical tick, pending fixed-dt update count and estimated work counts. A plan admits zero or more distinct updates, but never changes the authoritative physics timestep.
 
 | Profile | Tick divisor | Max vertices | Max constraints | Catch-up |
 |---|---:|---:|---:|---:|
@@ -17,10 +17,11 @@ These are conservative starting ceilings, not measured performance claims. CUSTO
 ## Determinism and overload
 - Scheduling depends only on policy, logical tick and explicit arguments.
 - No wall-clock sampling, randomization or hidden adaptive state.
-- Non-due ticks return cadence; disabled feature/policy returns disabled.
-- Work above the profile ceiling is rejected.
-- Backlog beyond the catch-up limit is reported as dropped. At most one update is planned per call; backlog is never converted into a larger physics timestep.
-- The caller retains authority over body/world dt, motor safety and journal order.
+- Non-due ticks and disabled policies admit zero steps and report all pending steps as deferred, not dropped.
+- Work above the profile ceiling is rejected and pending steps remain deferred for caller policy.
+- On a due, enabled tick, `admitted_steps = min(pending_steps, max_catch_up_steps)`; every remaining pending step is explicitly counted in `dropped_pending_steps`.
+- The plan reports admitted, deferred and dropped work separately. The caller executes each admitted step with its own fixed authoritative dt; the count is not permission to enlarge dt.
+- The caller retains authority over body/world dt, motor safety, backlog persistence and journal order.
 
 ## Non-claims
 This does not run MuJoCo/Jolt/PBD, simulate fabric, estimate CPU milliseconds, guarantee realtime deadlines, generate LOD meshes, persist snapshots or integrate with Aquarium. Vertex/constraint ceilings are caller-supplied admission metadata, not proof of solver memory or runtime cost. OFF remains the default until a real solver adapter is separately implemented and validated.
