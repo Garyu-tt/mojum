@@ -40,6 +40,17 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         with self.assertRaises(BenchmarkValidationError):
             verify_benchmark_report(report)
 
+    def test_oversized_native_mapping_keys_rejected_before_hashing(self):
+        report = sample()
+        report["x" * 1_000_000] = report.pop("sha256")
+        with self.assertRaisesRegex(BenchmarkValidationError, "bounded native strings"):
+            verify_benchmark_report(report)
+
+        report = sample()
+        report["rig"]["x" * 1_000_000] = report["rig"].pop("id")
+        with self.assertRaisesRegex(BenchmarkValidationError, "bounded native strings"):
+            verify_benchmark_report(report)
+
     def test_unknown_fields_rejected(self):
         report = sample()
         report["private_payload"] = "must not pass"
