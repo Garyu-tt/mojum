@@ -38,7 +38,7 @@ def validate_keyring(records, *, now):
     normalized = []
     seen = set()
     for index, record in enumerate(records):
-        if type(record) is not dict or any(type(field) is not str for field in record) or set(record) != _FIELDS:
+        if type(record) is not dict or any(type(field) is not str or len(field) > 32 for field in record) or set(record) != _FIELDS:
             raise KeyLifecycleError(f"record {index} has an invalid shape")
         key_id = record["key_id"]
         if type(key_id) is not str or not _KEY_ID.fullmatch(key_id):
@@ -75,7 +75,7 @@ def validate_keyring(records, *, now):
 
 def admit_key_operation(key_record, *, operation, at):
     """Return an advisory admission result for encrypt/decrypt at logical time."""
-    if type(key_record) is not dict or any(type(field) is not str for field in key_record) or set(key_record) != _FIELDS:
+    if type(key_record) is not dict or any(type(field) is not str or len(field) > 32 for field in key_record) or set(key_record) != _FIELDS:
         raise KeyLifecycleError("invalid key record")
     _timestamp(at, "at")
     if type(operation) is not str or operation not in ("encrypt", "decrypt"):
