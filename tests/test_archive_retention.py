@@ -232,6 +232,27 @@ class ArchiveRetentionTests(unittest.TestCase):
         with self.assertRaises(RetentionError):
             plan_retention(raw)
 
+    def test_rejects_unbounded_tick_and_sequence_integers(self):
+        raw = fixture()
+        raw["current_tick"] = 1 << 100
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+        raw = fixture()
+        raw["minimum_age_ticks"] = 1 << 100
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+        raw = fixture()
+        raw["restore_anchor"]["sequence"] = 1 << 100
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
+        raw = fixture()
+        raw["segments"][0]["end_sequence"] = 1 << 100
+        with self.assertRaises(RetentionError):
+            plan_retention(raw)
+
 
 if __name__ == "__main__":
     unittest.main()
