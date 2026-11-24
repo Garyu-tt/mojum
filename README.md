@@ -59,6 +59,11 @@ synthetic 2D point-room, not MuJoCo or physical contact. The legacy
 fixed-room `local_cell_*` modes intentionally refuse custom rooms. The
 portable foreground host has not yet gained `--room-file` support.
 
+For a journal created with a room draft, pass the same `--room-file` and
+runtime modes to `python -m mojum.aquarium_trace_export` and both
+`python -m mojum.aquarium_cold_copy` subcommands (`export` and `verify`).
+Replay checks the room geometry and start position against the journal.
+
 The editor itself is input-only and does not edit a running organism.
 
 ## Run the current aquarium
