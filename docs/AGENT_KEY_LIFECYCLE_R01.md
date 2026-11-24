@@ -7,9 +7,11 @@ rotation, retirement, retention expiry and revocation.
 - Only the `agent-heartbeat` purpose and `HMAC-SHA256` algorithm are accepted.
 - At most 64 exact-dict metadata records; IDs and timestamps are bounded.
 - Non-revoked signing windows may not overlap.
-- Retired keys cannot sign new events. They may verify events timestamped
-  inside their former signing window until `verify_until`.
+- Retired keys cannot sign new events. Every retired key must carry an explicit
+  `verify_until` timestamp; historical verification fails after that bound.
 - Revocation immediately blocks signing and verification, including history.
+- Keyring metadata and its consistency digest are revalidated at every public
+  operation. Python frozen dataclasses are not treated as tamper-proof.
 - Unknown keys, future events and expired retention fail closed.
 - The SHA-256 digest is a consistency fingerprint, not authentication.
 
