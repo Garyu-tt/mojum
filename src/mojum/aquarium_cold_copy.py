@@ -17,7 +17,7 @@ import sqlite3
 import stat
 import tempfile
 
-from .aquarium import Aquarium, AquariumError, MOTOR_MODES
+from .aquarium import Aquarium, AquariumError, MOTOR_MODES, load_cli_room
 from .genesis import validate_seed
 from .graph import load_graph
 from .noosphere import STORE_SCHEMA, _open_readonly
@@ -256,6 +256,8 @@ def main():
         p.add_argument("--db", type=Path, required=True)
         p.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
         p.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
+        p.add_argument("--room-file", type=Path,
+                       help="room draft used when creating the source journal")
         p.add_argument("--agent-id", help="journal owner, defaults to the supplied genome ID")
         p.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
         p.add_argument("--motor-mode", choices=MOTOR_MODES, default="scripted")
@@ -271,10 +273,11 @@ def main():
             p.add_argument("--expected-sha256")
             p.add_argument("--expected-tick", type=int)
     args = parser.parse_args()
-    options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
-                   brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
-                   temporal_mode=args.temporal_mode)
     try:
+        room, start = load_cli_room(args.room_file, args.motor_mode)
+        options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
+                       brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
+                       temporal_mode=args.temporal_mode, room=room, start=start)
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
         agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
