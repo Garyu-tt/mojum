@@ -1,4 +1,4 @@
-"""CLI movement preflight regression: invalid input must not bootstrap SQLite."""
+"""Aquarium CLI rejects invalid plans and seed files before writing SQLite."""
 
 import json
 import os
@@ -12,7 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-class AquariumCliMovementPreflightTests(unittest.TestCase):
+class AquariumCliPreflightTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -54,6 +54,40 @@ class AquariumCliMovementPreflightTests(unittest.TestCase):
         reopened = self.run_cli(0)
         self.assertEqual(reopened.returncode, 0, reopened.stderr)
         self.assertEqual(json.loads(reopened.stdout), checkpoint)
+
+    def test_missing_or_malformed_genome_does_not_create_journal(self):
+        genome = self.db.with_name("genome.json")
+        inputs = {
+            "missing file": None,
+            "malformed JSON": b"{",
+            "invalid UTF-8": b"\xff",
+            "deeply nested malformed JSON": b"[" * 2000,
+        }
+        for description, data in inputs.items():
+            with self.subTest(description=description):
+                if data is not None:
+                    genome.write_bytes(data)
+                result = self.run_cli(1, "--genome", str(genome))
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("--genome requires a readable UTF-8 JSON file", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(self.db.exists())
+
+    def test_invalid_genome_schema_preserves_existing_journal(self):
+        started = self.run_cli(1)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        before = self.db.read_bytes()
+        genome = self.db.with_name("genome.json")
+        genome.write_text("{}", encoding="utf-8")
+
+        result = self.run_cli(1, "--genome", str(genome))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("invalid --genome", result.stderr)
+        self.assertIn("seed must have exactly", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.db.read_bytes(), before)
 
 
 if __name__ == "__main__":
