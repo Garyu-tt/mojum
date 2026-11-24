@@ -1,0 +1,35 @@
+name: Virtual jerk audit QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/virtual_jerk_audit.py"
+      - "tests/test_virtual_jerk_audit.py"
+      - "docs/VIRTUAL_JERK_AUDIT_R01.md"
+      - ".github/workflows/virtual-jerk-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact pull request head
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_virtual_jerk_audit.py' -v
