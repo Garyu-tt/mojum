@@ -177,7 +177,8 @@ def audit_triangle_intersections(vertices: Sequence[Sequence[float]],
         tested += 1
         if _triangles_intersect(faces[i][1], faces[j][1]):
             hits.append((i,j))
-    payload = {"schema": SCHEMA, "candidate_count": len(pairs), "tested_count": tested,
+    payload = {"schema": SCHEMA, "vertices": points, "triangles": [face for face, _ in faces],
+               "candidate_pairs": pairs, "candidate_count": len(pairs), "tested_count": tested,
                "intersection_pairs": hits, "skipped_adjacent": skipped}
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
     return TriangleIntersectionReport(SCHEMA, len(pairs), tested, tuple(hits), skipped, digest)
