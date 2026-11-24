@@ -162,7 +162,8 @@ def observe_first_order_echoes(room: Room, state: RoomState, events, *,
             if bounce is None:
                 continue
             bx, by = bounce
-            length = hypot(hypot(sx - bx, sy - by), hypot(lx / 1000 - bx, ly / 1000 - by))
+            length = (hypot(sx - bx, sy - by)
+                      + hypot(lx / 1000 - bx, ly / 1000 - by))
             path_mm = _mm(length, "echo.path_length")
             if path_mm > max_range_mm:
                 continue
