@@ -37,7 +37,14 @@ class ReviewEvidence:
 
 
 def _exact_keys(value: Any, keys: set[str], where: str) -> dict[str, Any]:
-    if type(value) is not dict or set(value) != keys:
+    """Admit a bounded native mapping without hashing caller-controlled keys."""
+    if type(value) is not dict or len(value) != len(keys):
+        raise ReviewEvidenceError(f"{where}: expected exactly {len(keys)} object keys")
+    supplied = tuple(value.keys())
+    maximum_key_length = max(map(len, keys))
+    if any(type(key) is not str or len(key) > maximum_key_length for key in supplied):
+        raise ReviewEvidenceError(f"{where}: keys must be bounded native strings")
+    if set(supplied) != keys:
         raise ReviewEvidenceError(f"{where}: expected exact object keys")
     return value
 
@@ -68,26 +75,21 @@ def validate_review_evidence(raw: Any) -> ReviewEvidence:
     Each review is an event; the latest event per reviewer controls that
     reviewer's current state. Approval must name the exact current head SHA.
     """
-    if type(raw) is not dict:
-        raise ReviewEvidenceError("snapshot must be an exact dict")
-    try:
-        encoded = json.dumps(raw, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
-    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
-        raise ReviewEvidenceError("snapshot is not bounded canonical JSON data") from exc
-    if len(encoded) > _MAX_INPUT_BYTES:
-        raise ReviewEvidenceError("snapshot exceeds byte budget")
-
     root = _exact_keys(raw, {"schema", "provenance", "consent", "pull_request", "reviews"}, "snapshot")
-    if root["schema"] != SCHEMA or root["provenance"] != "PUBLIC_SYNTHETIC" or root["consent"] is not True:
+    if (type(root["schema"]) is not str or root["schema"] != SCHEMA
+            or type(root["provenance"]) is not str or root["provenance"] != "PUBLIC_SYNTHETIC"
+            or root["consent"] is not True):
         raise ReviewEvidenceError("schema, provenance, or explicit consent is invalid")
 
-    pr = _exact_keys(root["pull_request"], {"number", "author", "last_pusher", "head_sha", "base_sha", "state", "draft"}, "pull_request")
+    pr = _exact_keys(root["pull_request"], {
+        "number", "author", "last_pusher", "head_sha", "base_sha", "state", "draft"
+    }, "pull_request")
     number = _positive_int(pr["number"], "pull_request.number", 1_000_000_000)
     author = _login(pr["author"], "pull_request.author")
     last_pusher = _login(pr["last_pusher"], "pull_request.last_pusher")
     head_sha = _sha(pr["head_sha"], "pull_request.head_sha")
     base_sha = _sha(pr["base_sha"], "pull_request.base_sha")
-    if pr["state"] != "open" or pr["draft"] is not False:
+    if type(pr["state"]) is not str or pr["state"] != "open" or pr["draft"] is not False:
         raise ReviewEvidenceError("pull request must be open and non-draft")
 
     reviews = root["reviews"]
@@ -96,9 +98,12 @@ def validate_review_evidence(raw: Any) -> ReviewEvidence:
 
     ids: set[int] = set()
     latest: dict[str, tuple[int, int, str, str]] = {}
+    normalized_reviews = []
     allowed_states = {"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"}
     for index, item in enumerate(reviews):
-        event = _exact_keys(item, {"id", "reviewer", "state", "commit_sha", "submitted_at"}, f"reviews[{index}]")
+        event = _exact_keys(
+            item, {"id", "reviewer", "state", "commit_sha", "submitted_at"}, f"reviews[{index}]"
+        )
         review_id = _positive_int(event["id"], f"reviews[{index}].id")
         if review_id in ids:
             raise ReviewEvidenceError("duplicate review id")
@@ -109,10 +114,32 @@ def validate_review_evidence(raw: Any) -> ReviewEvidence:
             raise ReviewEvidenceError(f"reviews[{index}].state: unsupported state")
         commit_sha = _sha(event["commit_sha"], f"reviews[{index}].commit_sha")
         submitted_at = _positive_int(event["submitted_at"], f"reviews[{index}].submitted_at")
+        normalized_reviews.append({
+            "id": review_id, "reviewer": reviewer, "state": state,
+            "commit_sha": commit_sha, "submitted_at": submitted_at,
+        })
         previous = latest.get(reviewer)
         ordering = (submitted_at, review_id)
         if previous is None or ordering > (previous[0], previous[1]):
             latest[reviewer] = (submitted_at, review_id, state, commit_sha)
+
+    # Serialize only the already validated, bounded native representation.
+    # Never traverse arbitrary caller objects before structural admission.
+    bounded_snapshot = {
+        "schema": SCHEMA,
+        "provenance": "PUBLIC_SYNTHETIC",
+        "consent": True,
+        "pull_request": {
+            "number": number, "author": author, "last_pusher": last_pusher,
+            "head_sha": head_sha, "base_sha": base_sha, "state": "open", "draft": False,
+        },
+        "reviews": normalized_reviews,
+    }
+    encoded = json.dumps(
+        bounded_snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode("ascii")
+    if len(encoded) > _MAX_INPUT_BYTES:
+        raise ReviewEvidenceError("snapshot exceeds byte budget")
 
     eligible = [
         (reviewer, event)
@@ -123,7 +150,9 @@ def validate_review_evidence(raw: Any) -> ReviewEvidence:
     ]
     if not eligible:
         raise ReviewEvidenceError("no current exact-head approval from an independent reviewer")
-    reviewer, (submitted_at, review_id, _state, _commit) = sorted(eligible, key=lambda pair: (pair[1][0], pair[0]))[0]
+    reviewer, (submitted_at, review_id, _state, _commit) = sorted(
+        eligible, key=lambda pair: (pair[1][0], pair[0])
+    )[0]
 
     receipt_payload = {
         "schema": SCHEMA,
@@ -135,7 +164,9 @@ def validate_review_evidence(raw: Any) -> ReviewEvidence:
         "submitted_at": submitted_at,
         "verdict": "INDEPENDENT_APPROVAL_PRESENT",
     }
-    digest = hashlib.sha256(json.dumps(receipt_payload, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
+    digest = hashlib.sha256(
+        json.dumps(receipt_payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
     return ReviewEvidence(
         schema=SCHEMA, pull_request=number, head_sha=head_sha, base_sha=base_sha,
         reviewer=reviewer, review_id=review_id, submitted_at=submitted_at, digest=digest,
