@@ -73,6 +73,17 @@ class PRSnapshotTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 admit_pr_snapshot(raw)
 
+    def test_rejects_git_invalid_at_only_and_component_trailing_dot_refs(self):
+        for field, value in (
+            ("base_ref", "@"),
+            ("base_ref", "refs/heads/feature/foo./bar"),
+            ("head_ref", "feature/segment./child"),
+        ):
+            raw = fixture()
+            raw[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                admit_pr_snapshot(raw)
+
     def test_rejects_timezone_free_and_reversed_timestamps(self):
         raw = fixture()
         raw["created_at"] = "2026-11-23T10:00:00"
