@@ -62,7 +62,7 @@ class WorldEchoTests(unittest.TestCase):
         room = Room(10.0, 10.0, ((4.5, 1.0, 1.0, 3.0),))
         state = initial_state(room, 5.0, 5.0)
         result = observe_first_order_echoes(
-            room, state, [event()], expected_revision=state.revision,
+            room, state, [event(x=4.0)], expected_revision=state.revision,
         )
         walls = {item["wall"] for item in result["events"][0]["echoes"]}
         self.assertNotIn("bottom", walls)
