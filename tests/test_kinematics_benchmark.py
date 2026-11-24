@@ -51,6 +51,38 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(BenchmarkValidationError, "bounded native strings"):
             verify_benchmark_report(report)
 
+    def test_hostile_string_subclass_keys_rejected_before_hashing(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not execute")
+
+        report = sample()
+        report[HostileKey("sha256")] = report.pop("sha256")
+        with self.assertRaisesRegex(BenchmarkValidationError, "bounded native strings"):
+            verify_benchmark_report(report)
+
+        for field in ("rig", "solver", "case", "fk", "ik", "contacts", "resources"):
+            report = sample()
+            nested = report[field]
+            key = next(iter(nested))
+            nested[HostileKey(key)] = nested.pop(key)
+            with self.assertRaisesRegex(BenchmarkValidationError, "bounded native strings"):
+                verify_benchmark_report(report)
+
+    def test_oversized_mapping_cardinality_rejected_at_every_schema_level(self):
+        report = sample()
+        report["extra"] = "rejected by cardinality"
+        with self.assertRaises(BenchmarkValidationError):
+            verify_benchmark_report(report)
+
+        for field in ("rig", "solver", "case", "fk", "ik", "contacts", "resources"):
+            report = sample()
+            report[field]["extra"] = "rejected by cardinality"
+            with self.assertRaises(BenchmarkValidationError):
+                verify_benchmark_report(report)
+
     def test_unknown_fields_rejected(self):
         report = sample()
         report["private_payload"] = "must not pass"
