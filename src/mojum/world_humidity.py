@@ -10,7 +10,8 @@ MAX_TICK = (1 << 53) - 1
 MAX_DIMENSION_MM = 1_000_000_000
 MAX_GRADIENT = 100_000
 MAX_TICK_DRIFT = 1_000
-_HEX = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+MAX_OBSERVATION_KEY_LENGTH = len("relative_humidity_milli_percent")
+_HEX = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -86,8 +87,12 @@ def verify_observation(observation: dict) -> bool:
     """Verify exact wire shape and canonical digest; this is not authentication."""
     keys = {"schema", "profile_schema", "room_revision", "tick", "position_mm",
             "relative_humidity_milli_percent", "provenance", "physical_sensor", "digest"}
-    if type(observation) is not dict or any(type(k) is not str for k in observation):
+    if type(observation) is not dict or len(observation) != len(keys):
         raise ValueError("invalid observation object")
+    # Bound caller-controlled key work before hashing keys or building a set.
+    for key in observation:
+        if type(key) is not str or len(key) > MAX_OBSERVATION_KEY_LENGTH:
+            raise ValueError("invalid observation key")
     if set(observation) != keys:
         raise ValueError("invalid observation fields")
     if (type(observation["schema"]) is not str or observation["schema"] != OBSERVATION_SCHEMA
