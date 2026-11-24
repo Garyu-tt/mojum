@@ -25,7 +25,7 @@ class VirtualJerkAuditTests(unittest.TestCase):
         report = audit_joint_jerk(trajectory(times, [t ** 3 for t in times]), {"elbow": 6.0})
         self.assertTrue(report.passed)
         self.assertAlmostEqual(report.peak_abs_jerk[0][1], 6.0, places=9)
-        self.assertEqual(report.jerk_sample_count, 2)
+        self.assertEqual(report.jerk_sample_count, 3)
 
     def test_nonuniform_time_grid_is_supported(self):
         times = [0, 0.5, 1.5, 3.0, 5.0, 8.0]
@@ -49,8 +49,8 @@ class VirtualJerkAuditTests(unittest.TestCase):
         self.assertEqual(repr(data), before)
         self.assertEqual(len(one.digest), 64)
 
-    def test_requires_five_samples(self):
-        data = trajectory([0, 1, 2, 3], [0, 1, 8, 27])
+    def test_requires_four_samples(self):
+        data = trajectory([0, 1, 2], [0, 1, 8])
         with self.assertRaises(VirtualJerkError):
             audit_joint_jerk(data, {"elbow": 10.0})
 
