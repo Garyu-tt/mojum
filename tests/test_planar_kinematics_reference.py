@@ -34,6 +34,14 @@ class PlanarKinematicsReferenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inverse_kinematics(1, 1, Point2(1, 0), branch="middle")
 
+    def test_tiny_positive_link_lengths_rejected_before_ik_denominator_underflow(self):
+        for first, second in ((1e-200, 1.0), (1.0, 1e-200), (1e-200, 1e-200), (1e-151, 1e-151)):
+            with self.subTest(link1=first, link2=second):
+                with self.assertRaisesRegex(ValueError, "at least 1e-150"):
+                    inverse_kinematics(first, second, Point2(0.0, 0.0))
+                with self.assertRaisesRegex(ValueError, "at least 1e-150"):
+                    forward_kinematics(first, second, JointState(0.0, 0.0))
+
     def test_boundary_target(self):
         result = inverse_kinematics(0.5, 0.5, Point2(1.0, 0.0))
         self.assertIsNotNone(result)
