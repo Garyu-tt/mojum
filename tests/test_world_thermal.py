@@ -1,6 +1,6 @@
 import unittest
-from mojum.world_room import Room, initial_state, advance
-from mojum.world_thermal import ThermalFieldError, ThermalProfile, observe_thermal_field
+from mojum.world_room import Room, RoomState, initial_state, advance
+from mojum.world_thermal import ThermalFieldError, ThermalProfile, observe_thermal_field, _revision
 
 
 class HostileStr(str):
@@ -51,6 +51,16 @@ class WorldThermalTests(unittest.TestCase):
         with self.assertRaisesRegex(ThermalFieldError, "stale or corrupted"):
             observe_thermal_field(self.room, hostile, tick=0,
                 expected_revision=self.state.revision, profile=ThermalProfile(),
+                points_mm=[(0, 0)])
+
+    def test_mutated_room_geometry_is_revalidated(self):
+        forged = Room(4, 3)
+        object.__setattr__(forged, "obstacles", ((3.5, 2.5, 1.0, 1.0),))
+        provisional = RoomState(0, 0.5, 0.5, "")
+        forged_state = RoomState(0, 0.5, 0.5, _revision(forged, provisional))
+        with self.assertRaisesRegex(ThermalFieldError, "invalid room geometry"):
+            observe_thermal_field(forged, forged_state, tick=0,
+                expected_revision=forged_state.revision, profile=ThermalProfile(),
                 points_mm=[(0, 0)])
 
     def test_tick_mismatch_rejected(self):
