@@ -128,6 +128,54 @@ class IndependentReviewEvidenceTests(unittest.TestCase):
             with self.assertRaises(ReviewEvidenceError):
                 validate_review_evidence(data)
 
+    def test_hostile_string_subclass_keys_are_rejected_before_hashing(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("hostile key equality must not execute")
+
+        mutations = (
+            lambda data: data.__setitem__(HostileKey("schema"), data.pop("schema")),
+            lambda data: data["pull_request"].__setitem__(
+                HostileKey("number"), data["pull_request"].pop("number")
+            ),
+            lambda data: data["reviews"][0].__setitem__(
+                HostileKey("id"), data["reviews"][0].pop("id")
+            ),
+        )
+        for mutate in mutations:
+            data = snapshot()
+            mutate(data)
+            with self.assertRaisesRegex(ReviewEvidenceError, "bounded native strings"):
+                validate_review_evidence(data)
+
+    def test_oversized_mapping_is_rejected_by_cardinality_first(self):
+        data = snapshot()
+        data.update({f"extra-{index}": index for index in range(10_000)})
+        with self.assertRaisesRegex(ReviewEvidenceError, "exactly 5"):
+            validate_review_evidence(data)
+
+        data = snapshot()
+        data["pull_request"].update({f"extra-{index}": index for index in range(10_000)})
+        with self.assertRaisesRegex(ReviewEvidenceError, "exactly 7"):
+            validate_review_evidence(data)
+
+    def test_hostile_discriminator_values_are_rejected_without_comparison(self):
+        class HostileValue:
+            def __eq__(self, other):
+                raise AssertionError("untrusted value equality must not execute")
+
+        for location, field in (("root", "schema"), ("root", "provenance"), ("pr", "state"),
+                                ("review", "state")):
+            data = snapshot()
+            target = data if location == "root" else (
+                data["pull_request"] if location == "pr" else data["reviews"][0]
+            )
+            target[field] = HostileValue()
+            with self.assertRaises(ReviewEvidenceError):
+                validate_review_evidence(data)
+
 
 if __name__ == "__main__":
     unittest.main()
