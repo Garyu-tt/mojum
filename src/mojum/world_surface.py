@@ -58,7 +58,8 @@ class SurfaceMap:
     schema: str = SCHEMA
 
     def __post_init__(self):
-        if self.schema != SCHEMA or type(self.schema) is not str:
+        # Validate exact type before equality: str subclasses may override hooks.
+        if type(self.schema) is not str or self.schema != SCHEMA:
             raise ValueError("unsupported surface schema")
         if (type(self.room_revision) is not str or len(self.room_revision) != 64
                 or any(c not in "0123456789abcdef" for c in self.room_revision)):
