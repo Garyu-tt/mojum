@@ -40,6 +40,18 @@ class RoboPianistBenchmarkTests(unittest.TestCase):
         self.assertNotEqual(a["sha256"], make_task(8, held_out=True)["sha256"])
         self.assertNotEqual(a["sha256"], make_task(7)["sha256"])
 
+    def test_frozen_control_stays_in_tick_domain_at_maximum(self):
+        task = make_task(13, note_count=4)
+        task["notes"][-1]["tick"] = 2**31 - 1
+        unsigned = {key: task[key] for key in (
+            "schema", "provenance", "consent", "seed", "split",
+            "tempo_ticks_per_second", "notes",
+        )}
+        task["sha256"] = _digest(unsigned)
+        validate_task(task)
+        comparison = compare_controls(task)
+        self.assertEqual(comparison["frozen_control"]["note_count"], 4)
+
     def test_score_requires_explicit_consent_and_matching_task(self):
         task = make_task(1)
         trace = make_trace(task)
