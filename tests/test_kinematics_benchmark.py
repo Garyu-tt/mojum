@@ -78,6 +78,37 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         samples[0]["joints"]["hip"] = 99
         self.assertTrue(report.samples[0].within_limits)
 
+
+    def test_hostile_string_subclass_keys_rejected_before_hashing(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not execute")
+
+        bad_sample = dict(SAMPLES[0])
+        bad_sample[HostileKey("sample_id")] = bad_sample.pop("sample_id")
+        with self.assertRaisesRegex(ValueError, "native strings"):
+            evaluate_ik_samples([bad_sample], LIMITS, rig_revision="r")
+
+        bad_joint_row = dict(SAMPLES[0])
+        bad_joints = dict(bad_joint_row["joints"])
+        bad_joints[HostileKey("hip")] = bad_joints.pop("hip")
+        bad_joint_row["joints"] = bad_joints
+        with self.assertRaisesRegex(ValueError, "native strings"):
+            evaluate_ik_samples([bad_joint_row], LIMITS, rig_revision="r")
+
+    def test_oversized_mappings_rejected_before_key_inspection(self):
+        oversized_sample = dict(SAMPLES[0])
+        oversized_sample.update({f"extra-{i}": i for i in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "missing or unknown"):
+            evaluate_ik_samples([oversized_sample], LIMITS, rig_revision="r")
+
+        oversized_joints = dict(SAMPLES[0]["joints"])
+        oversized_joints.update({f"extra-{i}": i for i in range(10_000)})
+        oversized_row = dict(SAMPLES[0], joints=oversized_joints)
+        with self.assertRaisesRegex(ValueError, "joint set"):
+            evaluate_ik_samples([oversized_row], LIMITS, rig_revision="r")
+
     def test_oversized_collection_rejected(self):
         with self.assertRaises(ValueError):
             evaluate_ik_samples([], LIMITS, rig_revision="r")
