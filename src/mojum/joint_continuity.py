@@ -43,6 +43,19 @@ def _delta(previous, current, wrap):
     return result
 
 
+def _admit_exact_keys(mapping, expected, field):
+    """Validate primitive dict keys before hashing or comparing caller keys."""
+    keys = tuple(dict.keys(mapping))
+    if (
+        len(keys) != len(expected)
+        or any(type(key) is not str or len(key) > MAX_ID_LENGTH for key in keys)
+    ):
+        raise ValueError(f"invalid {field} keys")
+    if set(keys) != expected:
+        raise ValueError(f"invalid {field} shape")
+    return keys
+
+
 def audit_joint_continuity(
     samples,
     limits,
@@ -75,6 +88,7 @@ def audit_joint_continuity(
         raise ValueError("invalid expected revision")
 
     joints = tuple(sorted(limits))
+    expected_row_keys = {"tick", "revision", "positions"}
     previous = None
     previous_tick = None
     revision = None
@@ -83,15 +97,17 @@ def audit_joint_continuity(
     normalized = []
 
     for index, row in enumerate(samples):
-        if type(row) is not dict or set(row) != {"tick", "revision", "positions"}:
+        if type(row) is not dict:
             raise ValueError("invalid sample shape")
+        _admit_exact_keys(row, expected_row_keys, "sample")
         tick, row_revision, positions = row["tick"], row["revision"], row["positions"]
         if type(tick) is not int or not 0 <= tick <= MAX_TICK:
             raise ValueError("invalid tick")
         if not _identifier(row_revision):
             raise ValueError("invalid rig revision")
-        if type(positions) is not dict or set(positions) != set(joints):
+        if type(positions) is not dict:
             raise ValueError("inconsistent joint set")
+        _admit_exact_keys(positions, set(joints), "positions")
         if any(
             not _number(value) or abs(value) > MAX_ABS_POSITION_RAD
             for value in positions.values()
