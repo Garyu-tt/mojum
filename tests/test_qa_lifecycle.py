@@ -39,6 +39,28 @@ class LifecycleTests(unittest.TestCase):
                                     head_sha=HEAD, evidence={"release_receipt": receipt})
         self.assertEqual(result.current, "MERGED")
 
+
+    def test_release_receipt_rejects_hostile_string_subclass_keys(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise AssertionError("untrusted receipt key equality must not execute")
+
+        receipt = {"schema": "mojum.release-receipt/1", "head_sha": HEAD, "base_sha": BASE,
+                   "review_id": "review-1", "ci_passed": True, "human_authorized": True}
+        receipt[HostileKey("schema")] = receipt.pop("schema")
+        with self.assertRaisesRegex(LifecycleError, "native strings"):
+            propose_transition("READY", "MERGED", reason="external merge observed",
+                               head_sha=HEAD, evidence={"release_receipt": receipt})
+
+    def test_release_receipt_oversized_mapping_rejected(self):
+        receipt = {"schema": "mojum.release-receipt/1", "head_sha": HEAD, "base_sha": BASE,
+                   "review_id": "review-1", "ci_passed": True, "human_authorized": True}
+        receipt.update({f"extra-{i}": i for i in range(10_000)})
+        with self.assertRaisesRegex(LifecycleError, "invalid shape"):
+            propose_transition("READY", "MERGED", reason="external merge observed",
+                               head_sha=HEAD, evidence={"release_receipt": receipt})
+
     def test_merged_rejects_model_only_or_missing_authority(self):
         receipt = {"schema": "mojum.release-receipt/1", "head_sha": HEAD, "base_sha": BASE,
                    "review_id": "review-1", "ci_passed": True, "human_authorized": False}
