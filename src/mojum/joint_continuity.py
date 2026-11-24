@@ -6,7 +6,12 @@ TWO_PI = 2.0 * math.pi
 MAX_SAMPLES, MAX_JOINTS, MAX_ID_LENGTH = 10_000, 512, 128
 
 def _number(v):
-    return type(v) in (int, float) and math.isfinite(v)
+    if type(v) not in (int, float):
+        return False
+    try:
+        return math.isfinite(v)
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 def _identifier(v):
     return type(v) is str and 0 < len(v) <= MAX_ID_LENGTH and v.strip() == v and all(ord(c) >= 32 and ord(c) != 127 for c in v)
