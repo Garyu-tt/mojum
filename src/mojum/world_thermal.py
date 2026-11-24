@@ -79,6 +79,8 @@ def observe_thermal_field(room, state, *, tick, expected_revision, profile, poin
         raise ThermalFieldError("invalid thermal profile bounds")
     if (profile.cycle_period_ticks == 0) != (profile.cycle_amplitude_millic == 0):
         raise ThermalFieldError("cycle period and amplitude must both be zero or nonzero")
+    if profile.cycle_period_ticks == 1 and profile.cycle_amplitude_millic:
+        raise ThermalFieldError("a nonzero cycle amplitude requires a period of at least two ticks")
     if type(points_mm) not in (list, tuple) or not 1 <= len(points_mm) <= MAX_POINTS:
         raise ThermalFieldError("point collection must contain 1..256 points")
 
