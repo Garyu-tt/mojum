@@ -15,6 +15,7 @@ from typing import Any, Mapping
 SCHEMA = "mojum.cloth-snapshot/1"
 MAX_VERTICES = 4096
 MAX_BYTES = 1_048_576
+MAX_REPLAY_BYTES = 16 * MAX_BYTES
 MAX_REVISION = 128
 MAX_SOLVER_ID = 64
 MAX_TICK = (1 << 63) - 1
@@ -81,7 +82,7 @@ def _vectors(value: Any, name: str) -> tuple[tuple[float, float, float], ...]:
 def _canonical(value: Any) -> bytes:
     try:
         return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
-    except (TypeError, ValueError, OverflowError) as exc:
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise ClothSnapshotError("snapshot is not canonical JSON data") from exc
 
 
@@ -90,7 +91,9 @@ def _state(value: Any) -> dict[str, Any]:
         raise ClothSnapshotError("state must be an exact dictionary")
     required = {"tick", "time_ns", "dt_ns", "mesh_sha256", "rig_revision",
                 "profile_revision", "solver_id", "provenance", "consent", "positions", "velocities"}
-    keys = tuple(value)
+    if len(value) != len(required):
+        raise ClothSnapshotError("state shape mismatch")
+    keys = tuple(value.keys())
     if any(type(key) is not str or len(key) > 32 for key in keys):
         raise ClothSnapshotError("state shape mismatch")
     if set(keys) != required:
@@ -150,6 +153,10 @@ def decode_snapshot(data: bytes | str) -> ClothSnapshot:
     if type(data) is bytes:
         raw = data
     elif type(data) is str:
+        # ASCII has one byte per code point. Preflight before allocating an
+        # encoded copy of caller-controlled text.
+        if len(data) > MAX_BYTES:
+            raise ClothSnapshotError("snapshot byte size outside bounds")
         try:
             raw = data.encode("ascii")
         except UnicodeEncodeError as exc:
@@ -185,9 +192,21 @@ def decode_snapshot(data: bytes | str) -> ClothSnapshot:
 
 
 def verify_replay(sequence: list[bytes | str]) -> tuple[str, ...]:
-    """Validate a bounded contiguous sequence and return its ordered digests."""
+    """Validate a contiguous sequence within a 16 MiB aggregate byte budget."""
     if type(sequence) is not list or not 1 <= len(sequence) <= 10_000:
         raise ClothSnapshotError("replay must contain 1..10000 snapshots")
+    total_bytes = 0
+    for item in sequence:
+        if type(item) not in (bytes, str):
+            raise ClothSnapshotError("replay entries must be bytes or text")
+        # For accepted ASCII text, code-point count equals encoded byte count.
+        # This also bounds per-item work before decode_snapshot encodes it.
+        item_size = len(item)
+        if item_size > MAX_BYTES:
+            raise ClothSnapshotError("snapshot byte size outside bounds")
+        total_bytes += item_size
+        if total_bytes > MAX_REPLAY_BYTES:
+            raise ClothSnapshotError("replay exceeds aggregate byte budget")
     snapshots = [decode_snapshot(item) for item in sequence]
     first = snapshots[0]
     for index, current in enumerate(snapshots):
