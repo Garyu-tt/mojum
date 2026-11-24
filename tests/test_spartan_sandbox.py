@@ -2,6 +2,8 @@
 import importlib.util
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -53,6 +55,28 @@ class SandboxPlannerTests(unittest.TestCase):
             prlimit=kwargs.get("prlimit", self.fake_tools[1]),
             timeout=kwargs.get("timeout", self.fake_tools[2]),
         )
+
+
+    @unittest.skipUnless(
+        os.name == "posix" and shutil.which("bwrap") and Path("/usr/bin/python3").is_file(),
+        "requires Linux Bubblewrap and /usr/bin/python3",
+    )
+    def test_real_bubblewrap_starts_python_in_isolated_namespace(self):
+        argv = sandbox.build_sandbox_argv(
+            self.repo, self.scratch,
+            ["/usr/bin/python3", "-c", "print('sandbox-runtime-ok')"],
+            self.limits,
+            bwrap=shutil.which("bwrap"),
+            prlimit="/usr/bin/prlimit",
+            timeout="/usr/bin/timeout",
+        )
+        result = subprocess.run(
+            argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=self.limits.wall_seconds + 5, check=False,
+            env=sandbox.sandbox_environment(),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "sandbox-runtime-ok")
 
     def test_valid_plan_is_argv_only_and_has_required_isolation(self):
         argv = self.build()
