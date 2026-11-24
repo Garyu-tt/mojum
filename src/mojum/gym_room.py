@@ -120,6 +120,8 @@ class PointRoomEpisode:
             raise ValueError("invalid action") from exc
         if not 0 <= index < len(ACTIONS):
             raise ValueError("invalid action")
+        # __index__ can run caller code: recheck before advancing state.
+        self._assert_configuration()
         ux, uy = ACTIONS[index]
         s, outcome = advance(self.room, self._state, tick=self._state.tick + 1,
                              dx=ux * self.step_m, dy=uy * self.step_m,

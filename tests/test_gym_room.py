@@ -79,6 +79,24 @@ class PointRoomGymTests(unittest.TestCase):
         self.assertEqual(episode._state.tick, 0)
         self.assertEqual(episode.step(0)[0]["tick"], 1)
 
+    def test_action_index_cannot_mutate_goal_after_validation(self):
+        episode = self.episode()
+        episode.reset()
+        original_goal = episode.goal
+
+        class MutatingIndex:
+            def __index__(self):
+                episode.goal = episode.start
+                return 0
+
+        with self.assertRaisesRegex(ValueError, "configuration mutated"):
+            episode.step(MutatingIndex())
+        self.assertEqual(episode._state.tick, 0)
+        episode.goal = original_goal
+        _, reward, terminated, _, _ = episode.step(0)
+        self.assertEqual(reward, -0.01)
+        self.assertFalse(terminated)
+
     def test_mutated_episode_budgets_are_rejected_without_advancing(self):
         episode = self.episode(step_m=0.125, max_steps=2)
         episode.reset(seed=7)

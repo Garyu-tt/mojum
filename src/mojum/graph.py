@@ -6,6 +6,10 @@ import math
 
 SCHEMA = "mechanicus.universal-graph/1"
 MAX_JSON_DEPTH = 256
+# Match the offline graph audit input budget. This bounds decoding BEFORE JSON
+# structure checks, so CLI/portable hosts cannot allocate arbitrarily large
+# graph JSON just by passing a path to an untrusted file.
+MAX_GRAPH_BYTES = 256 * 1024
 
 # Input/output port name -> type. Future plugin definitions require signed registration.
 PORTS = {
@@ -92,16 +96,25 @@ def _parse_json_float(token):
 
 
 def load_graph(path):
-    """Read UTF-8 graph JSON without collapsing duplicate keys."""
+    """Read bounded UTF-8 graph JSON without collapsing duplicate keys.
+
+    Reading only MAX_GRAPH_BYTES + 1 bytes avoids creating an unbounded Python
+    string before the depth, duplicate-key and numeric gates can inspect it.
+    The byte limit also counts non-ASCII UTF-8 and insignificant whitespace.
+    """
     try:
-        raw = path.read_text(encoding="utf-8")
+        with path.open("rb") as stream:
+            payload = stream.read(MAX_GRAPH_BYTES + 1)
+        if len(payload) > MAX_GRAPH_BYTES:
+            raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+        raw = payload.decode("utf-8", errors="strict")
         _check_json_depth(raw)
         return json.loads(raw, object_pairs_hook=_unique_json_object,
                           parse_constant=_reject_json_constant,
                           parse_float=_parse_json_float)
     except GraphError:
         raise
-    except (ValueError, RecursionError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
 
