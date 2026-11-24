@@ -13,7 +13,6 @@ from typing import Any, Mapping, Sequence
 
 SCHEMA = "mojum.nats-delivery/1"
 PROVENANCE = "PUBLIC_SYNTHETIC"
-MAX_TOKEN = 96
 MAX_SEQUENCE = (1 << 63) - 1
 MAX_SEEN = 4096
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}\Z")
@@ -83,11 +82,13 @@ def admit_envelope(raw: Mapping[str, Any]) -> DeliveryEnvelope:
     """Validate and detach an exact-field metadata envelope."""
     if type(raw) is not dict:
         raise ContractError("envelope must be a native dict")
-    if set(raw) != _FIELDS:
+    if any(type(key) is not str for key in raw):
+        raise ContractError("envelope keys must be native strings")
+    if len(raw) != len(_FIELDS) or set(raw) != _FIELDS:
         raise ContractError("envelope fields do not match the versioned schema")
-    if raw["schema"] != SCHEMA or type(raw["schema"]) is not str:
+    if type(raw["schema"]) is not str or raw["schema"] != SCHEMA:
         raise ContractError("unsupported schema")
-    if raw["provenance"] != PROVENANCE or type(raw["provenance"]) is not str:
+    if type(raw["provenance"]) is not str or raw["provenance"] != PROVENANCE:
         raise ContractError("only PUBLIC_SYNTHETIC metadata is admitted")
     causation = raw["causation_id"]
     if causation is not None:
@@ -135,7 +136,8 @@ def plan_delivery(
             return DeliveryPlan("STALE", key, None, "sequence does not advance consumer cursor")
         if admitted.sequence != last_sequence + 1:
             return DeliveryPlan("GAP", key, last_sequence + 1, "consumer must reconcile missing sequence")
-    return DeliveryPlan("ACCEPT_CANDIDATE", key, admitted.sequence + 1, "metadata is admissible; external commit is still required")
+    next_sequence = admitted.sequence + 1 if admitted.sequence < MAX_SEQUENCE else None
+    return DeliveryPlan("ACCEPT_CANDIDATE", key, next_sequence, "metadata is admissible; external commit is still required")
 
 
 def canonical_bytes(envelope: DeliveryEnvelope) -> bytes:
