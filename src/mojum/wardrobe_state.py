@@ -101,7 +101,8 @@ def initial_state(body_revision):
 
 
 def _verify_state(state):
-    if type(state) is not WardrobeState or state.schema != SCHEMA:
+    if (type(state) is not WardrobeState or type(state.schema) is not str
+            or state.schema != SCHEMA):
         raise WardrobeError("unsupported state schema")
     _identifier(state.body_revision, "body revision")
     if type(state.sequence) is not int or not 0 <= state.sequence <= 2**63 - 2:
@@ -115,6 +116,8 @@ def _verify_state(state):
         raise WardrobeError("invalid operation history entry")
     if len(set(state.recent_operations)) != len(state.recent_operations):
         raise WardrobeError("duplicate operation history entry")
+    if type(state.revision) is not str:
+        raise WardrobeError("state revision must be an exact native string")
     expected = _digest(_state_payload(state.body_revision, state.sequence,
                                       state.equipped, state.recent_operations))
     if state.revision != expected:
