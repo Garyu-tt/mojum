@@ -307,7 +307,9 @@ class Aquarium:
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
         self._committed_count = 0
-        first = _read_first_event(db_path, agent_id)
+        first = _read_first_event(
+            db_path, agent_id, external_expected_head=external_expected_head,
+        )
         if first is not None:
             self._check_bootstrap(first)
         elif external_expected_head is not None:
@@ -1046,7 +1048,9 @@ def main():
         )
         if aquarium.motor is not None:
             checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"
-        print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
+        # Escape Unicode so redirected legacy consoles can emit the checkpoint
+        # after committing ticks, including when the genome ID is non-ASCII.
+        print(json.dumps(checkpoint, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
