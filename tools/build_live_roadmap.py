@@ -4,12 +4,35 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 REPO = "Garyu-tt/mojum"
 ROOT = "https://api.github.com"
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+
+def open_page(url, headers):
+    """Retry transient transport and upstream failures without dropping pages."""
+    for attempt in range(5):
+        try:
+            return urllib.request.urlopen(
+                urllib.request.Request(url, headers=headers), timeout=60
+            )
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503, 504) or attempt == 4:
+                raise
+            retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
+            delay = max(2 ** attempt, min(60, int(retry_after))) if retry_after.isascii() and retry_after.isdecimal() and len(retry_after) <= 4 else 2 ** attempt
+            exc.close()
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == 4:
+                raise
+            delay = 2 ** attempt
+        print(f"Transient GitHub API failure; retry {attempt + 1}/4", file=sys.stderr)
+        time.sleep(delay)
 
 
 def get_pages(path, max_pages=None):
@@ -23,7 +46,7 @@ def get_pages(path, max_pages=None):
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "mojum-roadmap"}
         if TOKEN:
             headers["Authorization"] = f"Bearer {TOKEN}"
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
+        with open_page(url, headers) as response:
             payload = json.load(response)
             if not isinstance(payload, list):
                 raise ValueError("Expected paginated array")
