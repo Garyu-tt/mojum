@@ -242,7 +242,11 @@ def verify_segment_bytes(manifest: SegmentManifest, segment_bytes: bytes) -> boo
         raise SegmentManifestError("manifest must be a validated SegmentManifest")
     # Dataclasses can be instantiated directly, bypassing the factory. Re-run
     # the public contract before trusting the digest field.
-    validate_manifest(manifest.to_dict())
+    try:
+        snapshot = manifest.to_dict()
+    except (AttributeError, TypeError) as exc:
+        raise SegmentManifestError("manifest record is incomplete") from exc
+    validate_manifest(snapshot)
     if type(segment_bytes) is not bytes:
         raise SegmentManifestError("segment_bytes must be exact bytes")
     if len(segment_bytes) > MAX_SEGMENT_BYTES:
