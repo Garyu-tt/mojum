@@ -114,6 +114,11 @@ class PrStackAuditTests(unittest.TestCase):
         bad["head_ref"] = "../unsafe"
         with self.assertRaises(AUDIT.SnapshotError):
             self.analyze(bad)
+        for invalid_ref in ("build/./worker", "build/.hidden", "build/worker.", "build/worker.lock"):
+            bad = item(1)
+            bad["head_ref"] = invalid_ref
+            with self.subTest(ref=invalid_ref), self.assertRaises(AUDIT.SnapshotError):
+                self.analyze(bad)
 
     def test_reject_hostile_string_subclass_keys_before_comparison(self):
         class HostileKey(str):
