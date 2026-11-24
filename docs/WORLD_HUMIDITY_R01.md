@@ -1,0 +1,1 @@
+Document synthetic humidity fixture
