@@ -1,0 +1,62 @@
+name: Mojum Live Roadmap
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - docs/roadmap/**
+      - tools/build_live_roadmap.py
+      - .github/workflows/live-roadmap.yml
+  pull_request:
+    paths:
+      - docs/roadmap/**
+      - tools/build_live_roadmap.py
+      - .github/workflows/live-roadmap.yml
+permissions:
+  contents: read
+concurrency:
+  group: live-roadmap-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check browser script
+        run: |
+          python -c 'from pathlib import Path; s=Path("docs/roadmap/index.html").read_text(); Path("/tmp/roadmap.js").write_text(s.split("<script>",1)[1].split("</script>",1)[0])'
+          node --check /tmp/roadmap.js
+          python -m py_compile tools/build_live_roadmap.py
+      - name: Build snapshot
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python tools/build_live_roadmap.py
+          mkdir -p _site/roadmap
+          cp docs/roadmap/index.html docs/roadmap/roadmap-data.json _site/roadmap/
+          printf '%s' '<!doctype html><meta charset="utf-8"><title>Mojum</title><a href="roadmap/">Mojum Live Roadmap</a>' > _site/index.html
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: live-roadmap-preview
+          path: _site/
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: _site/
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish
+        id: deployment
+        uses: actions/deploy-pages@v4
