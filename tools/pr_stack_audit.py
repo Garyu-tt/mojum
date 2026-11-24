@@ -53,7 +53,11 @@ def _exact_keys(value: Any, required: frozenset[str], where: str) -> None:
 def _branch(value: Any, where: str) -> str:
     if type(value) is not str or _REF.fullmatch(value) is None:
         _failure(f"{where}: invalid branch ref")
-    if ".." in value or value.endswith(".") or "//" in value or value.endswith("/"):
+    components = value.split("/")
+    if (".." in value or "//" in value or value.endswith("/")
+            or any(not part or part in {".", ".."} or part.startswith(".")
+                   or part.endswith(".") or part.endswith(".lock")
+                   for part in components)):
         _failure(f"{where}: noncanonical branch ref")
     return value
 
