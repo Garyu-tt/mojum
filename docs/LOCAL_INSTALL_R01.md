@@ -5,9 +5,9 @@ This package is an **experimental, CPU-first, single-device synthetic fixture**.
 ## Requirements
 
 - CPython 3.11 or newer with standard-library `sqlite3`.
-- `pip` to install a local wheel. Only source builds use `setuptools>=61` and older setuptools versions also need `wheel` available on the builder.
+- `pip` to install a local wheel. Source builds require `setuptools>=77.0.3` on the builder.
 - No mandatory third-party **runtime** dependencies and no GPU.
-- **License undecided:** this in-repository install support does not grant permission to redistribute or publish on PyPI.
+- Distribution uses the GNU General Public License version 3 or any later version. [Full license text](../LICENSE)
 
 ## Install from a local source checkout
 
@@ -25,10 +25,10 @@ Alternatively, build a wheel once for transfer to another compatible machine.
 python -m pip wheel --no-index --no-build-isolation --no-deps --wheel-dir dist .
 ```
 
-Copy `dist/mojum-0.1.0-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
+Copy `dist/mojum-0.1.1-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
 
 ```sh
-python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+python -m pip install --no-index ./mojum-0.1.1-py3-none-any.whl
 ```
 
 The source checkout and the installed package contain the same example synthetic GENESIS seed and Universal Graph IR. The installed defaults are read through `importlib.resources`, not through a repository-relative `__file__` path.

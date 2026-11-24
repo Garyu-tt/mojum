@@ -22,11 +22,12 @@ python -I -m venv runtime
 runtime/bin/python -I -m pip --isolated --disable-pip-version-check install \
     --no-index --no-cache-dir wheels/mojum-*.whl
 
-runtime/bin/python -I - <<'PY'
+runtime/bin/python -I - "$repo/LICENSE" <<'PY'
 import json
 import subprocess
 import sys
 import sysconfig
+from importlib.metadata import distribution
 from importlib.resources import files
 from pathlib import Path
 
@@ -39,6 +40,13 @@ def run(script, *args):
 
 
 assert Path(mojum.__file__).resolve().is_relative_to(Path(sysconfig.get_path("purelib")).resolve())
+installed = distribution("mojum")
+assert installed.metadata["License-Expression"] == "GPL-3.0-or-later"
+assert installed.metadata.get_all("License-File") == ["LICENSE"]
+licenses = [path for path in installed.files or () if path.parts[-2:] == ("licenses", "LICENSE")]
+assert len(licenses) == 1
+assert installed.locate_file(licenses[0]).read_bytes() == Path(sys.argv[1]).read_bytes()
+
 first = run("mojum-aquarium", "--db", "resumed.sqlite3", "--ticks", "120")
 assert (first["tick"], first["stored_events"], first["neural_mode"]) == (120, 121, "shadow")
 resumed = run("mojum-aquarium", "--db", "resumed.sqlite3", "--ticks", "30")
