@@ -7,6 +7,9 @@ on:
       - "docs/ARCHIVE_KEY_ROTATION_R01.md"
       - ".github/workflows/archive-key-rotation.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 jobs:
   contract:
     runs-on: ubuntu-latest
