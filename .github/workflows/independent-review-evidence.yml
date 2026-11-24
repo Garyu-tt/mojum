@@ -8,7 +8,9 @@ on:
       - "docs/INDEPENDENT_REVIEW_EVIDENCE_R01.md"
       - ".github/workflows/independent-review-evidence.yml"
   push:
-    branches: ["main"]
+    branches:
+      - main
+      - "build/712-independent-review-evidence-20261124"
     paths:
       - "src/mojum/independent_review_evidence.py"
       - "tests/test_independent_review_evidence.py"
@@ -27,6 +29,14 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact tested revision
+        if: github.event_name == 'pull_request'
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
