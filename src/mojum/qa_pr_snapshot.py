@@ -68,12 +68,19 @@ def _branch(value: Any, field: str) -> str:
     branch = _text(value, field, _BRANCH_RE)
     parts = branch.split("/")
     if (
-        branch.startswith(("/", "-"))
+        branch in {"", "@"}
+        or branch.startswith(("/", "-"))
         or branch.endswith(("/", "."))
         or "//" in branch
         or ".." in branch
         or "@{" in branch
-        or any(part in {"", ".", ".."} or part.startswith(".") or part.endswith(".lock") for part in parts)
+        or any(
+            part in {"", ".", ".."}
+            or part.startswith(".")
+            or part.endswith(".")
+            or part.endswith(".lock")
+            for part in parts
+        )
     ):
         raise ValueError(f"{field} is not a valid branch ref")
     return branch
