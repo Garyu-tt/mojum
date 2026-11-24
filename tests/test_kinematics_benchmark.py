@@ -39,6 +39,18 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         self.assertTrue(report.within_limits)
         self.assertEqual(report.max_residual_m, 0)
 
+    def test_mean_residual_handles_multiple_large_finite_values(self):
+        huge = 1e308
+        samples = [
+            {"sample_id": "a", "target_m": (0.0, 0.0, 0.0), "achieved_m": (huge, 0.0, 0.0),
+             "joints": {"hip": 0.0, "knee": 1.0}, "elapsed_ns": 1, "peak_bytes": 1},
+            {"sample_id": "b", "target_m": (0.0, 0.0, 0.0), "achieved_m": (huge, 0.0, 0.0),
+             "joints": {"hip": 0.0, "knee": 1.0}, "elapsed_ns": 1, "peak_bytes": 1},
+        ]
+        report = evaluate_ik_samples(samples, LIMITS, rig_revision="r")
+        self.assertEqual(report.max_residual_m, huge)
+        self.assertEqual(report.mean_residual_m, huge)
+
     def test_duplicate_sample_rejected(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             evaluate_ik_samples(SAMPLES + [dict(SAMPLES[0])], LIMITS, rig_revision="r")
