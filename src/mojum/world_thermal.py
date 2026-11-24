@@ -51,11 +51,11 @@ def observe_thermal_field(room, state, *, tick, expected_revision, profile, poin
 
     if type(room) is not Room or type(state) is not RoomState:
         raise ThermalFieldError("canonical Room and RoomState required")
-    if type(state.tick) is not int or state.tick < 0 or type(tick) is not int or tick != state.tick:
+    if type(tick) is not int or tick != state.tick:
         raise ThermalFieldError("thermal tick must equal current room tick")
     if (type(expected_revision) is not str or type(state.revision) is not str
             or state.revision != expected_revision
-            or state.revision != _revision(room, state)):
+            or state.revision != _revision(room, state.tick, state.x, state.y)):
         raise ThermalFieldError("stale or corrupted room revision")
     if type(profile) is not ThermalProfile:
         raise ThermalFieldError("exact ThermalProfile required")
@@ -73,6 +73,12 @@ def observe_thermal_field(room, state, *, tick, expected_revision, profile, poin
     if type(points_mm) not in (list, tuple) or not 1 <= len(points_mm) <= MAX_POINTS:
         raise ThermalFieldError("point collection must contain 1..256 points")
 
+    if room.width > MAX_ROOM_MM / 1000 or room.height > MAX_ROOM_MM / 1000:
+        raise ThermalFieldError("room extent exceeds the supported millimetre range")
+    if (not _native_int(state.tick, 0, 2**63 - 1)
+            or not _native_int(state.x * 1000, 0, MAX_ROOM_MM)
+            or not _native_int(state.y * 1000, 0, MAX_ROOM_MM)):
+        raise ThermalFieldError("invalid room state coordinates or tick")
     width_mm, height_mm = int(room.width * 1000), int(room.height * 1000)
     cycle = _triangle_offset(tick, profile.cycle_period_ticks, profile.cycle_amplitude_millic)
     samples = []
