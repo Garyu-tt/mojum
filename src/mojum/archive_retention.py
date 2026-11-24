@@ -98,7 +98,7 @@ def plan_retention(raw: dict) -> RetentionPlan:
         _fail("tick values must be nonnegative exact integers")
     if not _exact_int(min_segments, minimum=1) or min_segments > MAX_SEGMENTS:
         _fail("minimum_retained_segments is outside bounds")
-    if not _exact_int(min_domains, minimum=1) or min_domains > MAX_FAILURE_DOMAINS:
+    if not _exact_int(min_domains, minimum=2) or min_domains > MAX_FAILURE_DOMAINS:
         _fail("minimum_failure_domains is outside bounds")
 
     anchor = raw["restore_anchor"]
