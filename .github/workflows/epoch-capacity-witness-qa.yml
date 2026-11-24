@@ -1,0 +1,41 @@
+name: Mojum v4 epoch capacity witness exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/epoch_capacity_witness.py'
+      - 'tests/test_epoch_capacity_witness.py'
+      - 'src/mojum/epoch_sense_v2.py'
+      - '.github/workflows/epoch-capacity-witness-qa.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  epoch-capacity-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert actual PR head checkout
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+      - name: Run all seven dedicated epoch witness tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_epoch_capacity_witness.py' -v
