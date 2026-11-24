@@ -1003,7 +1003,12 @@ def main():
         room, start = load_cli_room(args.room_file, args.motor_mode)
     except RoomSpecError as exc:
         parser.error(str(exc))
-    seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    try:
+        seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    except GenesisError as exc:
+        parser.error(f"invalid --genome ({exc})")
+    except (OSError, ValueError, RecursionError):
+        parser.error("--genome requires a readable UTF-8 JSON file")
     try:
         graph = load_graph(args.graph)
         validate_graph(graph)  # Fail before opening a new SQLite journal.
