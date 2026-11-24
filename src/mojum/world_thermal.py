@@ -47,11 +47,13 @@ def _triangle_offset(tick, period, amplitude):
 
 def observe_thermal_field(room, state, *, tick, expected_revision, profile, points_mm):
     """Evaluate bounded integer-mm samples at the current logical room tick."""
-    from .world_room import Room, RoomState
+    from .world_room import Room, RoomState, _valid
 
     if type(room) is not Room or type(state) is not RoomState:
         raise ThermalFieldError("canonical Room and RoomState required")
-    if type(tick) is not int or tick != state.tick:
+    if not _valid(room, state.x, state.y):
+        raise ThermalFieldError("invalid room state coordinates")
+    if type(tick) is not int or type(state.tick) is not int or tick != state.tick or state.tick < 0:
         raise ThermalFieldError("thermal tick must equal current room tick")
     if (type(expected_revision) is not str or type(state.revision) is not str
             or state.revision != expected_revision
