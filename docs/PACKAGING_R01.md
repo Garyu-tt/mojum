@@ -10,7 +10,7 @@ Mojum has a setuptools distribution description in pyproject.toml. This guide re
 - Tests, local tools, SQLite journals, credentials, and private data are not runtime assets.
 
 ## Offline wheel build
-A fully offline build requires the build backend to be installed locally. Pip resolves build-system requirements before creating the wheel, so a fresh environment without cached setuptools cannot build offline.
+A fully offline build requires the build backend to be installed locally. Pip resolves build-system requirements before creating the wheel, so a fresh environment without cached setuptools cannot build offline. CI provisions setuptools before the test; the wheel build and archive inspection then run without pip, build isolation, an index, or network access.
 
 ```sh
 python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
@@ -25,14 +25,14 @@ PYTHONPATH=./wheel-install python -m mojum.aquarium --help
 
 Generated console-script launchers live in the target's bin/ directory (POSIX) or Scripts/ directory (Windows). Add the relevant directory to PATH to invoke mojum-aquarium directly.
 
-## Static contract tests
+## Contract tests
 From the repository root:
 
 ```sh
 PYTHONPATH=src python -m unittest tests.test_packaging_contract -v
 ```
 
-The tests import each declared console-script target and verify it is callable, check source-layout/package-data declarations, and confirm the default graph fixture exists. They do not claim every platform's wheel installation has been exercised; run the wheel commands above for that smoke check.
+The tests import every declared console-script target, check source-layout/package-data declarations, and build a wheel through the already-installed setuptools backend in a temporary directory. They inspect the archive to require runtime modules and the default graph fixture, while rejecting tests, tools, docs, private/journal/secret paths, environment files, keys, and database artifacts. This is an offline wheel-content check, not a claim that installation on every platform has been exercised.
 
 ## Limitations
 Packaging the current fixture does not add a real neural backend, MuJoCo physics, distributed persistence, encrypted memory, or a claim of consciousness. The runtime remains a CPU-first synthetic simulation.
