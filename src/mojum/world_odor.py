@@ -69,6 +69,35 @@ def _inside(point_x: int, point_y: int, width: int, height: int) -> bool:
     return 0 <= point_x <= width and 0 <= point_y <= height
 
 
+def _inside_obstacle(x: int, y: int, obstacles) -> bool:
+    return any(left <= x <= left + width and bottom <= y <= bottom + height
+               for left, bottom, width, height in obstacles)
+
+
+def _validate_profile(profile: OdorProfile, width: int, height: int,
+                      obstacles: tuple[tuple[int, int, int, int], ...]) -> None:
+    if (type(profile.room_digest) is not str or len(profile.room_digest) != 64
+            or any(ch not in "0123456789abcdef" for ch in profile.room_digest)
+            or not _native_int(profile.created_tick, 0, MAX_TICK_AGE)
+            or not _native_int(profile.decay_per_tick, 0, MAX_CONCENTRATION)
+            or type(profile.sources) is not tuple
+            or not 1 <= len(profile.sources) <= MAX_SOURCES):
+        raise ValueError("malformed odor profile")
+    previous = None
+    for source in profile.sources:
+        if type(source) is not tuple or len(source) != 4:
+            raise ValueError("malformed odor source")
+        sid, x, y, concentration = source
+        if (type(sid) is not str or not sid or len(sid) > MAX_ID_LENGTH
+                or sid.strip() != sid or (previous is not None and sid <= previous)
+                or not _native_int(x, 0, min(width, MAX_COORD_MM))
+                or not _native_int(y, 0, min(height, MAX_COORD_MM))
+                or not _native_int(concentration, 0, MAX_CONCENTRATION)
+                or _inside_obstacle(x, y, obstacles)):
+            raise ValueError("malformed odor source")
+        previous = sid
+
+
 def _segment_intersects_rect(x0: int, y0: int, x1: int, y1: int,
                              rect: tuple[int, int, int, int]) -> bool:
     """Closed integer AABB intersection; touching an obstacle blocks the path."""
@@ -127,6 +156,8 @@ def create_profile(room, *, created_tick: int, decay_per_tick: int,
             raise ValueError("source outside room or invalid coordinate")
         if not _native_int(concentration, 0, MAX_CONCENTRATION):
             raise ValueError("invalid concentration")
+        if _inside_obstacle(x, y, _room_geometry(room)[2]):
+            raise ValueError("source lies inside an obstacle")
         normalized.append((sid, x, y, concentration))
     normalized.sort(key=lambda row: row[0])
     return OdorProfile(_room_digest(room), created_tick, decay_per_tick, tuple(normalized))
@@ -139,6 +170,7 @@ def sample(profile: OdorProfile, room, state, *, tick: int, expected_revision: s
     if type(profile) is not OdorProfile or type(state) is not RoomState:
         raise ValueError("invalid profile or room state")
     width, height, obstacles = _room_geometry(room)
+    _validate_profile(profile, width, height, obstacles)
     if profile.room_digest != _room_digest(room):
         raise ValueError("profile belongs to different room geometry")
     if type(state.tick) is not int or state.tick < 0 or type(tick) is not int or tick != state.tick:
@@ -165,6 +197,8 @@ def sample(profile: OdorProfile, room, state, *, tick: int, expected_revision: s
             raise ValueError("invalid or duplicate point id")
         if not _native_int(x, 0, min(width, MAX_COORD_MM)) or not _native_int(y, 0, min(height, MAX_COORD_MM)):
             raise ValueError("sample point outside room or invalid coordinate")
+        if _inside_obstacle(x, y, obstacles):
+            raise ValueError("sample point lies inside an obstacle")
         seen.add(pid)
         normalized_points.append((pid, x, y))
     normalized_points.sort(key=lambda row: row[0])
