@@ -7,6 +7,7 @@ import math
 # Keep arithmetic bounded so squaring and products in the analytic solver
 # cannot overflow even when callers provide finite but absurd magnitudes.
 _MAX_ABS = 1e100
+_MIN_LINK_LENGTH = 1e-150
 
 
 def _finite_number(value: object, field: str) -> float:
@@ -67,8 +68,8 @@ class IKResult:
 def _validate_lengths(link1_m: float, link2_m: float) -> None:
     first = _finite_number(link1_m, "link1_m")
     second = _finite_number(link2_m, "link2_m")
-    if first <= 0 or second <= 0:
-        raise ValueError("link lengths must be positive")
+    if first < _MIN_LINK_LENGTH or second < _MIN_LINK_LENGTH:
+        raise ValueError("link lengths must be at least 1e-150 metres")
 
 
 def within_limits(joints: JointState, limits: JointLimits, *, tolerance: float = 1e-12) -> bool:
