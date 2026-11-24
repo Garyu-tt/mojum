@@ -163,7 +163,12 @@ def evaluate_ik_samples(
         for sample_id, residual, elapsed, peak, excursion in normalized
     )
     count = len(results)
-    mean_residual = math.fsum(item.residual_m for item in results) / count
+    max_residual = max(item.residual_m for item in results)
+    # Normalize before summation: individually finite residuals can still make
+    # fsum overflow when their unscaled total exceeds the float range.
+    mean_ratio = (math.fsum(item.residual_m / max_residual for item in results) / count
+                  if max_residual else 0.0)
+    mean_residual = max_residual * min(1.0, mean_ratio)
     mean_elapsed = math.fsum(item.elapsed_ns for item in results) / count
     all_within = all(item.within_limits for item in results)
     budget_exceeded = any(
@@ -195,7 +200,7 @@ def evaluate_ik_samples(
     ).hexdigest()
     return BenchmarkReport(
         SCHEMA, provenance, rig_revision, count, mean_residual,
-        max(item.residual_m for item in results), mean_elapsed,
+        max_residual, mean_elapsed,
         max(item.elapsed_ns for item in results), max(item.peak_bytes for item in results),
         all_within, budget_exceeded, results, digest,
     )
