@@ -91,6 +91,8 @@ class SandboxPlannerTests(unittest.TestCase):
         self.assertIn("--ro-bind", argv)
         self.assertIn(str(self.repo), argv)
         self.assertIn(str(self.scratch), argv)
+        # Executables in the host repository must use the sandbox mount path.
+        self.assertIn("/workspace/bin/test-runner", argv)
         self.assertIn("a;not-a-shell-command", argv)
         self.assertNotIn("shell=True", argv)
         env_index = argv.index("--setenv")
