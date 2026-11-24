@@ -83,6 +83,11 @@ class WorldThermalTests(unittest.TestCase):
         with self.assertRaises(ThermalFieldError):
             self.observe(profile=ThermalProfile(cycle_period_ticks=8))
 
+    def test_one_tick_cycle_with_nonzero_amplitude_rejected(self):
+        with self.assertRaisesRegex(ThermalFieldError, "at least two ticks"):
+            self.observe(profile=ThermalProfile(
+                cycle_period_ticks=1, cycle_amplitude_millic=1000))
+
     def test_temperature_bound_enforced(self):
         with self.assertRaises(ThermalFieldError):
             self.observe(profile=ThermalProfile(base_millic=99_000,
