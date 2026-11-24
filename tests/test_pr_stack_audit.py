@@ -115,6 +115,22 @@ class PrStackAuditTests(unittest.TestCase):
         with self.assertRaises(AUDIT.SnapshotError):
             self.analyze(bad)
 
+    def test_reject_hostile_string_subclass_keys_before_comparison(self):
+        class HostileKey(str):
+            explode = False
+            def __hash__(self):
+                if self.explode:
+                    raise RuntimeError("hostile hash executed")
+                return super().__hash__()
+
+        value = snapshot(item(1))
+        original = value.pop("schema")
+        key = HostileKey("schema")
+        value[key] = original
+        key.explode = True
+        with self.assertRaises(AUDIT.SnapshotError):
+            AUDIT.validate_snapshot(value)
+
     def test_reject_duplicate_json_fields_and_unknown_keys(self):
         with self.assertRaises(AUDIT.SnapshotError):
             AUDIT.decode_snapshot(b'{"schema":"a","schema":"b"}')
