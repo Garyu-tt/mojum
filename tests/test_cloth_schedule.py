@@ -7,23 +7,43 @@ class ClothScheduleTests(unittest.TestCase):
         self.assertEqual((PROFILES["LOW"].tick_divisor, PROFILES["MEDIUM"].tick_divisor, PROFILES["HIGH"].tick_divisor), (4, 2, 1))
 
     def test_logical_tick_cadence(self):
-        self.assertFalse(plan_step(PROFILES["LOW"], 3).run)
+        result = plan_step(PROFILES["LOW"], 3, pending_steps=2)
+        self.assertFalse(result.run)
+        self.assertEqual(result.reason, "cadence")
+        self.assertEqual((result.admitted_steps, result.deferred_pending_steps, result.dropped_pending_steps), (0, 2, 0))
         self.assertEqual(plan_step(PROFILES["LOW"], 4).reason, "run")
 
     def test_work_budget_fails_closed(self):
         result = plan_step(PROFILES["LOW"], 4, requested_vertices=2001)
         self.assertFalse(result.run)
         self.assertEqual(result.reason, "work-budget-exceeded")
+        self.assertEqual(result.deferred_pending_steps, 1)
+        self.assertEqual(result.dropped_pending_steps, 0)
 
     def test_backlog_is_bounded_and_explicit(self):
         result = plan_step(PROFILES["LOW"], 4, pending_steps=5)
         self.assertTrue(result.run)
+        self.assertEqual(result.admitted_steps, 1)
+        self.assertEqual(result.deferred_pending_steps, 0)
         self.assertEqual(result.dropped_pending_steps, 4)
         self.assertEqual(result.reason, "run-with-backlog-dropped")
 
-    def test_disable(self):
-        self.assertEqual(plan_step(PROFILES["HIGH"], 1, enabled=False).reason, "disabled")
-        self.assertFalse(plan_step(PROFILES["OFF"], 1).run)
+    def test_catch_up_boundaries_for_all_profiles(self):
+        for profile, cap in ((PROFILES["LOW"], 1), (PROFILES["MEDIUM"], 1), (PROFILES["HIGH"], 2)):
+            for pending, expected_admitted in ((1, 1), (2, min(2, cap)), (3, min(3, cap))):
+                with self.subTest(profile=profile.profile, pending=pending):
+                    result = plan_step(profile, profile.tick_divisor, pending_steps=pending)
+                    self.assertEqual(result.admitted_steps, expected_admitted)
+                    self.assertEqual(result.dropped_pending_steps, pending - expected_admitted)
+                    self.assertEqual(result.deferred_pending_steps, 0)
+                    self.assertEqual(result.run, expected_admitted > 0)
+
+    def test_disable_and_cadence_defer_without_losing_work(self):
+        for result in (plan_step(PROFILES["HIGH"], 1, pending_steps=3, enabled=False),
+                       plan_step(PROFILES["OFF"], 1, pending_steps=3)):
+            self.assertEqual(result.reason, "disabled")
+            self.assertEqual(result.deferred_pending_steps, 3)
+            self.assertEqual(result.dropped_pending_steps, 0)
 
     def test_digest_stable_and_sensitive(self):
         p = PROFILES["LOW"]
@@ -49,6 +69,7 @@ class ClothScheduleTests(unittest.TestCase):
         self.assertEqual(result.schema, SCHEMA)
         self.assertEqual(policy_digest(p), before)
         self.assertEqual(result.admitted_vertices, 100)
+        self.assertEqual(result.admitted_steps, 1)
 
 if __name__ == "__main__":
     unittest.main()
