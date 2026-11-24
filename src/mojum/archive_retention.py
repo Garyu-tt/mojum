@@ -170,7 +170,11 @@ def plan_retention(raw: dict) -> RetentionPlan:
         previous_end, previous_head = end, item["head_sha256"]
 
     # Anchor must be the genesis boundary or an exact segment boundary.
-    anchor_matches = anchor_seq == 0 and anchor_head == normalized[0]["previous_head_sha256"]
+    anchor_matches = (
+        anchor_seq == 0
+        and anchor_head == _ZERO_HEAD
+        and normalized[0]["previous_head_sha256"] == _ZERO_HEAD
+    )
     if anchor_seq > 0:
         anchor_matches = False
     for segment in normalized:
