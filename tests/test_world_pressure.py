@@ -73,6 +73,21 @@ class PressureTests(unittest.TestCase):
             observe_pressure(profile, room=room, state=state,
                              tick=0, x_mm=1500, y_mm=1500)
 
+    def test_forged_room_geometry_is_revalidated_before_sampling(self):
+        cases = (
+            ("width", -1.0, ()),
+            ("obstacles", ((4.5, 3.5, 1.0, 1.0),),),
+        )
+        for attribute, forged_value, _ in cases:
+            with self.subTest(attribute=attribute):
+                room = Room(5.0, 4.0)
+                object.__setattr__(room, attribute, forged_value)
+                state = RoomState(0, 1.0, 1.0, _revision(room, 0, 1.0, 1.0))
+                profile = PressureProfile(state.revision, 5000, 4000, 101000)
+                with self.assertRaisesRegex(ValueError, "canonical room geometry"):
+                    observe_pressure(profile, room=room, state=state,
+                                     tick=0, x_mm=1000, y_mm=1000)
+
     def test_profile_bounds_and_room_dimensions(self):
         cases = (
             {"width_mm": 0}, {"base_pressure_pa": 120001},
