@@ -19,6 +19,11 @@ EVENT_SCHEMA = "mojum.noosphere.event/1"
 STORE_SCHEMA = "mojum.noosphere.sqlite/1"
 DATASET_SCHEMA = "mojum.noosphere.dataset/1"
 _ALLOWED_VISIBILITY = frozenset(("PUBLIC", "PRIVATE", "RESTRICTED"))
+_INDEXED_EVENT_FIELDS = (
+    "event_id", "agent_id", "topic", "visibility", "observed_at_ns",
+    "recorded_at_ns", "valid_from_ns", "valid_to_ns",
+)
+_PROJECTION_COLUMNS = ",".join(("seq", "wire_json", "event_hash", *_INDEXED_EVENT_FIELDS))
 EMPTY_HEAD = "0" * 64
 _MAX_PAYLOAD_BYTES = 128_000
 
@@ -147,6 +152,26 @@ def _validate_event(event, owner):
     return json.loads(wire)
 
 
+def _projection_event(row, owner):
+    """Validate one selected row before exposing its decoded event.
+
+    SQL indexes select candidates; they cannot authorize export of conflicting
+    wire data. This checks each candidate, not the journal's full hash chain.
+    """
+    try:
+        parsed = _loads_wire(row["wire_json"])
+    except NoosphereError as exc:
+        raise NoosphereError(f"invalid journal JSON: {exc}") from exc
+    try:
+        event = _validate_event(parsed, owner)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise NoosphereError(f"invalid event at row {row['seq']}") from exc
+    for name in _INDEXED_EVENT_FIELDS:
+        if event[name] != row[name]:
+            raise NoosphereError(f"indexed column {name} mismatches event at row {row['seq']}")
+    return event
+
+
 @contextmanager
 def _open_readonly(path):
     path = Path(path)
@@ -231,8 +256,7 @@ def _verify_chain(db, agent_id, *, external_expected_head=None, strict_wire=Fals
             raise NoosphereError(f"noncanonical event at row {seq}")
         if seq != expected_seq:
             raise NoosphereError(f"noncontiguous sequence at row {seq}")
-        for name in ("event_id", "agent_id", "topic", "visibility", "observed_at_ns",
-                     "recorded_at_ns", "valid_from_ns", "valid_to_ns"):
+        for name in _INDEXED_EVENT_FIELDS:
             if event[name] != row[name]:
                 raise NoosphereError(f"indexed column {name} mismatches event at row {seq}")
         if prior != prev or _sha({"previous": prev, "event": event}) != stored:
@@ -395,8 +419,9 @@ class LocalNoosphere:
 
         Streaming companion to :meth:`dataset`: callers can re-derive state
         without materializing the whole projection in memory. The filter and
-        visibility semantics match ``dataset``. This helper does not verify the
-        hash chain by itself; callers that need integrity run
+        visibility semantics match ``dataset``. Each selected event is checked
+        against its indexed columns before yield. This helper does not verify
+        the hash chain by itself; callers that need integrity run
         :meth:`verify_chain` independently, as Aquarium replay does.
         """
         if topic is not None:
@@ -426,7 +451,7 @@ class LocalNoosphere:
         if valid_at_ns is not None:
             where.append("valid_from_ns <= ? AND (valid_to_ns IS NULL OR valid_to_ns > ?)")
             args.extend((valid_at_ns, valid_at_ns))
-        sql = ("SELECT seq,wire_json,event_hash FROM events WHERE "
+        sql = ("SELECT " + _PROJECTION_COLUMNS + " FROM events WHERE "
                + " AND ".join(where) + " ORDER BY seq")
         cursor = self._db.execute(sql, args)
         try:
@@ -435,14 +460,9 @@ class LocalNoosphere:
                 if not rows:
                     return
                 for row in rows:
-                    try:
-                        event = _loads_wire(row["wire_json"])
-                    except NoosphereError as exc:
-                        raise NoosphereError(f"invalid journal JSON: {exc}") from exc
+                    event = _projection_event(row, self.agent_id)
                     if source is not None:
-                        if type(event) is not dict:
-                            raise NoosphereError("invalid journal JSON event object")
-                        if event.get("source") != source:
+                        if event["source"] != source:
                             continue
                     yield {"seq": row["seq"], "event": event,
                            "event_hash": row["event_hash"]}
@@ -450,7 +470,10 @@ class LocalNoosphere:
             cursor.close()
 
     def dataset(self, *, topic=None, source=None, as_of_recorded_ns=None, valid_at_ns=None, include_nonpublic=False, limit=1000):
-        """Read-only reproducible dataset projection; PRIVATE never exported by default."""
+        """Project checked candidates; PRIVATE is never exported by default.
+
+        Candidate checks do not replace independent full-chain verification.
+        """
         if topic is not None:
             _text(topic, "topic")
         if source is not None:
@@ -479,19 +502,15 @@ class LocalNoosphere:
             args.extend((valid_at_ns, valid_at_ns))
         # The limit is applied after source filtering. Iterate rather than
         # materializing unbounded candidate rows when a source is requested.
-        sql = "SELECT seq,wire_json,event_hash FROM events WHERE " + " AND ".join(where) + " ORDER BY seq"
+        sql = ("SELECT " + _PROJECTION_COLUMNS + " FROM events WHERE "
+               + " AND ".join(where) + " ORDER BY seq")
         rows = self._db.execute(sql, args)
         items = []
         try:
             for row in rows:
-                try:
-                    event = _loads_wire(row["wire_json"])
-                except NoosphereError as exc:
-                    raise NoosphereError(f"invalid journal JSON: {exc}") from exc
+                event = _projection_event(row, self.agent_id)
                 if source is not None:
-                    if type(event) is not dict:
-                        raise NoosphereError("invalid journal JSON event object")
-                    if event.get("source") != source:
+                    if event["source"] != source:
                         continue
                 items.append({"seq": row["seq"], "event": event,
                               "event_hash": row["event_hash"]})
