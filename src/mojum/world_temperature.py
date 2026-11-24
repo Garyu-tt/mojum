@@ -45,10 +45,12 @@ def _require_exact_fields(row: dict[str, Any], required: set[str], name: str) ->
     # Reject oversized mappings in O(1) before iterating caller-controlled keys.
     if len(row) != len(required):
         raise ValueError(f"{name} fields do not match schema")
-    # Exact native types are checked before any set construction/hashing.
-    if any(type(key) is not str for key in row):
-        raise ValueError(f"{name} keys must be native strings")
-    if set(row) != required:
+    # Snapshot only the bounded key count; reject type/length before hashing.
+    keys = tuple(row.keys())
+    max_key_length = max(map(len, required))
+    if any(type(key) is not str or len(key) > max_key_length for key in keys):
+        raise ValueError(f"{name} keys must be bounded native strings")
+    if set(keys) != required:
         raise ValueError(f"{name} fields do not match schema")
 
 def observe_temperature(*, sources: Any, points: Any, baseline_milli_c: int,
