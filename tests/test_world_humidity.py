@@ -8,6 +8,8 @@ REV = "a" * 64
 
 
 class HostileStr(str):
+    __hash__ = str.__hash__
+
     def __eq__(self, other):
         raise AssertionError("hostile equality must not execute")
 
