@@ -242,7 +242,7 @@ The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or M
 With CPython 3.11+ and a locally built Mojum wheel, install into a virtual environment and run from any working directory:
 
 ```sh
-python -m pip install --no-index ./mojum-0.1.1-py3-none-any.whl
+python -m pip install --no-index ./mojum-0.1.2-py3-none-any.whl
 mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 120
 mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 ```

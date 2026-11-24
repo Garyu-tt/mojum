@@ -25,10 +25,10 @@ Alternatively, build a wheel once for transfer to another compatible machine.
 python -m pip wheel --no-index --no-build-isolation --no-deps --wheel-dir dist .
 ```
 
-Copy `dist/mojum-0.1.1-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
+Copy `dist/mojum-0.1.2-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
 
 ```sh
-python -m pip install --no-index ./mojum-0.1.1-py3-none-any.whl
+python -m pip install --no-index ./mojum-0.1.2-py3-none-any.whl
 ```
 
 The source checkout and the installed package contain the same example synthetic GENESIS seed and Universal Graph IR. The installed defaults are read through `importlib.resources`, not through a repository-relative `__file__` path.
