@@ -38,6 +38,10 @@ class JointContinuityTests(unittest.TestCase):
             with self.assertRaises(ValueError): audit_joint_continuity([s(0,{"j":0})],limits)
         for rev in (("other",),("j","j")):
             with self.assertRaises(ValueError): audit_joint_continuity([s(0,{"j":0})],{"j":1},revolute=rev)
+    def test_oversized_logical_tick_fails_closed(self):
+        with self.assertRaises(ValueError):
+            audit_joint_continuity([s(1 << 63, {"j": 0})], {"j": 1})
+
     def test_bounds_and_schema(self):
         with self.assertRaises(ValueError): audit_joint_continuity([s(0,{"j":0}),s(1,{"j":0})],{"j":1},max_samples=1)
         with self.assertRaises(ValueError): audit_joint_continuity([s(0,{"j":0,"k":0})],{"j":1,"k":1},max_joints=1)
