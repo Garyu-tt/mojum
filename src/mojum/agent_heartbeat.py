@@ -55,7 +55,7 @@ def _canonical(payload: Mapping[str, object]) -> bytes:
             sort_keys=True, separators=(",", ":"),
         )
         encoded = text.encode("utf-8", errors="strict")
-    except (TypeError, ValueError, UnicodeError) as exc:
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
         raise HeartbeatError("payload is not canonical JSON data") from exc
     if len(encoded) > MAX_ENVELOPE_BYTES:
         raise HeartbeatError("heartbeat envelope exceeds size limit")
@@ -72,6 +72,11 @@ def _pairs_no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
+    if type(raw) is bytes:
+        try:
+            raw = raw.decode("utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise HeartbeatError("invalid UTF-8 envelope") from exc
     if type(raw) is str:
         try:
             encoded = raw.encode("utf-8", errors="strict")
@@ -80,9 +85,13 @@ def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
         if len(encoded) > MAX_ENVELOPE_BYTES:
             raise HeartbeatError("heartbeat envelope exceeds size limit")
         try:
-            value = json.loads(raw, object_pairs_hook=_pairs_no_duplicates,
-                               parse_constant=lambda _: (_ for _ in ()).throw(
-                                   HeartbeatError("non-finite JSON number")))
+            value = json.loads(
+                raw,
+                object_pairs_hook=_pairs_no_duplicates,
+                parse_constant=lambda _: (_ for _ in ()).throw(
+                    HeartbeatError("non-finite JSON number")
+                ),
+            )
         except HeartbeatError:
             raise
         except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
@@ -115,7 +124,8 @@ def _validate_payload(value: dict[str, object]) -> dict[str, object]:
         item = value[field]
         if type(item) is not str or _ID_RE.fullmatch(item) is None:
             raise HeartbeatError(f"{field} is invalid")
-    if type(value["sequence"]) is not int or value["sequence"] < 0 or value["sequence"] > 2**63 - 1:
+    if (type(value["sequence"]) is not int or value["sequence"] < 0
+            or value["sequence"] > 2**63 - 1):
         raise HeartbeatError("sequence must be a bounded nonnegative integer")
     if type(value["event"]) is not str or value["event"] not in EVENTS:
         raise HeartbeatError("unsupported heartbeat event")
@@ -141,7 +151,6 @@ def sign_heartbeat(
         "sequence": sequence, "event": event,
         "issued_at_ns": issued_at_ns, "expires_at_ns": expires_at_ns,
     }
-    # Reuse the same strict validator as the verification boundary.
     provisional = dict(payload)
     provisional["signature"] = "0" * 64
     payload = _validate_payload(provisional)
@@ -176,7 +185,7 @@ def verify_heartbeat(
         raise HeartbeatError("heartbeat lifetime is invalid")
     if issued > now_ns + clock_skew_ns:
         raise HeartbeatError("heartbeat is not yet valid")
-    if expires < now_ns:
+    if expires <= now_ns:
         raise HeartbeatError("heartbeat has expired")
 
     expected = hmac.new(key, _canonical(payload), hashlib.sha256).hexdigest()
