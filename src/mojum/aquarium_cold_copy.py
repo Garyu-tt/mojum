@@ -162,7 +162,7 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
     committed WAL pages. Only the temporary backup is opened for full Aquarium
     replay with the supplied Aquarium configuration. The source history is
     never opened writable during export.
-    Concurrent commits are reflected in the backup's verified snapshot.
+    The backup includes commits visible when its page budget is checked.
     """
     source = _source_file(source_db)
     destination = _destination(destination_db)
@@ -186,6 +186,8 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
         with closing(sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
                                      uri=True, timeout=5.0)) as original:
             original.execute("PRAGMA query_only=ON")
+            # Hold one read snapshot for the budget check and the online backup.
+            original.execute("BEGIN")
             if (original.execute("PRAGMA page_count").fetchone()[0]
                     * original.execute("PRAGMA page_size").fetchone()[0]
                     > MAX_BACKUP_BYTES):
