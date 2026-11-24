@@ -42,10 +42,13 @@ def _records(value: Any, name: str, maximum: int) -> list[dict[str, Any]]:
     return list(value)
 
 def _require_exact_fields(row: dict[str, Any], required: set[str], name: str) -> None:
-    # Do not hash or compare untrusted key subclasses before rejecting them.
+    # Reject oversized mappings in O(1) before iterating caller-controlled keys.
+    if len(row) != len(required):
+        raise ValueError(f"{name} fields do not match schema")
+    # Exact native types are checked before any set construction/hashing.
     if any(type(key) is not str for key in row):
         raise ValueError(f"{name} keys must be native strings")
-    if len(row) != len(required) or set(row) != required:
+    if set(row) != required:
         raise ValueError(f"{name} fields do not match schema")
 
 def observe_temperature(*, sources: Any, points: Any, baseline_milli_c: int,
