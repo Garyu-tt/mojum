@@ -1,0 +1,25 @@
+name: Noosphere key lifecycle metadata
+on:
+  pull_request:
+    paths:
+      - "src/mojum/noosphere_key_lifecycle.py"
+      - "tests/test_noosphere_key_lifecycle.py"
+      - "docs/NOOSPHERE_KEY_LIFECYCLE_R01.md"
+      - ".github/workflows/noosphere-key-lifecycle.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: PYTHONPATH=src python -m unittest tests.test_noosphere_key_lifecycle -v
