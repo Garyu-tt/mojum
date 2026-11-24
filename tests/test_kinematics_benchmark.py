@@ -109,6 +109,19 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "native strings"):
             evaluate_ik_samples([bad_joint_row], LIMITS, rig_revision="r")
 
+    def test_oversized_native_keys_rejected_before_hashing(self):
+        bad_sample = dict(SAMPLES[0])
+        bad_sample["x" * 1_000_000] = bad_sample.pop("sample_id")
+        with self.assertRaisesRegex(ValueError, "bounded native strings"):
+            evaluate_ik_samples([bad_sample], LIMITS, rig_revision="r")
+
+        bad_joint_row = dict(SAMPLES[0])
+        bad_joints = dict(bad_joint_row["joints"])
+        bad_joints["x" * 1_000_000] = bad_joints.pop("hip")
+        bad_joint_row["joints"] = bad_joints
+        with self.assertRaisesRegex(ValueError, "bounded native strings"):
+            evaluate_ik_samples([bad_joint_row], LIMITS, rig_revision="r")
+
     def test_oversized_mappings_rejected_before_key_inspection(self):
         oversized_sample = dict(SAMPLES[0])
         oversized_sample.update({f"extra-{i}": i for i in range(10_000)})
