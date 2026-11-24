@@ -1,0 +1,36 @@
+name: Independent review evidence contract
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/independent_review_evidence.py"
+      - "tests/test_independent_review_evidence.py"
+      - "docs/INDEPENDENT_REVIEW_EVIDENCE_R01.md"
+      - ".github/workflows/independent-review-evidence.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "src/mojum/independent_review_evidence.py"
+      - "tests/test_independent_review_evidence.py"
+      - "docs/INDEPENDENT_REVIEW_EVIDENCE_R01.md"
+      - ".github/workflows/independent-review-evidence.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_independent_review_evidence -v
