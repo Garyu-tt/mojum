@@ -24,7 +24,7 @@ _ALLOWED_FLAGS = frozenset({
     "schema_migration",
 })
 _ALLOWED_VERDICTS = frozenset({"PASS", "FAIL", "UNKNOWN"})
-_SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
+_SHA_RE = re.compile(r"[0-9a-f]{40}\\Z")
 
 
 class EscalationInputError(ValueError):
@@ -43,7 +43,14 @@ class EscalationDecision:
 
 
 def _exact_keys(value: dict[str, Any], expected: set[str], where: str) -> None:
-    if set(value) != expected:
+    # Reject oversized mappings before allocating a key snapshot or hashing
+    # caller-controlled keys. Only the tiny, fixed schema may reach set().
+    if len(value) != len(expected):
+        raise EscalationInputError(f"{where} fields must be exactly {sorted(expected)!r}")
+    keys = tuple(value.keys())
+    if any(type(key) is not str for key in keys):
+        raise EscalationInputError(f"{where} field names must be exact strings")
+    if set(keys) != expected:
         raise EscalationInputError(f"{where} fields must be exactly {sorted(expected)!r}")
 
 
