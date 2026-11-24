@@ -89,8 +89,8 @@ class PackagingContractTests(unittest.TestCase):
             }
             forbidden_suffixes = (".env", ".pem", ".key", ".sqlite", ".sqlite3", ".db")
             for name in names:
-                parts = set(Path(name).parts)
-                self.assertFalse(parts & forbidden_parts, f"forbidden path packaged: {name}")
+                parts = Path(name).parts
+                self.assertFalse(set(parts) & forbidden_parts, f"forbidden path packaged: {name}")
                 self.assertFalse(
                     any(part.lower().endswith(forbidden_suffixes) for part in parts),
                     f"forbidden file packaged: {name}",
