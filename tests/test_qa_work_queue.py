@@ -105,6 +105,16 @@ class WorkQueueTests(unittest.TestCase):
         with self.assertRaises(QueueError):
             claim(self.db, owner="worker", now=0, lease_ms=True)
 
+    def test_payload_rejects_hostile_string_subclass_keys_before_comparison(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not execute")
+
+        with self.assertRaises(QueueError):
+            enqueue(self.db, idempotency_key="hostile-key", kind="review", pr_number=1,
+                    head_sha=SHA, created_at=0, payload={HostileKey("source"): "github"})
+
     def test_expired_lease_cannot_be_heartbeated(self):
         self.add()
         task = claim(self.db, owner="worker-a", now=10, lease_ms=5)
