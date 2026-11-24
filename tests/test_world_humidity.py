@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from mojum.world_humidity import (
     HumidityProfile, MAX_TICK, observe_humidity, verify_observation,
@@ -88,6 +89,13 @@ class HumidityTests(unittest.TestCase):
         observation[HostileStr("unexpected")] = 1
         with self.assertRaises(ValueError):
             verify_observation(observation)
+
+    def test_verifier_bounds_native_key_length_before_set(self):
+        observation = self.observe()
+        observation["x" * 1_000_000] = observation.pop("digest")
+        with patch("builtins.set", side_effect=AssertionError("set must not run")):
+            with self.assertRaisesRegex(ValueError, "invalid observation key"):
+                verify_observation(observation)
 
     def test_verifier_rejects_non_native_nested_values(self):
         observation = self.observe()
