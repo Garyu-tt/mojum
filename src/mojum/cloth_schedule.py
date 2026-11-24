@@ -31,6 +31,8 @@ class ClothSchedulePolicy:
             raise ValueError("enabled must be a native bool")
         if self.profile == "OFF" and self.enabled:
             raise ValueError("OFF profile cannot be enabled")
+        if self.enabled and self.max_catch_up_steps < 1:
+            raise ValueError("enabled policies require at least one catch-up step")
 
 PROFILES: Final = {
     "OFF": ClothSchedulePolicy("OFF", 1, 0, 0, 0, False),
@@ -52,7 +54,16 @@ class ClothStepPlan:
     dropped_pending_steps: int
     policy_digest: str
 
+def _validated_policy(policy: object) -> ClothSchedulePolicy:
+    if type(policy) is not ClothSchedulePolicy:
+        raise TypeError("policy must be an exact ClothSchedulePolicy")
+    return ClothSchedulePolicy(
+        policy.profile, policy.tick_divisor, policy.max_catch_up_steps,
+        policy.max_vertices, policy.max_constraints, policy.enabled,
+    )
+
 def policy_digest(policy: ClothSchedulePolicy) -> str:
+    policy = _validated_policy(policy)
     payload = {
         "schema": SCHEMA, "profile": policy.profile,
         "tick_divisor": policy.tick_divisor,
@@ -68,8 +79,7 @@ def plan_step(policy: ClothSchedulePolicy, logical_tick: int, *,
               pending_steps: int = 1, requested_vertices: int = 0,
               requested_constraints: int = 0, enabled: bool = True) -> ClothStepPlan:
     """Admit bounded fixed-dt updates; explicitly defer or drop every pending step."""
-    if not isinstance(policy, ClothSchedulePolicy):
-        raise TypeError("policy must be ClothSchedulePolicy")
+    policy = _validated_policy(policy)
     for name, value in (("logical_tick", logical_tick), ("pending_steps", pending_steps),
                         ("requested_vertices", requested_vertices),
                         ("requested_constraints", requested_constraints)):
