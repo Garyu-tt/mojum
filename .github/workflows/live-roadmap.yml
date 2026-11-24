@@ -26,6 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact tested revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Check browser script
         run: |
           python -c 'from pathlib import Path; s=Path("docs/roadmap/index.html").read_text(); Path("/tmp/roadmap.js").write_text(s.split("<script>",1)[1].split("</script>",1)[0])'
