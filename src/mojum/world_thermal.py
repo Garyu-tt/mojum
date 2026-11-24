@@ -75,10 +75,6 @@ def observe_thermal_field(room, state, *, tick, expected_revision, profile, poin
 
     if room.width > MAX_ROOM_MM / 1000 or room.height > MAX_ROOM_MM / 1000:
         raise ThermalFieldError("room extent exceeds the supported millimetre range")
-    if (not _native_int(state.tick, 0, 2**63 - 1)
-            or not _native_int(state.x * 1000, 0, MAX_ROOM_MM)
-            or not _native_int(state.y * 1000, 0, MAX_ROOM_MM)):
-        raise ThermalFieldError("invalid room state coordinates or tick")
     width_mm, height_mm = int(room.width * 1000), int(room.height * 1000)
     cycle = _triangle_offset(tick, profile.cycle_period_ticks, profile.cycle_amplitude_millic)
     samples = []
