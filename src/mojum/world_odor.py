@@ -21,6 +21,7 @@ _MAX_CONCENTRATION = 1_000_000_000
 _MAX_COORD_MM = 1_000_000_000
 _MAX_FALLOFF_MM = 1_000_000_000
 _MAX_AGE_TICKS = 1_000_000
+_MAX_GEOMETRY_TESTS = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,11 @@ def sample_odor_field(
         raise ValueError("invalid point collection")
     if len(sources) * len(points) > 100_000:
         raise ValueError("sampling work budget exceeded")
+    geometry_tests = len(room.obstacles) * (
+        len(sources) + len(points) + (len(sources) * len(points) if occlusion else 0)
+    )
+    if geometry_tests > _MAX_GEOMETRY_TESTS:
+        raise ValueError("room geometry work budget exceeded")
 
     source_ids: set[str] = set()
     normalized_sources: list[OdorSource] = []
