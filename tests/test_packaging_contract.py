@@ -7,6 +7,7 @@ import tempfile
 import tomllib
 import unittest
 import zipfile
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +51,7 @@ class PackagingContractTests(unittest.TestCase):
             if p.is_file()
         ]
         for pattern in patterns:
-            self.assertTrue(any(__import__("fnmatch").fnmatch.fnmatchcase(p, pattern) for p in shipped), pattern)
+            self.assertTrue(any(fnmatchcase(p, pattern) for p in shipped), pattern)
 
     def test_default_graph_resource_is_present(self):
         resource = SRC / "mojum" / "data" / "first_loop.json"
@@ -64,37 +65,44 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("mojum*", setuptools["packages"]["find"]["include"])
 
     def test_offline_wheel_contains_runtime_and_required_data_only(self):
-        # Call the already-installed PEP 517 backend directly. No pip resolver,
-        # build isolation, index, network, or extra build dependency is involved.
+        # Use the already-installed PEP 517 backend directly. No pip resolver,
+        # build isolation, package index, network, or extra dependency is used.
         from setuptools import build_meta
 
         with tempfile.TemporaryDirectory(prefix="mojum-wheel-") as directory:
-            wheel_name = build_meta.build_wheel(directory, config_settings={"--quiet": ""})
+            wheel_name = build_meta.build_wheel(directory)
             wheel_path = Path(directory) / wheel_name
             self.assertTrue(wheel_path.is_file(), "backend did not create a wheel")
             with zipfile.ZipFile(wheel_path) as archive:
                 names = archive.namelist()
 
             self.assertIn("mojum/data/first_loop.json", names)
-            runtime_modules = [name for name in names if name.startswith("mojum/") and name.endswith(".py")]
+            runtime_modules = [
+                name for name in names
+                if name.startswith("mojum/") and name.endswith(".py")
+            ]
             self.assertTrue(runtime_modules, "wheel contains no Python runtime modules")
 
             forbidden_parts = {
                 "tests", "tools", "docs", ".git", ".github", "__pycache__",
                 "private", "journals", "secrets",
             }
-            forbidden_suffixes = {".sqlite", ".sqlite3", ".db", ".pem", ".key"}
+            forbidden_suffixes = (".env", ".pem", ".key", ".sqlite", ".sqlite3", ".db")
             for name in names:
                 parts = set(Path(name).parts)
                 self.assertFalse(parts & forbidden_parts, f"forbidden path packaged: {name}")
-                self.assertFalse(name.lower().endswith((".env", ".pem", ".key", ".sqlite", ".sqlite3", ".db")),
-                                 f"forbidden file packaged: {name}")
-                self.assertFalse(any(part.startswith(".env") for part in parts),
-                                 f"environment file packaged: {name}")
-                self.assertFalse(any(part.endswith(".dist-info") for part in parts[:-1]),
-                                 f"unexpected nested metadata path: {name}")
-                self.assertFalse(any(Path(name).name.endswith(suffix) for suffix in forbidden_suffixes),
-                                 f"forbidden sensitive artifact packaged: {name}")
+                self.assertFalse(
+                    any(part.lower().endswith(forbidden_suffixes) for part in parts),
+                    f"forbidden file packaged: {name}",
+                )
+                self.assertFalse(
+                    any(part.startswith(".env") for part in parts),
+                    f"environment file packaged: {name}",
+                )
+                self.assertFalse(
+                    any(part.endswith(".dist-info") for part in parts[:-1]),
+                    f"unexpected nested metadata path: {name}",
+                )
 
 
 if __name__ == "__main__":
