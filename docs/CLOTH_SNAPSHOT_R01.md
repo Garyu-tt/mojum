@@ -23,7 +23,9 @@ Numbers must be finite native integers/floats (booleans are rejected), coordinat
 - `decode_snapshot(data) -> ClothSnapshot`: validate canonical representation, schema and digest; return detached immutable tuples.
 - `verify_replay(sequence) -> tuple[str, ...]`: require 1..10,000 snapshots with contiguous ticks and identical timebase, mesh, rig, profile, solver and vertex count.
 
-Run focused tests:
+Resource limits: each snapshot is at most 1 MiB; replay admission checks a 16 MiB aggregate byte budget before decoding any entry. Oversized text is rejected by character-count preflight before ASCII encoding.
+
+## Run
 
 ```sh
 python -m unittest discover -s tests -p 'test_cloth_snapshot.py' -v
