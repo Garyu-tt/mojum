@@ -21,6 +21,7 @@ MAX_RUNS = 10000
 MAX_NAME = 80
 MAX_CPU_MS = 60_000.0
 MAX_RSS_MIB = 1_048_576.0
+MAX_INPUT_BYTES = 4 * 1024 * 1024
 
 
 class BenchmarkError(ValueError):
@@ -67,6 +68,16 @@ def _exact_mapping(value: Any, required: set[str], field: str) -> dict[str, Any]
     return value
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object while rejecting duplicate keys instead of last-wins."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise BenchmarkError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
 def _percentile_nearest_rank(values: list[float], percentile: int) -> float:
     ordered = sorted(values)
     index = max(0, math.ceil(percentile * len(ordered) / 100) - 1)
@@ -78,9 +89,9 @@ def validate_document(document: Any) -> dict[str, Any]:
     document = _exact_mapping(document, {
         "schema", "provenance", "consent", "rig", "engine", "runs"
     }, "document")
-    if document["schema"] != SCHEMA:
+    if type(document["schema"]) is not str or document["schema"] != SCHEMA:
         raise BenchmarkError("unsupported schema")
-    if document["provenance"] != "PUBLIC_SYNTHETIC":
+    if type(document["provenance"]) is not str or document["provenance"] != "PUBLIC_SYNTHETIC":
         raise BenchmarkError("only PUBLIC_SYNTHETIC fixtures are accepted")
     if document["consent"] is not True:
         raise BenchmarkError("explicit consent=true is required")
@@ -155,8 +166,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="write summary JSON (default: stdout)")
     args = parser.parse_args(argv)
     try:
-        raw = args.input.read_text(encoding="utf-8")
-        document = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(BenchmarkError(f"invalid constant {value}")))
+        with args.input.open("rb") as source:
+            raw_bytes = source.read(MAX_INPUT_BYTES + 1)
+        if len(raw_bytes) > MAX_INPUT_BYTES:
+            raise BenchmarkError(f"input exceeds {MAX_INPUT_BYTES} byte limit")
+        raw = raw_bytes.decode("utf-8")
+        document = json.loads(
+            raw,
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(BenchmarkError(f"invalid constant {value}")),
+        )
         report = summarize(document)
         rendered = json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
         if args.output:
