@@ -8,6 +8,9 @@ on:
       - 'tests/offline_package_smoke.sh'
       - 'tests/test_installable_package.py'
       - '.github/workflows/package-smoke.yml'
+  push:
+    tags:
+      - 'v[0-9]*'
 
 permissions:
   contents: read
@@ -35,9 +38,31 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Provision the wheel builder
         run: python -m pip install 'setuptools>=77.0.3' wheel
-      - name: Build, install and resume in a network namespace with only loopback
+      - name: Rebuild, install and resume in a network namespace with only loopback
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
+          source_epoch=$(git show -s --format=%ct HEAD)
+          staging=$(mktemp -d "$RUNNER_TEMP/mojum-wheel-source.XXXXXX")
+          git archive --format=tar --output="$staging/source.tar" HEAD
+          for source in "$staging/first" "$staging/second"; do
+            mkdir -- "$source"
+            tar -xf "$staging/source.tar" -C "$source"
+          done
           sudo unshare --net -- sudo -u "$(id -un)" -- env \
             "PATH=$PATH" "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" \
-            bash tests/offline_package_smoke.sh "$RUNNER_TEMP/mojum-wheel-smoke"
+            "SOURCE_DATE_EPOCH=$source_epoch" \
+            bash "$staging/first/tests/offline_package_smoke.sh" \
+            "$RUNNER_TEMP/mojum-wheel-smoke" "$staging/second" "$RELEASE_TAG"
+          cd "$RUNNER_TEMP/mojum-wheel-smoke/wheels"
+          sha256sum mojum-*.whl > SHA256SUMS
+      - name: Save the verified release wheel
+        if: github.ref_type == 'tag' && matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mojum-release-wheel
+          path: |
+            ${{ runner.temp }}/mojum-wheel-smoke/wheels/mojum-*.whl
+            ${{ runner.temp }}/mojum-wheel-smoke/wheels/SHA256SUMS
+          if-no-files-found: error
