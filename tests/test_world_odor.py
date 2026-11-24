@@ -23,9 +23,9 @@ class OdorFieldTests(unittest.TestCase):
 
     def test_source_peak_and_distance_attenuation(self):
         result = self.run_sample([
-            {"id": "near", "x_mm": 2000, "y_mm": 1000},
+            {"id": "near", "x_mm": 1500, "y_mm": 1000},
             {"id": "source", "x_mm": 1000, "y_mm": 1000},
-        ])
+        ], occlusion=False)
         values = {row["point_id"]: row["concentration"] for row in result["samples"]}
         self.assertEqual(values["source"], 100)
         self.assertLess(values["near"], values["source"])
@@ -67,6 +67,15 @@ class OdorFieldTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sample(self.profile, self.room, self.state, tick=0,
                    expected_revision="0" * 64, points=[{"id": "p", "x_mm": 1, "y_mm": 1}])
+
+    def test_forged_profile_snapshot_is_rejected(self):
+        from mojum.world_odor import OdorProfile
+        forged = OdorProfile(self.profile.room_digest, 0, 0,
+                             (("vent", True, 1000, 100),))
+        with self.assertRaises(ValueError):
+            sample(forged, self.room, self.state, tick=0,
+                   expected_revision=self.state.revision,
+                   points=[{"id": "p", "x_mm": 1000, "y_mm": 1000}])
 
     def test_profile_is_bound_to_room_geometry(self):
         other = Room(6.0, 5.0)
