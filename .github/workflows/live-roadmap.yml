@@ -8,11 +8,13 @@ on:
     paths:
       - docs/roadmap/**
       - tools/build_live_roadmap.py
+      - tools/test_live_roadmap.cjs
       - .github/workflows/live-roadmap.yml
   pull_request:
     paths:
       - docs/roadmap/**
       - tools/build_live_roadmap.py
+      - tools/test_live_roadmap.cjs
       - .github/workflows/live-roadmap.yml
 permissions:
   contents: read
@@ -28,6 +30,7 @@ jobs:
         run: |
           python -c 'from pathlib import Path; s=Path("docs/roadmap/index.html").read_text(); Path("/tmp/roadmap.js").write_text(s.split("<script>",1)[1].split("</script>",1)[0])'
           node --check /tmp/roadmap.js
+          node tools/test_live_roadmap.cjs
           python -m py_compile tools/build_live_roadmap.py
       - name: Build snapshot
         env:
