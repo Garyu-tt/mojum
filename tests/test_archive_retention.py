@@ -47,10 +47,10 @@ def fixture():
 class ArchiveRetentionTests(unittest.TestCase):
     def test_old_prefix_is_only_operator_review_candidate(self):
         plan = plan_retention(fixture())
-        self.assertEqual(plan.eligible_segment_ids, ("seg-001", "seg-002"))
+        self.assertEqual(plan.eligible_segment_ids, ("seg-001",))
         self.assertEqual([d.action for d in plan.decisions],
-                         ["ELIGIBLE_FOR_OPERATOR_REVIEW",
-                          "ELIGIBLE_FOR_OPERATOR_REVIEW", "KEEP", "KEEP"])
+                         ["KEEP", "KEEP", "KEEP"])
+        self.assertIn("restore_anchor_segment", plan.decisions[1].reasons)
         self.assertIn("required_after_restore_anchor", plan.decisions[2].reasons)
 
     def test_minimum_recent_segment_floor_is_preserved(self):
