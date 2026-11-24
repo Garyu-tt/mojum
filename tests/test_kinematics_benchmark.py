@@ -99,6 +99,10 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         with self.assertRaises(BenchmarkValidationError):
             sample(dof_count=float("nan"))
 
+    def test_oversized_integer_measurement_is_rejected(self):
+        with self.assertRaises(BenchmarkValidationError):
+            sample(cpu_p50_us=10 ** 1000)
+
     def test_ik_convergence_cannot_exceed_attempts(self):
         with self.assertRaises(BenchmarkValidationError):
             sample(ik_attempts=3, ik_converged=4)
