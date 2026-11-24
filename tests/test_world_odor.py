@@ -23,7 +23,7 @@ class OdorFieldTests(unittest.TestCase):
 
     def test_source_peak_and_distance_attenuation(self):
         result = self.run_sample([
-            {"id": "near", "x_mm": 1500, "y_mm": 1000},
+            {"id": "near", "x_mm": 1000, "y_mm": 2000},
             {"id": "source", "x_mm": 1000, "y_mm": 1000},
         ], occlusion=False)
         values = {row["point_id"]: row["concentration"] for row in result["samples"]}
