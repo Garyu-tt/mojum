@@ -9,6 +9,7 @@ import json
 import re
 
 SCHEMA = "mojum.noosphere-key-lifecycle/1"
+MAX_TIMESTAMP = (1 << 63) - 1  # signed 64-bit Unix seconds
 _PURPOSE = "noosphere-export"
 _ALGORITHM = "AES-256-GCM"
 _KEY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -23,8 +24,10 @@ class KeyLifecycleError(ValueError):
 def _timestamp(value, field, *, optional=False):
     if optional and value is None:
         return
-    if type(value) is not int or value < 0:
-        raise KeyLifecycleError(f"{field} must be a non-negative integer timestamp")
+    if type(value) is not int or not 0 <= value <= MAX_TIMESTAMP:
+        raise KeyLifecycleError(
+            f"{field} must be a non-negative signed 64-bit Unix-second timestamp"
+        )
 
 
 def validate_keyring(records, *, now):
