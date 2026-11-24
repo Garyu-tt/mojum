@@ -56,7 +56,6 @@ class SandboxPlannerTests(unittest.TestCase):
             timeout=kwargs.get("timeout", self.fake_tools[2]),
         )
 
-
     @unittest.skipUnless(
         os.name == "posix" and shutil.which("bwrap") and Path("/usr/bin/python3").is_file(),
         "requires Linux Bubblewrap and /usr/bin/python3",
@@ -94,6 +93,14 @@ class SandboxPlannerTests(unittest.TestCase):
         self.assertIn(str(self.scratch), argv)
         self.assertIn("a;not-a-shell-command", argv)
         self.assertNotIn("shell=True", argv)
+        env_index = argv.index("--setenv")
+        while env_index < len(argv) and argv[env_index] == "--setenv":
+            if argv[env_index + 1] == "GIT_TERMINAL_PROMPT":
+                self.assertEqual(argv[env_index + 2], "0")
+                break
+            env_index += 3
+        else:
+            self.fail("GIT_TERMINAL_PROMPT must be explicitly disabled inside Bubblewrap")
 
     def test_source_is_read_only_and_only_scratch_is_writable(self):
         argv = self.build()
@@ -148,6 +155,7 @@ class SandboxPlannerTests(unittest.TestCase):
     def test_sandbox_environment_does_not_inherit_parent_secrets(self):
         env = sandbox.sandbox_environment()
         self.assertEqual(set(env), {"PATH", "HOME", "LANG", "GIT_TERMINAL_PROMPT"})
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertNotIn("SSH_AUTH_SOCK", env)
 
