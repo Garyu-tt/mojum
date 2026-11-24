@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 from functools import lru_cache
+from importlib.util import module_from_spec, spec_from_file_location
 import itertools
 import json
 import os
@@ -17,6 +18,16 @@ import re
 import stat
 import subprocess
 import sys
+
+if __package__:
+    from . import _json_input
+else:
+    # Isolated Python omits the script directory from its import search path.
+    _json_spec = spec_from_file_location(
+        "_json_input", Path(__file__).resolve().with_name("_json_input.py"),
+    )
+    _json_input = module_from_spec(_json_spec)
+    _json_spec.loader.exec_module(_json_input)
 
 MAX_GPUS = 32
 MAX_INPUT_BYTES = 65536
@@ -162,7 +173,10 @@ def load_inventory(path):
     if len(raw) > MAX_INPUT_BYTES:
         raise InventoryError("GPU inventory exceeds 64 KiB")
     try:
-        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+        text = raw.decode("utf-8")
+        if _json_input.exceeds_json_depth(text):
+            raise InventoryError("GPU inventory JSON exceeds parser limits")
+        data = json.loads(text, object_pairs_hook=_unique_keys)
     except (RecursionError, ValueError) as exc:
         # A <64 KiB JSON document can still contain tens of thousands of
         # nested arrays, or a numeric token that exceeds Python integer
