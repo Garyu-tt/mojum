@@ -117,7 +117,7 @@ def plan_retention(raw: dict) -> RetentionPlan:
     if not segments:
         if anchor_seq != 0 or anchor_head != _ZERO_HEAD or restore_head != _ZERO_HEAD:
             _fail("empty archive must use the genesis anchor and head")
-        return _build_plan(restore_head, anchor_seq, (), ())
+        return _build_plan(restore_head, anchor_seq, (), (), ())
 
     normalized = []
     seen_ids = set()
@@ -209,10 +209,10 @@ def plan_retention(raw: dict) -> RetentionPlan:
             action, tuple(reasons),
         ))
 
-    return _build_plan(restore_head, anchor_seq, tuple(decisions), tuple(eligible))
+    return _build_plan(restore_head, anchor_seq, tuple(decisions), tuple(eligible), tuple(normalized))
 
 
-def _build_plan(restore_head, anchor_seq, decisions, eligible):
+def _build_plan(restore_head, anchor_seq, decisions, eligible, inventory):
     payload = {
         "schema": REPORT_SCHEMA,
         "restore_head": restore_head,
@@ -228,6 +228,7 @@ def _build_plan(restore_head, anchor_seq, decisions, eligible):
             for d in decisions
         ],
         "eligible_segment_ids": list(eligible),
+        "inventory": list(inventory),
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
