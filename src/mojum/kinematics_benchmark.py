@@ -111,10 +111,16 @@ def evaluate_ik_samples(
 
     seen: set[str] = set()
     normalized = []
+    sample_fields = {
+        "sample_id", "target_m", "achieved_m", "joints", "elapsed_ns", "peak_bytes"
+    }
     for raw in samples:
-        if type(raw) is not dict or set(raw) != {
-            "sample_id", "target_m", "achieved_m", "joints", "elapsed_ns", "peak_bytes"
-        }:
+        if type(raw) is not dict or len(raw) != len(sample_fields):
+            raise ValueError("sample has missing or unknown fields")
+        sample_keys = tuple(raw.keys())
+        if any(type(key) is not str for key in sample_keys):
+            raise ValueError("sample keys must be native strings")
+        if set(sample_keys) != sample_fields:
             raise ValueError("sample has missing or unknown fields")
         sample_id = _identifier(raw["sample_id"], "sample_id")
         if sample_id in seen:
@@ -123,7 +129,12 @@ def evaluate_ik_samples(
         target = _vector(raw["target_m"], "target_m")
         achieved = _vector(raw["achieved_m"], "achieved_m")
         joints = raw["joints"]
-        if type(joints) is not dict or set(joints) != set(limits):
+        if type(joints) is not dict or len(joints) != len(limits):
+            raise ValueError("sample joint set does not match rig limits")
+        joint_keys = tuple(joints.keys())
+        if any(type(key) is not str for key in joint_keys):
+            raise ValueError("joint keys must be native strings")
+        if set(joint_keys) != set(limits):
             raise ValueError("sample joint set does not match rig limits")
         for value in joints.values():
             if not _finite(value):
