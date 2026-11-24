@@ -35,7 +35,7 @@ def validate_keyring(records, *, now):
     normalized = []
     seen = set()
     for index, record in enumerate(records):
-        if type(record) is not dict or set(record) != _FIELDS:
+        if type(record) is not dict or any(type(field) is not str for field in record) or set(record) != _FIELDS:
             raise KeyLifecycleError(f"record {index} has an invalid shape")
         key_id = record["key_id"]
         if type(key_id) is not str or not _KEY_ID.fullmatch(key_id):
@@ -43,9 +43,9 @@ def validate_keyring(records, *, now):
         if key_id in seen:
             raise KeyLifecycleError("duplicate key_id")
         seen.add(key_id)
-        if record["purpose"] != _PURPOSE or type(record["purpose"]) is not str:
+        if type(record["purpose"]) is not str or record["purpose"] != _PURPOSE:
             raise KeyLifecycleError(f"{key_id}: unsupported purpose")
-        if record["algorithm"] != _ALGORITHM or type(record["algorithm"]) is not str:
+        if type(record["algorithm"]) is not str or record["algorithm"] != _ALGORITHM:
             raise KeyLifecycleError(f"{key_id}: unsupported algorithm")
         for field in ("created_at", "activated_at"):
             _timestamp(record[field], field)
@@ -72,10 +72,10 @@ def validate_keyring(records, *, now):
 
 def admit_key_operation(key_record, *, operation, at):
     """Return an advisory admission result for encrypt/decrypt at logical time."""
-    if type(key_record) is not dict or set(key_record) != _FIELDS:
+    if type(key_record) is not dict or any(type(field) is not str for field in key_record) or set(key_record) != _FIELDS:
         raise KeyLifecycleError("invalid key record")
     _timestamp(at, "at")
-    if operation not in ("encrypt", "decrypt") or type(operation) is not str:
+    if type(operation) is not str or operation not in ("encrypt", "decrypt"):
         raise KeyLifecycleError("operation must be encrypt or decrypt")
     # Reuse the complete schema and chronology validation for a single record.
     validate_keyring([key_record], now=max(at, key_record.get("revoked_at") or 0,
