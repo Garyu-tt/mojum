@@ -83,6 +83,24 @@ class KinematicsBenchmarkTests(unittest.TestCase):
             with self.assertRaises(BenchmarkValidationError):
                 verify_benchmark_report(report)
 
+    def test_hostile_discriminator_values_rejected_without_comparison(self):
+        class HostileValue:
+            def __eq__(self, other):
+                raise AssertionError("untrusted value equality must not execute")
+
+        for field, target in (
+            ("schema", "top"),
+            ("classification", "top"),
+            ("contacts", "nested"),
+        ):
+            report = sample()
+            if target == "top":
+                report[field] = HostileValue()
+            else:
+                report[field]["authority"] = HostileValue()
+            with self.assertRaises(BenchmarkValidationError):
+                verify_benchmark_report(report)
+
     def test_unknown_fields_rejected(self):
         report = sample()
         report["private_payload"] = "must not pass"
