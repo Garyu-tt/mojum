@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 import tempfile
 import tomllib
@@ -67,6 +68,10 @@ class PackagingContractTests(unittest.TestCase):
     def test_offline_wheel_contains_runtime_and_required_data_only(self):
         # Use the already-installed PEP 517 backend directly. No pip resolver,
         # build isolation, package index, network, or extra dependency is used.
+        # Broad stdlib-only repository matrices do not provision build tooling.
+        # The dedicated packaging workflow installs setuptools and runs this check.
+        if importlib.util.find_spec("setuptools") is None:
+            self.skipTest("setuptools is absent; dedicated packaging matrix installs it")
         from setuptools import build_meta
 
         with tempfile.TemporaryDirectory(prefix="mojum-wheel-") as directory:
