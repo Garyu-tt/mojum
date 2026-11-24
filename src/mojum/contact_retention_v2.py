@@ -163,51 +163,109 @@ class ContactRetentionV2:
             "max_observations_per_cue", "entries", "total_admitted",
             "expired_cues", "capacity_evictions", "digest",
         }
-        if type(snapshot) is not dict or set(snapshot) != keys:
+        # Reject cardinality and non-native keys before hashing/comparison.
+        if type(snapshot) is not dict or len(snapshot) != len(keys):
             raise RetentionError("invalid v2 snapshot shape")
-        if snapshot["schema"] != SCHEMA:
+        for key in snapshot:
+            if type(key) is not str or not key or len(key) > 64:
+                raise RetentionError("invalid snapshot key")
+        if set(snapshot.keys()) != keys:
+            raise RetentionError("invalid v2 snapshot shape")
+
+        schema = snapshot["schema"]
+        digest = snapshot["digest"]
+        if type(schema) is not str or schema != SCHEMA:
             raise RetentionError("unsupported contact-retention schema")
-        unsigned = {key: copy.deepcopy(value) for key, value in snapshot.items()
-                    if key != "digest"}
-        if type(snapshot["digest"]) is not str or _digest(unsigned) != snapshot["digest"]:
-            raise RetentionError("snapshot digest mismatch")
-        ledger = cls(
-            max_cues=snapshot["max_cues"],
-            retention_ticks=snapshot["retention_ticks"],
-            max_observations_per_cue=snapshot["max_observations_per_cue"],
-        )
-        if (not _exact_int(snapshot["last_tick"], -1, MAX_TOTAL)
-                or not _exact_int(snapshot["total_admitted"], 0, MAX_TOTAL)
-                or not _exact_int(snapshot["expired_cues"], 0, MAX_TOTAL)
-                or not _exact_int(snapshot["capacity_evictions"], 0, MAX_TOTAL)
-                or type(snapshot["entries"]) is not list
-                or len(snapshot["entries"]) > ledger.max_cues):
-            raise RetentionError("invalid snapshot counters or entry collection")
-        seen = set()
-        for item in snapshot["entries"]:
-            if type(item) is not dict or set(item) != {
-                "cue", "count", "mean_milli", "first_tick", "last_tick"
-            }:
+        if (type(digest) is not str or len(digest) != 64
+                or any(ch not in "0123456789abcdef" for ch in digest)):
+            raise RetentionError("invalid snapshot digest")
+
+        max_cues = snapshot["max_cues"]
+        retention_ticks = snapshot["retention_ticks"]
+        max_observations = snapshot["max_observations_per_cue"]
+        if (not _exact_int(max_cues, 1, MAX_CUES)
+                or not _exact_int(retention_ticks, 1, MAX_RETENTION_TICKS)
+                or not _exact_int(max_observations, 1, MAX_COUNT)):
+            raise RetentionError("invalid snapshot limits")
+        last_tick = snapshot["last_tick"]
+        total_admitted = snapshot["total_admitted"]
+        expired_cues = snapshot["expired_cues"]
+        capacity_evictions = snapshot["capacity_evictions"]
+        if (not _exact_int(last_tick, -1, MAX_TOTAL)
+                or not _exact_int(total_admitted, 0, MAX_TOTAL)
+                or not _exact_int(expired_cues, 0, MAX_TOTAL)
+                or not _exact_int(capacity_evictions, 0, MAX_TOTAL)):
+            raise RetentionError("invalid snapshot counters")
+
+        entries = snapshot["entries"]
+        if type(entries) is not list or len(entries) > max_cues:
+            raise RetentionError("invalid snapshot entry collection")
+
+        normalized_entries: list[dict[str, object]] = []
+        seen: set[str] = set()
+        retained_observations = 0
+        entry_keys = {"cue", "count", "mean_milli", "first_tick", "last_tick"}
+        for index, item in enumerate(entries):
+            if type(item) is not dict or len(item) != len(entry_keys):
+                raise RetentionError("invalid cue entry")
+            for key in item:
+                if type(key) is not str or not key or len(key) > 32:
+                    raise RetentionError("invalid cue entry key")
+            if set(item.keys()) != entry_keys:
                 raise RetentionError("invalid cue entry")
             cue = item["cue"]
             if type(cue) is not str or not 1 <= len(cue) <= 64 or cue in seen:
                 raise RetentionError("invalid or duplicate cue")
-            if (not _exact_int(item["count"], 1, ledger.max_observations_per_cue)
-                    or not _exact_int(item["mean_milli"], 0, 1000)
-                    or not _exact_int(item["first_tick"], 0, snapshot["last_tick"])
-                    or not _exact_int(item["last_tick"], item["first_tick"], snapshot["last_tick"])
-                    or snapshot["last_tick"] - item["last_tick"] > ledger.retention_ticks):
+            try:
+                cue.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise RetentionError("cue must be valid UTF-8") from exc
+            count = item["count"]
+            mean_milli = item["mean_milli"]
+            first_tick = item["first_tick"]
+            entry_last_tick = item["last_tick"]
+            if (not _exact_int(count, 1, max_observations)
+                    or not _exact_int(mean_milli, 0, 1000)
+                    or not _exact_int(first_tick, 0, last_tick)
+                    or not _exact_int(entry_last_tick, first_tick, last_tick)
+                    or last_tick - entry_last_tick > retention_ticks):
                 raise RetentionError("invalid cue aggregate")
             seen.add(cue)
-            ledger.entries[cue] = {
+            retained_observations += count
+            normalized_entries.append({
+                "cue": cue, "count": count, "mean_milli": mean_milli,
+                "first_tick": first_tick, "last_tick": entry_last_tick,
+            })
+
+        if (last_tick == -1 and (total_admitted != 0 or normalized_entries)
+                or total_admitted < retained_observations):
+            raise RetentionError("inconsistent snapshot totals")
+
+        # Hash only the newly built, bounded native structure. No caller object is
+        # deep-copied, sorted, or serialized before every field has been admitted.
+        unsigned = {
+            "schema": SCHEMA, "last_tick": last_tick, "max_cues": max_cues,
+            "retention_ticks": retention_ticks,
+            "max_observations_per_cue": max_observations,
+            "entries": normalized_entries, "total_admitted": total_admitted,
+            "expired_cues": expired_cues, "capacity_evictions": capacity_evictions,
+        }
+        if _digest(unsigned) != digest:
+            raise RetentionError("snapshot digest mismatch")
+
+        ledger = cls(
+            max_cues=max_cues, retention_ticks=retention_ticks,
+            max_observations_per_cue=max_observations,
+        )
+        ledger.entries = {
+            item["cue"]: {
                 "count": item["count"], "mean_milli": item["mean_milli"],
                 "first_tick": item["first_tick"], "last_tick": item["last_tick"],
             }
-        if (snapshot["last_tick"] == -1 and snapshot["total_admitted"] != 0
-                or snapshot["total_admitted"] < sum(x["count"] for x in ledger.entries.values())):
-            raise RetentionError("inconsistent snapshot totals")
-        ledger.last_tick = snapshot["last_tick"]
-        ledger.total_admitted = snapshot["total_admitted"]
-        ledger.expired_cues = snapshot["expired_cues"]
-        ledger.capacity_evictions = snapshot["capacity_evictions"]
+            for item in normalized_entries
+        }
+        ledger.last_tick = last_tick
+        ledger.total_admitted = total_admitted
+        ledger.expired_cues = expired_cues
+        ledger.capacity_evictions = capacity_evictions
         return ledger
