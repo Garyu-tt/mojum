@@ -119,6 +119,15 @@ def _segment_hits_triangle(p0, p1, tri):
 
 
 def _triangles_intersect(a, b):
+    # Normalize each pair to a local unit-scale frame before predicates. This
+    # keeps plane-side, determinant and 2D orientation tolerances dimensionless
+    # and prevents small but well-separated geometry being called coplanar.
+    origin = a[0]
+    scale = max(abs(p[k] - origin[k]) for p in (*a, *b) for k in range(3))
+    if scale == 0.0:
+        return False
+    a = tuple(tuple((p[k] - origin[k]) / scale for k in range(3)) for p in a)
+    b = tuple(tuple((p[k] - origin[k]) / scale for k in range(3)) for p in b)
     na, nb = _area2(a), _area2(b)
     da = [_dot(na, _sub(p, a[0])) for p in b]
     db = [_dot(nb, _sub(p, b[0])) for p in a]
@@ -153,8 +162,15 @@ def audit_triangle_intersections(vertices: Sequence[Sequence[float]],
         if len(set(face)) != 3 or any(i < 0 or i >= len(points) for i in face):
             raise TriangleIntersectionError("triangle indices must be unique and in range")
         tri = tuple(points[i] for i in face)
-        n = _area2(tri)
-        if _dot(n,n) <= _EPS*_EPS:
+        # Degeneracy is tested after scaling edge vectors to unit magnitude;
+        # an absolute area threshold would reject valid small-coordinate meshes.
+        e1, e2 = _sub(tri[1], tri[0]), _sub(tri[2], tri[0])
+        edge_scale = max(abs(v) for edge in (e1, e2) for v in edge)
+        if edge_scale == 0.0:
+            raise TriangleIntersectionError("degenerate triangle is not admissible")
+        unit_edges = tuple(tuple(v / edge_scale for v in edge) for edge in (e1, e2))
+        n = _cross(unit_edges[0], unit_edges[1])
+        if _dot(n, n) <= _EPS * _EPS:
             raise TriangleIntersectionError("degenerate triangle is not admissible")
         faces.append((tuple(face), tri))
     if type(candidate_pairs) not in (tuple, list):
