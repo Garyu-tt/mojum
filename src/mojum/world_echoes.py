@@ -16,6 +16,7 @@ MAX_EVENTS = 16
 MAX_AGE_TICKS = 100_000
 MAX_LEVEL_MILLI = 1_000_000
 MAX_RANGE_MM = 100_000
+MAX_COORDINATE_MM = 1_000_000_000_000
 
 
 class EchoError(ValueError):
@@ -39,7 +40,7 @@ def _finite(value):
 
 def _mm(value, name):
     scaled = value * 1000
-    if not isfinite(scaled) or abs(scaled) > MAX_RANGE_MM * 1000:
+    if not isfinite(scaled) or abs(scaled) > MAX_COORDINATE_MM:
         raise EchoError(f"{name} exceeds the supported millimetre range")
     return round(scaled)
 
@@ -163,7 +164,9 @@ def observe_first_order_echoes(room: Room, state: RoomState, events, *,
                 continue
             bx, by = bounce
             length = (hypot(sx - bx, sy - by)
-                      + hypot(lx / 1000 - bx, ly / 1000 - by))
+                      + hypot(state.x - bx, state.y - by))
+            if length * 1000 > max_range_mm + 0.5:
+                continue
             path_mm = _mm(length, "echo.path_length")
             if path_mm > max_range_mm:
                 continue
