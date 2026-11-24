@@ -52,6 +52,11 @@ class WorldEchoTests(unittest.TestCase):
                     if item["wall"] == "bottom")
         self.assertEqual(item["bounce_mm"], [5000, 0])
         self.assertEqual(item["path_length_mm"], 7000)
+        self.assertEqual(item["received_level_milli"], 125)
+
+    def test_range_gate_omits_long_echoes(self):
+        result = self.sense([event()], max_range_mm=6000)
+        self.assertEqual(result["events"][0]["echoes"], [])
 
     def test_obstacle_blocks_reflection_path(self):
         room = Room(10.0, 10.0, ((4.5, 1.0, 1.0, 3.0),))
