@@ -6,6 +6,7 @@ blocked once. These tests pin the defect on the existing v3 policy, then prove
 the versioned escape profile stays bounded and honest without reading geometry.
 """
 
+import copy
 import inspect
 import unittest
 
