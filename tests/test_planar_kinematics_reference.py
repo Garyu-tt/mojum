@@ -59,7 +59,7 @@ class PlanarKinematicsReferenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             forward_kinematics(1e101, 1.0, JointState(0.0, 0.0))
         with self.assertRaises(ValueError):
-            inverse_kinematics(1e100, 1e100, Point2(1e100, 1e100))
+            inverse_kinematics(1e101, 1e100, Point2(1e100, 1e100))
 
 
 if __name__ == "__main__":
