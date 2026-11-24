@@ -73,11 +73,19 @@ def _pairs_no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
     if type(raw) is bytes:
+        # Check the byte count before decoding so oversized input cannot force
+        # an unbounded second allocation.
+        if len(raw) > MAX_ENVELOPE_BYTES:
+            raise HeartbeatError("heartbeat envelope exceeds size limit")
         try:
             raw = raw.decode("utf-8", errors="strict")
         except UnicodeError as exc:
             raise HeartbeatError("invalid UTF-8 envelope") from exc
     if type(raw) is str:
+        # UTF-8 uses at least one byte per code point; this preflight bounds
+        # the encoding allocation before checking its exact encoded size.
+        if len(raw) > MAX_ENVELOPE_BYTES:
+            raise HeartbeatError("heartbeat envelope exceeds size limit")
         try:
             encoded = raw.encode("utf-8", errors="strict")
         except UnicodeError as exc:
