@@ -11,7 +11,7 @@ Do not put source diffs, prompts, tokens, private Noosphere records, user data, 
 ## API
 
 - `enqueue(...)`: insert a task once by unique idempotency key. A duplicate key returns the original task without mutating its original metadata.
-- `claim(...)`: atomically claim the oldest queued task or reclaim the oldest expired lease. SQLite `BEGIN IMMEDIATE` serializes concurrent claimers.
+- `claim(...)`: atomically claim the oldest queued task first; only when no queued task exists, reclaim the oldest expired lease. This prevents a repeatedly expiring blocked task from monopolizing the queue head while independent queued work exists. SQLite `BEGIN IMMEDIATE` serializes concurrent claimers.
 - `heartbeat(...)`: extend a lease only when owner, opaque lease token, and unexpired lease all match.
 - `finish(..., success=True|False)`: transition a live lease to `done` or `failed`.
 - `release(...)`: return a live lease to `queued`, preserving attempt count.
