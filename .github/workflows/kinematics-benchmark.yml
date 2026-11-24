@@ -1,0 +1,32 @@
+name: kinematics-benchmark-contract
+on:
+  push:
+    branches: ["build/702-kinematics-benchmark-contract-20261124"]
+  pull_request:
+    paths:
+      - "src/mojum/kinematics_benchmark.py"
+      - "tests/test_kinematics_benchmark.py"
+      - "docs/KINEMATICS_BENCHMARK_R01.md"
+      - ".github/workflows/kinematics-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stdlib-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused offline tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          PYTHONPATH=src python -m unittest discover -s tests -p 'test_kinematics_benchmark.py' -v
