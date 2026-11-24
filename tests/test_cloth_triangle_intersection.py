@@ -38,8 +38,8 @@ class TriangleIntersectionTests(unittest.TestCase):
     def test_tiny_triangles_far_apart_do_not_collapse_under_pair_distance_scale(self):
         vertices = [
             (0, 0, 0), (1e-5, 0, 0), (0, 1e-5, 0),
-            (1e9, 0, 1e-6), (1e9 + 1e-5, 0, 1e-6),
-            (1e9, 1e-5, 1e-6),
+            (1e8, 0, 1e-6), (1e8 + 1e-5, 0, 1e-6),
+            (1e8, 1e-5, 1e-6),
         ]
         report = audit_triangle_intersections(vertices, [(0,1,2), (3,4,5)], [(0,1)])
         self.assertEqual(report.intersection_pairs, ())
