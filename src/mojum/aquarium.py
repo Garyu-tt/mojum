@@ -1046,7 +1046,9 @@ def main():
         )
         if aquarium.motor is not None:
             checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"
-        print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
+        # Escape Unicode so redirected legacy consoles can emit the checkpoint
+        # after committing ticks, including when the genome ID is non-ASCII.
+        print(json.dumps(checkpoint, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":

@@ -57,23 +57,25 @@ class InstallableAquariumTests(unittest.TestCase):
 
     def test_cli_uses_selected_genome_identity_on_start_and_resume(self):
         seed = json.loads(files("mojum").joinpath("data", "genesis_seed.json").read_text(encoding="utf-8"))
-        seed["genome_id"] = "portable-fixture-copy"
+        seed["genome_id"] = "portable-fixture-\u661f"
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             genome = root / "custom-seed.json"
             genome.write_text(json.dumps(seed), encoding="utf-8")
-            env = {**os.environ, "PYTHONPATH": str(SOURCE)}
+            # CP1251 cannot represent the selected genome ID in redirected output.
+            env = {**os.environ, "PYTHONPATH": str(SOURCE), "PYTHONIOENCODING": "cp1251"}
             command = [sys.executable, "-m", "mojum.aquarium",
                        "--db", str(root / "custom.sqlite3"), "--neural-mode", "disabled"]
 
             def run(ticks):
                 return json.loads(subprocess.check_output(
                     [*command, "--genome", str(genome), "--ticks", str(ticks)],
-                    cwd=root, env=env, text=True, timeout=60))
+                    cwd=root, env=env, encoding="cp1251", timeout=60))
 
             first = run(2)
             resumed = run(1)
             self.assertEqual(first["agent_id"], seed["genome_id"])
+            self.assertEqual((first["tick"], first["stored_events"]), (2, 3))
             self.assertEqual(resumed["agent_id"], first["agent_id"])
             self.assertEqual((resumed["tick"], resumed["stored_events"]), (3, 4))
 
