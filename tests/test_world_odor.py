@@ -1,6 +1,6 @@
 import unittest
 
-from mojum.world_room import Room, initial_state, advance
+from mojum.world_room import Room, RoomState, initial_state, advance, _revision
 from mojum.world_odor import create_profile, sample, verify_receipt
 
 
@@ -83,6 +83,26 @@ class OdorFieldTests(unittest.TestCase):
             sample(self.profile, other, self.state, tick=0,
                    expected_revision=self.state.revision,
                    points=[{"id": "p", "x_mm": 1000, "y_mm": 1000}])
+
+    def test_create_profile_rejects_post_construction_room_obstacle_forgery(self):
+        forged = Room(5.0, 5.0)
+        object.__setattr__(forged, "obstacles", ((4.5, 4.5, 1.0, 1.0),))
+        with self.assertRaisesRegex(ValueError, "canonical room geometry"):
+            create_profile(
+                forged, created_tick=0, decay_per_tick=0,
+                sources=[{"id": "vent", "x_mm": 1000, "y_mm": 1000, "concentration": 1}],
+            )
+
+    def test_sample_rejects_post_construction_room_dimension_forgery(self):
+        forged = Room(5.0, 5.0)
+        object.__setattr__(forged, "width", 0.0)
+        forged_state = RoomState(0, 1.0, 1.0, _revision(forged, 0, 1.0, 1.0))
+        with self.assertRaisesRegex(ValueError, "canonical room geometry"):
+            sample(
+                self.profile, forged, forged_state, tick=0,
+                expected_revision=forged_state.revision,
+                points=[{"id": "nose", "x_mm": 1000, "y_mm": 1000}],
+            )
 
 
 if __name__ == "__main__":
