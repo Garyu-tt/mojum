@@ -66,6 +66,17 @@ class WorldTemperatureTests(unittest.TestCase):
     def test_source_count_bound(self):
         with self.assertRaises(ValueError): self.sample(sources=[source(str(i)) for i in range(65)])
 
+    def test_oversized_rows_are_rejected_before_key_validation(self):
+        oversized_source = source()
+        oversized_source.update({f"extra-{i}": i for i in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "fields do not match schema"):
+            self.sample(sources=[oversized_source])
+
+        oversized_point = point()
+        oversized_point.update({f"extra-{i}": i for i in range(10_000)})
+        with self.assertRaisesRegex(ValueError, "fields do not match schema"):
+            self.sample(points=[oversized_point])
+
     def test_source_and_point_reject_hostile_string_subclass_keys(self):
         class HostileKey(str):
             __hash__ = str.__hash__
