@@ -6,6 +6,7 @@ does not run a solver, load assets, or establish physical correctness.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 from dataclasses import dataclass
@@ -64,7 +65,10 @@ def _vectors(value: Any, name: str) -> tuple[tuple[float, float, float], ...]:
         for component in vector:
             if type(component) not in (int, float):
                 raise ClothSnapshotError(f"{name}[{index}] components must be native numbers")
-            number = float(component)
+            try:
+                number = float(component)
+            except (OverflowError, ValueError) as exc:
+                raise ClothSnapshotError(f"{name}[{index}] component is outside finite bounds") from exc
             if not math.isfinite(number) or abs(number) > 1_000_000:
                 raise ClothSnapshotError(f"{name}[{index}] component is outside finite bounds")
             row.append(number)
@@ -110,7 +114,7 @@ def _state(value: Any) -> dict[str, Any]:
 
 def encode_snapshot(state: Mapping[str, Any]) -> bytes:
     """Return canonical UTF-8 envelope for one PUBLIC_SYNTHETIC state."""
-    if not isinstance(state, dict) or type(state) is not dict:
+    if type(state) is not dict:
         raise ClothSnapshotError("state must be an exact dictionary")
     normalized = _state(state)
     payload = _canonical(normalized)
@@ -157,7 +161,7 @@ def decode_snapshot(data: bytes | str) -> ClothSnapshot:
     payload = _canonical(normalized)
     expected = hashlib.sha256(payload).hexdigest()
     supplied = _text(parsed["sha256"], "sha256", 64, digest=True)
-    if not hashlib.compare_digest(expected, supplied):
+    if not hmac.compare_digest(expected, supplied):
         raise ClothSnapshotError("snapshot digest mismatch")
     if _canonical({"schema": SCHEMA, "state": normalized, "sha256": expected}) != raw:
         raise ClothSnapshotError("snapshot is not canonical")
