@@ -57,7 +57,7 @@ def observe_thermal_field(room, state, *, tick, expected_revision, profile, poin
         raise ThermalFieldError("thermal tick must equal current room tick")
     if (type(expected_revision) is not str or type(state.revision) is not str
             or state.revision != expected_revision
-            or state.revision != _revision(room, state.tick, state.x, state.y)):
+            or state.revision != _revision(room, state)):
         raise ThermalFieldError("stale or corrupted room revision")
     if type(profile) is not ThermalProfile:
         raise ThermalFieldError("exact ThermalProfile required")
