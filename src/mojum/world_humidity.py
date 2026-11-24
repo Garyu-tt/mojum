@@ -11,7 +11,7 @@ MAX_DIMENSION_MM = 1_000_000_000
 MAX_GRADIENT = 100_000
 MAX_TICK_DRIFT = 1_000
 MAX_OBSERVATION_KEY_LENGTH = len("relative_humidity_milli_percent")
-_HEX = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
+_HEX = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 
 
 @dataclass(frozen=True)
