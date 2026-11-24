@@ -4,6 +4,12 @@ set -euo pipefail
 umask 077
 unset PYTHONPATH PYTHONHOME
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd)
+comparison_repo=
+if [[ -n ${2:-} ]]; then
+    comparison_repo=$(cd -- "$2" && pwd)
+    : "${SOURCE_DATE_EPOCH:?supply a fixed source timestamp to compare wheel builds}"
+fi
+release_tag=${3:-}
 mkdir -- "${1:?supply a new working directory for the smoke test}"
 cd -- "$1"
 
@@ -16,13 +22,21 @@ if interfaces != {"lo"}:
     raise SystemExit(f"offline smoke requires a loopback-only namespace, found {interfaces}")
 PY
 
-python -I -m pip --isolated --disable-pip-version-check wheel --no-index --no-deps \
-    --no-build-isolation --no-cache-dir --wheel-dir wheels "$repo"
+build_wheel() {
+    python -I -m pip --isolated --disable-pip-version-check wheel --no-index --no-deps \
+        --no-build-isolation --no-cache-dir --wheel-dir "$1" "$2"
+}
+
+build_wheel wheels "$repo"
+if [[ -n $comparison_repo ]]; then
+    build_wheel comparison-wheels "$comparison_repo"
+    cmp -- wheels/mojum-*.whl comparison-wheels/mojum-*.whl
+fi
 python -I -m venv runtime
 runtime/bin/python -I -m pip --isolated --disable-pip-version-check install \
     --no-index --no-cache-dir wheels/mojum-*.whl
 
-runtime/bin/python -I - "$repo/LICENSE" <<'PY'
+runtime/bin/python -I - "$repo/LICENSE" "$release_tag" <<'PY'
 import json
 import subprocess
 import sys
@@ -46,6 +60,9 @@ def run_module(module, *args):
 
 assert Path(mojum.__file__).resolve().is_relative_to(Path(sysconfig.get_path("purelib")).resolve())
 installed = distribution("mojum")
+tag = sys.argv[2]
+if tag and tag != f"v{installed.version}":
+    raise SystemExit(f"release tag {tag!r} does not match installed version {installed.version!r}")
 assert installed.metadata["License-Expression"] == "GPL-3.0-or-later"
 assert installed.metadata.get_all("License-File") == ["LICENSE"]
 licenses = [path for path in installed.files or () if path.parts[-2:] == ("licenses", "LICENSE")]
