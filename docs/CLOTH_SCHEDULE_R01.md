@@ -3,7 +3,7 @@
 Status: opt-in scheduling contract; not a cloth solver and not a CPU-time guarantee.
 
 ## Contract
-The versioned schema moj um.cloth.schedule/1 is a pure-stdlib, solver-neutral decision function. The caller supplies a monotonically increasing logical tick and estimated work counts. At most one update decision is returned for that tick.
+The versioned schema `mojum.cloth.schedule/1` is a pure-stdlib, solver-neutral decision function. The caller supplies a monotonically increasing logical tick and estimated work counts. At most one update decision is returned for that tick.
 
 | Profile | Tick divisor | Max vertices | Max constraints | Catch-up |
 |---|---:|---:|---:|---:|
@@ -26,6 +26,6 @@ These are conservative starting ceilings, not measured performance claims. CUSTO
 This does not run MuJoCo/Jolt/PBD, simulate fabric, estimate CPU milliseconds, guarantee realtime deadlines, generate LOD meshes, persist snapshots or integrate with Aquarium. Vertex/constraint ceilings are caller-supplied admission metadata, not proof of solver memory or runtime cost. OFF remains the default until a real solver adapter is separately implemented and validated.
 
 ## Verification
-PYTHONPATH=src python -m unittest tests.test_cloth_schedule -v
+`PYTHONPATH=src python -m unittest discover -s tests -p 'test_cloth_schedule.py' -v`
 
 Python 3.11+, standard library only, offline.
