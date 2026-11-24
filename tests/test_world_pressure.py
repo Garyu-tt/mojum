@@ -75,8 +75,8 @@ class PressureTests(unittest.TestCase):
 
     def test_forged_room_geometry_is_revalidated_before_sampling(self):
         cases = (
-            ("width", -1.0, ()),
-            ("obstacles", ((4.5, 3.5, 1.0, 1.0),),),
+            ("width", -1.0),
+            ("obstacles", ((4.5, 3.5, 1.0, 1.0),)),
         )
         for attribute, forged_value, _ in cases:
             with self.subTest(attribute=attribute):
