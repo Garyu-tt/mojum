@@ -26,12 +26,12 @@ class SandboxPlannerTests(unittest.TestCase):
         self.bin = self.repo / "bin"
         self.bin.mkdir()
         self.runner = self.bin / "test-runner"
-        self.runner.write_text("#!/bin/false\\n", encoding="utf-8")
+        self.runner.write_text("#!/bin/false\n", encoding="utf-8")
         self.runner.chmod(0o700)
         self.fake_tools = []
         for name in ("bwrap", "prlimit", "timeout"):
             tool = self.root / name
-            tool.write_text("#!/bin/false\\n", encoding="utf-8")
+            tool.write_text("#!/bin/false\n", encoding="utf-8")
             tool.chmod(0o700)
             self.fake_tools.append(tool)
         self.limits = sandbox.SandboxLimits(
@@ -105,7 +105,7 @@ class SandboxPlannerTests(unittest.TestCase):
             sandbox.build_sandbox_argv(self.repo, self.repo / "nested", [str(self.runner)], self.limits)
 
     def test_rejects_unbounded_or_non_native_command_values(self):
-        for command in ([], [True], [str(self.runner), "\\x00"], [str(self.runner)] + ["x"] * 128):
+        for command in ([], [True], [str(self.runner), "\x00"], [str(self.runner)] + ["x"] * 128):
             with self.subTest(command=repr(command)), self.assertRaises(sandbox.SandboxError):
                 self.build(command=command)
 
