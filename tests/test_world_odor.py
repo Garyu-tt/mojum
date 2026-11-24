@@ -82,6 +82,24 @@ class WorldOdorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.sample(sources=[Derived("s", 1000, 1000, 10)])
 
+    def test_forged_room_dimensions_rejected_after_construction(self):
+        room = Room(10, 10)
+        state = initial_state(room, 1, 1)
+        object.__setattr__(room, "width", -1)
+        with self.assertRaises(ValueError):
+            sample_odor_field(
+                room, state, [self.source], [SamplePoint("p", 1000, 1000)], consent=True,
+            )
+
+    def test_forged_obstacle_bounds_rejected_after_construction(self):
+        room = Room(10, 10)
+        state = initial_state(room, 1, 1)
+        object.__setattr__(room, "obstacles", ((9, 9, 5, 5),))
+        with self.assertRaises(ValueError):
+            sample_odor_field(
+                room, state, [self.source], [SamplePoint("p", 1000, 1000)], consent=True,
+            )
+
     def test_stale_room_revision_rejected(self):
         from mojum.world_room import RoomState
         with self.assertRaises(ValueError):
