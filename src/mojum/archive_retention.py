@@ -85,9 +85,9 @@ def plan_retention(raw: dict) -> RetentionPlan:
     }
     if set(raw) != required:
         _fail("input fields do not match schema")
-    if raw["schema"] != SCHEMA or type(raw["schema"]) is not str:
+    if type(raw["schema"]) is not str or raw["schema"] != SCHEMA:
         _fail("unsupported schema")
-    if raw["consent"] != "PUBLIC_SYNTHETIC" or type(raw["consent"]) is not str:
+    if type(raw["consent"]) is not str or raw["consent"] != "PUBLIC_SYNTHETIC":
         _fail("explicit PUBLIC_SYNTHETIC consent required")
 
     current_tick = raw["current_tick"]
@@ -164,9 +164,11 @@ def plan_retention(raw: dict) -> RetentionPlan:
 
     # Anchor must be the genesis boundary or an exact segment boundary.
     anchor_matches = anchor_seq == 0 and anchor_head == normalized[0]["previous_head_sha256"]
+    if anchor_seq > 0:
+        anchor_matches = False
     for segment in normalized:
         if segment["end_sequence"] == anchor_seq and segment["head_sha256"] == anchor_head:
-            anchor_matches = True
+            anchor_matches = segment["verified"]
     if not anchor_matches:
         _fail("restore anchor is not a verified sequence boundary")
     if previous_head != restore_head:
