@@ -42,6 +42,8 @@ import sys
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import quote
 
+from ._json_nesting import exceeds_json_depth
+
 SCHEMA = "mojum.merge-gate.v1"
 MAX_INPUT_BYTES = 4 * 1024 * 1024
 
@@ -660,8 +662,10 @@ def _unique_snapshot_object(pairs: list[tuple[str, object]]) -> dict[str, object
 def _decode_snapshot_bytes(data: bytes) -> object:
     """Reject parser-depth exhaustion and ambiguous JSON object fields."""
     try:
-        return json.loads(data.decode("utf-8"),
-                          object_pairs_hook=_unique_snapshot_object)
+        text = data.decode("utf-8")
+        if exceeds_json_depth(text):
+            raise SnapshotError("snapshot JSON exceeds parser nesting limit")
+        return json.loads(text, object_pairs_hook=_unique_snapshot_object)
     except UnicodeDecodeError as exc:
         raise SnapshotError("snapshot JSON is not valid UTF-8") from exc
     except RecursionError as exc:

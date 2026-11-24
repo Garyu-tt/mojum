@@ -18,6 +18,11 @@ import stat
 import subprocess
 import sys
 
+if __package__:
+    from ._json_input import exceeds_json_depth
+else:
+    from _json_input import exceeds_json_depth
+
 MAX_GPUS = 32
 MAX_INPUT_BYTES = 65536
 DEFAULT_MODEL_MIB = 15360
@@ -162,7 +167,10 @@ def load_inventory(path):
     if len(raw) > MAX_INPUT_BYTES:
         raise InventoryError("GPU inventory exceeds 64 KiB")
     try:
-        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+        text = raw.decode("utf-8")
+        if exceeds_json_depth(text):
+            raise InventoryError("GPU inventory JSON exceeds parser limits")
+        data = json.loads(text, object_pairs_hook=_unique_keys)
     except (RecursionError, ValueError) as exc:
         # A <64 KiB JSON document can still contain tens of thousands of
         # nested arrays, or a numeric token that exceeds Python integer

@@ -165,7 +165,7 @@ class FanoutContract(unittest.TestCase):
 
     def test_malformed_backend_json_cannot_overreport_free_slots(self):
         # The last duplicate is_processing value would otherwise turn a busy
-        # slot into a free one; deep JSON can also exhaust parser recursion.
+        # slot into a free one. Bounded response bytes still allow deep JSON.
         class Response:
             status = 200
             headers = {"Content-Type": "application/json"}
@@ -187,12 +187,18 @@ class FanoutContract(unittest.TestCase):
              b'"is_processing":false}]', "duplicate backend JSON field"),
             (b"[" * 20000 + b"0" + b"]" * 20000,
              "invalid JSON response"),
+            (("[" * 257 + "0" + "]" * 257).encode("utf-16"),
+             "invalid JSON response"),
         )
         for payload, message in cases:
             with self.subTest(message=message):
                 fake = Mock(open=Mock(return_value=Response(payload)))
                 with self.assertRaisesRegex(f.FanoutError, message):
                     f._request_json(18180, "/slots", opener=fake)
+
+        healthy = {"status": "ok", "text": '\\"' + "[{}]" * 300}
+        fake = Mock(open=Mock(return_value=Response(json.dumps(healthy).encode("utf-16"))))
+        self.assertEqual(f._request_json(18180, "/health", opener=fake), healthy)
 
     def test_loopback_allowlist_and_post_paths(self):
         for port,path in ((22,"/health"),(18080,"/health"),

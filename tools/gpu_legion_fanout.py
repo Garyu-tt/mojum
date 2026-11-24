@@ -26,6 +26,11 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
 
+if __package__:
+    from ._json_input import backend_json_text, exceeds_json_depth
+else:
+    from _json_input import backend_json_text, exceeds_json_depth
+
 PORTS = (18180, 18181)
 MODEL = "GPT20B"
 MAX_LOGICAL_AGENTS = 300
@@ -79,8 +84,11 @@ def _request_json(port: int, path: str, *, body=None, timeout=5, opener=None):
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
         raise FanoutError(f"loopback endpoint unavailable: {type(exc).__name__}") from exc
     try:
+        text = backend_json_text(data)
+        if exceeds_json_depth(text):
+            raise FanoutError("invalid JSON response")
         return json.loads(
-            data,
+            text,
             object_pairs_hook=lambda pairs: _unique_json_object(pairs, origin="backend"),
             parse_constant=lambda x: (_ for _ in ()).throw(
                 FanoutError("nonfinite JSON")),
