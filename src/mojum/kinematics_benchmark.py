@@ -48,7 +48,13 @@ def _finite_number(value: Any, name: str, minimum: float = 0.0, maximum: float =
 
 
 def _mapping(value: Any, name: str, keys: set[str]) -> dict[str, Any]:
-    if type(value) is not dict or set(value) != keys:
+    if type(value) is not dict or len(value) != len(keys):
+        raise BenchmarkValidationError(f"{name} must be a bounded plain dict with exactly: {', '.join(sorted(keys))}")
+    supplied = tuple(value.keys())
+    maximum_key_length = max(map(len, keys))
+    if any(type(key) is not str or len(key) > maximum_key_length for key in supplied):
+        raise BenchmarkValidationError(f"{name} keys must be bounded native strings")
+    if set(supplied) != keys:
         raise BenchmarkValidationError(f"{name} must be a plain dict with exactly: {', '.join(sorted(keys))}")
     return value
 
@@ -127,8 +133,15 @@ def build_benchmark_report(
 def verify_benchmark_report(report: Any) -> bool:
     """Fail-closed verification of a report previously produced by this module."""
     keys = {"schema", "classification", "rig", "solver", "case", "fk", "ik", "contacts", "resources", "sha256"}
-    if type(report) is not dict or set(report) != keys:
-        raise BenchmarkValidationError("report has an unexpected shape")
+    report = _mapping(report, "report", keys)
+    # Validate every nested mapping before canonical serialization/hashing.
+    rig = _mapping(report["rig"], "rig", {"id", "revision", "dof_count"})
+    solver = _mapping(report["solver"], "solver", {"name", "version", "license"})
+    case = _mapping(report["case"], "case", {"id", "seed"})
+    fk = _mapping(report["fk"], "fk", {"samples", "max_position_error_um"})
+    ik = _mapping(report["ik"], "ik", {"attempts", "converged", "max_residual_um", "joint_limit_violations"})
+    contacts = _mapping(report["contacts"], "contacts", {"events", "authority"})
+    resources = _mapping(report["resources"], "resources", {"cpu_p50_us", "cpu_p95_us", "max_rss_kib"})
     digest = report["sha256"]
     if type(digest) is not str or not _SHA256_RE.fullmatch(digest):
         raise BenchmarkValidationError("sha256 must be 64 lowercase hexadecimal characters")
@@ -136,13 +149,6 @@ def verify_benchmark_report(report: Any) -> bool:
     if _canonical_digest(payload) != digest:
         raise BenchmarkValidationError("report digest mismatch")
     # Re-run full semantic validation; do not trust a matching digest alone.
-    rig = _mapping(payload["rig"], "rig", {"id", "revision", "dof_count"})
-    solver = _mapping(payload["solver"], "solver", {"name", "version", "license"})
-    case = _mapping(payload["case"], "case", {"id", "seed"})
-    fk = _mapping(payload["fk"], "fk", {"samples", "max_position_error_um"})
-    ik = _mapping(payload["ik"], "ik", {"attempts", "converged", "max_residual_um", "joint_limit_violations"})
-    contacts = _mapping(payload["contacts"], "contacts", {"events", "authority"})
-    resources = _mapping(payload["resources"], "resources", {"cpu_p50_us", "cpu_p95_us", "max_rss_kib"})
     rebuilt = build_benchmark_report(
         rig_id=rig["id"], rig_revision=rig["revision"], dof_count=rig["dof_count"],
         solver_name=solver["name"], solver_version=solver["version"], solver_license=solver["license"],
