@@ -44,6 +44,8 @@ def _real_directory(value: str | os.PathLike[str], name: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
         raise SandboxError(f"{name} must be absolute")
+    if any(parent.is_symlink() for parent in (path, *path.parents)):
+        raise SandboxError(f"{name} path contains a symlink")
     try:
         info = path.lstat()
     except OSError as exc:
