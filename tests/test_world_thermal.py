@@ -3,6 +3,11 @@ from mojum.world_room import Room, initial_state, advance
 from mojum.world_thermal import ThermalFieldError, ThermalProfile, observe_thermal_field
 
 
+class HostileStr(str):
+    def __eq__(self, other):
+        raise AssertionError("hostile revision equality must not run")
+
+
 class WorldThermalTests(unittest.TestCase):
     def setUp(self):
         self.room = Room(4, 3, ((1, 1, 1, 1),))
@@ -39,6 +44,14 @@ class WorldThermalTests(unittest.TestCase):
     def test_stale_revision_rejected(self):
         with self.assertRaises(ThermalFieldError):
             self.observe(expected_revision="0" * 64)
+
+    def test_hostile_state_revision_rejected_before_comparison(self):
+        from dataclasses import replace
+        hostile = replace(self.state, revision=HostileStr(self.state.revision))
+        with self.assertRaisesRegex(ThermalFieldError, "stale or corrupted"):
+            observe_thermal_field(self.room, hostile, tick=0,
+                expected_revision=self.state.revision, profile=ThermalProfile(),
+                points_mm=[(0, 0)])
 
     def test_tick_mismatch_rejected(self):
         with self.assertRaises(ThermalFieldError):
