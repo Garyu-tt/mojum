@@ -1,0 +1,57 @@
+import unittest
+
+from mojum.cloth_triangle_intersection import TriangleIntersectionError, audit_triangle_intersections
+
+
+class TriangleIntersectionTests(unittest.TestCase):
+    def test_crossing_non_coplanar_triangles(self):
+        vertices = [(0,0,0),(2,0,0),(0,2,0),(0.5,0.5,-1),(0.5,0.5,1),(1.5,0.5,0)]
+        self.assertEqual(audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ((0,1),))
+
+    def test_separated_triangles(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
+        self.assertEqual(audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(1,0)]).intersection_pairs, ())
+
+    def test_coplanar_overlap(self):
+        vertices = [(0,0,0),(2,0,0),(0,2,0),(0.5,0.5,0),(2,0.5,0),(0.5,2,0)]
+        self.assertEqual(audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ((0,1),))
+
+    def test_coplanar_disjoint(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(2,2,0),(3,2,0),(2,3,0)]
+        self.assertEqual(audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ())
+
+    def test_shared_vertex_pair_is_ignored(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,1),(1,1,1)]
+        report = audit_triangle_intersections(vertices, [(0,1,2),(0,3,4)], [(0,1)])
+        self.assertEqual((report.skipped_adjacent, report.tested_count), (1,0))
+
+    def test_boundary_touch_counts(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(1,0,0),(2,0,0),(1,1,0)]
+        self.assertEqual(audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)]).intersection_pairs, ((0,1),))
+
+    def test_duplicate_pair_rejected(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
+        with self.assertRaises(TriangleIntersectionError):
+            audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1),(1,0)])
+
+    def test_degenerate_triangle_rejected(self):
+        vertices = [(0,0,0),(1,0,0),(2,0,0),(0,0,2),(1,0,2),(0,1,2)]
+        with self.assertRaises(TriangleIntersectionError):
+            audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(0,1)])
+
+    def test_hostile_types_rejected(self):
+        vertices = [(0,0,0),(1,0,0),(0,1,0),(0,0,2),(1,0,2),(0,1,2)]
+        with self.assertRaises(TriangleIntersectionError):
+            audit_triangle_intersections(vertices, [(0,1,2),(3,4,5)], [(False,1)])
+
+    def test_deterministic_digest_and_order(self):
+        vertices = [(0,0,0),(2,0,0),(0,2,0),(0.5,0.5,-1),(0.5,0.5,1),(1.5,0.5,0),(0,0,3),(1,0,3),(0,1,3)]
+        triangles = [(0,1,2),(3,4,5),(6,7,8)]
+        a = audit_triangle_intersections(vertices, triangles, [(1,0),(2,0)])
+        b = audit_triangle_intersections(vertices, triangles, [(0,2),(0,1)])
+        self.assertEqual(a, b)
+        self.assertEqual(len(a.digest_sha256), 64)
+
+
+if __name__ == "__main__":
+    unittest.main()
