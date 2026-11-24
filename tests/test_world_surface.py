@@ -95,6 +95,15 @@ class SurfaceMapTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SurfaceMap("not-a-hash", 5000, 4000, ())
 
+    def test_hostile_schema_string_is_rejected_before_equality(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("schema comparison ran before type admission")
+            __hash__ = str.__hash__
+
+        with self.assertRaisesRegex(ValueError, "unsupported surface schema"):
+            SurfaceMap(REV, 5000, 4000, (), schema=HostileString(SCHEMA))
+
 
 if __name__ == "__main__":
     unittest.main()
