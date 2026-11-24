@@ -94,7 +94,9 @@ class SandboxPlannerTests(unittest.TestCase):
         link = self.root / "scratch-link"
         link.symlink_to(self.scratch, target_is_directory=True)
         with self.assertRaises(sandbox.SandboxError):
-            self.build(**{"scratch": link})
+            sandbox.build_sandbox_argv(self.repo, link, [str(self.runner)], self.limits,
+                                        bwrap=self.fake_tools[0], prlimit=self.fake_tools[1],
+                                        timeout=self.fake_tools[2])
         with self.assertRaises(sandbox.SandboxError):
             sandbox.build_sandbox_argv(self.repo, self.repo / "nested", [str(self.runner)], self.limits)
 
@@ -105,7 +107,7 @@ class SandboxPlannerTests(unittest.TestCase):
 
     def test_rejects_relative_missing_or_out_of_workspace_executable(self):
         for command in (["python", "-m", "unittest"], ["/missing/test-runner"],
-                        ["/tmp/test-runner"]):
+                        ["/bin/sh", "-c", "id"]):
             with self.subTest(command=command), self.assertRaises(sandbox.SandboxError):
                 self.build(command=command)
 
