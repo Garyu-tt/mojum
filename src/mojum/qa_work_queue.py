@@ -157,7 +157,7 @@ def enqueue(path: str, *, idempotency_key: str, kind: str, pr_number: int,
 
 
 def claim(path: str, *, owner: str, now: int, lease_ms: int) -> Task | None:
-    """Atomically claim the oldest queued or expired lease; exactly one concurrent winner."""
+    """Claim queued work before reclaiming expired leases; exactly one concurrent winner."""
     worker = _text(owner, "owner", _MAX_OWNER, _KEY)
     clock = _integer(now, "now")
     duration = _integer(lease_ms, "lease_ms", 1)
@@ -171,7 +171,7 @@ def claim(path: str, *, owner: str, now: int, lease_ms: int) -> Task | None:
             row = db.execute(
                 """SELECT * FROM qa_tasks
                 WHERE status='queued' OR (status='leased' AND lease_expires_at<=?)
-                ORDER BY created_at,task_id LIMIT 1""", (clock,)
+                ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, created_at, task_id LIMIT 1""", (clock,)
             ).fetchone()
             if row is None:
                 db.commit()
