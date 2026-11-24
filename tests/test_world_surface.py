@@ -112,6 +112,18 @@ class SurfaceMapTests(unittest.TestCase):
             SurfaceMap(REV, 5000, 4000, (), schema=HostileString(SCHEMA))
 
 
+    def test_constructor_revalidates_mutated_patch_before_hashing_id(self):
+        class HostileString(str):
+            def __hash__(self):
+                raise AssertionError("hostile hash must not execute")
+            def __eq__(self, other):
+                raise AssertionError("hostile equality must not execute")
+
+        p = patch()
+        object.__setattr__(p, "patch_id", HostileString("hostile"))
+        with self.assertRaisesRegex(ValueError, "invalid patch or material identifier"):
+            self.make_map([p])
+
     def test_post_construction_patch_mutation_rejected_by_public_uses(self):
         p = patch()
         m = self.make_map([p])
