@@ -15,7 +15,7 @@ The caller supplies:
 - a trusted restore-anchor sequence/head;
 - the expected final restore head.
 
-The anchor must be genesis (sequence zero and the zero digest) or an exact verified segment boundary. All segments after the anchor are retained because they are required to replay to the declared restore head. Older segments are eligible for operator review only when they are old enough, verified, represented in enough distinct failure domains, and outside the recent-segment floor.
+The anchor must be genesis (sequence zero and the zero digest) or an exact verified segment boundary. The segment ending exactly at the anchor is also retained as the checkpoint bridge, and all later segments are retained because they are required to replay to the declared restore head. Only older prefix segments are eligible for operator review only when they are old enough, verified, represented in enough distinct failure domains, and outside the recent-segment floor.
 
 ## Output and safety
 
