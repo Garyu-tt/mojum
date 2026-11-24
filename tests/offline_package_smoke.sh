@@ -39,6 +39,11 @@ def run(script, *args):
     return json.loads(subprocess.check_output(command, text=True))
 
 
+def run_module(module, *args):
+    command = [sys.executable, "-I", "-m", module, *args]
+    return json.loads(subprocess.check_output(command, text=True, timeout=60))
+
+
 assert Path(mojum.__file__).resolve().is_relative_to(Path(sysconfig.get_path("purelib")).resolve())
 installed = distribution("mojum")
 assert installed.metadata["License-Expression"] == "GPL-3.0-or-later"
@@ -122,6 +127,43 @@ Path("bright.json").write_text(json.dumps(graph), encoding="utf-8")
 custom = run("mojum-fixture", "bright.json", "--ticks", "2")
 assert custom["last_episode"]["brain_observation"]["world_light"] == "bright"
 assert custom["graph_sha256"] != fixture["graph_sha256"]
+
+# Experimental labs are distributed in the same wheel. They must read the
+# packaged defaults without a source checkout, including on cold restart.
+for module, basename, events_key in (
+    ("mojum.infant_play", "infant", "events"),
+    ("mojum.sensory_curiosity_lab", "curiosity", "private_events"),
+):
+    journal = f"{basename}.sqlite3"
+    started = run_module(module, "--db", journal, "--ticks", "2")
+    assert (started["checkpoint"]["tick"], started[events_key]) == (2, 3)
+    resumed_lab = run_module(module, "--db", journal, "--ticks", "1")
+    assert (resumed_lab["checkpoint"]["tick"], resumed_lab[events_key]) == (3, 4)
+    assert resumed_lab == run_module(
+        module, "--db", f"{basename}-continuous.sqlite3", "--ticks", "3",
+    )
+
+twins = run_module(
+    "mojum.twin_lab", "pair", "--left-db", "twin-left.sqlite3",
+    "--right-db", "twin-right.sqlite3", "--left-id", "wheel-twin-left",
+    "--right-id", "wheel-twin-right",
+)
+assert [(t["agent_id"], t["tick"], t["stored_events"]) for t in twins["twins"]] == [
+    ("wheel-twin-left", 0, 1), ("wheel-twin-right", 0, 1),
+]
+mentor_options = ("mentor", "--db", "twin-left.sqlite3",
+                  "--agent-id", "wheel-twin-left")
+mentored = run_module("mojum.twin_lab", *mentor_options, "--ticks", "2")
+continued_twin = run_module("mojum.twin_lab", *mentor_options, "--ticks", "1")
+assert (mentored["twin"]["tick"], mentored["twin"]["stored_events"]) == (2, 3)
+assert (continued_twin["twin"]["tick"], continued_twin["twin"]["stored_events"]) == (3, 4)
+assert continued_twin["shared_heritable_sha256"] == twins["shared_heritable_sha256"]
+assert run_module("mojum.twin_lab", *mentor_options, "--ticks", "0") == continued_twin
+untouched_twin = run_module(
+    "mojum.twin_lab", "mentor", "--db", "twin-right.sqlite3",
+    "--agent-id", "wheel-twin-right", "--ticks", "0",
+)
+assert (untouched_twin["twin"]["tick"], untouched_twin["twin"]["stored_events"]) == (0, 1)
 
 print(f'Offline wheel verified: {resumed["tick"]} ticks, {resumed["stored_events"]} events, '
       f'journal head {resumed["journal_head"]}')
