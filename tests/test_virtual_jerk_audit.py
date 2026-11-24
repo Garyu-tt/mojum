@@ -33,6 +33,13 @@ class VirtualJerkAuditTests(unittest.TestCase):
         self.assertTrue(report.passed)
         self.assertAlmostEqual(report.peak_abs_jerk[0][1], 6.0, places=8)
 
+    def test_large_timestamp_span_with_one_ns_steps_stays_finite(self):
+        limit = (1 << 63) - 1
+        data = trajectory([0, limit - 2, limit - 1, limit], [0, 1, 2, 3])
+        report = audit_joint_jerk(data, {"elbow": 1_000_000_000_000.0})
+        self.assertEqual(report.jerk_sample_count, 1)
+        self.assertTrue(report.passed)
+
     def test_threshold_violation_is_advisory_result(self):
         times = [0, 1, 2, 3, 4]
         report = audit_joint_jerk(trajectory(times, [t ** 3 for t in times]), {"elbow": 5.9})
