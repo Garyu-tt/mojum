@@ -96,6 +96,14 @@ class ArchiveRetentionTests(unittest.TestCase):
         self.assertEqual(first.digest, second.digest)
         self.assertEqual(first, second)
 
+    def test_digest_binds_inventory_content_and_replica_metadata(self):
+        raw = fixture()
+        original = plan_retention(raw)
+        changed = copy.deepcopy(raw)
+        changed["segments"][0]["content_sha256"] = "f" * 64
+        self.assertEqual(original.eligible_segment_ids, plan_retention(changed).eligible_segment_ids)
+        self.assertNotEqual(original.digest, plan_retention(changed).digest)
+
     def test_input_is_not_mutated(self):
         raw = fixture()
         before = copy.deepcopy(raw)
