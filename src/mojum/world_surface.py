@@ -58,7 +58,6 @@ class SurfaceMap:
     schema: str = SCHEMA
 
     def __post_init__(self):
-        # Validate exact type before equality: str subclasses may override hooks.
         if type(self.schema) is not str or self.schema != SCHEMA:
             raise ValueError("unsupported surface schema")
         if (type(self.room_revision) is not str or len(self.room_revision) != 64
@@ -109,8 +108,8 @@ def surface_map_digest(surface_map):
 def observe_surface(surface_map, *, x_mm, y_mm, tick, expected_room_revision):
     """Return the highest-priority containing patch, or the explicit default.
 
-    Patch rectangles are half-open [x, x+w) × [y, y+h). Equal-priority
-    overlaps resolve by lexicographically smallest patch_id.
+    Patch rectangles and the room sample domain are half-open.
+    Equal-priority overlaps resolve by lexicographically smallest patch_id.
     """
     if type(surface_map) is not SurfaceMap:
         raise ValueError("invalid surface map")
@@ -119,8 +118,8 @@ def observe_surface(surface_map, *, x_mm, y_mm, tick, expected_room_revision):
         raise ValueError("stale room revision")
     if not _native_int(tick, 0, 2**63 - 1):
         raise ValueError("invalid logical tick")
-    if not (_native_int(x_mm, 0, surface_map.room_width_mm)
-            and _native_int(y_mm, 0, surface_map.room_height_mm)):
+    if not (_native_int(x_mm, 0, surface_map.room_width_mm - 1)
+            and _native_int(y_mm, 0, surface_map.room_height_mm - 1)):
         raise ValueError("sample outside room")
     matches = [
         p for p in surface_map.patches
