@@ -5,10 +5,10 @@
 ## Contract
 
 - Input schema: `mojum.body.joint-trajectory/1`, explicit `PUBLIC_SYNTHETIC` classification and boolean consent.
-- At least 5 and at most 4096 samples; at most 256 joints and 65,536 total position values.
+- At least 4 and at most 4096 samples; at most 256 joints and 65,536 total position values.
 - Exact native dictionaries/lists/scalars, unique bounded ASCII joint names, finite bounded positions and positive per-joint jerk limits.
 - Strictly increasing integer nanosecond timestamps.
-- Nonuniform-time three-point second derivative estimates acceleration; a nonuniform three-point first derivative of those estimates produces jerk at interior samples.
+- A four-point Newton divided difference over each nonuniform time window estimates the third derivative directly; it is exact for cubic position trajectories. Each estimate is associated with the second sample in its four-sample window.
 - Immutable report, threshold violations, deterministic SHA-256 consistency digest. The digest is not a signature or authenticity proof.
 
 ## Limitations
