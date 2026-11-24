@@ -10,7 +10,7 @@ metadata, or establish identity, authorization, or cryptographic authenticity.
 - One purpose and algorithm are admitted: `noosphere-export` and
   `AES-256-GCM`; this prevents metadata from silently crossing domains.
 - Key IDs are bounded ASCII identifiers; a keyring contains 1..128 unique keys.
-- Timestamps are non-negative integer logical/Unix timestamps (booleans rejected).
+- Timestamps are non-negative signed 64-bit Unix timestamps in whole seconds (maximum `2^63 - 1`; booleans and larger integers are rejected before canonical serialization).
   Activation follows creation; retirement/revocation cannot precede activation
   or lie in the future relative to the supplied audit time.
 - Retired keys cannot encrypt new exports but may decrypt historical exports
