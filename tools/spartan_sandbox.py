@@ -66,6 +66,24 @@ def _within(path: Path, root: Path) -> bool:
         return False
 
 
+def _runtime_symlinks() -> list[tuple[str, str]]:
+    """Return only usr-merge aliases whose resolved targets remain under /usr."""
+    usr = Path("/usr").resolve(strict=True)
+    aliases: list[tuple[str, str]] = []
+    for name in ("bin", "lib", "lib64"):
+        host_path = Path("/") / name
+        if not host_path.exists() and not host_path.is_symlink():
+            continue
+        try:
+            target = host_path.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise SandboxError(f"/{name} runtime alias cannot be resolved") from exc
+        if not _within(target, usr):
+            raise SandboxError(f"/{name} must resolve inside /usr for this sandbox profile")
+        aliases.append((name, str(target)))
+    return aliases
+
+
 def _private_scratch(path: Path) -> None:
     if os.name == "posix":
         import stat
@@ -154,8 +172,9 @@ def build_sandbox_argv(
     argv = _validate_command(command, repo)
 
     # Mount only the immutable host runtime tree and two explicit task paths.
-    # /bin and /lib are intentionally not mounted separately: common Linux
-    # layouts symlink them into /usr, which already contains their targets.
+    # Recreate host usr-merge aliases inside the namespace; the host's root-level
+    # symlinks are not inherited by Bubblewrap's new root.
+    runtime_links = _runtime_symlinks()
     bubblewrap = [
         str(bwrap_path),
         "--die-with-parent",
@@ -164,6 +183,7 @@ def build_sandbox_argv(
         "--unshare-net",
         "--clearenv",
         "--ro-bind", "/usr", "/usr",
+        *[arg for name, target in runtime_links for arg in ("--symlink", target, f"/{name}")],
         "--proc", "/proc",
         "--dev", "/dev",
         "--tmpfs", "/tmp",
