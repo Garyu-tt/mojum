@@ -19,7 +19,7 @@ The anchor must be genesis (sequence zero and the zero digest) or an exact verif
 
 ## Output and safety
 
-Each segment receives KEEP or ELIGIBLE_FOR_OPERATOR_REVIEW, with stable reason codes. The report includes a SHA-256 digest over canonical JSON. Input objects are not mutated.
+Each segment receives KEEP or ELIGIBLE_FOR_OPERATOR_REVIEW, with stable reason codes. The report includes a SHA-256 digest over canonical JSON that binds the full normalized segment inventory (content/head digests, sequence ranges, verification flags, failure domains and retention decisions). Input objects are not mutated.
 
 Unknown, malformed, unverified, too recent, under-replicated, or restore-required segments are kept. Eligibility is not a deletion instruction and must not be wired directly to a destructive command.
 
