@@ -1,0 +1,1 @@
+Test deterministic humidity observation contract
