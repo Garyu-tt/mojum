@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import math
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -43,6 +44,17 @@ class RigidClothBenchmarkTests(unittest.TestCase):
         for field, value in (("consent", False), ("provenance", "PRIVATE")):
             data = fixture()
             data[field] = value
+            with self.assertRaises(MODULE.BenchmarkError):
+                MODULE.summarize(data)
+
+    def test_rejects_hostile_discriminator_values_without_comparison(self):
+        class HostileValue:
+            def __eq__(self, other):
+                raise AssertionError("untrusted value equality must not execute")
+
+        for field in ("schema", "provenance"):
+            data = fixture()
+            data[field] = HostileValue()
             with self.assertRaises(MODULE.BenchmarkError):
                 MODULE.summarize(data)
 
@@ -95,6 +107,36 @@ class RigidClothBenchmarkTests(unittest.TestCase):
         data["runs"][0]["x" * 1_000_000] = data["runs"][0].pop("cpu_ms")
         with self.assertRaisesRegex(MODULE.BenchmarkError, "bounded native strings"):
             MODULE.summarize(data)
+
+    def test_hostile_string_subclass_keys_rejected_at_all_schema_levels(self):
+        class HostileKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not execute")
+
+        data = fixture()
+        data[HostileKey("schema")] = data.pop("schema")
+        with self.assertRaisesRegex(MODULE.BenchmarkError, "bounded native strings"):
+            MODULE.summarize(data)
+
+        for field in ("rig", "engine", "runs"):
+            data = fixture()
+            mapping = data[field] if field != "runs" else data["runs"][0]
+            key = next(iter(mapping))
+            mapping[HostileKey(key)] = mapping.pop(key)
+            with self.assertRaisesRegex(MODULE.BenchmarkError, "bounded native strings"):
+                MODULE.summarize(data)
+
+    def test_duplicate_json_object_keys_are_rejected(self):
+        with self.assertRaisesRegex(MODULE.BenchmarkError, "duplicate JSON object key"):
+            MODULE._unique_object([("schema", "one"), ("schema", "two")])
+
+    def test_cli_bounds_input_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "too-large.json"
+            path.write_bytes(b" " * (MODULE.MAX_INPUT_BYTES + 1))
+            self.assertEqual(MODULE.main([str(path)]), 2)
 
     def test_input_is_not_mutated(self):
         data = fixture()
