@@ -63,11 +63,19 @@ def _payload(value: object) -> str:
     # Payload is intentionally a tiny public-metadata envelope. Reject nested
     # values and arbitrary text to keep accidental private data out of the DB.
     allowed = {"source", "reason", "workflow"}
-    if set(value) - allowed:
+    # Bound cardinality and preflight exact native keys before hashing or
+    # comparing caller-controlled key objects.
+    if len(value) > len(allowed):
+        raise QueueError("payload contains too many fields")
+    keys = tuple(value.keys())
+    if any(type(key) is not str or len(key) > 8 for key in keys):
+        raise QueueError("payload keys must be short native strings")
+    if set(keys) - allowed:
         raise QueueError("payload contains unsupported fields")
     clean: dict[str, str] = {}
-    for key, item in value.items():
-        if type(key) is not str or key not in allowed or type(item) is not str or len(item) > 256:
+    for key in keys:
+        item = value[key]
+        if key not in allowed or type(item) is not str or len(item) > 256:
             raise QueueError("payload values must be bounded plain strings")
         clean[key] = item
     encoded = json.dumps(clean, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
