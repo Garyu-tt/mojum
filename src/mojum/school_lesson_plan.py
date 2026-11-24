@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from .school_activity import (
@@ -19,6 +20,7 @@ PROVENANCE = "OFFLINE_SYNTHETIC_CATALOG_PROPOSAL"
 MAX_LESSONS = 16
 MAX_PHASE_TICKS = 256
 MAX_TICK = (1 << 63) - 1
+_SECTION_ID = re.compile(r"[a-z][a-z0-9_]{0,47}\Z", re.ASCII)
 
 
 class LessonPlanError(ValueError):
@@ -61,8 +63,9 @@ def plan_voluntary_lessons(
         raise LessonPlanError("invalid phase duration")
     if type(section_ids) is not list or not 1 <= len(section_ids) <= MAX_LESSONS:
         raise LessonPlanError("invalid lesson count")
-    if any(type(section_id) is not str for section_id in section_ids):
-        raise LessonPlanError("section IDs must be plain strings")
+    if any(type(section_id) is not str or _SECTION_ID.fullmatch(section_id) is None
+           for section_id in section_ids):
+        raise LessonPlanError("section IDs must be bounded canonical identifiers")
     if len(set(section_ids)) != len(section_ids):
         raise LessonPlanError("duplicate section ID")
     if type(catalog) is not dict:
