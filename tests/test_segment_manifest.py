@@ -154,6 +154,11 @@ class SegmentManifestTests(unittest.TestCase):
         with self.assertRaises(SegmentManifestError):
             verify_segment_bytes(forged, self.segment)
 
+    def test_uninitialized_manifest_is_rejected_with_contract_error(self):
+        forged = object.__new__(SegmentManifest)
+        with self.assertRaises(SegmentManifestError):
+            verify_segment_bytes(forged, self.segment)
+
     def test_wrong_schema_is_rejected(self):
         data = self.make().to_dict()
         data["schema"] = "mojum.noosphere.segment-manifest/999"
