@@ -36,9 +36,14 @@ class PressureTests(unittest.TestCase):
 
     def test_spatial_gradient_and_logical_tick_drift(self):
         state = RoomState(1, 1.0, 1.0, _revision(self.room, 1, 1.0, 1.0))
-        out = observe_pressure(self.profile, room=self.room, state=state,
+        profile = PressureProfile(
+            state.revision, 5000, 4000, 101000,
+            gradient_x_pa_per_km=100, gradient_y_pa_per_km=-50,
+            drift_pa_per_tick=2, epoch_tick=0,
+        )
+        out = observe_pressure(profile, room=self.room, state=state,
                                tick=1, x_mm=2000, y_mm=1000)
-        self.assertEqual(out["pressure_pa"], 101002)
+        self.assertEqual(out["pressure_pa"], 101001)
 
     def test_room_state_revision_and_tick_are_bound(self):
         with self.assertRaisesRegex(ValueError, "revision or tick"):
@@ -88,9 +93,9 @@ class PressureTests(unittest.TestCase):
                              tick=0, x_mm=1000, y_mm=1000)
 
     def test_out_of_range_computed_pressure_rejected(self):
-        profile = PressureProfile(self.state.revision, 5000, 4000, 120000,
-                                  drift_pa_per_tick=1)
         state = RoomState(1, 1.0, 1.0, _revision(self.room, 1, 1.0, 1.0))
+        profile = PressureProfile(state.revision, 5000, 4000, 120000,
+                                  drift_pa_per_tick=1)
         with self.assertRaisesRegex(ValueError, "supported"):
             observe_pressure(profile, room=self.room, state=state,
                              tick=1, x_mm=1000, y_mm=1000)
