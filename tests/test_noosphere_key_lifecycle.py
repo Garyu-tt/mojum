@@ -77,6 +77,24 @@ class KeyLifecycleTests(unittest.TestCase):
         with self.assertRaises(KeyLifecycleError):
             admit_key_operation(key(), operation="rotate", at=21)
 
+
+    def test_hostile_string_subclass_is_rejected_before_comparison(self):
+        class Hostile(str):
+            def __eq__(self, other):
+                raise AssertionError("comparison must not run")
+            __hash__ = str.__hash__
+        bad = key()
+        bad["purpose"] = Hostile("noosphere-export")
+        with self.assertRaises(KeyLifecycleError):
+            validate_keyring([bad], now=30)
+
+    def test_hostile_operation_object_is_rejected_by_exact_type(self):
+        class Hostile:
+            def __eq__(self, other):
+                raise AssertionError("comparison must not run")
+        with self.assertRaises(KeyLifecycleError):
+            admit_key_operation(key(), operation=Hostile(), at=21)
+
     def test_bounded_keyring(self):
         with self.assertRaises(KeyLifecycleError):
             validate_keyring([], now=30)
