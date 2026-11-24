@@ -125,9 +125,15 @@ class HeartbeatAdmissionTests(unittest.TestCase):
         value["agent_id"] = "changed"
         self.assertEqual(result.agent_id, "worker-01")
 
-    def test_rejects_oversized_wire(self):
+    def test_rejects_oversized_wire_before_decode_or_encode(self):
         with self.assertRaisesRegex(HeartbeatError, "size"):
-            verify_heartbeat(" " * 16_385, key=KEY, now_ns=NOW)
+            verify_heartbeat(b"x" * 16_385, key=KEY, now_ns=NOW)
+        with self.assertRaisesRegex(HeartbeatError, "size"):
+            verify_heartbeat("x" * 16_385, key=KEY, now_ns=NOW)
+
+    def test_rejects_utf8_expansion_over_byte_budget(self):
+        with self.assertRaisesRegex(HeartbeatError, "size"):
+            verify_heartbeat("é" * 9_000, key=KEY, now_ns=NOW)
 
 
 if __name__ == "__main__":
