@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import dataclass
-import hashlib
 import json
 import re
 import secrets
