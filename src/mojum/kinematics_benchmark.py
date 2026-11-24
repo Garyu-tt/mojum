@@ -146,9 +146,8 @@ def verify_benchmark_report(report: Any) -> bool:
     if type(digest) is not str or not _SHA256_RE.fullmatch(digest):
         raise BenchmarkValidationError("sha256 must be 64 lowercase hexadecimal characters")
     payload = {key: value for key, value in report.items() if key != "sha256"}
-    if _canonical_digest(payload) != digest:
-        raise BenchmarkValidationError("report digest mismatch")
-    # Re-run full semantic validation; do not trust a matching digest alone.
+    # Validate values and bounds before canonical serialization. A digest must
+    # never force JSON work on unbounded caller-controlled strings or numbers.
     rebuilt = build_benchmark_report(
         rig_id=rig["id"], rig_revision=rig["revision"], dof_count=rig["dof_count"],
         solver_name=solver["name"], solver_version=solver["version"], solver_license=solver["license"],
