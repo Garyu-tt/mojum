@@ -15,8 +15,9 @@ prlimit and timeout. It does not launch the command itself.
   host HOME, credential stores, SSH socket paths or other host directories.
 - Uses Bubblewrap namespace isolation, including an explicit network namespace
   with no network access, a new session and die-with-parent behavior.
-- Clears the inherited environment and supplies only PATH, HOME, TMPDIR,
-  LANG and GIT_TERMINAL_PROMPT.
+- Clears the inherited environment and explicitly sets PATH, HOME, TMPDIR,
+  LANG and GIT_TERMINAL_PROMPT. Bubblewrap additionally supplies
+  PWD=/workspace for the sandbox working directory.
 - Applies CPU time, virtual address-space, process-count and file-descriptor
   limits through prlimit, plus a wall-clock deadline through GNU timeout.
 - Uses argv arrays and never invokes a shell.

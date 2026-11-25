@@ -76,6 +76,7 @@ class SandboxPlannerTests(unittest.TestCase):
                 "TMPDIR": "/scratch",
                 "LANG": "C.UTF-8",
                 "GIT_TERMINAL_PROMPT": "0",
+                "PWD": "/workspace",
             }, dict(os.environ)
             try:
                 Path("/workspace/sandbox-write-denied.txt").write_text("must fail")
