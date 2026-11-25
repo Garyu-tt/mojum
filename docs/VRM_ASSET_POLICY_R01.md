@@ -14,6 +14,12 @@ Python 3.11+, standard library only. Call `validate_manifest(manifest, policy)` 
 
 The caller supplies explicit allowlists and resource limits. The result is a detached normalized manifest, sorted violation identifiers, an acceptance boolean and SHA-256 digest of the normalized metadata. Dependency ordering does not affect the digest.
 
+Source identifiers are bounded local tokens such as `local-import`; colons and
+path separators are rejected, including URI-scheme and drive-relative forms.
+Policy allowlists accept exact built-in lists or tuples. Collection admission
+uses identity checks before length or iteration, so custom metaclass equality
+and collection hooks are not invoked for rejected inputs.
+
 ## Security and limits
 
 The validator rejects remote/path-like sources, traversal, absolute paths, malformed hashes, mutable versions, duplicate/unapproved dependencies, unsupported media types/licenses, malformed containers and out-of-policy sizes. The helper does not read the path, verify the digest against file bytes, prove the declared byte size, parse VRM, inspect license texts, fetch dependencies, or establish legal compatibility. All allowlists must be reviewed and supplied by the caller.

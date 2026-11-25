@@ -127,6 +127,50 @@ class VrmAssetPolicyTests(unittest.TestCase):
         with self.assertRaises(AssetPolicyError):
             validate_manifest(manifest(), HostileDict(POLICY))
 
+    def test_policy_collection_type_admission_never_calls_custom_hooks(self):
+        calls = []
+
+        class HostileMeta(type):
+            def __eq__(cls, other):
+                calls.append("type equality")
+                raise AssertionError("metaclass equality executed")
+
+        class HostileValues(metaclass=HostileMeta):
+            def __len__(self):
+                calls.append("length")
+                raise AssertionError("custom length executed")
+
+            def __iter__(self):
+                calls.append("iteration")
+                raise AssertionError("custom iteration executed")
+
+        for field in ("allowed_dependencies", "allowed_licenses", "allowed_media_types"):
+            with self.subTest(field=field):
+                bad_policy = dict(POLICY, **{field: HostileValues()})
+                with self.assertRaisesRegex(AssetPolicyError, "bounded list or tuple"):
+                    validate_manifest(manifest(), bad_policy)
+                self.assertEqual(calls, [])
+
+    def test_source_rejects_uri_schemes_and_drive_relative_paths(self):
+        for source in ("file:avatar.vrm", "https:example.invalid", "C:avatar.vrm",
+                       "https://example.invalid/avatar.vrm", "avatars/avatar.vrm"):
+            with self.subTest(source=source):
+                candidate = manifest()
+                candidate["asset"]["source"] = source
+                report = validate_manifest(candidate, POLICY)
+                self.assertFalse(report["accepted"])
+                self.assertIn("asset.source", report["violations"])
+                self.assertEqual(report["normalized"]["asset"]["source"], "")
+
+    def test_source_preserves_bounded_local_identifiers(self):
+        for source in ("local-import", "synthetic-fixture", "artist.ref+v1"):
+            with self.subTest(source=source):
+                candidate = manifest()
+                candidate["asset"]["source"] = source
+                report = validate_manifest(candidate, POLICY)
+                self.assertTrue(report["accepted"])
+                self.assertEqual(report["normalized"]["asset"]["source"], source)
+
     def test_reject_oversized_mapping_cardinality_before_key_iteration(self):
         candidate = manifest()
         candidate.update({f"unexpected-{i}": None for i in range(10000)})

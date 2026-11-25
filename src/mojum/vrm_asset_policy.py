@@ -51,6 +51,11 @@ def _version(value: Any) -> bool:
     return type(value) is str and len(value) <= 128 and _VERSION.fullmatch(value) is not None
 
 
+def _source_id(value: Any) -> bool:
+    # Sources are local identifiers, not URI schemes or drive-relative paths.
+    return _token(value) and ":" not in value
+
+
 def _safe_relative_path(value: Any) -> bool:
     if type(value) is not str or not value or len(value) > 240:
         return False
@@ -69,7 +74,8 @@ def _policy(policy: Any) -> dict[str, Any]:
         raise AssetPolicyError("policy has missing or unknown keys")
     for key in ("allowed_dependencies", "allowed_licenses", "allowed_media_types"):
         values = policy[key]
-        if type(values) not in (list, tuple) or len(values) > 128:
+        # Identity checks cannot invoke equality hooks on a custom metaclass.
+        if (type(values) is not list and type(values) is not tuple) or len(values) > 128:
             raise AssetPolicyError(f"{key} must be a bounded list or tuple")
         valid = (lambda item: len(item) <= 127 and _MEDIA_TYPE.fullmatch(item) is not None) if key == "allowed_media_types" else _token
         if any(type(item) is not str or not valid(item) for item in values) or len(set(values)) != len(values):
@@ -122,7 +128,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
         violations.append("asset.size_bytes")
     if type(media_type) is not str or len(media_type) > 127 or media_type not in rules["allowed_media_types"]:
         violations.append("asset.media_type")
-    if not _token(source) or "://" in source:
+    if not _source_id(source):
         violations.append("asset.source")
     if not _token(license_id) or license_id not in rules["allowed_licenses"]:
         violations.append("asset.license")
@@ -161,7 +167,7 @@ def validate_manifest(manifest: Any, policy: Any) -> dict[str, Any]:
             "sha256": digest if type(digest) is str and len(digest) == 64 and _HEX_256.fullmatch(digest) else "",
             "size_bytes": size if type(size) is int and 0 < size <= rules["max_asset_bytes"] else 0,
             "media_type": media_type if type(media_type) is str and len(media_type) <= 127 and media_type in rules["allowed_media_types"] else "",
-            "source": source if _token(source) else "",
+            "source": source if _source_id(source) else "",
             "license": license_id if _token(license_id) and license_id in rules["allowed_licenses"] else "",
         },
         "dependencies": normalized_dependencies,
