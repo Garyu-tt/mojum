@@ -275,9 +275,9 @@ report distinct `local_cell_v2_a_unreleased` and `local_cell_v2_b_unreleased`
 formats even though the original CLIs used the same mode name. Keep each
 journal with the matching runtime for deterministic replay.
 
-`python -m mojum.aquarium_wire --list-policies` prints every distinct
-persisted identity (selectors, state schema, learning schema, intent source)
-without opening a journal. The list comes from `mojum.policy_identity`, which
+Use `python -m mojum.aquarium_wire --list-policies` on its own to print every
+distinct persisted identity (selectors, state schema, learning schema, intent
+source). The list comes from `mojum.policy_identity`, which
 fails at import time if two identities claim the same selector set, public
 configuration, or schema so no future mode can silently impersonate another.
 

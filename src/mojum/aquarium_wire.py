@@ -516,14 +516,17 @@ def list_policies():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path)
-    parser.add_argument("--expected-head")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--db", type=Path, help="inspect a SQLite journal")
+    mode.add_argument(
         "--list-policies", action="store_true",
         help="print every distinct persisted policy identity and exit",
     )
+    parser.add_argument("--expected-head", help="independent SHA-256 for --db inspection")
     args = parser.parse_args()
     if args.list_policies:
+        if args.expected_head is not None:
+            parser.error("--expected-head requires --db")
         print(json.dumps(list_policies(), sort_keys=True))
         return
     if args.db is None:
