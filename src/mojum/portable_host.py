@@ -23,6 +23,9 @@ from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
 from .noosphere import NoosphereError
+from .room_draft_runtime import load_runtime_room
+from .room_spec import RoomSpecError
+from .sensory_play import ToyScene
 
 
 SCHEMA = "mojum.portable-host.run/2"
@@ -214,6 +217,8 @@ def main(argv=None):
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
+    parser.add_argument("--room-file", type=Path,
+                        help="optional strict offline point-room draft; pinned on restart")
     parser.add_argument("--expected-head",
                         help="optional independently pinned journal head SHA-256")
     args = parser.parse_args(argv)
@@ -238,6 +243,24 @@ def main(argv=None):
     elif args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
 
+    # Run the same admission path as the Aquarium CLI *before* opening the
+    # PRIVATE journal. Legacy local-cell policies pin exact built-in geometry.
+    room_options = {}
+    if args.room_file is not None:
+        if args.motor_mode == V4_MODE:
+            parser.error("--room-file is unsupported for local_cell_v4 compatibility journals")
+        try:
+            room, start = load_runtime_room(args.room_file)
+        except RoomSpecError as exc:
+            parser.error(f"invalid --room-file: {exc}")
+        # Room drafts contain geometry, not virtual toy definitions. Supply a
+        # dimension-matched empty scene instead of silently adding the fixed
+        # 4x4 built-in toys (which may lie inside authored walls).
+        room_options = {
+            "room": room, "start": start,
+            "sensory_scene": ToyScene(width=room.width, height=room.height, toys=()),
+        }
+
     stopped = _SignalStop()
     started = time.monotonic()
     with termination_signals(stopped):
@@ -250,6 +273,7 @@ def main(argv=None):
                 sensory_mode=args.sensory_mode,
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
+                **room_options,
             ) as aquarium:
                 begin_tick = aquarium.tick
                 committed = run_paced(

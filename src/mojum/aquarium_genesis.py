@@ -16,9 +16,9 @@ import sqlite3
 import stat
 
 from .aquarium import Aquarium, AquariumError, MOTOR_MODES, load_cli_room
+from .cli_sensory_scene import SENSORY_SCENE_CHOICES, resolve_sensory_scene
 from .genesis import ACQUISITION_SCHEMA, GENES, GenomeLedger, validate_seed
 from .graph import load_graph
-from .sensory_play import ToyScene
 
 
 SCHEMA = "mojum.aquarium.genesis-command/1"
@@ -57,17 +57,6 @@ def _load_seed(path):
         payload.decode("utf-8"), object_pairs_hook=_unique_object,
         parse_constant=_reject_constant,
     ))
-
-
-def _scene(selector, sensory_mode, room):
-    # Match the explicit selector used by the installed lifecycle/export
-    # workflow, without depending on helpers that are not yet on main.
-    if selector == "default":
-        return None
-    if sensory_mode == "none":
-        raise ValueError("--sensory-scene empty requires a toy sensory mode")
-    return ToyScene(width=4.0 if room is None else room.width,
-                    height=4.0 if room is None else room.height, toys=())
 
 
 def _receipt(aquarium, command, *, previous_head=None):
@@ -142,7 +131,7 @@ def _parser():
                            default="placeholder")
         child.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                            default="none")
-        child.add_argument("--sensory-scene", choices=("default", "empty"), default="default",
+        child.add_argument("--sensory-scene", choices=SENSORY_SCENE_CHOICES, default="default",
                            help="same explicit scene used when the journal was created")
         child.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
         child.add_argument("--pulse-sum", choices=("auto", "ordered", "compensated"), default="auto")
@@ -179,7 +168,8 @@ def main(argv=None):
             "agent_id": seed["genome_id"], "room": room, "start": start,
             "neural_mode": args.neural_mode, "motor_mode": args.motor_mode,
             "brain_mode": args.brain_mode, "sensory_mode": args.sensory_mode,
-            "sensory_scene": _scene(args.sensory_scene, args.sensory_mode, room),
+            "sensory_scene": resolve_sensory_scene(
+                args.sensory_scene, sensory_mode=args.sensory_mode, room=room),
             "temporal_mode": args.temporal_mode, "pulse_sum": args.pulse_sum,
             "dt_ns": args.dt_ns,
         }

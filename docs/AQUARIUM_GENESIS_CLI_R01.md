@@ -72,8 +72,8 @@ The explicit empty scene uses the authored room's width and height, including
 non-default rooms such as 5×4. The same scene is passed to the read-only replay
 and the writable reopen. `--sensory-scene default` preserves the ordinary toy
 scene. Empty scenes require a toy sensory mode; arbitrary caller-defined toy
-layouts are not represented by this CLI. The command does not depend on the
-unmerged installed-host/lifecycle integration to work.
+layouts are not represented by this CLI. The command uses the shared scene
+selector already accepted with the installed host/lifecycle workflow.
 
 Status can inspect supported local-cell histories. Acquisition is limited to
 the canonical `scripted` and `developmental_fixture` modes because local-cell
