@@ -17,7 +17,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mojum.aquarium import Aquarium, AquariumError, V2A_ARCHIVE_MODE, V2B_MODE, V2B_WIRE_MODE
+from mojum import local_cell_transfer as transfer_module
+from mojum.aquarium import Aquarium, AquariumError, V2A_ARCHIVE_MODE, V2B_MODE, V2B_WIRE_MODE, V3_MODE
 from mojum.aquarium_trace_export import export_private_trace
 from mojum.archived_policy_v2a import LocalCellExplorer
 from mojum.cell_policy_v2 import CellExplorer, LocalCellError
@@ -25,6 +26,7 @@ from mojum.local_cell_sense import Proprioception
 from mojum.migration_v2a_v2b import (
     SCHEMA, TransferError, transfer_v2a_to_v2b,
 )
+from mojum.migration_v2b_v3 import transfer_v2b_to_v3
 from mojum.world_room import Room
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +102,165 @@ class LocalCellEvidenceAdmissionTests(unittest.TestCase):
         outcome = policy.observe(sense, intent, intent["action"] != "rest")
         self.assertEqual(outcome["total_updates"], 1)
         CellExplorer.from_snapshot(policy.snapshot())
+
+
+class TransferDestinationSidecarTests(unittest.TestCase):
+    """A new main file must not inherit another journal's SQLite sidecars."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.source = self.root / "source-v2b.sqlite3"
+        with Aquarium(self.source, SEED, GRAPH, motor_mode=V2B_MODE) as source:
+            source.step()
+            source.step()
+            self.head = source.checkpoint()["journal_head"]
+        with closing(sqlite3.connect(self.source)) as db:
+            self.assertEqual(db.execute("PRAGMA journal_mode=DELETE").fetchone()[0], "delete")
+        self.source_bytes = self.source.read_bytes()
+
+    def migrate(self, target):
+        return transfer_v2b_to_v3(
+            self.source, target, expected_source_head=self.head,
+            seed=SEED, graph=GRAPH, create_new_journal=True,
+        )
+
+    def assert_source_unchanged(self):
+        self.assertEqual(self.source.read_bytes(), self.source_bytes)
+        self.assertFalse(list(self.root.glob(".mojum-local-cell-convert-*")))
+
+    def orphaned_wal(self, target, *, include_shm):
+        # Preserve real committed WAL bytes while the writer is still open.
+        # Restore them after orderly close/removal of the old main to model
+        # a stale destination left by incomplete recovery or manual cleanup.
+        with Aquarium(target, SEED, GRAPH, motor_mode=V3_MODE) as previous:
+            for _ in range(4):
+                previous.step()
+            saved = {"-wal": Path(str(target) + "-wal").read_bytes()}
+            if include_shm:
+                saved["-shm"] = Path(str(target) + "-shm").read_bytes()
+        target.unlink()
+        self.assertGreater(len(saved["-wal"]), 32)
+        for suffix, data in saved.items():
+            Path(str(target) + suffix).write_bytes(data)
+        return saved
+
+    def test_real_orphaned_wal_cannot_overlay_a_successful_transfer(self):
+        for include_shm in (False, True):
+            with self.subTest(include_shm=include_shm):
+                target = self.root / f"orphan-{include_shm}.sqlite3"
+                saved = self.orphaned_wal(target, include_shm=include_shm)
+                with self.assertRaisesRegex(TransferError, "SQLite sidecars"):
+                    self.migrate(target)
+                self.assertFalse(os.path.lexists(target))
+                for suffix, data in saved.items():
+                    self.assertEqual(Path(str(target) + suffix).read_bytes(), data)
+                self.assert_source_unchanged()
+
+    def test_existing_sidecar_files_and_directories_fail_before_source_open(self):
+        for suffix in ("-wal", "-shm", "-journal"):
+            for directory in (False, True):
+                with self.subTest(suffix=suffix, directory=directory):
+                    target = self.root / f"target{suffix}-{directory}.sqlite3"
+                    sidecar = Path(str(target) + suffix)
+                    if directory:
+                        sidecar.mkdir()
+                        sentinel = sidecar / "foreign.txt"
+                    else:
+                        sentinel = sidecar
+                    sentinel.write_bytes(b"preserve foreign artifact")
+                    with patch.object(transfer_module, "_source_manifest",
+                                      wraps=transfer_module._source_manifest) as source_open:
+                        with self.assertRaisesRegex(TransferError, "SQLite sidecars"):
+                            self.migrate(target)
+                    source_open.assert_not_called()
+                    self.assertFalse(os.path.lexists(target))
+                    self.assertEqual(sentinel.read_bytes(), b"preserve foreign artifact")
+                    self.assert_source_unchanged()
+
+    def test_dangling_sidecar_symlinks_are_preserved_and_rejected(self):
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                target = self.root / f"symlink{suffix}.sqlite3"
+                sidecar = Path(str(target) + suffix)
+                missing = self.root / f"missing{suffix}"
+                try:
+                    sidecar.symlink_to(missing)
+                except (NotImplementedError, OSError) as exc:
+                    self.skipTest(f"symlink creation unavailable: {exc}")
+                original_target = sidecar.readlink()
+                with self.assertRaisesRegex(TransferError, "SQLite sidecars"):
+                    self.migrate(target)
+                self.assertTrue(sidecar.is_symlink())
+                self.assertEqual(sidecar.readlink(), original_target)
+                self.assertFalse(missing.exists())
+                self.assertFalse(os.path.lexists(target))
+                self.assert_source_unchanged()
+
+    def test_sidecar_appearing_during_conversion_prevents_publication(self):
+        verify_source = transfer_module._verify_source
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                target = self.root / f"late{suffix}.sqlite3"
+                sidecar = Path(str(target) + suffix)
+
+                def appear_after_verification(*args):
+                    verify_source(*args)
+                    sidecar.write_bytes(b"arrived during transfer")
+
+                with patch.object(transfer_module, "_verify_source", appear_after_verification):
+                    with self.assertRaisesRegex(TransferError, "SQLite sidecars"):
+                        self.migrate(target)
+                self.assertFalse(os.path.lexists(target))
+                self.assertEqual(sidecar.read_bytes(), b"arrived during transfer")
+                self.assert_source_unchanged()
+
+    def test_exclusive_publication_still_preserves_a_competing_main_file(self):
+        target = self.root / "competing.sqlite3"
+        original_link = os.link
+
+        def competing_create(staged, destination):
+            self.assertEqual(destination, target)
+            target.write_bytes(b"another writer owns this path")
+            return original_link(staged, destination)
+
+        with patch.object(transfer_module.os, "link", competing_create):
+            with self.assertRaisesRegex(TransferError, "refusing overwrite"):
+                self.migrate(target)
+        self.assertEqual(target.read_bytes(), b"another writer owns this path")
+        self.assert_source_unchanged()
+
+    def test_clean_destination_still_reopens_at_the_reported_head(self):
+        target = self.root / "clean.sqlite3"
+        result = self.migrate(target)
+        self.assertEqual(result["status"], "EXPLICIT_VERIFIED_NEW_JOURNAL")
+        self.assertEqual(result["destination_events"], 3)
+        with Aquarium(target, SEED, GRAPH, motor_mode=V3_MODE, read_only=True,
+                      external_expected_head=result["destination_head"]) as reopened:
+            self.assertEqual(reopened.tick, 2)
+            self.assertEqual(reopened.store.count(), result["destination_events"])
+            self.assertEqual(reopened.checkpoint()["journal_head"], result["destination_head"])
+        self.assert_source_unchanged()
+
+    def test_cli_refuses_stale_wal_without_a_success_receipt(self):
+        target = self.root / "cli.sqlite3"
+        saved = self.orphaned_wal(target, include_shm=False)
+        result = subprocess.run(
+            [sys.executable, "-m", "mojum.migration_v2b_v3",
+             "--source", str(self.source), "--destination", str(target),
+             "--genome", str(ROOT / "examples/genesis_seed.json"),
+             "--graph", str(ROOT / "examples/first_loop.json"),
+             "--expected-source-head", self.head, "--create-new-journal"],
+            cwd=self.root, env=dict(os.environ, PYTHONPATH=str(ROOT / "src")),
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("SQLite sidecars", result.stderr)
+        self.assertFalse(os.path.lexists(target))
+        self.assertEqual(Path(str(target) + "-wal").read_bytes(), saved["-wal"])
+        self.assert_source_unchanged()
 
 
 @unittest.skipUnless(SOURCE112 is not None,

@@ -163,8 +163,13 @@ def _open_readonly(path):
         raise NoosphereError("cannot read SQLite event journal") from exc
 
 
-def _read_first_event(path, agent_id, *, external_expected_head=None):
-    """Inspect existing bootstrap before any writable SQLite initialization."""
+def _read_first_event(path, agent_id, *, external_expected_head=None,
+                      for_initialization=False):
+    """Inspect the bootstrap, optionally admitting only safe blank schemas.
+
+    Read-only consumers retain None for absent history and report their own
+    errors. Initializers must distinguish blank reservations from other data.
+    """
     path = Path(path)
     if path.is_symlink():
         raise NoosphereError("database path cannot be a symbolic link")
@@ -173,7 +178,8 @@ def _read_first_event(path, agent_id, *, external_expected_head=None):
     with _open_readonly(path) as db:
         db.execute("BEGIN")
         tables = {row["name"] for row in db.execute(
-            "SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('metadata','events')",
+            "SELECT lower(name) AS name FROM sqlite_schema "
+            "WHERE type='table' AND lower(name) IN ('metadata','events')",
         )}
         has_metadata = "metadata" in tables
         has_events = "events" in tables
@@ -189,6 +195,12 @@ def _read_first_event(path, agent_id, *, external_expected_head=None):
             # through a writable connection and potentially alter the source.
             raise NoosphereError("database metadata is missing or does not match")
         if not has_events:
+            # Only a genuinely blank schema can be a new reservation. An
+            # unrelated database or a journal missing its events table must
+            # not be adopted/repaired by later writable initialization.
+            if (for_initialization and
+                    db.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone() is not None):
+                raise NoosphereError("existing database has no event journal")
             return None
         first = db.execute("SELECT wire_json FROM events ORDER BY seq LIMIT 1").fetchone()
         if first is None:

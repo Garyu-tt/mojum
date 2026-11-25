@@ -23,6 +23,15 @@ PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120
 
 Run the exact command again: the aquarium **resumes** at the next tick rather than overwriting or reinitializing the journal.
 
+Startup checks an existing database before writable initialization. A nonempty
+SQLite schema without an events table is rejected, including unrelated tables,
+view-only databases and an incomplete journal whose events table was removed.
+Such a file is not adopted or repaired, even with `--ticks 0`. New paths, blank
+reservation files, schema-empty SQLite files and correctly initialized empty
+Noosphere journals still support first-time bootstrap; twin-pair reservations
+use that path. Keep journals in a trusted directory: this inspection does not
+lock pathnames against replacement by another process.
+
 Reproducible tests:
 
 ```bash

@@ -310,6 +310,7 @@ class Aquarium:
         self._committed_count = 0
         first = _read_first_event(
             db_path, agent_id, external_expected_head=external_expected_head,
+            for_initialization=not self._read_only,
         )
         if first is not None:
             self._check_bootstrap(first)
