@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from mojum.aquarium_cold_copy import export_cold_copy, verify_cold_copy
+from mojum.aquarium_trace_export import export_private_trace
 from mojum.noosphere import LocalNoosphere
+from mojum.portable_host import main as host_main
+from mojum.room_draft_runtime import load_runtime_room
 from mojum.room_spec import MAX_INPUT_BYTES
+from mojum.sensory_play import ToyScene
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +110,62 @@ class PortableHostCustomRoomTests(unittest.TestCase):
         self.assertEqual(changed.returncode, 2)
         self.assertEqual(changed.stdout, "")
         self.assertEqual(self.committed(), before)
+
+    def test_signal_stop_preserves_custom_room_for_cold_restart(self):
+        def stop_during_wait(_delay):
+            signal.raise_signal(signal.SIGTERM)
+
+        with (
+            patch("mojum.portable_host.time.sleep", side_effect=stop_during_wait),
+            redirect_stdout(StringIO()),
+        ):
+            status = host_main([
+                "--db", str(self.db), "--room-file", str(self.room),
+                "--ticks", "2", "--interval-ms", "500",
+                "--neural-mode", "disabled",
+            ])
+
+        self.assertEqual(status["stop_reason"], "signal")
+        self.assertEqual(status["committed_ticks"], 1)
+        self.assertEqual(self.committed(), (2, status["journal_head"]))
+        restarted = self.invoke()
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        resumed = json.loads(restarted.stdout)
+        self.assertEqual((resumed["start_tick"], resumed["end_tick"]), (1, 3))
+
+    def test_custom_scene_replays_through_trace_and_cold_copy_apis(self):
+        run = self.invoke()
+        self.assertEqual(run.returncode, 0, run.stderr)
+        status = json.loads(run.stdout)
+        source_bytes = self.db.read_bytes()
+        room, start = load_runtime_room(self.room)
+        options = dict(
+            room=room, start=start, neural_mode="disabled",
+            motor_mode="developmental_fixture", sensory_mode="toy_probe",
+            temporal_mode="range_guided",
+            sensory_scene=ToyScene(width=room.width, height=room.height, toys=()),
+        )
+        data = ROOT / "src" / "mojum" / "data"
+        seed = json.loads((data / "genesis_seed.json").read_text(encoding="utf-8"))
+        graph = json.loads((data / "first_loop.json").read_text(encoding="utf-8"))
+        trace = export_private_trace(
+            self.db, self.root / "trace.private.jsonl", seed, graph,
+            allow_private_export=True,
+            expected_journal_head=status["journal_head"], **options,
+        )
+        self.assertEqual((trace["frames"], trace["journal_head"]),
+                         (2, status["journal_head"]))
+        backup_path = self.root / "backup.private.sqlite3"
+        backup = export_cold_copy(self.db, backup_path, seed, graph, **options)
+        verified = verify_cold_copy(
+            backup_path, seed, graph,
+            expected_agent_id=seed["genome_id"],
+            expected_journal_head=status["journal_head"],
+            expected_sha256=backup["db_sha256"], expected_tick=2, **options,
+        )
+        self.assertEqual((verified["tick"], verified["journal_head"]),
+                         (2, status["journal_head"]))
+        self.assertEqual(self.db.read_bytes(), source_bytes)
 
     def test_invalid_or_unavailable_room_does_not_create_journal(self):
         invalid = [

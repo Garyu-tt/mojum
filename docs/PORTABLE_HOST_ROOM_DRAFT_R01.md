@@ -34,6 +34,27 @@ it has no virtual toy contacts to learn from until an independently reviewed
 authored-toy contract is available. Built-in rooms retain the historical
 spectator toy fixture. No toys are silently inserted through authored walls.
 
+The installed `mojum-host` command accepts the same options; `PYTHONPATH=src`
+is only needed when running directly from the source checkout.
+
+### Trace export and cold-copy replay
+
+The current trace-export and cold-copy **CLIs** cannot select this empty toy
+scene. Passing only the room and mode flags to those CLIs will reject a custom
+host journal. Use their existing Python APIs with the same room, start, modes
+and an explicit `sensory_scene=ToyScene(width=room.width, height=room.height,
+toys=())`. The scene must match the one pinned in the journal bootstrap.
+
+`export_private_trace`, `export_cold_copy`, and `verify_cold_copy` accept those
+options. Trace export additionally requires `allow_private_export=True` and
+can pin the `journal_head` returned by the host as `expected_journal_head`.
+Cold-copy verification requires that head as `expected_journal_head` together
+with `expected_agent_id`; the export's `db_sha256` can also be pinned.
+The regression below exercises these APIs with a real custom host journal
+and confirms that the source database bytes remain unchanged.
+An explicit CLI scene selector is tracked in
+[issue #1427](https://github.com/Garyu-tt/mojum/issues/1427).
+
 Without `--room-file`, the host retains the built-in room and its existing
 `mojum.portable-host.run/2` JSON output. In both cases stdout reports **metadata
 only**, not PRIVATE observations, genome, geometry, or file paths.
@@ -59,13 +80,15 @@ identify private world configuration, so it is not emitted to stdout.
 ## Offline regression tests
 
 ```sh
-PYTHONPATH=src python -m unittest -v tests.test_portable_host_room_draft
-PYTHONPATH=src python -m unittest -v tests.test_portable_host tests.test_room_draft_runtime
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_portable_host*.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_room_draft_runtime.py' -v
 ```
 
 Tests verify the custom room bootstrap, paced cold restart, refusal to resume
 without the pinned room or after changing it, absent/invalid/oversized draft
 rejection before DB birth, v4 compatibility rejection, and default host ABI.
+They also cover signal interruption followed by cold restart and explicit
+custom-scene replay through the trace and cold-copy Python APIs.
 No online APIs or external workers are required.
 
 ## Explicit limits
