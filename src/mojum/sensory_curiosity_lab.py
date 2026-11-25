@@ -72,7 +72,12 @@ DEFAULT_TOYS = (
 )
 
 
+@dataclass(frozen=True, init=False, eq=False, repr=False)
 class ToyScene:
+    """Validated fixed scene whose geometry stays pinned for journal replay."""
+    room: Room
+    toys: tuple[Toy, ...]
+
     def __init__(self, *, width=4.0, height=4.0, toys=DEFAULT_TOYS):
         if not all(_finite(v) and v > 0 for v in (width, height)):
             raise CuriosityError("invalid scene size")
@@ -91,8 +96,8 @@ class ToyScene:
             if not (t.radius_m < t.x < width - t.radius_m
                     and t.radius_m < t.y < height - t.radius_m):
                 raise CuriosityError("toy outside point-room")
-        self.room = Room(float(width), float(height))
-        self.toys = toys
+        object.__setattr__(self, "room", Room(float(width), float(height)))
+        object.__setattr__(self, "toys", toys)
 
     def manifest(self):
         return {
