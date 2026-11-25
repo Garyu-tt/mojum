@@ -14,6 +14,8 @@ Position limits are inclusive. Every sample must contain exactly the declared jo
 
 At most 256 joints, 4096 samples, 64-character ASCII joint IDs and 128-character rig revisions. Booleans, non-native numeric types, NaN/Infinity, duplicate IDs, missing/extra joints, inverted limits, out-of-range positions, tick gaps and revision changes are rejected.
 
+Positions and lower/upper bounds are canonicalized as Python floats, and report extrema remain floats. Numeric inputs must be finite native floats or native integers whose conversion to a finite float preserves the exact value. For example, `2**53 + 1` and `-2**53 - 1` are rejected; `2**53 + 2`, its negative, and finite powers of two remain valid. This prevents integer rounding from changing reported extrema or collapsing distinct accepted values in the digest.
+
 ## Safety boundary
 
 This is only a metadata/trajectory audit. It does not infer revolute wrap semantics, perform kinematics or physics, establish anatomical calibration, command actuators, or serve as a safety interlock. Caller-supplied PUBLIC_SYNTHETIC labeling is not provenance authentication. No filesystem, network, third-party dependency, Noosphere, device, Aquarium or Graph IR access occurs.

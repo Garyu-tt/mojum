@@ -76,5 +76,75 @@ class JointLimitAuditTests(unittest.TestCase):
         self.assertEqual(report.maximum_observed[0], ("hip", 0.2))
         self.assertEqual(len(report.digest), 64)
 
+    def test_inexact_integer_positions_are_rejected(self):
+        limits = [("hip", -(2 ** 101), 2 ** 101)]
+        for value in (2 ** 53 + 1, -(2 ** 53) - 1,
+                      2 ** 100 + 1, -(2 ** 100) - 1):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                audit_joint_limits(limits, [(0, "rig-a", {"hip": value})],
+                                   rig_revision="rig-a")
+
+    def test_inexact_integer_bounds_are_rejected(self):
+        extent = 2 ** 101
+        for value in (2 ** 53 + 1, -(2 ** 53) - 1,
+                      2 ** 100 + 1, -(2 ** 100) - 1):
+            for side in ("lower", "upper"):
+                bounds = (value, extent) if side == "lower" else (-extent, value)
+                position = extent if side == "lower" else -extent
+                with self.subTest(value=value, side=side), self.assertRaises(ValueError):
+                    audit_joint_limits([("hip", *bounds)],
+                                       [(0, "rig-a", {"hip": position})],
+                                       rig_revision="rig-a")
+
+    def test_exact_large_integers_preserve_extrema_and_distinct_digests(self):
+        n = 2 ** 53
+        limits = [("hip", -(2 ** 1023), 2 ** 1023)]
+        values = (n - 2, n, n + 2, -n + 2, -n, -n - 2,
+                  2 ** 100, -(2 ** 100), 2 ** 1023, -(2 ** 1023))
+        digests = set()
+        for value in values:
+            with self.subTest(value=value):
+                report = audit_joint_limits(limits, [(0, "rig-a", {"hip": value})],
+                                            rig_revision="rig-a")
+                self.assertEqual(report.minimum_observed, (("hip", value),))
+                self.assertEqual(report.maximum_observed, (("hip", value),))
+                self.assertIs(type(report.minimum_observed[0][1]), float)
+                self.assertIs(type(report.maximum_observed[0][1]), float)
+                digests.add(report.digest)
+        self.assertEqual(len(digests), len(values))
+
+    def test_exact_large_bounds_remain_distinct_in_digest(self):
+        n = 2 ** 53
+        for value in (n, -n):
+            reports = [
+                audit_joint_limits([("hip", lower, upper)],
+                                   [(0, "rig-a", {"hip": value})],
+                                   rig_revision="rig-a")
+                for lower, upper in ((value - 2, value),
+                                     (value - 2, value + 2),
+                                     (value, value + 2))
+            ]
+            with self.subTest(value=value):
+                self.assertEqual(len({report.digest for report in reports}), 3)
+
+    def test_native_floats_and_exact_integer_float_equivalence_are_preserved(self):
+        extent = float.fromhex("0x1.fffffffffffffp+1023")
+        limits = [("hip", -extent, extent)]
+        for value in (0.0, 0.1, -0.1, 5e-324, -5e-324, extent, -extent):
+            with self.subTest(value=value):
+                report = audit_joint_limits(limits, [(0, "rig-a", {"hip": value})],
+                                            rig_revision="rig-a")
+                self.assertEqual(report.minimum_observed, (("hip", value),))
+                self.assertEqual(report.maximum_observed, (("hip", value),))
+        for value in (0, 1, -1, 2 ** 53 + 2, -(2 ** 53) - 2, 2 ** 100):
+            with self.subTest(value=value):
+                integer_report = audit_joint_limits(
+                    [("hip", -(2 ** 101), 2 ** 101)],
+                    [(0, "rig-a", {"hip": value})], rig_revision="rig-a")
+                float_report = audit_joint_limits(
+                    [("hip", -float(2 ** 101), float(2 ** 101))],
+                    [(0, "rig-a", {"hip": float(value)})], rig_revision="rig-a")
+                self.assertEqual(integer_report, float_report)
+
 if __name__ == "__main__":
     unittest.main()

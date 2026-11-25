@@ -28,7 +28,8 @@ def _finite_number(value):
     if type(value) not in (int, float):
         return False
     try:
-        return math.isfinite(value)
+        converted = float(value)
+        return math.isfinite(converted) and (type(value) is float or converted == value)
     except (OverflowError, TypeError, ValueError):
         return False
 
@@ -46,6 +47,8 @@ def audit_joint_limits(limits, samples, *, rig_revision):
     Each sample is a list/tuple of (tick, revision, positions_dict).
     Position bounds are inclusive. Ticks must be consecutive and all samples
     must carry the same rig revision and exact joint inventory.
+    Positions and bounds accept finite native floats or native integers exactly
+    representable as finite floats; report extrema remain floats.
     """
     if (type(rig_revision) is not str or not rig_revision
             or len(rig_revision) > MAX_REVISION_LENGTH):
@@ -98,7 +101,8 @@ def audit_joint_limits(limits, samples, *, rig_revision):
         for joint_id in joint_ids:
             value = positions[joint_id]
             if not _finite_number(value):
-                raise ValueError("joint position must be a finite native number")
+                raise ValueError("joint position must be a finite native number "
+                                 "exactly representable as float")
             lower, upper = normalized_limits[joint_id]
             if value < lower or value > upper:
                 raise ValueError(f"joint position outside limits: {joint_id}")
