@@ -97,6 +97,142 @@ class PointRoomGymTests(unittest.TestCase):
         self.assertEqual(reward, -0.01)
         self.assertFalse(terminated)
 
+    def test_action_index_cannot_step_past_episode_horizon(self):
+        episode = self.episode(max_steps=1)
+        episode.reset(seed=7)
+        before = episode._state
+
+        class SteppingIndex:
+            def __index__(self):
+                episode.step(0)
+                return 0
+
+        with self.assertRaisesRegex(RuntimeError, "action conversion"):
+            episode.step(SteppingIndex())
+        self.assertIs(episode._state, before)
+        self.assertFalse(episode._done)
+        self.assertEqual(episode._seed, 7)
+        obs, _, terminated, truncated, _ = episode.step(0)
+        self.assertEqual(obs["tick"], 1)
+        self.assertEqual((terminated, truncated), (False, True))
+        with self.assertRaisesRegex(RuntimeError, "episode ended"):
+            episode.step(0)
+        self.assertEqual(episode.reset()[0]["tick"], 0)
+
+    def test_action_boolean_check_does_not_call_class_property(self):
+        episode = self.episode(max_steps=1)
+        episode.reset()
+        callbacks = []
+
+        class ClassPropertyIndex:
+            @property
+            def __class__(self):
+                callbacks.append("class")
+                episode.step(0)
+                return int
+
+            def __index__(self):
+                return 0
+
+        obs, _, _, truncated, _ = episode.step(ClassPropertyIndex())
+        self.assertEqual(callbacks, [])
+        self.assertEqual(obs["tick"], 1)
+        self.assertTrue(truncated)
+
+    def test_action_index_cannot_reset_episode_state(self):
+        episode = self.episode(max_steps=2)
+        episode.reset(seed=7)
+        episode.step(1)
+        before = episode._state
+
+        class ResettingIndex:
+            def __index__(self):
+                episode.reset(seed=99)
+                return 0
+
+        with self.assertRaisesRegex(RuntimeError, "action conversion"):
+            episode.step(ResettingIndex())
+        self.assertIs(episode._state, before)
+        self.assertEqual(episode._seed, 7)
+        self.assertFalse(episode._done)
+        obs, _, _, truncated, info = episode.step(0)
+        self.assertEqual(obs["tick"], 2)
+        self.assertTrue(truncated)
+        self.assertEqual(info["seed"], 7)
+
+    def test_index_may_catch_reentry_error_without_corrupting_outer_step(self):
+        for operation in ("reset", "step"):
+            with self.subTest(operation=operation):
+                episode = self.episode(max_steps=1)
+                episode.reset(seed=7)
+                rejected = []
+
+                class CatchingIndex:
+                    def __index__(self):
+                        try:
+                            if operation == "reset":
+                                episode.reset(seed=99)
+                            else:
+                                episode.step(0)
+                        except RuntimeError as exc:
+                            rejected.append(str(exc))
+                        return 0
+
+                obs, _, terminated, truncated, info = episode.step(CatchingIndex())
+                self.assertEqual(len(rejected), 1)
+                self.assertIn("action conversion", rejected[0])
+                self.assertEqual(obs["tick"], 1)
+                self.assertEqual(info["seed"], 7)
+                self.assertEqual((terminated, truncated), (False, True))
+
+    def test_action_conversion_exception_releases_reentry_guard(self):
+        for exception in (TypeError, ValueError, OverflowError, RuntimeError):
+            with self.subTest(exception=exception.__name__):
+                episode = self.episode()
+                episode.reset(seed=7)
+                before = episode._state
+
+                class RaisingIndex:
+                    def __index__(self):
+                        raise exception("conversion failed")
+
+                expected = ValueError if exception is TypeError else exception
+                with self.assertRaises(expected):
+                    episode.step(RaisingIndex())
+                self.assertIs(episode._state, before)
+                self.assertEqual(episode.reset(seed=8)[1]["seed"], 8)
+                self.assertEqual(episode.step(0)[0]["tick"], 1)
+
+    def test_optional_gym_wrapper_refuses_recursive_transition(self):
+        try:
+            import gymnasium  # noqa: F401 - optional upstream integration
+        except ImportError:
+            self.skipTest("gymnasium is optional")
+        for operation in ("reset", "step"):
+            with self.subTest(operation=operation):
+                env = make_gymnasium_env(self.room, start=(1, 2), goal=(3, 2),
+                                         max_steps=1)
+                try:
+                    env.reset(seed=7)
+
+                    class RecursiveIndex:
+                        def __index__(self):
+                            if operation == "reset":
+                                env.reset(seed=99)
+                            else:
+                                env.step(0)
+                            return 0
+
+                    with self.assertRaisesRegex(RuntimeError, "action conversion"):
+                        env.step(RecursiveIndex())
+                    obs, _, terminated, truncated, info = env.step(0)
+                    self.assertTrue(env.observation_space.contains(obs))
+                    self.assertEqual(obs["tick"], 1)
+                    self.assertEqual(info["seed"], 7)
+                    self.assertEqual((terminated, truncated), (False, True))
+                finally:
+                    env.close()
+
     def test_mutated_episode_budgets_are_rejected_without_advancing(self):
         episode = self.episode(step_m=0.125, max_steps=2)
         episode.reset(seed=7)

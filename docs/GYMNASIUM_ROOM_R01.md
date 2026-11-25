@@ -24,6 +24,14 @@ advance state. Reward is +1 at goal, -0.05 on blocked, -0.01 otherwise.
 `terminated` indicates within `goal_radius_m` of the goal; `truncated`
 indicates the step horizon was reached first. Reset must precede step.
 
+Integer-like actions, including NumPy integers from `Discrete.sample()`, are
+accepted through `__index__`. If that conversion calls `reset` or `step` on the
+same episode, the nested call raises `RuntimeError` before changing state.
+An uncaught conversion error leaves the episode at its previous tick and seed;
+the guard is released even when conversion fails. Catching the nested-call error
+and returning a valid action permits exactly the outer step. This preserves the
+configured horizon and end-of-episode gate without changing action IDs or rewards.
+
 ## Optional real Gymnasium
 
 Install separately into an isolated environment, after dependency/license review:

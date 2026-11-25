@@ -163,7 +163,7 @@ def _open_readonly(path):
         raise NoosphereError("cannot read SQLite event journal") from exc
 
 
-def _read_first_event(path, agent_id):
+def _read_first_event(path, agent_id, *, external_expected_head=None):
     """Inspect existing bootstrap before any writable SQLite initialization."""
     path = Path(path)
     if path.is_symlink():
@@ -193,6 +193,12 @@ def _read_first_event(path, agent_id):
         first = db.execute("SELECT wire_json FROM events ORDER BY seq LIMIT 1").fetchone()
         if first is None:
             return None
+        if external_expected_head is not None:
+            # Check the tip in the same snapshot as the bootstrap. This
+            # preflight cannot replace full replay verification after opening.
+            tip = db.execute("SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+            if tip["event_hash"] != external_expected_head:
+                raise NoosphereError("hash head differs from independent external anchor")
         try:
             event = _loads_wire(first["wire_json"])
         except NoosphereError as exc:

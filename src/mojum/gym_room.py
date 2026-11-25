@@ -67,6 +67,7 @@ class PointRoomEpisode:
         self._done = False
         self._last_blocked = False
         self._seed = None
+        self._converting_action = False
 
     def _assert_configuration(self):
         """Reject facade mutation before a reset or reward-producing step."""
@@ -91,6 +92,8 @@ class PointRoomEpisode:
                 "physical_contact": False, "seed": self._seed}
 
     def reset(self, *, seed=None, options=None):
+        if self._converting_action:
+            raise RuntimeError("reset is not allowed during action conversion")
         if (seed is not None and (type(seed) is not int or seed < 0)):
             raise ValueError("invalid seed")
         if options is not None and (type(options) is not dict or options):
@@ -105,6 +108,8 @@ class PointRoomEpisode:
         return self._observation(), self._info()
 
     def step(self, action):
+        if self._converting_action:
+            raise RuntimeError("step is not allowed during action conversion")
         if self._state is None:
             raise RuntimeError("reset must precede step")
         if self._done:
@@ -112,12 +117,18 @@ class PointRoomEpisode:
         # Do not let a policy/harness change motion, horizon, start or reward goal.
         # Fail before advancing the authoritative point-room state.
         self._assert_configuration()
-        if isinstance(action, bool):
+        # bool cannot be subclassed; avoid invoking a caller's __class__ hook.
+        if type(action) is bool:
             raise ValueError("invalid action")
+        # Integer conversion can call user code. Refuse recursive transitions
+        # before they can reset the episode or consume its remaining horizon.
+        self._converting_action = True
         try:
             index = operator.index(action)  # includes numpy.integer / Discrete.sample()
         except TypeError as exc:
             raise ValueError("invalid action") from exc
+        finally:
+            self._converting_action = False
         if not 0 <= index < len(ACTIONS):
             raise ValueError("invalid action")
         # __index__ can run caller code: recheck before advancing state.
