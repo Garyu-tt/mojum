@@ -403,13 +403,17 @@ class SensoryPlay:
         return copy.deepcopy(payload)
 
     def _replay(self):
-        self.store.verify_chain()
-        n = self.store.count()
+        verified = self.store.verify_chain()
+        n = verified["count"]
         if n > MAX_EVENTS:
             raise CuriosityError("oversized sensory replay journal")
         rows = self.store.dataset(include_nonpublic=True, limit=MAX_EVENTS)["projection"]["items"]
-        if len(rows) != n or not rows:
+        if not rows:
             raise CuriosityError("incomplete sensory journal")
+        # Verification and projection are separate reads. Never rebuild state
+        # from a different revision than the chain that was actually checked.
+        if len(rows) != n or rows[-1]["event_hash"] != verified["head"]:
+            raise CuriosityError("sensory journal advanced during replay; reopen")
         if rows[0]["event"] != self._event(
             "sensory.bootstrap", "sensory-bootstrap", self.manifest, 0,
         ):
@@ -424,11 +428,12 @@ class SensoryPlay:
                 raise CuriosityError("sensory experience replay mismatch")
             self.world, self.model, self.rng = world, model, rng
             self.tick += 1
+        if self.store.head() != verified["head"]:
+            raise CuriosityError("sensory journal advanced during replay; reopen")
+        self._committed_head = verified["head"]
 
     def checkpoint(self):
-        if self.store.head() != self._committed_head:
-            raise CuriosityError("stale sensory checkpoint: journal head advanced")
-        return {
+        state = {
             "schema": "mojum.sensory-curiosity.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "world_revision": self.world.revision,
@@ -436,6 +441,9 @@ class SensoryPlay:
             "rng": self.rng, "head": self._committed_head,
             "integrity": "local_checksum_not_authenticated",
         }
+        if self.store.head() != self._committed_head:
+            raise CuriosityError("stale sensory checkpoint: journal head advanced")
+        return state
 
 
 def main():
@@ -455,8 +463,11 @@ def main():
             if args.watch:
                 print(json.dumps(row, sort_keys=True, ensure_ascii=False, allow_nan=False),
                       flush=True)
-        print(json.dumps({"checkpoint": baby.checkpoint(),
-                          "private_events": baby.store.count()},
+        checkpoint = baby.checkpoint()
+        # One bootstrap plus one frame per tick, from this same checkpoint.
+        # A separate live count could include another writer's later append.
+        print(json.dumps({"checkpoint": checkpoint,
+                          "private_events": checkpoint["tick"] + 1},
                          ensure_ascii=False, sort_keys=True, allow_nan=False))
 
 
