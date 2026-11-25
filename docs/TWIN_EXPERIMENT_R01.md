@@ -35,9 +35,13 @@ No sensory meeting events, transfer of knowledge, encrypted backup, observer
 UI, consent protocol or true cross-database transaction exists yet.
 `pair` now reserves both new SQLite names using exclusive `O_CREAT|O_EXCL`
 creation before opening Aquarium, so a second creator cannot silently replace
-an existing path after the initial check. If the second reservation fails, the
-first empty reservation is removed when its identity still matches. This
-requires a trusted, private parent directory; it does not lock out malicious
+an existing path after the initial check. If a later reservation fails or
+creation is interrupted, already reserved files are retained, even when
+empty. Another Aquarium process may have opened or populated a reservation;
+an inode or size check cannot make automatic deletion safe. Inspect both
+paths before retrying: use new paths or remove an empty reservation only
+after establishing that no other process is using it. This requires a
+trusted, private parent directory; it does not lock out malicious
 same-UID processes, provide durable two-file commits, or prevent hostile
 filesystem replacement after reservation.
 
