@@ -3,6 +3,8 @@
 from collections import defaultdict
 import json
 import math
+import os
+import stat
 
 from ._json_nesting import MAX_JSON_DEPTH, exceeds_json_depth
 
@@ -78,8 +80,17 @@ def load_graph(path):
     string before the depth, duplicate-key and numeric gates can inspect it.
     The byte limit also counts non-ASCII UTF-8 and insignificant whitespace.
     """
+    def open_nonblocking(filename, flags):
+        # Preserve the platform's binary/readonly flags supplied by open().
+        return os.open(filename, flags | getattr(os, "O_NONBLOCK", 0))
+
     try:
-        with path.open("rb") as stream:
+        # Nonblocking open lets POSIX FIFO admission finish even with no
+        # writer. Check the opened object, including a followed symlink,
+        # before any read; the file context owns descriptor cleanup.
+        with open(os.fspath(path), "rb", opener=open_nonblocking) as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise GraphError("Graph input must be a regular file")
             payload = stream.read(MAX_GRAPH_BYTES + 1)
         if len(payload) > MAX_GRAPH_BYTES:
             raise GraphError("Graph JSON exceeds 256 KiB byte limit")
@@ -90,7 +101,7 @@ def load_graph(path):
                           parse_float=_parse_json_float)
     except GraphError:
         raise
-    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError, TypeError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
 
