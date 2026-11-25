@@ -1,0 +1,38 @@
+name: Spartan sandbox planner QA
+
+on:
+  pull_request:
+    paths:
+      - "tools/spartan_sandbox.py"
+      - "tests/test_spartan_sandbox.py"
+      - "docs/SPARTAN_SANDBOX_R01.md"
+      - ".github/workflows/spartan-sandbox-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-planner:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out head
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Install Bubblewrap runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run offline sandbox planner tests
+        run: python -m unittest discover -s tests -p "test_spartan_sandbox.py" -v
