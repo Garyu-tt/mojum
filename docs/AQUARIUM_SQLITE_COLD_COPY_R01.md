@@ -72,7 +72,9 @@ coordinated replication: writing to two forks creates divergent histories.
 - Import verification requires an expected journal head and owning organism ID;
   expected byte SHA and virtual tick are recommended additional gates.
 - Source file must exist and be a regular non-symlink file; database pages are
-  limited to **128 MB**. No filesystem/network-backed concurrent-directory
+  limited to **128 MB**. Verification also enforces this limit while copying
+  the backup into temporary storage. Finish transferring the file before
+  starting verification. No filesystem/network-backed concurrent-directory
   adversary is supported.
 
 ## Boundaries

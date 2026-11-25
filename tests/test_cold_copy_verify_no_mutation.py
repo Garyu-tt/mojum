@@ -4,14 +4,16 @@ The Aquarium constructor auto-bootstraps an empty journal, so a verify API
 must isolate SQLite open/replay side effects from the original archive.
 """
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from mojum import aquarium_cold_copy
 from mojum.aquarium import Aquarium
 from mojum.aquarium_cold_copy import export_cold_copy, verify_cold_copy
 
@@ -76,23 +78,62 @@ class ReadOnlyVerifyTests(unittest.TestCase):
         self.assertEqual(self.archive.read_bytes(), original)
         self.assert_no_new_archive_sidecars()
 
-    def test_successful_verification_does_not_modify_archive(self):
+    def test_verification_at_size_limit_does_not_modify_archive(self):
         with Aquarium(self.source, SEED, GRAPH) as baby:
             for _ in range(4):
                 baby.step()
         meta = export_cold_copy(self.source, self.archive, SEED, GRAPH)
         original = self.archive.read_bytes()
-        result = verify_cold_copy(
-            self.archive, SEED, GRAPH,
-            expected_agent_id=ID,
-            expected_journal_head=meta["journal_head"],
-            expected_sha256=meta["db_sha256"],
-            expected_tick=4,
-        )
+        with patch.object(aquarium_cold_copy, "MAX_BACKUP_BYTES", len(original)):
+            result = verify_cold_copy(
+                self.archive, SEED, GRAPH,
+                expected_agent_id=ID,
+                expected_journal_head=meta["journal_head"],
+                expected_sha256=meta["db_sha256"],
+                expected_tick=4,
+            )
         self.assertEqual(result["tick"], 4)
         self.assertEqual(result["db_sha256_before_replay"], meta["db_sha256"])
         self.assertEqual(self.archive.read_bytes(), original)
         self.assert_no_new_archive_sidecars()
+
+    def test_growth_after_preflight_never_exceeds_staging_budget(self):
+        with Aquarium(self.source, SEED, GRAPH) as baby:
+            baby.step()
+        meta = export_cold_copy(self.source, self.archive, SEED, GRAPH)
+        original = self.archive.read_bytes()
+        appended = b"x" * (256 * 1024)
+        temporary_directory = tempfile.TemporaryDirectory
+        staged_sizes = []
+
+        @contextmanager
+        def finish_transfer(**kwargs):
+            # The first checksum has already returned before staging starts.
+            with self.archive.open("ab") as transfer:
+                transfer.write(appended)
+            with temporary_directory(dir=self.root, **kwargs) as scratch:
+                try:
+                    yield scratch
+                finally:
+                    staged = Path(scratch) / "candidate.sqlite3"
+                    staged_sizes.append(staged.stat().st_size if staged.exists() else 0)
+
+        with (patch.object(aquarium_cold_copy, "MAX_BACKUP_BYTES", len(original)),
+              patch.object(aquarium_cold_copy.tempfile, "TemporaryDirectory",
+                           side_effect=finish_transfer),
+              patch.object(aquarium_cold_copy, "Aquarium") as replay):
+            with self.assertRaisesRegex(ValueError, "exceeds size budget"):
+                verify_cold_copy(
+                    self.archive, SEED, GRAPH, expected_agent_id=ID,
+                    expected_journal_head=meta["journal_head"],
+                    expected_sha256=meta["db_sha256"],
+                )
+        self.assertEqual(len(staged_sizes), 1)
+        self.assertLessEqual(staged_sizes[0], len(original))
+        replay.assert_not_called()
+        self.assertEqual(self.archive.read_bytes(), original + appended)
+        self.assert_no_new_archive_sidecars()
+        self.assertFalse(list(self.root.glob("mojum-cold-verify-*")))
 
     def test_wrong_expected_head_does_not_modify_archive(self):
         with Aquarium(self.source, SEED, GRAPH) as baby:
