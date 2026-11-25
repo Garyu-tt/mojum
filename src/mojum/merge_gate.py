@@ -249,6 +249,8 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
     )
     conclusion_raw = _text(raw, "conclusion")
     state_raw = _text(raw, "state")
+    if "state" in raw and state_raw is None:
+        raise SnapshotError(f"check[{index}] state must be a nonblank string")
 
     if state_raw is not None:
         # StatusContext: EXPECTED/PENDING are non-terminal; SUCCESS/FAILURE/
@@ -256,12 +258,15 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         state = state_raw.upper()
         if state in {"FAILURE", "ERROR"}:
             conclusion_raw = state
-        if status_raw is None:
-            if state in {"SUCCESS", "FAILURE", "ERROR"}:
+        if state in {"SUCCESS", "FAILURE", "ERROR"}:
+            if status_raw is None:
                 status_raw = "COMPLETED"
                 conclusion_raw = conclusion_raw or state
-            else:
-                status_raw = state
+        else:
+            # A hybrid record must retain pending or unknown legacy evidence
+            # even when its CheckRun fields claim completion. Preserve any
+            # failed conclusion so evaluate() still gives failure priority.
+            status_raw = "PENDING" if state in PENDING_STATES else "UNKNOWN"
 
     if status_raw is None:
         if conclusion_raw is not None:
