@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 
 from .graph import validate as validate_graph
-from .noosphere import EVENT_SCHEMA, LocalNoosphere
+from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere
 from .sim import Simulation, digest
 from .world_room import Room, advance, initial_state
 
@@ -224,6 +224,7 @@ class InfantPlay:
                      "start": list(self.start)},
             "goal": None, "provenance": "synthetic-fixture-no-real-world-observation",
         }
+        self._committed_head = EMPTY_HEAD
         self.store = LocalNoosphere(db_path, agent_id)
         try:
             if self.store.count() == 0:
@@ -254,9 +255,11 @@ class InfantPlay:
     def _append(self, topic, eid, payload, now):
         if self.store.count() >= MAX_EVENTS:
             raise InfantError("infant journal budget reached")
-        return self.store.append(
-            self._event(topic, eid, payload, now), expected_head=self.store.head(),
+        new_head = self.store.append(
+            self._event(topic, eid, payload, now), expected_head=self._committed_head,
         )
+        self._committed_head = new_head
+        return new_head
 
     def _calculate(self):
         runtime = Simulation(self.graph, self.dt_ns)
@@ -344,13 +347,15 @@ class InfantPlay:
         return copy.deepcopy(payload)
 
     def _replay(self):
-        self.store.verify_chain()
-        count = self.store.count()
+        verified = self.store.verify_chain()
+        count = verified["count"]
         if count > MAX_EVENTS:
             raise InfantError("journal exceeds bounded replay capacity")
         events = self.store.dataset(include_nonpublic=True, limit=MAX_EVENTS)["projection"]["items"]
-        if len(events) != count or not events:
+        if not events:
             raise InfantError("incomplete infant memory")
+        if len(events) != count or events[-1]["event_hash"] != verified["head"]:
+            raise InfantError("infant journal advanced during replay, reopen the journal")
         if events[0]["event"] != self._event(
             "infant.bootstrap", "infant-bootstrap", self.manifest, 0,
         ):
@@ -368,15 +373,19 @@ class InfantPlay:
                 raise InfantError("infant experience replay mismatch")
             self.world, self.model = next_world, next_model
             self.tick += 1
+        self._committed_head = verified["head"]
 
     def checkpoint(self):
-        return {
+        state = {
             "schema": "mojum.infant.checkpoint/1", "tick": self.tick,
             "agent_id": self.agent_id, "world_revision": self.world.revision,
-            "motor_memory": self.model.snapshot(), "journal_head": self.store.head(),
+            "motor_memory": self.model.snapshot(), "journal_head": self._committed_head,
             "manifest_sha256": digest(self.manifest),
             "trust": "checksum_only_not_authenticated",
         }
+        if self.store.head() != state["journal_head"]:
+            raise InfantError("stale infant checkpoint, reopen the journal")
+        return state
 
 
 def main():
@@ -399,8 +408,11 @@ def main():
             frame = infant.step()
             if args.watch:
                 print(json.dumps(frame["viewer"], ensure_ascii=False, allow_nan=False))
+        checkpoint = infant.checkpoint()
+        # The verified infant wire has one bootstrap plus one frame per tick.
+        # A later writer must not change the count paired with this checkpoint.
         print(json.dumps(
-            {"checkpoint": infant.checkpoint(), "events": infant.store.count()},
+            {"checkpoint": checkpoint, "events": checkpoint["tick"] + 1},
             ensure_ascii=False, allow_nan=False,
         ))
 
