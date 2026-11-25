@@ -923,6 +923,14 @@ class Aquarium:
         return state
 
 
+def report_cli_runtime_error(parser, exc):
+    """Give runtime storage failures a distinct exit status in Aquarium CLIs."""
+    storage_error = exc.__cause__ if isinstance(exc, NoosphereError) else exc
+    if isinstance(storage_error, sqlite3.OperationalError):
+        parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {storage_error}\n")
+    parser.error(str(exc))
+
+
 def load_cli_room(room_file, motor_mode):
     """Resolve the versioned room and start used to create or replay a journal."""
     if room_file is None:
@@ -1050,10 +1058,7 @@ def main():
             # after committing ticks, including when the genome ID is non-ASCII.
             print(json.dumps(checkpoint, indent=2, allow_nan=False))
     except (AquariumError, NoosphereError, sqlite3.OperationalError) as exc:
-        storage_error = exc.__cause__ if isinstance(exc, NoosphereError) else exc
-        if isinstance(storage_error, sqlite3.OperationalError):
-            parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {storage_error}\n")
-        parser.error(str(exc))
+        report_cli_runtime_error(parser, exc)
 
 
 if __name__ == "__main__":

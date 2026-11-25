@@ -15,9 +15,10 @@ import json
 from importlib.resources import files
 from pathlib import Path
 import signal
+import sqlite3
 import time
 
-from .aquarium import Aquarium, AquariumError, V4_MODE
+from .aquarium import Aquarium, AquariumError, V4_MODE, report_cli_runtime_error
 from .aquarium import MAX_REPLAY_EVENTS as AQUARIUM_REPLAY_EVENTS
 from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
@@ -282,8 +283,8 @@ def main(argv=None):
                         "motor_mode": aquarium.motor_mode,
                         "sensory_mode": aquarium.sensory_mode,
                     })
-        except (AquariumError, NoosphereError, PortableHostError) as exc:
-            parser.error(str(exc))
+        except (AquariumError, NoosphereError, PortableHostError, sqlite3.OperationalError) as exc:
+            report_cli_runtime_error(parser, exc)
     # Stdout contains metadata only, never private frames, genome, sensor
     # measurements or learner state.
     print(json.dumps(status, sort_keys=True, ensure_ascii=False, allow_nan=False))
