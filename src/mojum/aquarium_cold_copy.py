@@ -18,6 +18,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError, MOTOR_MODES, load_cli_room
+from .cli_sensory_scene import SENSORY_SCENE_CHOICES, resolve_sensory_scene
 from .genesis import validate_seed
 from .graph import load_graph
 from .noosphere import STORE_SCHEMA, _open_readonly
@@ -67,8 +68,8 @@ def _require_existing_source_journal(path, agent_id):
     with _open_readonly(path) as db:
         db.execute("BEGIN")
         tables = {row["name"] for row in db.execute(
-            "SELECT name FROM sqlite_schema "
-            "WHERE type='table' AND name IN ('metadata', 'events')"
+            "SELECT lower(name) AS name FROM sqlite_schema "
+            "WHERE type='table' AND lower(name) IN ('metadata', 'events')"
         )}
         if tables != {"metadata", "events"}:
             raise ValueError("export requires existing metadata and events tables")
@@ -267,6 +268,8 @@ def main():
                        default="placeholder")
         p.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                        default="none")
+        p.add_argument("--sensory-scene", choices=SENSORY_SCENE_CHOICES, default="default",
+                       help="scene used to create the journal; empty uses the selected room dimensions")
         p.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
         if mode == "export":
             p.add_argument("--output", type=Path, required=True)
@@ -277,9 +280,13 @@ def main():
     args = parser.parse_args()
     try:
         room, start = load_cli_room(args.room_file, args.motor_mode)
+        sensory_scene = resolve_sensory_scene(
+            args.sensory_scene, sensory_mode=args.sensory_mode, room=room,
+        )
         options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
                        brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
-                       temporal_mode=args.temporal_mode, room=room, start=start)
+                       temporal_mode=args.temporal_mode, room=room, start=start,
+                       sensory_scene=sensory_scene)
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
         agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
