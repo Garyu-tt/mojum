@@ -10,6 +10,7 @@ import json
 SCHEMA = "mojum.obstacle-geometry-audit/1"
 MAX_OBSTACLES = 128
 MAX_COORD = 1_000_000
+MAX_FIELD_NAME = 32
 _EXPECTED_FIELDS = {"id", "x_min", "y_min", "x_max", "y_max"}
 
 
@@ -31,6 +32,13 @@ def audit_obstacles(obstacles: list[dict]) -> dict:
         # hashing/equality and execute arbitrary code during comparisons.
         if any(type(key) is not str for key in item):
             raise ValueError("rectangle keys must be exact native strings")
+        # Bound native key length before set()/hash/equality. Exact built-in
+        # strings cannot execute user code, but huge keys still cause
+        # unbounded hashing/comparison work before an unexpected field is rejected.
+        if any(len(key) > MAX_FIELD_NAME for key in item):
+            raise ValueError("rectangle field names exceed the size limit")
+        if len(item) != len(_EXPECTED_FIELDS):
+            raise ValueError("invalid rectangle fields")
         if set(item) != _EXPECTED_FIELDS:
             raise ValueError("invalid rectangle fields")
         identifier = item["id"]
