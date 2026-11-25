@@ -1,6 +1,7 @@
+import math
 import unittest
 
-from mojum.kinematics_benchmark import evaluate_ik_samples, PROVENANCE
+from mojum.kinematics_evaluator import evaluate_ik_samples, PROVENANCE
 
 LIMITS = {"hip": (-1.0, 1.0), "knee": (0.0, 2.0)}
 SAMPLES = [
@@ -11,7 +12,15 @@ SAMPLES = [
 ]
 
 
-class KinematicsBenchmarkTests(unittest.TestCase):
+class KinematicsEvaluatorTests(unittest.TestCase):
+    @staticmethod
+    def _single_joint_report(position, bounds, *, target=(0, 0, 0), achieved=(0, 0, 0)):
+        sample = {
+            "sample_id": "numeric-probe", "target_m": target, "achieved_m": achieved,
+            "joints": {"joint": position}, "elapsed_ns": 1, "peak_bytes": 1,
+        }
+        return evaluate_ik_samples([sample], {"joint": bounds}, rig_revision="numeric-rig")
+
     def test_report_and_limit_excursion(self):
         report = evaluate_ik_samples(SAMPLES, LIMITS, rig_revision="rig-r1")
         self.assertEqual(report.sample_count, 2)
@@ -20,6 +29,7 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         self.assertFalse(report.within_limits)
         self.assertAlmostEqual(report.samples[0].max_limit_excursion_rad, 0.2)
         self.assertEqual(report.provenance, PROVENANCE)
+        self.assertEqual(report.schema, "mojum.kinematics-evaluation/1")
 
     def test_input_order_does_not_change_digest(self):
         a = evaluate_ik_samples(SAMPLES, LIMITS, rig_revision="rig-r1")
@@ -50,6 +60,99 @@ class KinematicsBenchmarkTests(unittest.TestCase):
         report = evaluate_ik_samples(samples, LIMITS, rig_revision="r")
         self.assertEqual(report.max_residual_m, huge)
         self.assertEqual(report.mean_residual_m, huge)
+
+    def test_rejects_lossy_integer_joint_bounds(self):
+        boundary = 2**53
+        for lower, upper, position in (
+            (boundary + 1, boundary + 2, boundary),
+            (boundary, boundary + 1, boundary),
+            (-boundary - 2, -boundary - 1, -boundary),
+            (-boundary - 1, -boundary, -boundary),
+        ):
+            with self.subTest(lower=lower, upper=upper):
+                with self.assertRaisesRegex(ValueError, "joint limits.*lossless"):
+                    self._single_joint_report(position, (lower, upper))
+
+    def test_rejects_lossy_integer_joint_positions(self):
+        boundary = 2**53
+        for position in (boundary + 1, -boundary - 1):
+            with self.subTest(position=position):
+                with self.assertRaisesRegex(ValueError, "joint positions.*lossless"):
+                    self._single_joint_report(position, (-2 * boundary, 2 * boundary))
+
+    def test_rejects_lossy_integer_coordinates(self):
+        boundary = 2**53
+        for sign in (-1, 1):
+            for field in ("target", "achieved"):
+                for axis in range(3):
+                    values = {"target": [0, 0, 0], "achieved": [0, 0, 0]}
+                    values["target"][axis] = sign * boundary
+                    values["achieved"][axis] = sign * boundary
+                    values[field][axis] = sign * (boundary + 1)
+                    with self.subTest(sign=sign, field=field, axis=axis):
+                        with self.assertRaisesRegex(ValueError, "lossless integer conversion"):
+                            self._single_joint_report(0, (-1, 1), **values)
+
+    def test_exact_large_integer_inputs_remain_supported(self):
+        boundary = 2**53
+        for magnitude in (boundary - 1, boundary, boundary + 2, 2**100, 2**1023):
+            for sign in (-1, 1):
+                with self.subTest(magnitude=magnitude, sign=sign):
+                    report = self._single_joint_report(
+                        sign * magnitude, (-magnitude, magnitude),
+                        target=(sign * magnitude, 0, 0),
+                    )
+                    self.assertTrue(report.within_limits)
+                    self.assertEqual(report.max_residual_m, float(magnitude))
+                    self.assertEqual(report.samples[0].max_limit_excursion_rad, 0.0)
+
+    def test_exact_out_of_limit_integers_preserve_nonzero_results(self):
+        boundary = 2**53
+        for sign, bounds in (
+            (1, (boundary + 2, boundary + 4)),
+            (-1, (-boundary - 4, -boundary - 2)),
+        ):
+            with self.subTest(sign=sign):
+                report = self._single_joint_report(
+                    sign * boundary, bounds,
+                    target=(sign * (boundary + 2), 0, 0),
+                    achieved=(sign * boundary, 0, 0),
+                )
+                self.assertFalse(report.within_limits)
+                self.assertEqual(report.max_residual_m, 2.0)
+                self.assertEqual(report.samples[0].max_limit_excursion_rad, 2.0)
+
+    def test_wide_finite_float_limits_keep_endpoints_compliant(self):
+        for position in (-1e308, 0.0, 1e308):
+            with self.subTest(position=position):
+                report = self._single_joint_report(position, (-1e308, 1e308))
+                self.assertTrue(report.within_limits)
+                self.assertEqual(report.samples[0].max_limit_excursion_rad, 0.0)
+
+    def test_rejects_nonfinite_derived_joint_excursions(self):
+        for position, bounds in (
+            (-1e308, (1e308, 1.5e308)),
+            (1e308, (-1.5e308, -1e308)),
+            (-2**1023, (2**1023, 2**1023 + 2**971)),
+        ):
+            with self.subTest(position=position, bounds=bounds):
+                with self.assertRaisesRegex(ValueError, "joint limit excursion"):
+                    self._single_joint_report(position, bounds)
+
+    def test_subnormal_residual_and_excursion_remain_nonzero(self):
+        tiny = math.ulp(0.0)
+        for sign, bounds in ((1, (tiny, 2 * tiny)), (-1, (-2 * tiny, -tiny))):
+            with self.subTest(sign=sign):
+                report = self._single_joint_report(0.0, bounds, target=(sign * tiny, 0, 0))
+                self.assertFalse(report.within_limits)
+                self.assertEqual(report.max_residual_m, tiny)
+                self.assertEqual(report.samples[0].max_limit_excursion_rad, tiny)
+
+    def test_rejects_nonfinite_derived_coordinate_residual(self):
+        with self.assertRaisesRegex(ValueError, "coordinate residual"):
+            self._single_joint_report(
+                0.0, (-1.0, 1.0), target=(1e308, 0, 0), achieved=(-1e308, 0, 0),
+            )
 
     def test_duplicate_sample_rejected(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):

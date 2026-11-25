@@ -1,26 +1,17 @@
-name: Kinematics benchmark
-
+name: world-temperature
+# Re-run exact-head QA after strict mapping-key admission hardening.
 on:
   pull_request:
     paths:
-      - ".github/workflows/kinematics-benchmark.yml"
-      - "src/mojum/kinematics_benchmark.py"
-      - "tests/test_kinematics_benchmark.py"
-      - "docs/KINEMATICS_BENCHMARK_R01.md"
-  push:
-    branches:
-      - "build/702-kinematics-benchmark-20261124"
-    paths:
-      - ".github/workflows/kinematics-benchmark.yml"
-      - "src/mojum/kinematics_benchmark.py"
-      - "tests/test_kinematics_benchmark.py"
-      - "docs/KINEMATICS_BENCHMARK_R01.md"
-
+      - "src/mojum/world_temperature.py"
+      - "tests/test_world_temperature.py"
+      - "docs/WORLD_TEMPERATURE_R01.md"
+      - ".github/workflows/world-temperature.yml"
+  workflow_dispatch:
 permissions:
   contents: read
-
 jobs:
-  benchmark-contract:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,7 +29,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Run focused unit tests
+      - run: python -m unittest discover -s tests -p "test_world_temperature.py" -v
         env:
           PYTHONPATH: src
-        run: python -m unittest discover -s tests -p "test_kinematics_benchmark.py" -v

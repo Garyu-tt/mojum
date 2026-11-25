@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 
-SCHEMA = "mojum.kinematics-benchmark/1"
+SCHEMA = "mojum.kinematics-evaluation/1"
 PROVENANCE = "PUBLIC_SYNTHETIC"
 MAX_SAMPLES = 10_000
 MAX_JOINTS = 512
@@ -19,12 +19,14 @@ MAX_PEAK_BYTES = 1_099_511_627_776
 
 
 def _finite(value: object) -> bool:
+    """Admit native finite numbers without rounding an integer on conversion."""
     if type(value) not in (int, float):
         return False
     try:
-        return math.isfinite(value)
+        number = float(value)
     except (OverflowError, TypeError, ValueError):
         return False
+    return math.isfinite(number) and (type(value) is float or number == value)
 
 
 def _identifier(value: object, field: str) -> str:
@@ -39,7 +41,7 @@ def _vector(value: object, field: str) -> tuple[float | int, float | int, float 
     if type(value) not in (tuple, list) or len(value) != 3:
         raise ValueError(f"{field} must contain exactly three coordinates")
     if not all(_finite(v) for v in value):
-        raise ValueError(f"{field} must contain finite native numbers")
+        raise ValueError(f"{field} requires finite native numbers with lossless integer conversion")
     return tuple(value)
 
 
@@ -83,7 +85,8 @@ def evaluate_ik_samples(
 
     Coordinates are metres, joint positions/limits are radians, elapsed time is
     nanoseconds, and peak memory is bytes. No solver is invoked and no contact
-    or physical-world inference is made.
+    or physical-world inference is made. Coordinate and joint integers must
+    convert to float without loss; derived residuals and excursions must be finite.
     """
     rig_revision = _identifier(rig_revision, "rig_revision")
     if type(provenance) is not str or provenance != PROVENANCE:
@@ -105,8 +108,10 @@ def evaluate_ik_samples(
         if type(raw_bounds) not in (tuple, list) or len(raw_bounds) != 2:
             raise ValueError("each joint limit must be a lower/upper pair")
         lower, upper = raw_bounds
-        if not _finite(lower) or not _finite(upper) or lower >= upper:
-            raise ValueError("joint limits must be finite and strictly increasing")
+        if not _finite(lower) or not _finite(upper):
+            raise ValueError("joint limits require finite native numbers with lossless integer conversion")
+        if lower >= upper:
+            raise ValueError("joint limits must be strictly increasing")
         limits[name] = (lower, upper)
 
     seen: set[str] = set()
@@ -138,7 +143,7 @@ def evaluate_ik_samples(
             raise ValueError("sample joint set does not match rig limits")
         for value in joints.values():
             if not _finite(value):
-                raise ValueError("joint positions must be finite native numbers")
+                raise ValueError("joint positions require finite native numbers with lossless integer conversion")
         elapsed = raw["elapsed_ns"]
         peak = raw["peak_bytes"]
         if type(elapsed) is not int or not 0 <= elapsed <= MAX_ELAPSED_NS:
@@ -154,7 +159,20 @@ def evaluate_ik_samples(
         excursions = []
         for name, value in joints.items():
             lower, upper = limits[name]
-            excursions.append(max(float(lower) - float(value), 0.0, float(value) - float(upper)))
+            # Compare admitted native values before arithmetic. In-range values
+            # need no subtraction, even for a range spanning both float extremes.
+            try:
+                if value < lower:
+                    excursion = float(lower - value)
+                elif value > upper:
+                    excursion = float(value - upper)
+                else:
+                    excursion = 0.0
+            except (OverflowError, ValueError):
+                raise ValueError("joint limit excursion is outside the supported numeric range") from None
+            if not math.isfinite(excursion):
+                raise ValueError("joint limit excursion is outside the supported numeric range")
+            excursions.append(excursion)
         normalized.append((sample_id, residual, elapsed, peak, max(excursions, default=0.0)))
 
     normalized.sort(key=lambda item: item[0])

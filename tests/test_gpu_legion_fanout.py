@@ -33,6 +33,22 @@ def read_only(port, path, **kwargs):
 
 
 class FanoutContract(unittest.TestCase):
+    def test_gpu_scripts_start_from_an_isolated_python(self):
+        tools_dir = Path(__file__).resolve().parents[1] / "tools"
+        cases = (
+            ("gpu_legion_fanout.py", "--tasks"),
+            ("gpu_legion_plan.py", "--inventory"),
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            for script, option in cases:
+                with self.subTest(script=script):
+                    result = subprocess.run(
+                        [sys.executable, "-I", str(tools_dir / script), "--help"],
+                        cwd=cwd, text=True, capture_output=True, timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(option, result.stdout)
+
     def test_discovers_exact_live_slots_not_300_fake_model_processes(self):
         b1=f.discover_backend(18180,request=read_only)
         b2=f.discover_backend(18181,request=read_only)
@@ -165,7 +181,7 @@ class FanoutContract(unittest.TestCase):
 
     def test_malformed_backend_json_cannot_overreport_free_slots(self):
         # The last duplicate is_processing value would otherwise turn a busy
-        # slot into a free one; deep JSON can also exhaust parser recursion.
+        # slot into a free one. Bounded response bytes still allow deep JSON.
         class Response:
             status = 200
             headers = {"Content-Type": "application/json"}
@@ -187,12 +203,18 @@ class FanoutContract(unittest.TestCase):
              b'"is_processing":false}]', "duplicate backend JSON field"),
             (b"[" * 20000 + b"0" + b"]" * 20000,
              "invalid JSON response"),
+            (("[" * 257 + "0" + "]" * 257).encode("utf-16"),
+             "invalid JSON response"),
         )
         for payload, message in cases:
             with self.subTest(message=message):
                 fake = Mock(open=Mock(return_value=Response(payload)))
                 with self.assertRaisesRegex(f.FanoutError, message):
                     f._request_json(18180, "/slots", opener=fake)
+
+        healthy = {"status": "ok", "text": '\\"' + "[{}]" * 300}
+        fake = Mock(open=Mock(return_value=Response(json.dumps(healthy).encode("utf-16"))))
+        self.assertEqual(f._request_json(18180, "/health", opener=fake), healthy)
 
     def test_loopback_allowlist_and_post_paths(self):
         for port,path in ((22,"/health"),(18080,"/health"),
