@@ -23,6 +23,16 @@ violations and maximum contact penetration in millimetres. Booleans are not
 accepted as integers; numeric values must be finite and within fixed bounds.
 At most 10,000 observations are accepted.
 
+CLI input must resolve to a regular file; symlinks to regular files remain
+supported. On POSIX the file is opened nonblocking and its actual descriptor
+is checked before reading, so writerless FIFOs and devices are rejected without
+waiting for a writer. POSIX platforms without `O_NONBLOCK` reject input before
+opening it. The input budget is 4 MiB, and JSON is limited to 32 nested container
+levels before decoding; brackets and escapes inside strings do not count.
+Malformed JSON, excessive nesting and integers exceeding the interpreter's
+decoder limits produce exit status 2 without a traceback or report publication.
+An existing `--output` file is left untouched on input rejection.
+
 Supported engine identifiers are `mujoco-flex`, `pinocchio-ik`,
 `jolt-softbody`, and `pbd-xpbd`. Engine versions and platform labels are
 required caller-supplied strings. The reporter emits median, nearest-rank p95,

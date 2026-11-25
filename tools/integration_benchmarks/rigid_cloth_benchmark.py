@@ -10,6 +10,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import stat
 import statistics
 import sys
 from pathlib import Path
@@ -22,6 +24,7 @@ MAX_NAME = 80
 MAX_CPU_MS = 60_000.0
 MAX_RSS_MIB = 1_048_576.0
 MAX_INPUT_BYTES = 4 * 1024 * 1024
+MAX_JSON_DEPTH = 32
 
 
 class BenchmarkError(ValueError):
@@ -76,6 +79,63 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise BenchmarkError(f"duplicate JSON object key: {key}")
         result[key] = value
     return result
+
+
+def _read_input(path: Path) -> bytes:
+    """Admit the opened regular file before a bounded read, including symlinks."""
+    if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+        raise BenchmarkError("POSIX benchmark input requires O_NONBLOCK")
+    descriptor = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise BenchmarkError("benchmark input must be a regular file")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1  # The stream now owns and closes the descriptor.
+            raw_bytes = source.read(MAX_INPUT_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(raw_bytes) > MAX_INPUT_BYTES:
+        raise BenchmarkError(f"input exceeds {MAX_INPUT_BYTES} byte limit")
+    return raw_bytes
+
+
+def _decode_document(raw_bytes: bytes) -> Any:
+    """Bound container depth before decoding; quoted brackets are plain text."""
+    raw = raw_bytes.decode("utf-8")
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise BenchmarkError(f"JSON exceeds {MAX_JSON_DEPTH} container levels")
+        elif character in "]}" and depth:
+            depth -= 1
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(BenchmarkError(f"invalid constant {value}")),
+        )
+    except BenchmarkError:
+        raise
+    except (ValueError, RecursionError):
+        # Includes malformed JSON and the interpreter's integer digit limit.
+        raise BenchmarkError("invalid JSON document") from None
 
 
 def _percentile_nearest_rank(values: list[float], percentile: int) -> float:
@@ -166,16 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="write summary JSON (default: stdout)")
     args = parser.parse_args(argv)
     try:
-        with args.input.open("rb") as source:
-            raw_bytes = source.read(MAX_INPUT_BYTES + 1)
-        if len(raw_bytes) > MAX_INPUT_BYTES:
-            raise BenchmarkError(f"input exceeds {MAX_INPUT_BYTES} byte limit")
-        raw = raw_bytes.decode("utf-8")
-        document = json.loads(
-            raw,
-            object_pairs_hook=_unique_object,
-            parse_constant=lambda value: (_ for _ in ()).throw(BenchmarkError(f"invalid constant {value}")),
-        )
+        document = _decode_document(_read_input(args.input))
         report = summarize(document)
         rendered = json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
         if args.output:

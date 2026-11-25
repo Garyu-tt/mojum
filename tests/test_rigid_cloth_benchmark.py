@@ -1,9 +1,16 @@
 import copy
 import importlib.util
+import io
+import json
 import math
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).parents[1] / "tools" / "integration_benchmarks" / "rigid_cloth_benchmark.py"
 SPEC = importlib.util.spec_from_file_location("rigid_cloth_benchmark", MODULE_PATH)
@@ -28,6 +35,12 @@ def fixture():
 
 
 class RigidClothBenchmarkTests(unittest.TestCase):
+    def run_cli(self, path, *extra):
+        return subprocess.run(
+            [sys.executable, str(MODULE_PATH), str(path), *map(str, extra)],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+
     def test_summary_is_deterministic_and_reports_not_verified(self):
         data = fixture()
         first = MODULE.summarize(data)
@@ -137,6 +150,110 @@ class RigidClothBenchmarkTests(unittest.TestCase):
             path = Path(directory) / "too-large.json"
             path.write_bytes(b" " * (MODULE.MAX_INPUT_BYTES + 1))
             self.assertEqual(MODULE.main([str(path)]), 2)
+
+    def test_cli_accepts_regular_file_with_quoted_brackets_and_escapes(self):
+        data = fixture()
+        data["rig"]["asset_id"] = 'quoted-"\\' + "[" * 25 + "]" * 25
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            run = self.run_cli(path)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(json.loads(run.stdout), MODULE.summarize(data))
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlink support required")
+    def test_cli_accepts_symlink_to_regular_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.json"
+            path.write_text(json.dumps(fixture()), encoding="utf-8")
+            link = Path(directory) / "fixture-link.json"
+            try:
+                link.symlink_to(path)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+            output = Path(directory) / "summary.json"
+            run = self.run_cli(link, "--output", output)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8")), MODULE.summarize(fixture()))
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "mkfifo"), "POSIX FIFO support required")
+    def test_cli_rejects_writerless_fifo_without_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "input.fifo"
+            os.mkfifo(fifo)
+            output = Path(directory) / "summary.json"
+            run = self.run_cli(fifo, "--output", output)
+            self.assertEqual(run.returncode, 2, run.stderr)
+            self.assertIn("regular file", run.stderr)
+            self.assertEqual(run.stdout, "")
+            self.assertFalse(output.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX device required")
+    def test_cli_rejects_device_without_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "summary.json"
+            run = self.run_cli(os.devnull, "--output", output)
+            self.assertEqual(run.returncode, 2, run.stderr)
+            self.assertIn("regular file", run.stderr)
+            self.assertFalse(output.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX flag requirement")
+    def test_missing_nonblock_is_rejected_before_open(self):
+        with patch.object(MODULE.os, "O_NONBLOCK", 0, create=True), \
+             patch.object(MODULE.os, "open") as opened, \
+             redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(MODULE.main(["unused-input"]), 2)
+        opened.assert_not_called()
+        self.assertIn("O_NONBLOCK", errors.getvalue())
+
+    def test_opened_descriptor_is_closed_on_admission_and_stream_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.json"
+            path.write_text(json.dumps(fixture()), encoding="utf-8")
+            original_open = os.open
+            for failing_operation in ("fstat", "fdopen"):
+                opened = []
+
+                def record_open(*args, **kwargs):
+                    descriptor = original_open(*args, **kwargs)
+                    opened.append(descriptor)
+                    return descriptor
+
+                with self.subTest(operation=failing_operation), \
+                     patch.object(MODULE.os, "open", side_effect=record_open), \
+                     patch.object(MODULE.os, failing_operation, side_effect=OSError("injected failure")):
+                    with self.assertRaisesRegex(OSError, "injected failure"):
+                        MODULE._read_input(path)
+                self.assertEqual(len(opened), 1)
+                with self.assertRaises(OSError):
+                    os.fstat(opened[0])
+
+    def test_cli_rejects_deep_huge_integer_and_malformed_json_without_traceback(self):
+        cases = {
+            "deep": "[" * 12000 + "0" + "]" * 12000,
+            "integer": "1" * 5000,
+            "malformed": '{"unfinished":',
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "summary.json"
+            output.write_text("existing report", encoding="utf-8")
+            for name, document in cases.items():
+                with self.subTest(case=name):
+                    path = Path(directory) / f"{name}.json"
+                    path.write_text(document, encoding="utf-8")
+                    run = self.run_cli(path, "--output", output)
+                    self.assertEqual(run.returncode, 2, run.stderr)
+                    self.assertIn("benchmark rejected:", run.stderr)
+                    self.assertNotIn("Traceback", run.stderr)
+                    self.assertEqual(run.stdout, "")
+                    self.assertEqual(output.read_text(encoding="utf-8"), "existing report")
+
+    def test_json_depth_limit_is_checked_before_decoding(self):
+        at_limit = "[" * MODULE.MAX_JSON_DEPTH + "0" + "]" * MODULE.MAX_JSON_DEPTH
+        MODULE._decode_document(at_limit.encode("utf-8"))
+        with patch.object(MODULE.json, "loads", side_effect=AssertionError("decoder must not run")):
+            with self.assertRaisesRegex(MODULE.BenchmarkError, "container levels"):
+                MODULE._decode_document(("[" + at_limit + "]").encode("utf-8"))
 
     def test_input_is_not_mutated(self):
         data = fixture()
