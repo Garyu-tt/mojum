@@ -189,10 +189,11 @@ class TransferDestinationSidecarTests(unittest.TestCase):
                     sidecar.symlink_to(missing)
                 except (NotImplementedError, OSError) as exc:
                     self.skipTest(f"symlink creation unavailable: {exc}")
+                original_target = sidecar.readlink()
                 with self.assertRaisesRegex(TransferError, "SQLite sidecars"):
                     self.migrate(target)
                 self.assertTrue(sidecar.is_symlink())
-                self.assertEqual(sidecar.readlink(), missing)
+                self.assertEqual(sidecar.readlink(), original_target)
                 self.assertFalse(missing.exists())
                 self.assertFalse(os.path.lexists(target))
                 self.assert_source_unchanged()
