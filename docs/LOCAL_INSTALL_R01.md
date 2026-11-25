@@ -5,9 +5,9 @@ This package is an **experimental, CPU-first, single-device synthetic fixture**.
 ## Requirements
 
 - CPython 3.11 or newer with standard-library `sqlite3`.
-- `pip` to install a local wheel. Only source builds use `setuptools>=61` and older setuptools versions also need `wheel` available on the builder.
+- `pip` to install a local wheel. Source builds require `setuptools>=77.0.3` on the builder.
 - No mandatory third-party **runtime** dependencies and no GPU.
-- **License undecided:** this in-repository install support does not grant permission to redistribute or publish on PyPI.
+- Distribution uses the GNU General Public License version 3 or any later version. [Full license text](../LICENSE)
 
 ## Install from a local source checkout
 
@@ -25,10 +25,10 @@ Alternatively, build a wheel once for transfer to another compatible machine.
 python -m pip wheel --no-index --no-build-isolation --no-deps --wheel-dir dist .
 ```
 
-Copy `dist/mojum-0.1.0-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
+Copy `dist/mojum-0.1.2-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
 
 ```sh
-python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+python -m pip install --no-index ./mojum-0.1.2-py3-none-any.whl
 ```
 
 The source checkout and the installed package contain the same example synthetic GENESIS seed and Universal Graph IR. The installed defaults are read through `importlib.resources`, not through a repository-relative `__file__` path.
@@ -68,7 +68,9 @@ The full stdlib suite remains:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow provisions the build tools, then builds the wheel, installs it in a fresh virtual environment, and runs both console commands outside the checkout in a Linux network namespace with only loopback. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
+`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow builds the wheel from two clean exports of the same commit using its timestamp for `SOURCE_DATE_EPOCH`, then compares the wheel bytes. It installs the wheel in a fresh virtual environment and runs the console commands in a loopback-only Linux network namespace. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
+
+The workflow also runs for release tags and checks that the installed version matches the tag. The successful Python 3.13 tag job attaches the verified wheel and `SHA256SUMS` to its workflow run.
 
 ## Limits
 
