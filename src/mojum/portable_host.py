@@ -286,7 +286,9 @@ def main(argv=None):
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
     # measurements or learner state.
-    print(json.dumps(status, sort_keys=True, ensure_ascii=False, allow_nan=False))
+    # Escape Unicode so a legacy redirected console can report committed ticks
+    # and the resume anchor even when it cannot encode the organism ID.
+    print(json.dumps(status, sort_keys=True, allow_nan=False))
     return status
 
 
