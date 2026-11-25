@@ -1,5 +1,6 @@
 import dataclasses
 import unittest
+from unittest import mock
 
 from mojum.world_room import Room, initial_state
 from mojum.world_odor import (
@@ -98,6 +99,28 @@ class WorldOdorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sample_odor_field(self.room, RoomState(0, 1, 1, "0" * 64),
                               [self.source], [SamplePoint("p", 1000, 1000)], consent=True)
+
+    def test_invalid_state_coordinates_rejected_before_revision_hashing(self):
+        invalid_values = (
+            ("list", []), ("object", object()), ("bool", True),
+            ("huge_int", 10 ** 5000), ("nan", float("nan")),
+            ("infinity", float("inf")), ("negative", -1),
+            ("outside_room", 11),
+        )
+        for axis in ("x", "y"):
+            for kind, value in invalid_values:
+                with self.subTest(axis=axis, kind=kind):
+                    state = dataclasses.replace(self.state, **{axis: value})
+                    with mock.patch(
+                        "mojum.world_odor._revision",
+                        side_effect=AssertionError("invalid coordinate reached revision hashing"),
+                    ) as revision:
+                        with self.assertRaisesRegex(ValueError, "stale or invalid RoomState"):
+                            sample_odor_field(
+                                self.room, state, [self.source],
+                                [SamplePoint("p", 1000, 1000)], consent=True,
+                            )
+                        revision.assert_not_called()
 
     def test_consent_and_bounds(self):
         with self.assertRaises(ValueError):

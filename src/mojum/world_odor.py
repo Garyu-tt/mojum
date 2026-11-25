@@ -81,7 +81,7 @@ def _validated_room(room: Room) -> Room:
 
 
 def _decay_q(numerator: int, denominator: int, age: int) -> int:
-    """Return floor((numerator/denominator)**age * SCALE), bounded and deterministic."""
+    """Return bounded fixed-point decay, truncating the ratio and each product."""
     if age == 0 or numerator == denominator:
         return _SCALE
     if numerator == 0:
@@ -136,8 +136,8 @@ def sample_odor_field(
     room = _validated_room(room)
     if (not _native_int(state.tick, 0, _MAX_AGE_TICKS)
             or type(state.revision) is not str
-            or state.revision != _revision(room, state.tick, state.x, state.y)
-            or not _valid(room, state.x, state.y)):
+            or not _valid(room, state.x, state.y)
+            or state.revision != _revision(room, state.tick, state.x, state.y)):
         raise ValueError("stale or invalid RoomState")
     if type(falloff_mm) is not int or not 1 <= falloff_mm <= _MAX_FALLOFF_MM:
         raise ValueError("invalid falloff_mm")

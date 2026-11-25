@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 from .noosphere import (
     DATASET_SCHEMA, EVENT_SCHEMA, NoosphereError, EMPTY_HEAD as _ZERO,
-    _canonical, _integer, _sha, _text, _validate_event,
+    _canonical, _integer, _loads_wire, _sha, _text, _validate_event,
 )
 
 STORE_SCHEMA = "mojum.noosphere.segmented-sqlite/1"
@@ -32,6 +32,10 @@ MAX_SEGMENT_SIZE = 8192
 MIN_SEGMENT_SIZE = 64
 MAX_JOURNAL_EVENTS = 262_144
 RESTORE_LOCK_SUFFIX = ".mojum-restore.lock"
+_PROJECTION_COLUMNS = (
+    "seq,event_id,agent_id,recorded_at_ns,topic,visibility,"
+    "wire_json,prev_hash,event_hash,segment_index"
+)
 
 
 def _restore_lock_path(path):
@@ -420,48 +424,87 @@ class SegmentedNoosphere:
         if self.count() != verified_count or self.head() != proven["head"]:
             raise NoosphereError("journal advanced during receipt generation")
 
-    def event_at(self, seq):
-        _integer(seq, "seq", 1)
-        row = self._db.execute(
-            "SELECT seq,wire_json,event_hash,segment_index FROM segmented_events "
-            "WHERE seq = ? AND agent_id = ?", (seq, self.agent_id),
-        ).fetchone()
-        if row is None:
-            raise NoosphereError("segmented event anchor missing")
+    def _projection_item(self, row):
+        """Check one selected row, without asserting whole-chain authenticity."""
+        try:
+            raw = row["wire_json"]
+            event = _validate_event(_loads_wire(raw), self.agent_id)
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise NoosphereError("invalid serialized segmented event") from exc
+        if type(raw) is not str or _canonical(event) != raw:
+            raise NoosphereError("noncanonical segmented event encoding")
+        for column in ("event_id", "agent_id", "recorded_at_ns", "topic", "visibility"):
+            if type(row[column]) is not type(event[column]) or row[column] != event[column]:
+                raise NoosphereError("event materialization disagrees with event")
+        seq = _integer(row["seq"], "seq", 1)
+        segment = (seq - 1) // self.segment_size
+        if _integer(row["segment_index"], "segment_index") != segment:
+            raise NoosphereError("segment journal sequence discontinuity")
+        previous = row["prev_hash"]
+        stored_hash = row["event_hash"]
+        if (type(previous) is not str or len(previous) != 64
+                or any(char not in "0123456789abcdef" for char in previous)
+                or type(stored_hash) is not str or len(stored_hash) != 64
+                or (seq == 1 and previous != _ZERO)
+                or stored_hash != _hash_event(
+                    event, seq=seq, segment_index=segment, previous=previous)):
+            raise NoosphereError("segmented event hash mismatch")
         return {
-            "seq": row["seq"], "event": json.loads(row["wire_json"]),
+            "seq": seq, "event": event,
             "event_hash": row["event_hash"],
         }
 
-    def iter_events(self, *, include_nonpublic=False, after_seq=0,
-                    batch_size=128):
-        if type(include_nonpublic) is not bool:
-            raise NoosphereError("include_nonpublic must be boolean")
-        _integer(after_seq, "after_seq")
-        _integer(batch_size, "batch_size", 1, 1024)
-        sql = (
-            "SELECT seq,wire_json,event_hash FROM segmented_events "
-            "WHERE agent_id = ? AND seq > ?"
-            + ("" if include_nonpublic else " AND visibility = 'PUBLIC'")
-            + " ORDER BY seq"
+    def event_at(self, seq):
+        """Read one internally consistent anchor; use verify_chain for history."""
+        _integer(seq, "seq", 1)
+        with closing(self._db.execute(
+            "SELECT " + _PROJECTION_COLUMNS + " FROM segmented_events "
+            "WHERE seq = ? AND agent_id = ?", (seq, self.agent_id),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            raise NoosphereError("segmented event anchor missing")
+        return self._projection_item(row)
+
+    def _iter_projection_items(self, where, params, batch_size):
+        cursor = self._db.execute(
+            "SELECT " + _PROJECTION_COLUMNS + " FROM segmented_events WHERE "
+            + " AND ".join(where) + " ORDER BY seq", params,
         )
-        cursor = self._db.execute(sql, (self.agent_id, after_seq))
         try:
             while True:
                 group = cursor.fetchmany(batch_size)
                 if not group:
                     return
                 for row in group:
-                    yield {
-                        "seq": row["seq"], "event": json.loads(row["wire_json"]),
-                        "event_hash": row["event_hash"],
-                    }
+                    yield self._projection_item(row)
         finally:
             cursor.close()
 
+    def iter_events(self, *, include_nonpublic=False, after_seq=0,
+                    batch_size=128):
+        """Yield checked candidates in bounded batches; not a full chain scan.
+
+        Indexed fields select candidates, then their wire and hash envelope
+        must agree before emission. A later corrupt row raises after any valid
+        prefix already yielded. Whole-history checks require verify_chain.
+        """
+        if type(include_nonpublic) is not bool:
+            raise NoosphereError("include_nonpublic must be boolean")
+        _integer(after_seq, "after_seq")
+        _integer(batch_size, "batch_size", 1, 1024)
+        where = ["agent_id = ?", "seq > ?"]
+        if not include_nonpublic:
+            where.append("visibility = 'PUBLIC'")
+        yield from self._iter_projection_items(where, (self.agent_id, after_seq), batch_size)
+
     def dataset(self, *, topic=None, source=None, as_of_recorded_ns=None,
                 valid_at_ns=None, include_nonpublic=False, limit=1000):
-        """Same 10k-max bounded filtered projection as LocalNoosphere."""
+        """Return up to 10k checked matches, not whole-history verification.
+
+        JSON-only filters and the result limit apply after candidate validation,
+        so malformed or ambiguous wire data cannot hide behind json_extract.
+        """
         if topic is not None:
             _text(topic, "topic")
         if source is not None:
@@ -480,29 +523,22 @@ class SegmentedNoosphere:
         if topic is not None:
             where.append("topic = ?")
             params.append(topic)
-        if source is not None:
-            where.append("json_extract(wire_json, '$.source') = ?")
-            params.append(source)
         if as_of_recorded_ns is not None:
             where.append("recorded_at_ns <= ?")
             params.append(as_of_recorded_ns)
-        if valid_at_ns is not None:
-            where.append(
-                "json_extract(wire_json,'$.valid_from_ns') <= ? AND "
-                "(json_extract(wire_json,'$.valid_to_ns') IS NULL OR "
-                "json_extract(wire_json,'$.valid_to_ns') > ?)"
-            )
-            params.extend((valid_at_ns, valid_at_ns))
-        params.append(limit)
-        rows = self._db.execute(
-            "SELECT seq,wire_json,event_hash FROM segmented_events WHERE "
-            + " AND ".join(where) + " ORDER BY seq LIMIT ?", params,
-        ).fetchall()
-        items = [
-            {"seq": r["seq"], "event": json.loads(r["wire_json"]),
-             "event_hash": r["event_hash"]}
-            for r in rows
-        ]
+        items = []
+        with closing(self._iter_projection_items(where, params, 128)) as candidates:
+            for item in candidates:
+                event = item["event"]
+                if source is not None and event["source"] != source:
+                    continue
+                if valid_at_ns is not None and (
+                        event["valid_from_ns"] > valid_at_ns
+                        or (event["valid_to_ns"] is not None and event["valid_to_ns"] <= valid_at_ns)):
+                    continue
+                items.append(item)
+                if len(items) == limit:
+                    break
         projection = {
             "schema": DATASET_SCHEMA, "agent_id": self.agent_id,
             "filters": {"topic": topic, "source": source,
