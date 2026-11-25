@@ -4,6 +4,7 @@ Source frames originate in actual R0.13 Aquarium + SQLite, not a fabricated
 web animation. Test only synthetic local files; never attach to CI artifacts.
 """
 from html.parser import HTMLParser
+import copy
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mojum.aquarium import Aquarium
 from mojum.aquarium_trace_export import export_private_trace
@@ -110,10 +112,10 @@ function legacyVariant(source,transform){
    f=>{delete f.trace_integrity;delete f.export_status;delete f.trace_range;
        delete f.trace_room}),transform);
 }
-// Build a legacy frame whose serialized line is exactly `lineLength` UTF-16
-// code units long, matching the viewer's `source.length` guard. Padding uses
-// plain ASCII so JSON escaping never changes the measured length.
-function exactFrame(tick,lineLength){
+// Build a legacy frame whose serialized line is exactly `lineLength`
+// Unicode code points long, matching the Python exporter's string budget.
+// Padding is one code point that does not need JSON escaping.
+function exactFrame(tick,lineLength,padding="x"){
  const frame={schema:"mojum.aquarium.frame/1",tick,
    world:{position:[0,0],blocked:false},
    interoception:{heartbeat:{pulse:false}}};
@@ -121,15 +123,15 @@ function exactFrame(tick,lineLength){
    frame.brain={status:""};
    const missing=lineLength-JSON.stringify(frame).length;
    if(missing<0)throw Error("line target too small");
-   frame.brain.status="x".repeat(missing);
-   if(JSON.stringify(frame).length!==lineLength)
+   frame.brain.status=padding.repeat(missing);
+   if(Array.from(JSON.stringify(frame)).length!==lineLength)
      throw Error("unexpected line length "+JSON.stringify(frame).length);
  }
  return JSON.stringify(frame);
 }
-function syntheticLegacyTrace(count,lineLength){
+function syntheticLegacyTrace(count,lineLength,padding="x"){
  const rows=[];
- for(let i=0;i<count;i++)rows.push(exactFrame(i,lineLength));
+ for(let i=0;i<count;i++)rows.push(exactFrame(i,lineLength,padding));
  rows.push(JSON.stringify({schema:"mojum.aquarium.checkpoint/1",
    stored_events:count+1}));
  return rows.join("\n")+"\n";
@@ -208,6 +210,8 @@ async function race(source){
  // limits, and only one unit beyond each maximum is rejected.
  const lineAtLimit=await attempt(syntheticLegacyTrace(1,64000), true);
  const lineOverLimit=await attempt(syntheticLegacyTrace(1,64001), true);
+ const unicodeLineAtLimit=await attempt(syntheticLegacyTrace(1,64000,"\u{1f31f}"), true);
+ const unicodeLineOverLimit=await attempt(syntheticLegacyTrace(1,64001,"\u{1f31f}"), true);
  const framesAtLimit=await attempt(syntheticLegacyTrace(5000,0), true);
  const framesOverLimit=await attempt(syntheticLegacyTrace(5001,0), true);
  const bytesAtLimit=await attempt(legacyVariant(wire, ()=>{}), true, 24*1024*1024);
@@ -226,6 +230,7 @@ async function race(source){
                                       legacyDefault,legacyOptIn,
                                       safe,gap,oversized,longLine,manyFrames,
                                       lineAtLimit,lineOverLimit,framesAtLimit,
+                                      unicodeLineAtLimit,unicodeLineOverLimit,
                                       framesOverLimit,bytesAtLimit,bytesOverLimit,
                                       raced,
                                       blankLine,whitespaceLine,trailingBlank,
@@ -298,6 +303,58 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertEqual(footer["trace_integrity"]["sha256"],
                          hashlib.sha256(b"".join(lines[:-1])).hexdigest())
         self.assertFalse(report["has_more"])
+
+    @unittest.skipUnless(shutil.which("node"), "Node unavailable; browser CI mandatory")
+    def test_actual_unicode_export_matches_viewer_line_budget(self):
+        # Use a smaller shared line limit to exercise the exact producer /
+        # viewer boundary with a real journal, without hundreds of expensive
+        # acquired-gene events just to grow a frame to the production limit.
+        seed = copy.deepcopy(SEED)
+        seed["genome_id"] = "unicode-trace-\U0001f31f"
+        database = self.db.with_name("unicode.sqlite3")
+        output = self.output.with_name("unicode.jsonl")
+        with Aquarium(database, seed, GRAPH, agent_id=seed["genome_id"],
+                      neural_mode="disabled") as aquarium:
+            frame = aquarium.step()
+            head = aquarium.checkpoint()["journal_head"]
+        line = json.dumps(frame, sort_keys=True, ensure_ascii=False,
+                          allow_nan=False, separators=(",", ":"))
+        limit = len(line)
+        self.assertGreater(len(line.encode("utf-16-le")) // 2, limit)
+        with patch("mojum.aquarium_trace_export.MAX_JSONL_CHARS", limit):
+            export_private_trace(
+                database, output, seed, GRAPH,
+                agent_id=seed["genome_id"], neural_mode="disabled",
+                allow_private_export=True, expected_journal_head=head,
+            )
+        self.assertEqual(output.read_bytes().split(b"\n", 1)[0], line.encode("utf-8"))
+
+        # Reuse the actual viewer's DOM harness, without running its large
+        # unrelated boundary fixtures for this one-frame export.
+        harness = NODE_HARNESS.split("(async()=>{", 1)[0] + r"""
+(async()=>{process.stdout.write(JSON.stringify(await attempt(wire))+"\n")})()
+ .catch(err=>{process.stderr.write(String(err.stack||err));process.exit(1)});
+"""
+        html = VIEWER.read_text(encoding="utf-8")
+        self.assertEqual(html.count("MAX_LINE = 64000"), 1)
+        page = self.output.with_name("unicode.viewer.html")
+        for viewer_limit, accepted in ((limit, True), (limit - 1, False)):
+            with self.subTest(viewer_limit=viewer_limit):
+                page.write_text(html.replace("MAX_LINE = 64000",
+                                             f"MAX_LINE = {viewer_limit}"),
+                                encoding="utf-8")
+                run = subprocess.run(
+                    [shutil.which("node"), "-e", harness, str(page), str(output)],
+                    cwd=ROOT, encoding="utf-8", capture_output=True,
+                    check=False, timeout=10,
+                )
+                self.assertEqual(run.returncode, 0, run.stderr)
+                result = json.loads(run.stdout)
+                self.assertEqual(result["enabled"], accepted, result["status"])
+                if accepted:
+                    self.assertIn("SHA-256 кадров совпадает", result["status"])
+                else:
+                    self.assertIn("Слишком длинная", result["status"])
 
     @unittest.skipUnless(shutil.which("node"), "Node unavailable; browser CI mandatory")
     def test_actual_viewer_js_verifies_hash_and_rejects_corrupt_truncated_files(self):
@@ -376,6 +433,10 @@ class PrivateTraceIntegrityQA(unittest.TestCase):
         self.assertIn("не проверен", values["lineAtLimit"]["status"])
         self.assertFalse(values["lineOverLimit"]["enabled"])
         self.assertIn("Слишком длинная", values["lineOverLimit"]["status"])
+        self.assertTrue(values["unicodeLineAtLimit"]["enabled"],
+                        values["unicodeLineAtLimit"]["status"])
+        self.assertFalse(values["unicodeLineOverLimit"]["enabled"])
+        self.assertIn("Слишком длинная", values["unicodeLineOverLimit"]["status"])
         self.assertTrue(values["framesAtLimit"]["enabled"],
                         values["framesAtLimit"]["status"])
         self.assertFalse(values["framesOverLimit"]["enabled"])
