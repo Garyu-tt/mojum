@@ -1,0 +1,36 @@
+name: world-airflow-qa
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/world_airflow.py"
+      - "tests/test_world_airflow.py"
+      - ".github/workflows/world-airflow-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact pull request head
+        if: github.event_name == 'pull_request'
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Run focused regression tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_world_airflow.py' -v
