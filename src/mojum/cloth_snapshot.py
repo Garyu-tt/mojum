@@ -197,7 +197,7 @@ def verify_replay(sequence: list[bytes | str]) -> tuple[str, ...]:
         raise ClothSnapshotError("replay must contain 1..10000 snapshots")
     total_bytes = 0
     for item in sequence:
-        if type(item) not in (bytes, str):
+        if type(item) is not bytes and type(item) is not str:
             raise ClothSnapshotError("replay entries must be bytes or text")
         # For accepted ASCII text, code-point count equals encoded byte count.
         # This also bounds per-item work before decode_snapshot encodes it.

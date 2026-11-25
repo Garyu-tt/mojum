@@ -61,6 +61,26 @@ class ClothSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(ClothSnapshotError, "aggregate byte budget"):
             verify_replay(oversized_replay)
 
+    def test_replay_rejects_non_native_entries_before_metaclass_or_length_callbacks(self):
+        calls = []
+
+        class PretendNative(type):
+            def __eq__(cls, other):
+                calls.append("metaclass.__eq__")
+                return True
+
+        class NonNativeEntry(metaclass=PretendNative):
+            def __len__(self):
+                calls.append("entry.__len__")
+                return 1
+
+        with self.assertRaises(ClothSnapshotError):
+            verify_replay([NonNativeEntry()])
+        self.assertEqual(calls, [])
+
+        encoded = encode_snapshot(state())
+        self.assertEqual(verify_replay([encoded]), verify_replay([encoded.decode("ascii")]))
+
     def test_rejects_oversized_text_before_encoding(self):
         with self.assertRaisesRegex(ClothSnapshotError, "byte size"):
             decode_snapshot("x" * (MAX_BYTES + 1))

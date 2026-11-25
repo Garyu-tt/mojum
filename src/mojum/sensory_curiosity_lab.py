@@ -36,7 +36,7 @@ class CuriosityError(ValueError):
 
 
 def _finite(value):
-    if type(value) not in (int, float):
+    if type(value) is not int and type(value) is not float:
         return False
     try:
         return math.isfinite(value)

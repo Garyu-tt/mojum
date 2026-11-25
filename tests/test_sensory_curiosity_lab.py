@@ -33,6 +33,29 @@ class SensoryCuriosityTests(unittest.TestCase):
     def open(self, **kwargs):
         return SensoryPlay(self.path, GRAPH, **kwargs)
 
+    def test_toy_rejects_non_native_numbers_before_metaclass_or_float_callbacks(self):
+        calls = []
+
+        class PretendNative(type):
+            def __eq__(cls, other):
+                calls.append("metaclass.__eq__")
+                return True
+
+        class NonNativeNumber(metaclass=PretendNative):
+            def __float__(self):
+                calls.append("number.__float__")
+                return 0.2
+
+        for field in ("x", "y", "radius_m", "softness"):
+            with self.subTest(field=field):
+                calls.clear()
+                spec = dict(id="fixture", x=1, y=2, radius_m=.1,
+                            rgb=(10, 20, 30), softness=.5)
+                spec[field] = NonNativeNumber()
+                with self.assertRaises(CuriosityError):
+                    Toy(**spec)
+                self.assertEqual(calls, [])
+
     def test_initial_numeric_sense_does_not_disclose_material_or_identity(self):
         scene = ToyScene()
         state = initial_state(scene.room, 1, 2)
