@@ -4,13 +4,37 @@ import sys
 import subprocess
 import tempfile
 import unittest
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
-from urllib.error import HTTPError
 from pathlib import Path
 from unittest.mock import patch
 from tools.cpu_legion import generate, local_url, parallel_limit, safe_file, task_context, verify
 from tools import cpu_legion as legion
+
+
+@contextmanager
+def _temporary_environment(overrides):
+    """Patch only named variables without rebuilding the process environment.
+
+    ``unittest.mock.patch.dict(os.environ, ...)`` clears and restores the whole
+    mapping on exit.  On Windows, restoring an inherited empty variable removes
+    it from the native environment block even though ``os.environ`` retains a
+    cached empty string.  That breaks later child processes when the empty value
+    is significant, as it is for Git's ``GIT_CONFIG_VALUE_*`` protocol.
+    """
+    missing = object()
+    original = {name: os.environ.get(name, missing) for name in overrides}
+    try:
+        os.environ.update(overrides)
+        yield
+    finally:
+        for name, value in original.items():
+            if value is missing:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
 
 class CpuLegionTests(unittest.TestCase):
     def test_only_loopback(self):
@@ -24,40 +48,15 @@ class CpuLegionTests(unittest.TestCase):
                 local_url(bad)
 
     def test_model_redirect_does_not_leave_configured_loopback_endpoint(self):
-        class RedirectingModel(BaseHTTPRequestHandler):
-            followed = False
-
-            def do_POST(self):
-                self.send_response(302)
-                self.send_header(
-                    "Location",
-                    f"http://127.0.0.1:{self.server.server_port}/unexpected",
-                )
-                self.end_headers()
-
-            def do_GET(self):
-                type(self).followed = True
-                self.send_response(200)
-                self.end_headers()
-
-            def log_message(self, *_):
-                pass
-
-        server = HTTPServer(("127.0.0.1", 0), RedirectingModel)
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            endpoint = (
-                f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
-            )
-            with self.assertRaises(HTTPError) as error:
-                generate(endpoint, "fixture", "hello", 2)
-            self.assertEqual(error.exception.code, 302)
-            self.assertFalse(RedirectingModel.followed)
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=2)
+        handler = legion._NoRedirect()
+        self.assertIsNone(handler.redirect_request(
+            None,
+            None,
+            302,
+            "Found",
+            {"Location": "https://example.invalid/unexpected"},
+            "https://example.invalid/unexpected",
+        ))
 
     def test_model_normal_loopback_response_still_works(self):
         class Model(BaseHTTPRequestHandler):
@@ -89,38 +88,15 @@ class CpuLegionTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_model_request_ignores_environment_http_proxy(self):
-        class Model(BaseHTTPRequestHandler):
-            def do_POST(self):
-                payload = b'{"choices":[{"message":{"content":"direct"}}]}'
-                self.send_response(200)
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+        from unittest.mock import MagicMock
 
-            def log_message(self, *_):
-                pass
-
-        class Proxy(BaseHTTPRequestHandler):
-            used = False
-
-            def do_POST(self):
-                type(self).used = True
-                self.send_response(502)
-                self.end_headers()
-
-            def log_message(self, *_):
-                pass
-
-        model = HTTPServer(("127.0.0.1", 0), Model)
-        proxy = HTTPServer(("127.0.0.1", 0), Proxy)
-        model_thread = Thread(target=model.serve_forever, daemon=True)
-        proxy_thread = Thread(target=proxy.serve_forever, daemon=True)
-        model_thread.start()
-        proxy_thread.start()
-        try:
-            endpoint = f"http://127.0.0.1:{model.server_port}/v1/chat/completions"
-            proxy_url = f"http://127.0.0.1:{proxy.server_port}"
-            with patch.dict(os.environ, {
+        payload = b'{"choices":[{"message":{"content":"direct"}}]}'
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value.read.return_value = payload
+        endpoint = "http://127.0.0.1:8080/v1/chat/completions"
+        proxy_url = "http://127.0.0.1:9090"
+        with patch.object(legion, "build_opener", return_value=opener) as factory:
+            with _temporary_environment({
                 "http_proxy": proxy_url,
                 "HTTP_PROXY": proxy_url,
                 "no_proxy": "",
@@ -128,14 +104,48 @@ class CpuLegionTests(unittest.TestCase):
             }):
                 self.assertEqual(generate(endpoint, "fixture", "hello", 2),
                                  "direct")
-            self.assertFalse(Proxy.used)
-        finally:
-            model.shutdown()
-            proxy.shutdown()
-            model.server_close()
-            proxy.server_close()
-            model_thread.join(timeout=2)
-            proxy_thread.join(timeout=2)
+        handlers = factory.call_args.args
+        self.assertEqual(len(handlers), 2)
+        proxy_handler = handlers[0]
+        self.assertEqual(proxy_handler.proxies, {})
+        self.assertIsInstance(handlers[1], legion._NoRedirect)
+        opener.open.assert_called_once()
+
+    def test_proxy_environment_override_preserves_empty_git_config_value(self):
+        """An empty inherited Git value must survive the proxy test cleanup."""
+        script = r'''
+import subprocess
+from tests.test_cpu_legion import _temporary_environment
+
+before = subprocess.run(
+    ["git", "config", "--get", "core.mojum-empty"],
+    capture_output=True,
+    check=False,
+)
+with _temporary_environment({"http_proxy": "http://127.0.0.1:9"}):
+    pass
+after = subprocess.run(
+    ["git", "config", "--get", "core.mojum-empty"],
+    capture_output=True,
+    check=False,
+)
+raise SystemExit(0 if before.returncode == after.returncode == 0 else 1)
+'''
+        env = dict(os.environ)
+        env.update({
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.mojum-empty",
+            "GIT_CONFIG_VALUE_0": "",
+        })
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_real_capacity_not_300_fake_models(self):
         self.assertEqual(parallel_limit(300, 16, 32, 8, 10000, 1024), 4)
@@ -154,12 +164,19 @@ class CpuLegionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_disallow_escape_and_symlink(self):
-        (self.root / "src/secret.py").symlink_to("/etc/passwd")
+    def test_disallow_escape_and_missing_paths(self):
         for item in ["../../etc/passwd", ".github/workflows/publish.yml",
-                     "src/secret.py", "src/missing.py"]:
-            with self.assertRaises(ValueError):
+                     "src/missing.py"]:
+            with self.subTest(item=item), self.assertRaises(ValueError):
                 safe_file(self.root, item)
+
+    def test_disallow_symlink(self):
+        try:
+            (self.root / "src/secret.py").symlink_to("/etc/passwd")
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        with self.assertRaises(ValueError):
+            safe_file(self.root, "src/secret.py")
 
     def test_valid_patch(self):
         patch = ("diff --git a/src/test.py b/src/test.py\n"
@@ -451,6 +468,11 @@ sys.exit(1)
             legion.run_one("unused.sqlite3", 1, self.root, Path("../unsafe"),
                            "http://127.0.0.1:8080/v1/chat/completions", "fixture", 5)
 
+    @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
+                         and getattr(os, "O_DIRECTORY", 0)
+                         and os.open in os.supports_dir_fd
+                         and os.mkdir in os.supports_dir_fd,
+                         "POSIX pinned output directory writes required")
     def test_expired_review_lease_discards_unreferenced_patch(self):
         # A stale attempt must not leak disk space through orphan proposals.
         from unittest.mock import Mock
