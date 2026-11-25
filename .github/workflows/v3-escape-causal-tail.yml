@@ -3,14 +3,22 @@ name: Local Cell v3-escape causal tail
 on:
   pull_request:
     paths:
+      - "src/mojum/aquarium.py"
       - "src/mojum/cell_policy_v3_escape.py"
+      - "tests/test_aquarium_v3_escape*.py"
       - "tests/test_cell_policy_v3_escape*.py"
+      - "tests/test_v3e_terminal_streak_evidence.py"
+      - "tests/fixtures/v3_escape_legacy_journal.json"
       - "docs/V3_ESCAPE_CAUSAL_TAIL_R01.md"
       - ".github/workflows/v3-escape-causal-tail.yml"
   push:
     paths:
+      - "src/mojum/aquarium.py"
       - "src/mojum/cell_policy_v3_escape.py"
+      - "tests/test_aquarium_v3_escape*.py"
       - "tests/test_cell_policy_v3_escape*.py"
+      - "tests/test_v3e_terminal_streak_evidence.py"
+      - "tests/fixtures/v3_escape_legacy_journal.json"
       - "docs/V3_ESCAPE_CAUSAL_TAIL_R01.md"
       - ".github/workflows/v3-escape-causal-tail.yml"
 
@@ -39,4 +47,7 @@ jobs:
       - name: Run escape snapshot and chronology tests
         env:
           PYTHONPATH: src
-        run: python -m unittest discover -s tests -p 'test_cell_policy_v3_escape*.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_cell_policy_v3_escape*.py' -v
+          python -m unittest discover -s tests -p 'test_aquarium_v3_escape*.py' -v
+          python -m unittest discover -s tests -p 'test_v3e_terminal_streak_evidence.py' -v

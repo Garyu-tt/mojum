@@ -168,6 +168,76 @@ class CausalTailTests(unittest.TestCase):
         with self.assertRaisesRegex(CellV3EscapeError, "invalid measured-outcome chronology tail"):
             CellExplorerV3Escape.from_snapshot(broken)
 
+    def test_tail_successes_require_unblocked_aggregate_capacity(self):
+        snapshot = CellExplorerV3Escape().snapshot()
+        snapshot.update({
+            "last_tick": 3, "updates": 4,
+            "records": {"0:0": {"x+": [2, 1], "y+": [2, 0]}},
+            "last_seen_at": {"0:0": 3},
+            "outcome_tail": [
+                {"tick": 0, "cell": "0:0", "action": "x+", "blocked": True},
+                {"tick": 1, "cell": "0:0", "action": "y+", "blocked": False},
+                {"tick": 2, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 3, "cell": "0:0", "action": "y+", "blocked": False},
+            ],
+        })
+        for tail_length in (2, 4):
+            with self.subTest(tail_length=tail_length):
+                valid = copy.deepcopy(snapshot)
+                valid["outcome_tail"] = valid["outcome_tail"][-tail_length:]
+                valid["history_complete"] = tail_length == 4
+                self.assertEqual(CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid)
+                invalid = copy.deepcopy(valid)
+                # Total and blocked lower bounds still hold, but both stored
+                # x+ outcomes were blocked: neither can supply tick 2's success.
+                invalid["records"]["0:0"]["x+"][1] = 2
+                with self.assertRaisesRegex(CellV3EscapeError, "measured aggregates"):
+                    CellExplorerV3Escape.from_snapshot(invalid)
+
+    def test_retained_cell_last_seen_requires_its_final_tail_occurrence(self):
+        snapshot = CellExplorerV3Escape().snapshot()
+        snapshot.update({
+            "last_tick": 5, "updates": 6,
+            "records": {"0:0": {"x+": [2, 0]}, "1:0": {"y+": [4, 0]}},
+            "last_seen_at": {"0:0": 4, "1:0": 5},
+            "outcome_tail": [
+                {"tick": 2, "cell": "1:0", "action": "y+", "blocked": False},
+                {"tick": 3, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 4, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 5, "cell": "1:0", "action": "y+", "blocked": False},
+            ],
+        })
+        for tail_length in (3, 4):
+            valid = copy.deepcopy(snapshot)
+            valid["outcome_tail"] = valid["outcome_tail"][-tail_length:]
+            valid["history_complete"] = tail_length == 4
+            with self.subTest(tail_length=tail_length, case="valid"):
+                self.assertEqual(CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid)
+            for omitted in (False, True):
+                with self.subTest(tail_length=tail_length, omitted=omitted):
+                    invalid = copy.deepcopy(valid)
+                    for item in invalid["outcome_tail"]:
+                        if item["cell"] == "0:0" and (omitted or item["tick"] == 4):
+                            item.update(cell="1:0", action="y+")
+                    # Each action still fits its aggregate counts. Cell 0:0
+                    # nevertheless claims tick 4 after its last tail occurrence,
+                    # or is absent from the entire attested interval.
+                    with self.assertRaisesRegex(CellV3EscapeError, "last observed cell tick"):
+                        CellExplorerV3Escape.from_snapshot(invalid)
+
+    def test_cells_last_seen_before_partial_tail_remain_valid(self):
+        snapshot = CellExplorerV3Escape().snapshot()
+        snapshot.update({
+            "last_tick": 5, "updates": 6,
+            "records": {"0:0": {"x+": [2, 0]}, "1:0": {"y+": [4, 0]}},
+            "last_seen_at": {"0:0": 3, "1:0": 5},
+            "outcome_tail": [
+                {"tick": 4, "cell": "1:0", "action": "y+", "blocked": False},
+                {"tick": 5, "cell": "1:0", "action": "y+", "blocked": False},
+            ],
+        })
+        self.assertEqual(CellExplorerV3Escape.from_snapshot(snapshot).snapshot(), snapshot)
+
 
 if __name__ == "__main__":
     unittest.main()

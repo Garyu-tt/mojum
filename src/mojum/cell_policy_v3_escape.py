@@ -157,11 +157,15 @@ class CellExplorerV3Escape:
             round(sense.y / STEP_METERS),
         )
 
-    def snapshot(self):
+    def journal_snapshot(self):
+        """Return the fixed policy projection hashed by existing journals.
+
+        The chronological tail belongs to the strict standalone snapshot.
+        Journal replay reconstructs it from verified ordered frame outcomes;
+        adding it to this legacy wire projection would change stored digests.
+        """
         return {
             "schema": SCHEMA,
-            "snapshot_version": 2,
-            "history_complete": self.history_complete,
             "cell_size_m": STEP_METERS,
             "last_tick": self.last_tick,
             "updates": self.updates,
@@ -171,6 +175,13 @@ class CellExplorerV3Escape:
             "forgotten_observations": self.forgotten_observations,
             "consecutive_rests": self.consecutive_rests,
             "consecutive_blocked_probes": self.consecutive_blocked_probes,
+        }
+
+    def snapshot(self):
+        return {
+            **self.journal_snapshot(),
+            "snapshot_version": 2,
+            "history_complete": self.history_complete,
             "outcome_tail": copy.deepcopy(self.outcome_tail),
         }
 
@@ -300,6 +311,7 @@ class CellExplorerV3Escape:
         if state["history_complete"] != (len(tail) == REPROBE_BLOCKED_BEFORE_REST):
             raise CellV3EscapeError("measured-outcome chronology completeness flag disagrees with tail")
         tail_counts = {}
+        tail_last_seen = {}
         for offset, item in enumerate(tail):
             if _exact_native_key_set(item, "chronology item", 4) != frozenset(
                 {"tick", "cell", "action", "blocked"}
@@ -321,10 +333,18 @@ class CellExplorerV3Escape:
             counts = tail_counts.setdefault(key, [0, 0])
             counts[0] += 1
             counts[1] += int(item["blocked"])
+            tail_last_seen[item["cell"]] = item["tick"]
         for (cell, action), counts in tail_counts.items():
             stored = state["records"][cell][action]
-            if stored[0] < counts[0] or stored[1] < counts[1]:
+            if (stored[0] < counts[0] or stored[1] < counts[1]
+                    or stored[0] - stored[1] < counts[0] - counts[1]):
                 raise CellV3EscapeError("chronology tail exceeds measured aggregates")
+        first_tail_tick = state["last_tick"] - len(tail) + 1
+        for cell, last_seen in state["last_seen_at"].items():
+            if last_seen >= first_tail_tick and tail_last_seen.get(cell) != last_seen:
+                raise CellV3EscapeError(
+                    "chronology tail disagrees with last observed cell tick"
+                )
         rest_suffix = 0
         for item in reversed(tail):
             if item["action"] == "rest" and not item["blocked"]:
@@ -340,8 +360,6 @@ class CellExplorerV3Escape:
         if (rest_suffix != state["consecutive_rests"]
                 or blocked_suffix != state["consecutive_blocked_probes"]):
             raise CellV3EscapeError("terminal streak counters disagree with ordered outcomes")
-
-
         model = cls()
         model.last_tick = state["last_tick"]
         model.updates = state["updates"]
