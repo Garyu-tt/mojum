@@ -84,7 +84,11 @@ def call_once(endpoint: str, model: str, timeout: float, *, opener=None) -> dict
             if len(raw) > MAX_REPLY_BYTES:
                 raise CanaryError("model response too large")
     except HTTPError as exc:
-        raise CanaryError("model endpoint returned HTTP " + str(exc.code)) from exc
+        # urllib's HTTPError is also a response object and owns its body.
+        # Preserve the redacted public error while closing that body now.
+        code = exc.code
+        exc.close()
+        raise CanaryError("model endpoint returned HTTP " + str(code)) from exc
     except (URLError, OSError, TimeoutError) as exc:
         raise CanaryError("local model endpoint unavailable") from exc
     end = time.monotonic_ns()
