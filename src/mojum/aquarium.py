@@ -21,6 +21,7 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .body_genetics import (compile_body, compile_body_at_month,
                             validate_human_name)
+from .cli_sensory_scene import SENSORY_SCENE_CHOICES, resolve_sensory_scene
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
@@ -48,6 +49,7 @@ from .noosphere import (
     EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event, _validate_event,
 )
 from .sensory_bridge import ToyContactBridge, SCHEMA as TOY_CONTACT_SCHEMA, OCCLUSION_SCHEMA
+from .sensory_bridge import SensoryBridgeError
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_associations_v2 import ContactAssociationsV2, SCHEMA as MODEL_V2_SCHEMA
 from .sensory_bridge_v2 import (
@@ -236,6 +238,13 @@ class Aquarium:
             scene = ToyScene() if sensory_scene is None else sensory_scene
             self.sensory_bridge = ToyContactBridgeV2(scene, motor_room=self.room)
         self._reset_replay_state(NATIVE_PULSE_SUM if pulse_sum == "auto" else pulse_sum)
+        # Topology admission does not establish runtime configuration validity.
+        # Execute only a disposable, GENESIS-bound graph before any SQLite open;
+        # a rejected graph must not leave a new bootstrap or alter an old file.
+        try:
+            self._execute_graph(self.genome.phenotype(0), 0)
+        except GraphError as exc:
+            raise AquariumError(f"graph cannot execute: {exc}") from exc
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
@@ -495,6 +504,18 @@ class Aquarium:
         payload, world, learner, *_ = self._calculate_frame(dx, dy)
         return payload, world, learner
 
+    def _execute_graph(self, phenotype, tick):
+        """Run a disposable fixture graph with the canonical GENESIS binding."""
+        adapted = copy.deepcopy(self.graph)
+        # The R0.1 executor has a static seed fixture. Its configured bpm is
+        # intentionally replaced by the phenotype for admission and every tick.
+        for node in adapted["nodes"]:
+            if node["kind"] == "genesis.seed":
+                node["config"]["bpm"] = phenotype["parameters"]["heartbeat_bpm"]
+        runtime = Simulation(adapted, dt_ns=self.dt_ns)
+        runtime.tick = tick
+        return runtime, runtime.step()
+
     def _calculate_frame(self, dx, dy):
         pre_move_sensor = None
         avoid = prefer = ()
@@ -524,16 +545,7 @@ class Aquarium:
                 intent = next_motor.choose(self.tick, avoid=avoid, prefer=prefer)
                 dx, dy = intent["dx"], intent["dy"]
         pheno = self.genome.phenotype(self.tick)
-        bpm = pheno["parameters"]["heartbeat_bpm"]
-        adapted = copy.deepcopy(self.graph)
-        # Explicit data binding at the GENESIS port of the typed graph. The
-        # R0.1 executor has a static seed fixture; rebuild its config per tick.
-        for node in adapted["nodes"]:
-            if node["kind"] == "genesis.seed":
-                node["config"]["bpm"] = bpm
-        runtime = Simulation(adapted, dt_ns=self.dt_ns)
-        runtime.tick = self.tick
-        output = runtime.step()
+        runtime, output = self._execute_graph(pheno, self.tick)
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         if self._local_cell:
             sense = self._motor_sense(sensory["heartbeat"]["pulse"])
@@ -952,6 +964,8 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"), default="none",
                         help="opt-in synthetic contact learning with developmental motor play")
+    parser.add_argument("--sensory-scene", choices=SENSORY_SCENE_CHOICES, default="default",
+                        help="explicit toy scene; authored-room hosts use empty")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none",
                         help="guide virtual movement from measured range transitions")
     parser.add_argument("--pulse-sum", choices=("auto", "ordered", "compensated"), default="auto",
@@ -1002,7 +1016,8 @@ def main():
         dx, dy = None, None
     try:
         room, start = load_cli_room(args.room_file, args.motor_mode)
-    except RoomSpecError as exc:
+        scene = resolve_sensory_scene(args.sensory_scene, sensory_mode=args.sensory_mode, room=room)
+    except ValueError as exc:
         parser.error(str(exc))
     try:
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
@@ -1019,7 +1034,7 @@ def main():
         with Aquarium(
             args.db, seed, graph, agent_id=seed["genome_id"], room=room, start=start,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
-            sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
+            sensory_mode=args.sensory_mode, sensory_scene=scene, temporal_mode=args.temporal_mode,
             brain_mode=args.brain_mode,
             external_expected_head=args.expected_head,
         ) as aquarium:
@@ -1049,7 +1064,7 @@ def main():
             # Escape Unicode so redirected legacy consoles can emit the checkpoint
             # after committing ticks, including when the genome ID is non-ASCII.
             print(json.dumps(checkpoint, indent=2, allow_nan=False))
-    except (AquariumError, NoosphereError, sqlite3.OperationalError) as exc:
+    except (AquariumError, NoosphereError, SensoryBridgeError, sqlite3.OperationalError) as exc:
         storage_error = exc.__cause__ if isinstance(exc, NoosphereError) else exc
         if isinstance(storage_error, sqlite3.OperationalError):
             parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {storage_error}\n")

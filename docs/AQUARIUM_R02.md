@@ -23,6 +23,16 @@ PYTHONPATH=src python -m mojum.aquarium --db ./dante_fixture.sqlite3 --ticks 120
 
 Run the exact command again: the aquarium **resumes** at the next tick rather than overwriting or reinitializing the journal.
 
+Before opening SQLite, Aquarium checks both the graph topology and execution
+of one disposable graph tick with the inherited GENESIS heartbeat binding.
+An unsupported runtime setting such as `world.room.config.light` is rejected
+as a command-line input error, including with `--ticks 0`; no journal or
+bootstrap is created, and an existing file is left unchanged. This admission
+step does not advance the organism, learning, development or journal. The
+first committed frame remains tick zero. The graph's static `genesis.seed`
+`bpm` remains overridden by the phenotype, exactly as during normal execution;
+successful bootstrap and frame formats are unchanged.
+
 Reproducible tests:
 
 ```bash

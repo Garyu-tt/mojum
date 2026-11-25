@@ -7,8 +7,16 @@ on:
       - "tools/package_room_designer.py"
       - "tools/room_designer.html"
       - "tools/room_designer_core.js"
+      - "tools/room_designer_history.js"
+      - "tools/room_walk_preview.js"
+      - "pyproject.toml"
       - "tests/test_package_room_designer.py"
+      - "src/mojum/room_designer.py"
+      - "src/mojum/data/room_designer.html"
+      - "tests/test_room_designer_package.py"
       - "tests/room_designer_browser_smoke.cjs"
+      - "tests/chrome_startup.cjs"
+      - "tests/chrome_startup.test.cjs"
       - "docs/R015_SINGLE_FILE_ROOM_DESIGNER.md"
   workflow_dispatch:
 
@@ -42,15 +50,20 @@ jobs:
           python tools/package_room_designer.py --out ./room-designer-offline.html
           test -s ./room-designer-offline.html
           ! grep -Eiq '<script[[:space:]][^>]*src=' ./room-designer-offline.html
+          PYTHONPATH=src python -m mojum.room_designer --output ./room-designer-packaged.html
+          cmp ./room-designer-offline.html ./room-designer-packaged.html
       - name: Prove deterministic, exclusive HTML packaging and no journal creation
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
           python -m unittest discover -s tests -p test_package_room_designer.py -v
+          PYTHONPATH=src python -m unittest discover -s tests -p test_room_designer_package.py -v
+      - name: Bounded browser startup process regression
+        run: node --test tests/chrome_startup.test.cjs
       - name: Browser original and one-file editor through file://
         env:
-          MOJUM_ROOM_HTML: room-designer-offline.html
+          MOJUM_ROOM_HTML: room-designer-packaged.html
         run: |
           set -euo pipefail
           if command -v google-chrome >/dev/null 2>&1; then
