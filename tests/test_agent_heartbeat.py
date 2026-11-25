@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 from mojum.agent_heartbeat import (
     HeartbeatError,
@@ -137,6 +138,67 @@ class HeartbeatAdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(HeartbeatError, "native strings"):
             verify_heartbeat(value, key=KEY, now_ns=NOW)
         self.assertEqual(HostileKey.calls, calls_after_insert)
+
+    def test_rejects_subclass_field_values_before_json_normalization(self):
+        class ForeignString(str):
+            pass
+
+        class ForeignInteger(int):
+            pass
+
+        original = envelope()
+        for field in original:
+            with self.subTest(field=field):
+                value = dict(original)
+                subtype = (ForeignString if type(value[field]) is str
+                           else ForeignInteger)
+                value[field] = subtype(value[field])
+                with self.assertRaises(HeartbeatError):
+                    verify_heartbeat(value, key=KEY, now_ns=NOW)
+
+    def test_rejects_container_values_without_invoking_user_hooks(self):
+        calls = []
+
+        class HostileList(list):
+            def __iter__(self):
+                calls.append("list iteration")
+                raise AssertionError("untrusted list iteration reached")
+
+        class HostileDict(dict):
+            def items(self):
+                calls.append("dict iteration")
+                raise AssertionError("untrusted dict iteration reached")
+
+        original = envelope()
+        for field in original:
+            for foreign in (HostileList([1]), HostileDict(nested=1)):
+                with self.subTest(field=field, container=type(foreign).__name__):
+                    value = dict(original)
+                    value[field] = foreign
+                    with self.assertRaises(HeartbeatError):
+                        verify_heartbeat(value, key=KEY, now_ns=NOW)
+                    self.assertEqual(calls, [])
+
+    def test_rejects_oversized_event_before_membership(self):
+        calls = []
+
+        class MembershipGuard:
+            def __contains__(self, value):
+                calls.append("membership")
+                raise AssertionError("oversized event reached membership")
+
+        value = envelope()
+        value["event"] = "x" * 1_000_000
+        with patch("mojum.agent_heartbeat.EVENTS", MembershipGuard()):
+            with self.assertRaisesRegex(HeartbeatError, "unsupported heartbeat event"):
+                verify_heartbeat(value, key=KEY, now_ns=NOW)
+        self.assertEqual(calls, [])
+
+    def test_accepts_each_lifecycle_event(self):
+        for event in ("start", "heartbeat", "finish"):
+            with self.subTest(event=event):
+                result = verify_heartbeat(envelope(event=event), key=KEY, now_ns=NOW)
+                self.assertEqual(result.event, event)
 
     def test_rejects_integer_literals_over_python_parser_limit(self):
         raw = b'{"sequence":' + b"9" * 5000 + b"}"

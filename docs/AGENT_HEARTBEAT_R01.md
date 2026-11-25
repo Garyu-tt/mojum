@@ -54,6 +54,9 @@ manager, scoped per agent, rotated, and never included in logs or source.
 
 - Keys must be exact `bytes` values of 32..128 bytes.
 - Envelopes are bounded to 16 KiB; IDs and integer domains are bounded.
+- Plain-dict fields must be exact native strings/integers. Schema, types and
+  value bounds are checked before JSON encoding; subclasses and nested
+  containers are rejected without invoking caller-defined iteration hooks.
 - Default validity is at most 60 seconds with at most 5 seconds of future
   clock skew. Both limits can be narrowed or widened within hard ceilings.
 - Expired, premature, malformed, noncanonical, altered, and unauthenticated

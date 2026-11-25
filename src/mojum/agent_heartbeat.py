@@ -106,6 +106,7 @@ def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
             raise HeartbeatError("invalid JSON envelope") from exc
         if type(value) is not dict:
             raise HeartbeatError("heartbeat envelope must be a JSON object")
+        _validate_payload(value)
         if _canonical(value) != encoded:
             raise HeartbeatError("envelope JSON is not in canonical form")
         return value
@@ -120,15 +121,12 @@ def _parse(raw: str | bytes | Mapping[str, object]) -> dict[str, object]:
         raw_keys = tuple(raw.keys())
         if any(type(key) is not str or len(key) > 32 for key in raw_keys):
             raise HeartbeatError("heartbeat envelope keys must be bounded native strings")
-        # Round-trip through canonical JSON to detach caller-owned containers
-        # and reject unsupported values before verification.
-        encoded = _canonical(raw)
-        try:
-            value = json.loads(encoded, object_pairs_hook=_pairs_no_duplicates)
-        except (json.JSONDecodeError, RecursionError) as exc:
-            raise HeartbeatError("invalid envelope mapping") from exc
-        if type(value) is not dict:
-            raise HeartbeatError("heartbeat envelope must be an object")
+        # Validate native scalar types and bounds before serialization can
+        # normalize subclasses or iterate caller-defined nested containers.
+        value = dict(raw)
+        _validate_payload(value)
+        _canonical(value)  # Preserve the envelope byte-budget check.
+        # Every admitted field is immutable, so the shallow copy is detached.
         return value
     raise HeartbeatError("envelope must be canonical JSON text or a plain dict")
 
@@ -145,7 +143,9 @@ def _validate_payload(value: dict[str, object]) -> dict[str, object]:
     if (type(value["sequence"]) is not int or value["sequence"] < 0
             or value["sequence"] > 2**63 - 1):
         raise HeartbeatError("sequence must be a bounded nonnegative integer")
-    if type(value["event"]) is not str or value["event"] not in EVENTS:
+    event = value["event"]
+    if (type(event) is not str or len(event) > len("heartbeat")
+            or event not in EVENTS):
         raise HeartbeatError("unsupported heartbeat event")
     for field in ("issued_at_ns", "expires_at_ns"):
         item = value[field]
