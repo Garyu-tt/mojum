@@ -60,6 +60,21 @@ The v1 pulse predictor stores exact floating-point predictions in the journal. C
 
 A very short history can match both rules. In that case `auto` continues with the local rule. To preserve the source's future predictions when moving such a history, pass `--pulse-sum ordered` for a standard CPython 3.11 source or `--pulse-sum compensated` for a standard CPython 3.12/3.13 source. Use the same explicit choice from birth when comparing independent runs across interpreters. [Python 3.12 summation change](https://docs.python.org/3.12/library/functions.html#sum)
 
+## View an exported trace from the installed wheel
+
+The wheel includes the standalone offline viewer. Create a local HTML file,
+open it in your browser, then select an exported Aquarium JSONL trace:
+
+```sh
+python -m mojum.trace_viewer --output ./aquarium-viewer.html
+```
+
+The command works from any directory and refuses to replace an existing file.
+It prints the HTML byte count and SHA-256, without opening a journal, selecting
+a trace, launching a browser or starting a server. The viewer itself is fully
+offline. Keep exported PRIVATE traces local; see the
+[export and verification instructions](REAL_AQUARIUM_TRACE_VIEWER_R01.md).
+
 ## Isolated test
 
 The full stdlib suite remains:

@@ -37,6 +37,7 @@ runtime/bin/python -I -m pip --isolated --disable-pip-version-check install \
     --no-index --no-cache-dir wheels/mojum-*.whl
 
 runtime/bin/python -I - "$repo/LICENSE" "$release_tag" <<'PY'
+import hashlib
 import json
 import subprocess
 import sys
@@ -68,6 +69,20 @@ assert installed.metadata.get_all("License-File") == ["LICENSE"]
 licenses = [path for path in installed.files or () if path.parts[-2:] == ("licenses", "LICENSE")]
 assert len(licenses) == 1
 assert installed.locate_file(licenses[0]).read_bytes() == Path(sys.argv[1]).read_bytes()
+
+# The wheel supplies the standalone observer without a source checkout.
+viewer = run_module("mojum.trace_viewer", "--output", "viewer.html")
+viewer_bytes = Path("viewer.html").read_bytes()
+assert viewer_bytes == files("mojum").joinpath("data", "aquarium_trace_viewer.html").read_bytes()
+assert viewer_bytes == (Path(sys.argv[1]).parent / "examples" / "aquarium_trace_viewer.html").read_bytes()
+assert viewer == {"schema": "mojum.trace-viewer.export/1", "bytes": len(viewer_bytes),
+                  "sha256": hashlib.sha256(viewer_bytes).hexdigest()}
+occupied_viewer = subprocess.run(
+    [sys.executable, "-I", "-m", "mojum.trace_viewer", "--output", "viewer.html"],
+    capture_output=True, text=True, timeout=20,
+)
+assert occupied_viewer.returncode == 2 and occupied_viewer.stdout == ""
+assert Path("viewer.html").read_bytes() == viewer_bytes
 
 first = run("mojum-aquarium", "--db", "resumed.sqlite3", "--ticks", "120")
 assert (first["tick"], first["stored_events"], first["neural_mode"]) == (120, 121, "shadow")
