@@ -6,6 +6,11 @@ semantics. The canonical executable schema remains `mechanicus.universal-graph/1
 
 ## Contract
 
+- Filesystem input must resolve to a **regular file**. The loader checks the
+  opened descriptor before reading; symlinks to regular files remain supported.
+  On POSIX it opens nonblocking so a writerless FIFO, including one reached
+  through a symlink, is rejected promptly instead of hanging Aquarium or host
+  startup. File descriptors close on rejected admission and read errors.
 - `mojum.graph.load_graph(path)` reads at most **262,145 bytes** from the
   explicitly supplied local file and rejects any input over **262,144 bytes**
   with a typed `GraphError`, **before UTF-8 decoding and JSON parsing**.
@@ -26,8 +31,11 @@ semantics. The canonical executable schema remains `mechanicus.universal-graph/1
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_graph_byte_limit.py' -v
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_graph_json_depth.py' -v
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_graph_v1_lossless_json.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_graph_file_safety.py' -v
 ```
 
 The oversized-graph Aquarium subprocess regression additionally checks that
 rejection occurs **before** any requested PRIVATE SQLite journal is created.
+The special-file regressions run both Aquarium and portable-host commands with
+subprocess deadlines and verify that rejected graph inputs create no journal.
 Results are not accepted until exact-head CI and independent QA review.
