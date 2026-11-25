@@ -36,7 +36,8 @@ def _delta(previous, current, wrap):
     if not math.isfinite(difference):
         raise ValueError("joint displacement overflow")
     if wrap:
-        difference = (difference + math.pi) % TWO_PI - math.pi
+        # Avoid adding pi: that can erase tiny steps or perturb exact limits.
+        difference = math.remainder(difference, TWO_PI)
     result = abs(difference)
     if not math.isfinite(result):
         raise ValueError("non-finite joint displacement")

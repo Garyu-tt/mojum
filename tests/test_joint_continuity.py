@@ -40,6 +40,42 @@ class JointContinuityTests(unittest.TestCase):
         self.assertFalse(audit_joint_continuity(rows, {"yaw": .2})["ok"])
         self.assertTrue(audit_joint_continuity(rows, {"yaw": .2}, revolute=("yaw",))["ok"])
 
+    def test_revolute_tiny_displacement_exceeds_limit(self):
+        for position in (-1e-16, 1e-16):
+            with self.subTest(position=position):
+                rows = [s(0, {"yaw": 0.0}), s(1, {"yaw": position})]
+                result = audit_joint_continuity(rows, {"yaw": 1e-17}, revolute=("yaw",))
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["max_steps_rad"]["yaw"], abs(position))
+                self.assertEqual(result["violations"][0]["first_offending_tick"], 1)
+
+    def test_revolute_threshold_equality(self):
+        for position in (-0.2, -0.1, 0.1, 0.2):
+            with self.subTest(position=position):
+                rows = [s(0, {"yaw": 0.0}), s(1, {"yaw": position})]
+                result = audit_joint_continuity(rows, {"yaw": abs(position)}, revolute=("yaw",))
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["max_steps_rad"]["yaw"], abs(position))
+                self.assertEqual(result["violations"], [])
+
+    def test_revolute_half_turn(self):
+        for position in (-math.pi, math.pi):
+            with self.subTest(position=position):
+                rows = [s(0, {"yaw": 0.0}), s(1, {"yaw": position})]
+                result = audit_joint_continuity(rows, {"yaw": math.pi}, revolute=("yaw",))
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["max_steps_rad"]["yaw"], math.pi)
+
+    def test_revolute_multiple_turns(self):
+        for turns in (-2, -1, 1, 2):
+            for residual in (-0.25, 0.0, 0.25):
+                with self.subTest(turns=turns, residual=residual):
+                    position = turns * math.tau + residual
+                    rows = [s(0, {"yaw": 0.0}), s(1, {"yaw": position})]
+                    result = audit_joint_continuity(rows, {"yaw": 0.25}, revolute=("yaw",))
+                    self.assertTrue(result["ok"])
+                    self.assertEqual(result["max_steps_rad"]["yaw"], abs(residual))
+
     def test_tick_gap_and_bool_tick(self):
         for rows in ([s(0, {"j": 0}), s(2, {"j": 0})], [s(True, {"j": 0})]):
             with self.assertRaises(ValueError):
