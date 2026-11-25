@@ -76,7 +76,7 @@ def _undo_reservation(path, identity):
 def _summary(a):
     return {"agent_id": a.agent_id, "tick": a.tick,
             "position_m": [a.world.x, a.world.y],
-            "stored_events": a.store.count()}
+            "stored_events": a.stored_events}
 
 
 def create_pair(left_db, right_db, left_id, right_id, template, graph):
@@ -133,18 +133,30 @@ def mentor_steps(db, agent_id, template, graph, *, ticks, dx, dy):
     db = Path(db)
     if db.is_symlink() or not db.is_file():
         raise AquariumError("mentor requires an existing regular SQLite journal")
-    with Aquarium(db, seed, graph, agent_id=agent_id) as twin:
-        if twin.store.count() + ticks > MAX_REPLAY_EVENTS:
+    # A regular file is not necessarily an existing organism. Validate the
+    # complete journal before a writable open can initialize storage, change
+    # its journal mode or permissions. Pin that revision across the reopen.
+    with Aquarium(db, seed, graph, agent_id=agent_id, read_only=True) as twin:
+        if twin.stored_events + ticks > MAX_REPLAY_EVENTS:
             raise AquariumError("requested ticks exceed remaining event budget")
-        for _ in range(ticks):
-            twin.step(dx=dx, dy=dy)
-        return {
-            "schema": RECEIPT_SCHEMA,
-            "experiment": "scripted_mentor_not_learned_policy",
-            "shared_heritable_sha256": _fingerprint(template),
-            "twin": _summary(twin),
-            "journal": "PRIVATE_local_SQLite_not_exported",
-        }
+        expected_head = twin.checkpoint()["journal_head"]
+        summary = _summary(twin)
+    # A zero-step request is inspection only; it needs no writable connection.
+    if ticks:
+        with Aquarium(db, seed, graph, agent_id=agent_id,
+                      external_expected_head=expected_head) as twin:
+            if twin.stored_events + ticks > MAX_REPLAY_EVENTS:
+                raise AquariumError("requested ticks exceed remaining event budget")
+            for _ in range(ticks):
+                twin.step(dx=dx, dy=dy)
+            summary = _summary(twin)
+    return {
+        "schema": RECEIPT_SCHEMA,
+        "experiment": "scripted_mentor_not_learned_policy",
+        "shared_heritable_sha256": _fingerprint(template),
+        "twin": summary,
+        "journal": "PRIVATE_local_SQLite_not_exported",
+    }
 
 
 def main():
