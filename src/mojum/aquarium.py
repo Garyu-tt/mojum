@@ -236,6 +236,13 @@ class Aquarium:
             scene = ToyScene() if sensory_scene is None else sensory_scene
             self.sensory_bridge = ToyContactBridgeV2(scene, motor_room=self.room)
         self._reset_replay_state(NATIVE_PULSE_SUM if pulse_sum == "auto" else pulse_sum)
+        # Topology admission does not establish runtime configuration validity.
+        # Execute only a disposable, GENESIS-bound graph before any SQLite open;
+        # a rejected graph must not leave a new bootstrap or alter an old file.
+        try:
+            self._execute_graph(self.genome.phenotype(0), 0)
+        except GraphError as exc:
+            raise AquariumError(f"graph cannot execute: {exc}") from exc
         self.manifest = {
             "schema": MANIFEST_SCHEMA, "agent_id": agent_id,
             "dt_ns": dt_ns, "genotype_sha256": genome_sha256(self.seed),
@@ -495,6 +502,18 @@ class Aquarium:
         payload, world, learner, *_ = self._calculate_frame(dx, dy)
         return payload, world, learner
 
+    def _execute_graph(self, phenotype, tick):
+        """Run a disposable fixture graph with the canonical GENESIS binding."""
+        adapted = copy.deepcopy(self.graph)
+        # The R0.1 executor has a static seed fixture. Its configured bpm is
+        # intentionally replaced by the phenotype for admission and every tick.
+        for node in adapted["nodes"]:
+            if node["kind"] == "genesis.seed":
+                node["config"]["bpm"] = phenotype["parameters"]["heartbeat_bpm"]
+        runtime = Simulation(adapted, dt_ns=self.dt_ns)
+        runtime.tick = tick
+        return runtime, runtime.step()
+
     def _calculate_frame(self, dx, dy):
         pre_move_sensor = None
         avoid = prefer = ()
@@ -524,16 +543,7 @@ class Aquarium:
                 intent = next_motor.choose(self.tick, avoid=avoid, prefer=prefer)
                 dx, dy = intent["dx"], intent["dy"]
         pheno = self.genome.phenotype(self.tick)
-        bpm = pheno["parameters"]["heartbeat_bpm"]
-        adapted = copy.deepcopy(self.graph)
-        # Explicit data binding at the GENESIS port of the typed graph. The
-        # R0.1 executor has a static seed fixture; rebuild its config per tick.
-        for node in adapted["nodes"]:
-            if node["kind"] == "genesis.seed":
-                node["config"]["bpm"] = bpm
-        runtime = Simulation(adapted, dt_ns=self.dt_ns)
-        runtime.tick = self.tick
-        output = runtime.step()
+        runtime, output = self._execute_graph(pheno, self.tick)
         sensory = output[self.kind_ids["sensory.interoception"]]["sensory"]
         if self._local_cell:
             sense = self._motor_sense(sensory["heartbeat"]["pulse"])
