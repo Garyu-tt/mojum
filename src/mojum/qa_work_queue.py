@@ -19,6 +19,7 @@ _MAX_KEY = 160
 _MAX_OWNER = 120
 _MAX_KIND = 80
 _MAX_PAYLOAD = 4096
+_MAX_INTEGER = 2**63 - 1
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$")
 
@@ -44,8 +45,8 @@ class Task:
 
 
 def _integer(value: object, name: str, minimum: int = 0) -> int:
-    if type(value) is not int or value < minimum:
-        raise QueueError(f"{name} must be an integer >= {minimum}")
+    if type(value) is not int or not minimum <= value <= _MAX_INTEGER:
+        raise QueueError(f"{name} must be an integer in [{minimum}, {_MAX_INTEGER}]")
     return value
 
 
@@ -87,11 +88,15 @@ def _connect(path: str) -> sqlite3.Connection:
     if type(path) is not str or not path or path == ":memory:" or path.startswith("file:"):
         raise QueueError("path must be a caller-owned persistent SQLite filename")
     db = sqlite3.connect(path, timeout=2.0, isolation_level=None)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout=2000")
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA synchronous=FULL")
-    db.execute("PRAGMA foreign_keys=ON")
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=2000")
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=FULL")
+        db.execute("PRAGMA foreign_keys=ON")
+    except BaseException:
+        db.close()
+        raise
     return db
 
 
@@ -168,7 +173,7 @@ def claim(path: str, *, owner: str, now: int, lease_ms: int) -> Task | None:
     worker = _text(owner, "owner", _MAX_OWNER, _KEY)
     clock = _integer(now, "now")
     duration = _integer(lease_ms, "lease_ms", 1)
-    if clock > (2**63 - 1) - duration:
+    if clock > _MAX_INTEGER - duration:
         raise QueueError("lease expiry overflow")
     token = secrets.token_hex(32)
     with closing(_connect(path)) as db:
@@ -196,14 +201,19 @@ def claim(path: str, *, owner: str, now: int, lease_ms: int) -> Task | None:
             raise
 
 
-def _owned(db: sqlite3.Connection, task_id: int, owner: str, token: str, now: int) -> sqlite3.Row:
+def _lease_arguments(task_id: int, owner: str, token: str, now: int) -> tuple[int, str, str, int]:
+    """Validate caller arguments before any connection or schema initialization."""
     ident = _integer(task_id, "task_id", 1)
     worker = _text(owner, "owner", _MAX_OWNER, _KEY)
     lease = _text(token, "lease_token", 64, re.compile(r"^[0-9a-f]{64}$"))
     clock = _integer(now, "now")
+    return ident, worker, lease, clock
+
+
+def _owned(db: sqlite3.Connection, task_id: int, owner: str, token: str, now: int) -> sqlite3.Row:
     row = db.execute(
         "SELECT * FROM qa_tasks WHERE task_id=? AND status='leased' AND lease_owner=? "
-        "AND lease_token=? AND lease_expires_at>?", (ident, worker, lease, clock)
+        "AND lease_token=? AND lease_expires_at>?", (task_id, owner, token, now)
     ).fetchone()
     if row is None:
         raise QueueError("lease is stale, expired, or not owned by caller")
@@ -212,18 +222,19 @@ def _owned(db: sqlite3.Connection, task_id: int, owner: str, token: str, now: in
 
 def heartbeat(path: str, *, task_id: int, owner: str, lease_token: str,
               now: int, lease_ms: int) -> Task:
-    clock = _integer(now, "now")
+    ident, worker, token, clock = _lease_arguments(task_id, owner, lease_token, now)
     duration = _integer(lease_ms, "lease_ms", 1)
-    if clock > (2**63 - 1) - duration:
+    if clock > _MAX_INTEGER - duration:
         raise QueueError("lease expiry overflow")
     with closing(_connect(path)) as db:
         _initialize(db)
         db.execute("BEGIN IMMEDIATE")
         try:
-            _owned(db, task_id, owner, lease_token, clock)
+            current = _owned(db, ident, worker, token, clock)
+            expiry = max(current["lease_expires_at"], clock + duration)
             db.execute("UPDATE qa_tasks SET lease_expires_at=? WHERE task_id=?",
-                       (clock + duration, task_id))
-            row = db.execute("SELECT * FROM qa_tasks WHERE task_id=?", (task_id,)).fetchone()
+                       (expiry, ident))
+            row = db.execute("SELECT * FROM qa_tasks WHERE task_id=?", (ident,)).fetchone()
             db.commit()
             return _task(row)
         except Exception:
@@ -235,16 +246,17 @@ def finish(path: str, *, task_id: int, owner: str, lease_token: str,
            now: int, success: bool) -> Task:
     if type(success) is not bool:
         raise QueueError("success must be bool")
+    ident, worker, token, clock = _lease_arguments(task_id, owner, lease_token, now)
     with closing(_connect(path)) as db:
         _initialize(db)
         db.execute("BEGIN IMMEDIATE")
         try:
-            _owned(db, task_id, owner, lease_token, now)
+            _owned(db, ident, worker, token, clock)
             db.execute(
                 """UPDATE qa_tasks SET status=?,lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL
-                WHERE task_id=?""", ("done" if success else "failed", task_id)
+                WHERE task_id=?""", ("done" if success else "failed", ident)
             )
-            row = db.execute("SELECT * FROM qa_tasks WHERE task_id=?", (task_id,)).fetchone()
+            row = db.execute("SELECT * FROM qa_tasks WHERE task_id=?", (ident,)).fetchone()
             db.commit()
             return _task(row)
         except Exception:
@@ -254,16 +266,17 @@ def finish(path: str, *, task_id: int, owner: str, lease_token: str,
 
 def release(path: str, *, task_id: int, owner: str, lease_token: str, now: int) -> Task:
     """Return a currently leased task to the queue without erasing its attempt count."""
+    ident, worker, token, clock = _lease_arguments(task_id, owner, lease_token, now)
     with closing(_connect(path)) as db:
         _initialize(db)
         db.execute("BEGIN IMMEDIATE")
         try:
-            _owned(db, task_id, owner, lease_token, now)
+            _owned(db, ident, worker, token, clock)
             db.execute(
                 """UPDATE qa_tasks SET status='queued',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL
-                WHERE task_id=?""", (task_id,)
+                WHERE task_id=?""", (ident,)
             )
-            row = db.execute("SELECT * FROM qa_tasks WHERE task_id=?", (task_id,)).fetchone()
+            row = db.execute("SELECT * FROM qa_tasks WHERE task_id=?", (ident,)).fetchone()
             db.commit()
             return _task(row)
         except Exception:

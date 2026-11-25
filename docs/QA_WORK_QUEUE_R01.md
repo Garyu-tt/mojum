@@ -12,11 +12,11 @@ Do not put source diffs, prompts, tokens, private Noosphere records, user data, 
 
 - `enqueue(...)`: insert a task once by unique idempotency key. A duplicate key returns the original task without mutating its original metadata.
 - `claim(...)`: atomically claim the oldest queued task first; only when no queued task exists, reclaim the oldest expired lease. This prevents a repeatedly expiring blocked task from monopolizing the queue head while independent queued work exists. SQLite `BEGIN IMMEDIATE` serializes concurrent claimers.
-- `heartbeat(...)`: extend a lease only when owner, opaque lease token, and unexpired lease all match.
+- `heartbeat(...)`: extend a lease only when owner, opaque lease token, and unexpired lease all match. A shorter requested duration preserves the current expiry and lease token.
 - `finish(..., success=True|False)`: transition a live lease to `done` or `failed`.
 - `release(...)`: return a live lease to `queued`, preserving attempt count.
 
-Each operation opens and closes its own connection. WAL mode, FULL synchronous mode, foreign keys and a bounded busy timeout are enabled. Database path ownership and filesystem permissions remain the caller's responsibility. WAL is not a substitute for backups or multi-device replication.
+Each operation opens and closes its own connection, including when connection setup fails. WAL mode, FULL synchronous mode, foreign keys and a bounded busy timeout are enabled. Database path ownership and filesystem permissions remain the caller's responsibility. WAL is not a substitute for backups or multi-device replication.
 
 ## Lease semantics
 
@@ -24,7 +24,7 @@ All times are caller-supplied integer logical milliseconds. Lease validity is ha
 
 ## Validation and limits
 
-Schema version is fixed at 1; unknown versions fail closed. Task IDs are SQLite-local integers. PR numbers are positive exact integers, SHA values are lowercase 40-hex, keys/owners/kinds are bounded ASCII identifiers, and payloads are a small allowlisted flat string map. Boolean values are rejected where integers are required. The database must be a caller-owned persistent SQLite filename, not an in-memory or URI database.
+Schema version is fixed at 1; unknown versions fail closed. Task IDs are SQLite-local integers. PR numbers and task IDs are positive exact integers; logical times are nonnegative and lease durations are positive. All integer arguments and computed lease expiries are bounded by SQLite's signed 64-bit maximum, `2**63 - 1`. Invalid integer or lease-identity arguments raise `QueueError` before opening the database or creating its schema. SHA values are lowercase 40-hex, keys/owners/kinds are bounded ASCII identifiers, and payloads are a small allowlisted flat string map. Boolean values are rejected where integers are required. The database must be a caller-owned persistent SQLite filename, not an in-memory or URI database.
 
 ## Test
 
