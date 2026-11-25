@@ -37,6 +37,13 @@ memory. It checks consecutive ticks, numeric room bounds, the terminal
 checkpoint, and the exporter-provided SHA-256 over the exact frame bytes before
 enabling playback, seeking, and the telemetry panel.
 
+Both exporter and viewer limit each JSONL line to **64,000 Unicode code
+points**. Supplementary characters, such as emoji in valid organism or
+acquisition identifiers, count once even though JavaScript stores them as two
+UTF-16 code units. The viewer counts long lines with a bounded scan; the
+separate **24 MiB UTF-8 file** and **5,000 frame** limits still apply. Integrity
+checks continue to hash the exact exported UTF-8 bytes, including newlines.
+
 Modern exports with missing or altered integrity, range, room, or status
 metadata fail closed. Truly older traces without the modern proof can only be
 opened after selecting the explicit legacy option and are visibly marked
@@ -45,7 +52,7 @@ encryption, rollback protection, or permission to disclose PRIVATE history.
 
 The viewer has no external scripts or network connections and renders journal
 values as text. Its tests cover the current HTML/CSP contract, corrupted and
-truncated modern traces, legacy boundaries, oversized input, and a slower
+truncated modern traces, ASCII and Unicode line boundaries, oversized input, and a slower
 stale file read losing to the latest file selection:
 
 ```sh
