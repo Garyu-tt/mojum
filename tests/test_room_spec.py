@@ -1,6 +1,7 @@
 """Strict offline typed-room validation: exact tokens, bounds, start placement."""
 
 from contextlib import redirect_stderr, redirect_stdout
+from decimal import Inexact, localcontext
 import io
 import json
 from pathlib import Path
@@ -440,6 +441,33 @@ class CliTests(unittest.TestCase):
 
 
 class NumericWireRegressionTests(unittest.TestCase):
+    def test_exact_endpoint_past_room_wall_is_rejected(self):
+        raw = (b'{"width":1,"height":1,"start":[0,1],'
+               b'"obstacles":[[0.5,0,0.50000000000000000000000000000000001,0.5]]}')
+        self.assertIn("obstacles[0] lies outside the room", errors_of(raw))
+
+    def test_separated_obstacles_keep_their_sub_float_gap(self):
+        raw = (b'{"width":1,"height":1,"start":[0,1],"obstacles":'
+               b'[[0.2,0,0.29999999999999999999999999999999999,0.5],'
+               b'[0.5,0,0.1,0.5]]}')
+        report = validate_room_bytes(raw)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.warnings, ())
+
+    def test_area_is_exact_across_scales_and_isolates_caller_context(self):
+        raw = (b'{"width":1e300,"height":1e300,"start":[1,1],'
+               b'"obstacles":[[0e-999999,0,1e-300,1e-300]]}')
+        with localcontext() as caller:
+            caller.prec, caller.Emin, caller.Emax = 4, -8, 8
+            caller.traps[Inexact] = True
+            caller.clear_flags()
+            report = validate_room_bytes(raw)
+            self.assertFalse(any(caller.flags.values()))
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.summary["obstacles_total_area"], "1E-600")
+        self.assertEqual(report.summary["estimated_free_area"], "9" * 600 + "." + "9" * 600)
+        self.assertEqual(report.summary["obstacles"][0][0], "0e-999999")
+
     def test_start_tokens_preserved_as_written(self):
         raw = (
             b'{"width":4,"height":4,"obstacles":[],"start":[1e0,2.00]}'
