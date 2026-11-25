@@ -38,6 +38,7 @@ runtime/bin/python -I -m pip --isolated --disable-pip-version-check install \
 
 runtime/bin/python -I - "$repo/LICENSE" "$release_tag" <<'PY'
 import json
+import os
 import subprocess
 import sys
 import sysconfig
@@ -48,9 +49,9 @@ from pathlib import Path
 import mojum
 
 
-def run(script, *args):
+def run(script, *args, env=None):
     command = [Path(sys.executable).with_name(script), *args]
-    return json.loads(subprocess.check_output(command, text=True))
+    return json.loads(subprocess.check_output(command, text=True, env=env))
 
 
 def run_module(module, *args):
@@ -139,11 +140,23 @@ fixture = run("mojum-fixture", "--ticks", "2")
 assert fixture["tick"] == 2 and fixture["last_episode"]["brain_observation"]["world_light"] == "dim"
 graph = json.loads(files("mojum").joinpath("data", "first_loop.json").read_text(encoding="utf-8"))
 room = next(node for node in graph["nodes"] if node["kind"] == "world.room")
+room_id = room["id"]
+unicode_room_id = "room-\u661f"
+room["id"] = unicode_room_id
 room["config"]["light"] = "bright"
+for edge in graph["edges"]:
+    for endpoint in edge.values():
+        if endpoint["node"] == room_id:
+            endpoint["node"] = unicode_room_id
 Path("bright.json").write_text(json.dumps(graph), encoding="utf-8")
 custom = run("mojum-fixture", "bright.json", "--ticks", "2")
 assert custom["last_episode"]["brain_observation"]["world_light"] == "bright"
 assert custom["graph_sha256"] != fixture["graph_sha256"]
+assert custom["last_frame"][unicode_room_id]["world"]["light"] == "bright"
+assert custom == run(
+    "mojum-fixture", "bright.json", "--ticks", "2",
+    env={**os.environ, "PYTHONIOENCODING": "ascii:strict"},
+)
 
 # Experimental labs are distributed in the same wheel. They must read the
 # packaged defaults without a source checkout, including on cold restart.

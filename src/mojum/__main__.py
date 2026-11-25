@@ -27,7 +27,15 @@ def main():
     last = None
     for _ in range(args.ticks):
         last = runtime.step()
-    print(json.dumps({"status": "R0.1_SYNTHETIC_FIXTURE", "tick": runtime.tick, "graph_sha256": runtime.graph_hash, "last_frame": last, "last_episode": runtime.episodes[-1] if runtime.episodes else None, "snapshot_sha256": runtime.snapshot()["sha256"]}, ensure_ascii=False, indent=2, allow_nan=False))
+    result = {
+        "status": "R0.1_SYNTHETIC_FIXTURE",
+        "tick": runtime.tick,
+        "graph_sha256": runtime.graph_hash,
+        "last_frame": last,
+        "last_episode": runtime.episodes[-1] if runtime.episodes else None,
+        "snapshot_sha256": runtime.snapshot()["sha256"],
+    }
+    print(json.dumps(result, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
