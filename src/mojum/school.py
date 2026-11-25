@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from typing import Any
 
 CATALOG_SCHEMA = "mojum.school-catalog/1"
@@ -103,9 +104,24 @@ def validate_catalog(catalog: Any) -> dict[str, Any]:
 
 
 def load_catalog(path: str | Path) -> dict[str, Any]:
-    """Bound file bytes and reject duplicate JSON keys before validation."""
-    with open(path, "rb") as source:
-        payload = source.read(MAX_CATALOG_BYTES + 1)
+    """Read a bounded regular file and reject duplicate JSON keys."""
+    # A writerless FIFO blocks in open(), before a bounded read can help.
+    # POSIX nonblocking open lets fstat reject special files before reading.
+    # On platforms without O_NONBLOCK, preflight the path as a best effort;
+    # fstat still checks the descriptor actually opened.
+    if not hasattr(os, "O_NONBLOCK") and not stat.S_ISREG(os.stat(path).st_mode):
+        raise SchoolContractError("school catalog must be a regular file")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise SchoolContractError("school catalog must be a regular file")
+        with os.fdopen(fd, "rb") as source:
+            fd = -1
+            payload = source.read(MAX_CATALOG_BYTES + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
     if len(payload) > MAX_CATALOG_BYTES:
         raise SchoolContractError("school catalog exceeds byte limit")
     try:
