@@ -570,21 +570,22 @@ def _run_gh_json(command: Sequence[str], *, label: str) -> dict[str, object]:
     """Run one read-only ``gh`` query and require an object response."""
 
     try:
+        # Capture bytes so the host locale and Windows reader threads cannot
+        # decode gh's UTF-8 before the snapshot parser sees it.
         completed = subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=60
+            command, capture_output=True, check=False, timeout=60
         )
-    except UnicodeError as error:
-        # subprocess text decoding can fail before JSON validation runs.
-        raise FetchError(f"{label} returned undecodable UTF-8") from error
     except (OSError, subprocess.SubprocessError) as error:
         raise FetchError(f"cannot run {' '.join(command)}: {error}") from error
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
-        raise FetchError(f"{label} exited {completed.returncode}: {detail}")
     try:
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).decode("utf-8").strip()
+            raise FetchError(f"{label} exited {completed.returncode}: {detail}")
         # Live gh responses must not bypass the duplicate-key validation
         # applied to offline snapshots and nested CI check entries.
-        payload = _decode_snapshot_bytes(completed.stdout.encode("utf-8"))
+        payload = _parse_snapshot_text(completed.stdout.decode("utf-8"))
+    except UnicodeDecodeError as error:
+        raise FetchError(f"{label} returned undecodable UTF-8") from error
     except json.JSONDecodeError as error:
         raise FetchError(f"{label} returned invalid JSON: {error}") from error
     if not isinstance(payload, dict):
@@ -672,11 +673,16 @@ def _decode_snapshot_bytes(data: bytes) -> object:
     """Reject parser-depth exhaustion and ambiguous JSON object fields."""
     try:
         text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SnapshotError("snapshot JSON is not valid UTF-8") from exc
+    return _parse_snapshot_text(text)
+
+
+def _parse_snapshot_text(text: str) -> object:
+    try:
         if _json_nesting.exceeds_json_depth(text):
             raise SnapshotError("snapshot JSON exceeds parser nesting limit")
         return json.loads(text, object_pairs_hook=_unique_snapshot_object)
-    except UnicodeDecodeError as exc:
-        raise SnapshotError("snapshot JSON is not valid UTF-8") from exc
     except RecursionError as exc:
         raise SnapshotError("snapshot JSON exceeds parser nesting limit") from exc
 
