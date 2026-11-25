@@ -6,6 +6,7 @@ The opt-in pressure profile is a deterministic CPU-only fixture for bounded synt
 
 - Pressure: integer pascals (Pa), supported output range 30,000..120,000 Pa.
 - Position and room dimensions: integer millimetres (mm), using a half-open sample domain.
+- Each canonical `Room` dimension in metres must equal the profile's integer millimetres divided by 1000. This admits millimetre dimensions such as 1001 mm without a floating-point multiply-back round trip; fractional-millimetre and mismatched dimensions are rejected with no rounding or tolerance.
 - Spatial gradients: integer Pa per kilometre.
 - Temporal drift: integer Pa per logical tick; no wall clock is read.
 - Room revision and tick are bound to the exact current canonical RoomState. The revision is recomputed against Room; stale, forged, or mismatched states fail closed.
@@ -25,4 +26,4 @@ The evaluator uses integer arithmetic, stable field names and canonical JSON SHA
 
 ## Validation
 
-Run offline with PYTHONPATH=src python -m unittest tests.test_world_pressure -v. The focused GitHub Actions workflow runs the suite on CPython 3.11, 3.12 and 3.13 against the exact pull-request head.
+Run offline with `PYTHONPATH=src python -m unittest discover -s tests -p 'test_world_pressure.py' -v`. The focused GitHub Actions workflow runs the suite on CPython 3.11, 3.12 and 3.13 against the exact pull-request head.

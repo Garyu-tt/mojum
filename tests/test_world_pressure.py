@@ -1,3 +1,4 @@
+import math
 import unittest
 from unittest.mock import patch
 
@@ -106,6 +107,45 @@ class PressureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dimensions"):
             observe_pressure(mismatch, room=self.room, state=self.state,
                              tick=0, x_mm=1000, y_mm=1000)
+
+    def test_millimetre_room_dimensions_are_admitted_on_both_axes(self):
+        for axis in (0, 1):
+            for dimension_mm in (1001, 1003, 1005, 1007, 1009):
+                with self.subTest(axis=axis, dimension_mm=dimension_mm):
+                    dimensions_mm = [1000, 1000]
+                    dimensions_mm[axis] = dimension_mm
+                    room = Room(*(value / 1000 for value in dimensions_mm))
+                    state = initial_state(room, 0.5, 0.5)
+                    profile = PressureProfile(state.revision, *dimensions_mm, 101000)
+                    observation = observe_pressure(
+                        profile, room=room, state=state, tick=0, x_mm=500, y_mm=500
+                    )
+                    self.assertEqual(observation["pressure_pa"], 101000)
+                    self.assertTrue(verify_observation(observation))
+
+    def test_fractional_and_nearby_mismatched_room_dimensions_are_rejected(self):
+        canonical_dimension = 1001 / 1000
+        mismatches = (
+            1002 / 1000,
+            1.0015,
+            math.nextafter(canonical_dimension, -math.inf),
+            math.nextafter(canonical_dimension, math.inf),
+        )
+        for axis in (0, 1):
+            for mismatch in mismatches:
+                with self.subTest(axis=axis, mismatch=mismatch):
+                    dimensions = [1.0, 1.0]
+                    dimensions[axis] = mismatch
+                    dimensions_mm = [1000, 1000]
+                    dimensions_mm[axis] = 1001
+                    room = Room(*dimensions)
+                    state = initial_state(room, 0.5, 0.5)
+                    profile = PressureProfile(state.revision, *dimensions_mm, 101000)
+                    with self.assertRaisesRegex(ValueError, "dimensions"):
+                        observe_pressure(
+                            profile, room=room, state=state,
+                            tick=0, x_mm=500, y_mm=500,
+                        )
 
     def test_out_of_range_computed_pressure_rejected(self):
         state = RoomState(1, 1.0, 1.0, _revision(self.room, 1, 1.0, 1.0))

@@ -82,7 +82,9 @@ def observe_pressure(profile: PressureProfile, *, room: Room, state: RoomState,
     if (not _integer(tick, p.epoch_tick, MAX_TICK) or tick != state.tick
             or state.revision != p.room_revision):
         raise ValueError("stale room revision or tick")
-    if room.width * 1000 != p.width_mm or room.height * 1000 != p.height_mm:
+    # Convert the exact millimetre dimensions to Room's metre representation;
+    # multiplying a valid float such as 1.001 back by 1000 need not be integral.
+    if room.width != p.width_mm / 1000 or room.height != p.height_mm / 1000:
         raise ValueError("profile dimensions do not match room")
     if (not _integer(x_mm, 0, p.width_mm - 1)
             or not _integer(y_mm, 0, p.height_mm - 1)
