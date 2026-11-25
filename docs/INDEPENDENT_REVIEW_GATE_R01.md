@@ -28,6 +28,29 @@ Input has an exact schema: PR number, target/draft state, author/last-pusher/rev
 - A `REVIEW_READY` result is only a recommendation to proceed to a separate human/authorized review step. It does not satisfy GitHub branch protection.
 - No reviewer identity can be provisioned by this patch. The external operator-authorized distinct principal remains a hard blocker for shipping.
 
+## Composition with review-history evidence (#1334)
+
+Within the offline #712 layer, #1335 owns the aggregate recommendation policy.
+[PR #1334](https://github.com/Garyu-tt/mojum/pull/1334) remains an unmerged Draft
+proposing an optional review-history reducer and approval-candidate selector.
+There is no automatic adapter or import between them. This boundary does not
+replace the existing [repository merge gate](MERGE_GATE_R01.md).
+
+Do not map #1334's `receipt.base_sha` to #1335's `reviewed_base_sha`: the former
+copies the current PR snapshot and does not establish which base was reviewed.
+A future adapter must obtain separate, trustworthy evidence of the reviewed
+base. If that evidence is unavailable, stop with `HOLD`; do not infer it from
+current `main` or supply a default.
+
+Selecting an approval candidate does not rule out another reviewer's
+`CHANGES_REQUESTED`. Authenticated data, an open PR against current `main`,
+successful completion of every required CI check, and absence of unresolved
+blockers remain separate verification requirements.
+
+#1334 admits only `PUBLIC_SYNTHETIC` inputs. Live GitHub evidence must not be
+relabelled as synthetic to pass admission. A future adapter with an explicit
+trust contract and end-to-end acceptance of #712 remain separate tasks.
+
 ## Resource bounds
 
 At most 32 required job identities and 128 supplied job snapshots; names and logins are bounded; no unbounded recursion, file access, network, clock reads or third-party packages.
