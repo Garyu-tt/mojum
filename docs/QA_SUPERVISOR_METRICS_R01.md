@@ -19,6 +19,8 @@ Unknown fields, duplicate IDs, unknown states/reasons, invalid native types, non
 
 The detached aggregate includes counts by state, age bucket, blocked reason, lease health, sample count and nearest-rank p50/p95 duration. It contains no task IDs or arbitrary source strings. A SHA-256 receipt covers the canonical JSON representation of the aggregate before the receipt field is added. The digest is an integrity aid, not an authenticity signature.
 
+Duration samples are converted to floats, with signed zero normalized to `0.0`. Reordering equivalent zero samples therefore preserves the serialized percentiles and receipt.
+
 ## Privacy and limits
 
 The caller must supply only data it is authorized to aggregate. The reducer deliberately discards task identifiers and rejects arbitrary labels/URLs/tokens instead of attempting to redact them. Do not feed PRIVATE Noosphere content, PR bodies, credentials, host identifiers, or raw logs. The reducer has no network, filesystem, subprocess, or hardware access.

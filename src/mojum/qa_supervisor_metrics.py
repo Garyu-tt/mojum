@@ -54,7 +54,8 @@ def _finite_number(value: Any, field: str, *, maximum: int) -> float:
         raise MetricsInputError(f"{field} is outside the permitted range") from None
     if not math.isfinite(result) or result < 0 or result > maximum:
         raise MetricsInputError(f"{field} is outside the permitted range")
-    return result
+    # Equal zero samples must serialize identically after a stable percentile sort.
+    return 0.0 if result == 0 else result
 
 
 def _age_bucket(seconds: int) -> str:

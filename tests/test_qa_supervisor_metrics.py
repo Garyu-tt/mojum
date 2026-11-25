@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -24,6 +25,18 @@ class SupervisorMetricsTests(unittest.TestCase):
     def test_duration_nearest_rank(self):
         result = summarize_snapshot({"observed_at": 1, "tasks": [], "duration_samples_ms": [9, 1, 5, 3, 7]})
         self.assertEqual(result["duration_ms"], {"p50": 5.0, "p95": 9.0})
+
+    def test_duration_signed_zero_has_a_canonical_receipt(self):
+        reference = summarize_snapshot({
+            "observed_at": 1, "tasks": [], "duration_samples_ms": [0.0, 0.0],
+        })
+        for samples in ([-0.0, 0.0], [0.0, -0.0], [-0.0, -0.0], [0, 0]):
+            with self.subTest(samples=samples):
+                result = summarize_snapshot({
+                    "observed_at": 1, "tasks": [], "duration_samples_ms": samples,
+                })
+                # JSON distinguishes signed zero even though Python equality does not.
+                self.assertEqual(json.dumps(result, sort_keys=True), json.dumps(reference, sort_keys=True))
 
     def test_empty_samples_are_null(self):
         result = summarize_snapshot({"observed_at": 1, "tasks": []})
