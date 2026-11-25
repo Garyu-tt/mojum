@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 MODULE = Path(__file__).resolve().parents[1] / "tools" / "spartan_sandbox.py"
@@ -61,9 +62,43 @@ class SandboxPlannerTests(unittest.TestCase):
         "requires Linux Bubblewrap and /usr/bin/python3",
     )
     def test_real_bubblewrap_starts_python_in_isolated_namespace(self):
+        script = textwrap.dedent("""
+            import errno
+            import os
+            from pathlib import Path
+            import resource
+            import sys
+
+            assert os.getcwd() == "/workspace"
+            assert dict(os.environ) == {
+                "PATH": "/usr/bin:/bin",
+                "HOME": "/tmp/home",
+                "TMPDIR": "/scratch",
+                "LANG": "C.UTF-8",
+                "GIT_TERMINAL_PROMPT": "0",
+            }, dict(os.environ)
+            try:
+                Path("/workspace/sandbox-write-denied.txt").write_text("must fail")
+            except OSError as exc:
+                assert exc.errno in (errno.EROFS, errno.EACCES, errno.EPERM), repr(exc)
+            else:
+                raise AssertionError("source repository is writable")
+            scratch = Path("/scratch/sandbox-write.txt")
+            scratch.write_text("scratch-ok")
+            assert scratch.read_text() == "scratch-ok"
+            names = ("RLIMIT_CPU", "RLIMIT_AS", "RLIMIT_NPROC", "RLIMIT_NOFILE")
+            for name, expected in zip(names, map(int, sys.argv[1:]), strict=True):
+                actual = resource.getrlimit(getattr(resource, name))
+                assert actual == (expected, expected), (name, actual, expected)
+            print("sandbox-runtime-ok")
+        """)
+        limit_values = (
+            self.limits.cpu_seconds, self.limits.memory_bytes,
+            self.limits.process_count, self.limits.open_files,
+        )
         argv = sandbox.build_sandbox_argv(
             self.repo, self.scratch,
-            ["/usr/bin/python3", "-c", "print('sandbox-runtime-ok')"],
+            ["/usr/bin/python3", "-c", script, *map(str, limit_values)],
             self.limits,
             bwrap=shutil.which("bwrap"),
             prlimit="/usr/bin/prlimit",
@@ -72,10 +107,12 @@ class SandboxPlannerTests(unittest.TestCase):
         result = subprocess.run(
             argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
             timeout=self.limits.wall_seconds + 5, check=False,
-            env=sandbox.sandbox_environment(),
+            env={**sandbox.sandbox_environment(), "MOJUM_SANDBOX_HOST_SENTINEL": "discard-me"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "sandbox-runtime-ok")
+        self.assertFalse((self.repo / "sandbox-write-denied.txt").exists())
+        self.assertEqual((self.scratch / "sandbox-write.txt").read_text(), "scratch-ok")
 
     def test_valid_plan_is_argv_only_and_has_required_isolation(self):
         argv = self.build()
@@ -124,6 +161,19 @@ class SandboxPlannerTests(unittest.TestCase):
         for limits in bad:
             with self.subTest(limits=limits), self.assertRaises(sandbox.SandboxError):
                 self.build(limits=limits)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX mode bits")
+    def test_requires_exact_owner_only_scratch_mode(self):
+        self.scratch.chmod(0o700)
+        self.assertIsInstance(self.build(), list)
+        try:
+            for mode in (0o500, 0o600, 0o750, 0o707, 0o1700, 0o2700):
+                with self.subTest(mode=oct(mode)):
+                    self.scratch.chmod(mode)
+                    with self.assertRaisesRegex(sandbox.SandboxError, "mode 0700"):
+                        self.build()
+        finally:
+            self.scratch.chmod(0o700)
 
     def test_rejects_relative_symlink_and_overlapping_paths(self):
         with self.assertRaises(sandbox.SandboxError):

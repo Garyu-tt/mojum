@@ -8,10 +8,11 @@ prlimit and timeout. It does not launch the command itself.
 
 - Requires an explicit absolute repository directory and a separate explicit
   scratch directory owned by the caller with POSIX mode 0700.
-- Mounts the source repository read-only at /workspace.
-- Mounts only the caller-owned scratch directory writable at /scratch.
-- Mounts /usr read-only for the runtime. It does not mount host HOME, SSH
-  sockets, Git credentials, arbitrary host directories, or project secrets.
+- Mounts the complete source repository read-only at /workspace.
+- The only writable host-directory mount is the caller-owned scratch at
+  /scratch; /tmp and the minimal /dev are disposable sandbox filesystems.
+- Mounts /usr read-only for the runtime. It does not automatically mount
+  host HOME, credential stores, SSH socket paths or other host directories.
 - Uses Bubblewrap namespace isolation, including an explicit network namespace
   with no network access, a new session and die-with-parent behavior.
 - Clears the inherited environment and supplies only PATH, HOME, TMPDIR,
@@ -19,6 +20,15 @@ prlimit and timeout. It does not launch the command itself.
 - Applies CPU time, virtual address-space, process-count and file-descriptor
   limits through prlimit, plus a wall-clock deadline through GNU timeout.
 - Uses argv arrays and never invokes a shell.
+
+The caller must supply a trusted, sanitized credential-free source checkout
+and a fresh empty private scratch directory. All contents of the explicit
+source, scratch and runtime mounts remain visible inside the sandbox;
+read-only mounting does not redact files. The planner validates paths and
+scratch ownership/mode, but does not inspect or sanitize directory contents,
+reject hardlinks or socket nodes, or defend against same-UID path replacement.
+Keep those paths stable and free of credentials, live sockets and private data
+before execution.
 
 ## Example
 
@@ -64,5 +74,6 @@ execution.
 - No cgroup CPU quota or resident-set hard limit is claimed. prlimit applies
   per-process resource limits; the host executor must enforce cgroup-level
   aggregate CPU/RAM quotas when needed.
-- This is not an activated production sandbox. No live test command was run
-  through this profile in this change.
+- The focused CI workflow installs Bubblewrap and runs a disposable isolated
+  Python smoke command alongside the planner tests. This does not activate a
+  production sandbox.

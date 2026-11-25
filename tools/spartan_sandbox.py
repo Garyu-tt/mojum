@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import stat
 from typing import Sequence
 
 
@@ -86,7 +87,7 @@ def _runtime_symlinks() -> list[tuple[str, str]]:
 def _private_scratch(path: Path) -> None:
     if os.name == "posix":
         info = path.stat()
-        if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise SandboxError("scratch directory must be owned by caller and mode 0700")
 
 
@@ -148,11 +149,15 @@ def build_sandbox_argv(
     prlimit: str | os.PathLike[str] = "/usr/bin/prlimit",
     timeout: str | os.PathLike[str] = "/usr/bin/timeout",
 ) -> list[str]:
-    """Build the exact argv for a no-network, credential-cleared test sandbox.
+    """Build argv for a no-network test sandbox with a cleared environment.
 
-    Source is mounted read-only at /workspace. Only the caller-owned scratch
-    directory is writable at /scratch. No host HOME, environment, credentials,
-    sockets, devices (beyond a minimal synthetic /dev), or network are mounted.
+    The caller must supply a trusted, sanitized credential-free source tree
+    and a fresh empty private scratch directory. The source is mounted in full
+    read-only at /workspace; scratch is the only writable host-directory mount.
+    Every explicit mount's contents remain visible. The planner does not scan
+    or redact contents, reject hardlinks or socket nodes, or defend against
+    same-UID path replacement. It does not automatically mount host HOME,
+    credential stores or SSH socket paths, and clears the inherited environment.
     """
     if os.name != "posix" or not Path("/proc").is_dir() or not Path("/usr").is_dir():
         raise SandboxError("this sandbox profile requires a Linux/POSIX host")
