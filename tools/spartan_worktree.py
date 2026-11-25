@@ -79,10 +79,18 @@ def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
             check=True, capture_output=True, text=True, timeout=20, env=env)
 
     try:
-        top = Path(git("rev-parse", "--show-toplevel").stdout.strip()).resolve(strict=True)
+        # Git implementations such as MSYS2 may print an absolute path in
+        # their own namespace.  --show-cdup is relative to -C and therefore
+        # remains meaningful to the Python process on both Windows and POSIX.
+        cdup = git("rev-parse", "--show-cdup").stdout.rstrip("\r\n")
+        if not re.fullmatch(r"(?:\.\./)*", cdup):
+            raise IsolationError("unexpected Git top-level relative path")
+        top = (repo / cdup).resolve(strict=True)
         if root == top or root in top.parents or top in root.parents:
             raise IsolationError("worktree root must be separate from repository")
-        git("cat-file", "-e", f"{base_sha}^{{commit}}")
+        # ^0 peels a commit (or a tag to a commit) without braces, which
+        # MSYS2's Windows argv processing may strip before Git sees them.
+        git("cat-file", "-e", f"{base_sha}^0")
         git("worktree", "add", "--no-checkout", "-b", branch, str(dest), base_sha)
         git("-C", str(dest), "checkout", "--force", branch)
     except IsolationError:
