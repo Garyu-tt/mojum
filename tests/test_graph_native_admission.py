@@ -1,6 +1,7 @@
 """Adversarial direct-Python admission tests for executable Graph v1."""
 import copy
 import json
+import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -9,7 +10,9 @@ from mojum.graph import (
     GraphError,
     MAX_GRAPH_BYTES,
     MAX_GRAPH_TREE_NODES,
+    MAX_JSON_DEPTH,
     SCHEMA,
+    load_graph,
     validate,
     _require_native_json_tree,
 )
@@ -196,6 +199,32 @@ class GraphNativeAdmissionTests(unittest.TestCase):
         graph["nodes"][0]["config"]["deep"] = nested
         with self.assertRaisesRegex(GraphError, "nesting depth"):
             validate(graph)
+
+    def test_file_and_native_depth_limits_agree_at_boundary(self):
+        expected_order = validate(self.fresh())[2]
+        # Root object, nodes list, node object and config object occupy four
+        # levels. JSON counts containers, not the scalar inside the last one.
+        for leaf in ("leaf", [], {}):
+            graph = self.fresh()
+            nested = leaf
+            leaf_depth = 1 if type(leaf) in (list, dict) else 0
+            for _ in range(MAX_JSON_DEPTH - 4 - leaf_depth):
+                nested = [nested]
+            graph["nodes"][0]["config"]["deep"] = nested
+            with self.subTest(leaf_type=type(leaf).__name__):
+                with tempfile.TemporaryDirectory() as folder:
+                    path = Path(folder) / "graph.json"
+                    path.write_text(json.dumps(graph), encoding="utf-8")
+                    loaded = load_graph(path)
+                    self.assertEqual(validate(loaded)[2], expected_order)
+                    self.assertEqual(validate(graph)[2], expected_order)
+
+                    graph["nodes"][0]["config"]["deep"] = [nested]
+                    path.write_text(json.dumps(graph), encoding="utf-8")
+                    with self.assertRaisesRegex(GraphError, "nesting depth"):
+                        load_graph(path)
+                    with self.assertRaisesRegex(GraphError, "nesting depth"):
+                        validate(graph)
 
     def test_direct_input_obeys_aggregate_node_budget(self):
         graph = self.fresh()

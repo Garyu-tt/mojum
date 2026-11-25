@@ -5,16 +5,18 @@ or malformed anchor must not leave behind a fresh PRIVATE SQLite journal, and a
 wrong anchor must not append or mutate the existing one.
 """
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
 
 from mojum.aquarium import Aquarium, AquariumError, main
-from mojum.noosphere import NoosphereError
+from mojum.noosphere import LocalNoosphere, NoosphereError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +46,13 @@ class AquariumExpectedHeadApiTests(unittest.TestCase):
             self.open(external_expected_head=head)
         self.assertFalse(self.db.exists())
 
+        with LocalNoosphere(self.db, SEED["genome_id"]) as empty:
+            self.assertEqual(empty.count(), 0)
+        before = self.db.read_bytes()
+        with self.assertRaisesRegex(AquariumError, "existing journal"):
+            self.open(external_expected_head=head)
+        self.assertEqual(self.db.read_bytes(), before)
+
     def test_correct_anchor_reopens_and_appends(self):
         with self.open() as writer:
             writer.step()
@@ -60,8 +69,15 @@ class AquariumExpectedHeadApiTests(unittest.TestCase):
         with self.open() as writer:
             writer.step()
             checkpoint = writer.checkpoint()
-        with self.assertRaises(NoosphereError):
+        # Cold copies of valid journals use DELETE mode. A refused reopen
+        # must leave the original database in that mode, byte for byte.
+        with closing(sqlite3.connect(self.db)) as writer:
+            self.assertEqual(writer.execute("PRAGMA journal_mode=DELETE").fetchone(),
+                             ("delete",))
+        before = self.db.read_bytes()
+        with self.assertRaisesRegex(NoosphereError, "differs from independent external anchor"):
             self.open(external_expected_head="1" * 64)
+        self.assertEqual(self.db.read_bytes(), before)
         with self.open(external_expected_head=checkpoint["journal_head"]) as reader:
             self.assertEqual(reader.checkpoint(), checkpoint)
 

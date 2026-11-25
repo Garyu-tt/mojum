@@ -4,8 +4,9 @@ from collections import defaultdict
 import json
 import math
 
+from ._json_nesting import MAX_JSON_DEPTH, exceeds_json_depth
+
 SCHEMA = "mechanicus.universal-graph/1"
-MAX_JSON_DEPTH = 256
 # Match the offline graph audit input budget. This bounds decoding BEFORE JSON
 # structure checks, so CLI/portable hosts cannot allocate arbitrarily large
 # graph JSON just by passing a path to an untrusted file.
@@ -82,10 +83,12 @@ def _require_native_json_tree(value):
             node_count += 1
             if node_count > MAX_GRAPH_TREE_NODES:
                 raise GraphError("Graph JSON tree exceeds node budget")
-            if depth > MAX_JSON_DEPTH:
+            kind = type(current)
+            # Match the file loader: only objects/arrays add JSON nesting.
+            # A scalar inside the last admitted container is not another level.
+            if depth > MAX_JSON_DEPTH and (kind is dict or kind is list):
                 raise GraphError("Graph JSON nesting depth exceeded")
 
-            kind = type(current)
             if kind is dict:
                 identity = id(current)
                 if identity in seen_containers:
@@ -156,33 +159,8 @@ def _unique_json_object(pairs):
 
 
 def _check_json_depth(raw):
-    """Reject deeply nested JSON before invoking the recursive decoder.
-
-    ``json.loads`` has no portable public depth limit.  A deeply nested graph
-    can otherwise raise ``RecursionError`` on one Python version and be
-    accepted on another.  Brackets inside JSON strings are ignored; the JSON
-    decoder remains responsible for all other syntax validation.
-    """
-    depth = 0
-    in_string = False
-    escaped = False
-    for char in raw:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char in "[{":
-            depth += 1
-            if depth > MAX_JSON_DEPTH:
-                raise GraphError("Graph JSON nesting depth exceeded")
-        elif char in "]}" and depth:
-            depth -= 1
+    if exceeds_json_depth(raw, MAX_JSON_DEPTH):
+        raise GraphError("Graph JSON nesting depth exceeded")
 
 
 def _require_lossless_json(graph):
@@ -287,8 +265,6 @@ def validate(graph):
     if dict.get(graph, "schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
 
-    if graph.get("schema") != SCHEMA:
-        raise GraphError("Unsupported or absent graph schema")
     nodes = graph.get("nodes")
     edges = graph.get("edges")
     if type(nodes) is not list or not nodes or type(edges) is not list:

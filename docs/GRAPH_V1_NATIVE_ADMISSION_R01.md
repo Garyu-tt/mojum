@@ -21,7 +21,8 @@ Object keys must be exact strings and valid UTF-8. It rejects:
 - non-JSON Python values such as tuples, sets, bytes, and custom objects;
 - cycles and shared container references (JSON has no alias representation);
 - non-finite floats, unpaired surrogates, and excessively large integers;
-- nesting above `MAX_JSON_DEPTH`, more than
+- container nesting above `MAX_JSON_DEPTH` (scalar leaves do not add a level,
+  matching the file loader), more than
   `MAX_GRAPH_TREE_NODES` tree entries (including pending traversal work before
   expanding containers), or serialized input above
   `MAX_GRAPH_BYTES` (256 KiB).
@@ -40,6 +41,11 @@ PYTHONPATH=src python -m unittest discover -s tests -p 'test_graph_native_admiss
 The focused tests cover a canonical graph, hostile dictionary/list/string
 subclasses, malformed native values, finite-number rules, cycles/aliases,
 depth/node/byte budgets, and stable valid-graph behavior.
+
+The `graph-native-admission` workflow checks out and asserts the exact PR head
+before running this suite on Python 3.11, 3.12, and 3.13. The suite also verifies
+that file-loaded and direct inputs agree at the 256-container depth boundary,
+including scalar leaves and empty containers, and both reject depth 257.
 
 ## Limitations
 
