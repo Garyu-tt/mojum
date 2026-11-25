@@ -222,6 +222,10 @@ def verify_sealed_archive(directory, *, external_expected_head):
     expected_size = None
     events = 0
     contains_private = False
+    # Keep identities unique across the entire prefix, as the restore journal
+    # requires. Fixed-size digests avoid retaining full PRIVATE IDs; manifest
+    # bounds cap this set at MAX_JOURNAL_EVENTS. A hash collision fails closed.
+    event_id_digests = set()
     for index in index_range:
         m = read_manifest(root, index)
         if (expected_owner is not None and m["agent_id"] != expected_owner
@@ -230,6 +234,10 @@ def verify_sealed_archive(directory, *, external_expected_head):
                 or m["prior_segment_head"] != previous):
             raise ArchiveError("invalid source identity or segment link")
         for event in iter_segment_events(root, m, previous):
+            identity = hashlib.sha256(event["event_id"].encode("utf-8")).digest()
+            if identity in event_id_digests:
+                raise ArchiveError("duplicate event ID in sealed archive")
+            event_id_digests.add(identity)
             if event["recorded_at_ns"] < recorded_at_ns:
                 raise ArchiveError("archive event time regresses")
             recorded_at_ns = event["recorded_at_ns"]
