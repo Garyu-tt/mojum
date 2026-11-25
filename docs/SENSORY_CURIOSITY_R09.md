@@ -12,6 +12,15 @@ The experimenter places two synthetic objects with fixed geometry,
 numeric RGB reflectance and a hidden `softness` measurement, used only
 as test truth when touched.
 
+`ToyScene` is a fixed, immutable configuration after validated construction. Its room
+and toy tuple cannot be reassigned or deleted while a journal is running;
+the contained room and toys are immutable too. This keeps future frames
+consistent with the scene recorded in the bootstrap. To experiment with a
+different scene, construct a new `ToyScene` and use a new journal. The
+`manifest()` result is a detached description that can be inspected or edited
+without changing the scene. Existing unchanged scenes and journal formats
+remain compatible.
+
 The organism **does not** receive the objects' IDs, material names,
 softness values, labels or distance coordinates. Its near-field
 sensor reports only a boolean visible flag, 3 channel integers, and
