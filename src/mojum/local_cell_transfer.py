@@ -51,6 +51,14 @@ class TransferError(ValueError):
     """Unsupported or unequal versioned experience or unsafe target."""
 
 
+def _reject_destination_sidecars(destination):
+    # An absent main file can still have another journal's WAL or rollback
+    # data. Never publish beside or remove those independently owned entries.
+    if any(os.path.lexists(str(destination) + suffix)
+           for suffix in ("-wal", "-shm", "-journal")):
+        raise TransferError("destination has existing SQLite sidecars; choose a new path")
+
+
 def _anchor(value):
     if (type(value) is not str or len(value) != 64
             or any(ch not in _HEX for ch in value)):
@@ -214,6 +222,7 @@ def transfer_journal(
         raise TransferError("destination must not already exist")
     if not dest.name or not dest.parent.is_dir():
         raise TransferError("destination parent must already exist")
+    _reject_destination_sidecars(dest)
     if source.resolve() == dest.resolve():
         raise TransferError("source and destination paths must differ")
     if not isinstance(seed, dict) or not isinstance(graph, dict):
@@ -310,6 +319,7 @@ def transfer_journal(
         # private staging file is opened without truncation and is not edited.
         with staged.open("r+b") as ready:
             os.fsync(ready.fileno())
+        _reject_destination_sidecars(dest)
         try:
             os.link(staged, dest)
         except FileExistsError as exc:

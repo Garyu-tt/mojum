@@ -331,6 +331,13 @@ with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
 observation matches, with zero evictions during the transfer.
 
+Both transfer commands require an unused destination basename, including its
+SQLite `-wal`, `-shm` and `-journal` paths. Existing sidecar files, directories
+and symlinks are rejected before conversion and checked again immediately
+before publication. They are preserved for recovery; choose another pathname
+when these artifacts exist. Use a trusted local destination directory: these
+checks do not lock pathnames against concurrent replacement.
+
 ### Local Cell/3-escape (isolated, library-only)
 
 `mojum.cell_policy_v3_escape` is an opt-in profile that re-probes its own
