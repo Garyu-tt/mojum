@@ -1,6 +1,7 @@
 """Bounded foreground host tests against the current Aquarium ABI."""
 
-from contextlib import closing
+from contextlib import closing, redirect_stdout
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -142,6 +143,27 @@ class PortableHostTests(unittest.TestCase):
         )
         self.assertEqual(committed, 1)
         self.assertEqual([round(t, 4) for t in runner.starts], [0])
+
+    def test_cli_handles_sigterm_during_wait_without_appending_another_tick(self):
+        def interrupt_sleep(_delay):
+            signal.raise_signal(signal.SIGTERM)
+
+        with (
+            patch("mojum.portable_host.time.sleep", side_effect=interrupt_sleep) as sleep,
+            redirect_stdout(StringIO()),
+        ):
+            status = host_main([
+                "--db", str(self.db), "--ticks", "2", "--interval-ms", "500",
+            ])
+
+        self.assertEqual(status["stop_reason"], "signal")
+        self.assertEqual(status["committed_ticks"], 1)
+        self.assertEqual(sleep.call_count, 1)
+        self.assertGreater(sleep.call_args.args[0], 0)
+        self.assertLessEqual(sleep.call_args.args[0], .1)
+        with self.open_aquarium() as reopened:
+            self.assertEqual(reopened.tick, 1)
+            self.assertEqual(reopened.checkpoint()["journal_head"], status["journal_head"])
 
     def test_cancel_before_first_tick_does_not_write_frame(self):
         event = threading.Event()
