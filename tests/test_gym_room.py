@@ -276,6 +276,145 @@ class PointRoomGymTests(unittest.TestCase):
                 self.assertFalse(terminated)
                 self.assertEqual(reward, -0.01)
 
+    def test_endpoint_numeric_alias_cannot_forge_reward_or_reset(self):
+        for field in ("start", "goal"):
+            for operation in ("step", "reset"):
+                with self.subTest(field=field, operation=operation):
+                    episode = PointRoomEpisode(Room(4, 4), max_steps=1)
+                    episode.reset(seed=7)
+                    before = episode._state
+                    original = getattr(episode, field)
+                    callbacks = []
+
+                    class Alias(float):
+                        def __eq__(self, other):
+                            callbacks.append("equality")
+                            return True
+
+                    values = (3, 3) if field == "start" else (1, 1)
+                    setattr(episode, field, tuple(Alias(x) for x in values))
+                    with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                        if operation == "step":
+                            episode.step(0)
+                        else:
+                            episode.reset(seed=99)
+                    self.assertEqual(callbacks, [])
+                    self.assertIs(episode._state, before)
+                    self.assertEqual(episode._seed, 7)
+                    self.assertFalse(episode._done)
+                    setattr(episode, field, original)
+                    obs, reward, terminated, truncated, _ = episode.step(0)
+                    self.assertEqual(obs["tick"], 1)
+                    self.assertEqual(reward, -0.01)
+                    self.assertEqual((terminated, truncated), (False, True))
+
+    def test_endpoint_equality_cannot_reenter_reset_or_step(self):
+        for field in ("start", "goal"):
+            for coordinate in (0, 1):
+                for nested in ("step", "reset"):
+                    for outer in ("step", "reset"):
+                        with self.subTest(field=field, coordinate=coordinate,
+                                          nested=nested, outer=outer):
+                            episode = self.episode(max_steps=1)
+                            episode.reset(seed=7)
+                            before = episode._state
+                            original = getattr(episode, field)
+                            callbacks = []
+
+                            class Reenter(float):
+                                def __eq__(self, other):
+                                    callbacks.append(nested)
+                                    setattr(episode, field, original)
+                                    if nested == "step":
+                                        episode.step(0)
+                                    else:
+                                        episode.reset(seed=99)
+                                    return True
+
+                            replacement = list(original)
+                            replacement[coordinate] = Reenter(original[coordinate])
+                            setattr(episode, field, tuple(replacement))
+                            with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                                if outer == "step":
+                                    episode.step(0)
+                                else:
+                                    episode.reset(seed=99)
+                            self.assertEqual(callbacks, [])
+                            self.assertIs(episode._state, before)
+                            self.assertEqual(episode._seed, 7)
+                            self.assertFalse(episode._done)
+                            setattr(episode, field, original)
+                            self.assertEqual(episode.step(0)[0]["tick"], 1)
+
+    def test_action_index_cannot_install_endpoint_equality_hook(self):
+        for field in ("start", "goal"):
+            with self.subTest(field=field):
+                episode = self.episode(max_steps=1)
+                episode.reset(seed=7)
+                before = episode._state
+                original = getattr(episode, field)
+                callbacks = []
+
+                class Alias(float):
+                    def __eq__(self, other):
+                        callbacks.append("equality")
+                        return True
+
+                class MutatingIndex:
+                    def __index__(self):
+                        setattr(episode, field, tuple(Alias(x) for x in episode.start))
+                        return 0
+
+                with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                    episode.step(MutatingIndex())
+                self.assertEqual(callbacks, [])
+                self.assertIs(episode._state, before)
+                self.assertEqual(episode._seed, 7)
+                self.assertFalse(episode._done)
+                setattr(episode, field, original)
+                self.assertEqual(episode.step(0)[2:4], (False, True))
+
+    def test_equal_builtin_endpoint_replacements_preserve_trajectory(self):
+        episode = self.episode(max_steps=3)
+        control = self.episode(max_steps=3)
+        episode.start = tuple(list(episode.start))
+        episode.goal = tuple(list(episode.goal))
+        self.assertEqual(episode.reset(seed=7), control.reset(seed=7))
+        for action in (0, 1, 3):
+            self.assertEqual(episode.step(action), control.step(action))
+
+    def test_optional_gym_wrapper_rejects_endpoint_equality_hooks(self):
+        try:
+            import gymnasium  # noqa: F401 - optional upstream integration
+        except ImportError:
+            self.skipTest("gymnasium is optional")
+        env = make_gymnasium_env(self.room, start=(1, 2), goal=(3, 2), max_steps=1)
+        try:
+            env.reset(seed=7)
+            original = env._episode.goal
+            callbacks = []
+
+            class Reenter(float):
+                def __eq__(self, other):
+                    callbacks.append("step")
+                    env._episode.goal = original
+                    env.step(0)
+                    return True
+
+            env._episode.goal = (Reenter(original[0]), original[1])
+            with self.assertRaisesRegex(ValueError, "configuration mutated"):
+                env.step(0)
+            self.assertEqual(callbacks, [])
+            env._episode.goal = original
+            obs, reward, terminated, truncated, info = env.step(0)
+            self.assertTrue(env.observation_space.contains(obs))
+            self.assertEqual(obs["tick"], 1)
+            self.assertEqual(info["seed"], 7)
+            self.assertEqual(reward, -0.01)
+            self.assertEqual((terminated, truncated), (False, True))
+        finally:
+            env.close()
+
     def test_bad_episode_inputs_fail_closed(self):
         for kwargs in ({"step_m": float("nan")}, {"step_m": 0},
                        {"max_steps": True}, {"goal": (2, 2)},
