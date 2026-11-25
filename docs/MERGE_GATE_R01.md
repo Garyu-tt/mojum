@@ -45,6 +45,12 @@ failed `gh` call) is also a `reject` and never a `ready`.
   generic neutral/waiver behavior.
 - A waiver never masks `failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `error` or `startup_failure`.
+- A supplied legacy `state` is evidence even beside CheckRun `status` and
+  `conclusion`: pending states defer with `CHECK_PENDING`, and unknown state
+  strings defer with `CHECK_UNKNOWN_STATUS`. A failed conclusion or legacy
+  `FAILURE`/`ERROR` still rejects. A present null, blank or non-string state is
+  `INVALID_INPUT`; omitting `state` remains valid for CheckRun records.
+  Rollup aliases that disagree after this normalization are `INVALID_INPUT`.
 - A required job that matches nothing yields `defer`
   (`MISSING_REQUIRED_CHECK`), because its workflow may not have registered yet.
 - Multiple rollup entries for one required identity yield `defer`
