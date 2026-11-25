@@ -108,6 +108,34 @@ class ClothContactTelemetryTests(unittest.TestCase):
         )
         self.assertLess(int(result.stdout), 256 * 1024)
 
+    def test_non_native_samples_reject_before_metaclass_callbacks(self):
+        calls = []
+
+        class HostileMeta(type):
+            def __hash__(cls):
+                calls.append("metaclass.__hash__")
+                raise AssertionError("sample metaclass callback executed")
+
+        class UnsupportedSample(metaclass=HostileMeta):
+            pass
+
+        class HostileDict(dict, metaclass=HostileMeta):
+            def keys(self):
+                calls.append("dict.keys")
+                raise AssertionError("sample keys callback executed")
+
+        class UnhashableMeta(type):
+            __hash__ = None
+
+        class UnhashableSample(metaclass=UnhashableMeta):
+            pass
+
+        for item in (UnsupportedSample(), HostileDict(sample()), UnhashableSample()):
+            with self.subTest(sample_type=type(item).__name__):
+                with self.assertRaises(ClothTelemetryError):
+                    reduce_contacts([item])
+        self.assertEqual(calls, [])
+
     def test_four_fields_still_require_exact_native_keys(self):
         class KeyAlias(str):
             pass

@@ -56,7 +56,7 @@ def _native_int(value: object, field: str, low: int, high: int) -> int:
 
 
 def _sample_copy(item: object, index: int) -> dict[str, object]:
-    if not isinstance(item, Mapping) or type(item) is not dict:
+    if type(item) is not dict:
         raise ClothTelemetryError(f"sample {index} must be a native dict")
     # Bound shape inspection before allocating or scanning a copy of the keys.
     if len(item) != len(_SAMPLE_KEYS):

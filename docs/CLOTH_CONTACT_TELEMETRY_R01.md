@@ -36,6 +36,8 @@ multiple samples in one step. The reducer never reads wall-clock time.
 - stdlib-only, CPU-only and offline; no imports of MuJoCo/Jolt/PBD.
 - 2,048 samples per call; fixed numeric ranges and explicit aggregate ceiling.
 - Exact native Python types; booleans are not integers for this protocol.
+- Sample dictionaries are admitted by exact type before any mapping-protocol
+  or key inspection, without invoking a rejected sample's metaclass hooks.
 - Exact sample keys; reject any other field count before copying or scanning
   keys. Unsupported visibility/classification fails closed.
 - Stable canonical SHA-256 is an integrity/determinism receipt, **not a
