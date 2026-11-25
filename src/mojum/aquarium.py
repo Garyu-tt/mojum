@@ -21,6 +21,7 @@ from pathlib import Path
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
 from .body_genetics import (compile_body, compile_body_at_month,
                             validate_human_name)
+from .cli_sensory_scene import SENSORY_SCENE_CHOICES, resolve_sensory_scene
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
 from .developmental import MotorPlay, SCHEMA as MOTOR_SCHEMA
 from .developmental_brain import DevelopmentalBrain, SCHEMA as DEVELOPMENTAL_BRAIN_SCHEMA
@@ -48,6 +49,7 @@ from .noosphere import (
     EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, NoosphereError, _read_first_event, _validate_event,
 )
 from .sensory_bridge import ToyContactBridge, SCHEMA as TOY_CONTACT_SCHEMA, OCCLUSION_SCHEMA
+from .sensory_bridge import SensoryBridgeError
 from .sensory_play import ContactAssociations, ToyScene, SENSE_SCHEMA, MODEL_SCHEMA
 from .sensory_associations_v2 import ContactAssociationsV2, SCHEMA as MODEL_V2_SCHEMA
 from .sensory_bridge_v2 import (
@@ -952,6 +954,8 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"), default="none",
                         help="opt-in synthetic contact learning with developmental motor play")
+    parser.add_argument("--sensory-scene", choices=SENSORY_SCENE_CHOICES, default="default",
+                        help="explicit toy scene; authored-room hosts use empty")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none",
                         help="guide virtual movement from measured range transitions")
     parser.add_argument("--pulse-sum", choices=("auto", "ordered", "compensated"), default="auto",
@@ -1002,7 +1006,8 @@ def main():
         dx, dy = None, None
     try:
         room, start = load_cli_room(args.room_file, args.motor_mode)
-    except RoomSpecError as exc:
+        scene = resolve_sensory_scene(args.sensory_scene, sensory_mode=args.sensory_mode, room=room)
+    except ValueError as exc:
         parser.error(str(exc))
     try:
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
@@ -1019,7 +1024,7 @@ def main():
         with Aquarium(
             args.db, seed, graph, agent_id=seed["genome_id"], room=room, start=start,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
-            sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
+            sensory_mode=args.sensory_mode, sensory_scene=scene, temporal_mode=args.temporal_mode,
             brain_mode=args.brain_mode,
             external_expected_head=args.expected_head,
         ) as aquarium:
@@ -1049,7 +1054,7 @@ def main():
             # Escape Unicode so redirected legacy consoles can emit the checkpoint
             # after committing ticks, including when the genome ID is non-ASCII.
             print(json.dumps(checkpoint, indent=2, allow_nan=False))
-    except (AquariumError, NoosphereError, sqlite3.OperationalError) as exc:
+    except (AquariumError, NoosphereError, SensoryBridgeError, sqlite3.OperationalError) as exc:
         storage_error = exc.__cause__ if isinstance(exc, NoosphereError) else exc
         if isinstance(storage_error, sqlite3.OperationalError):
             parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {storage_error}\n")
