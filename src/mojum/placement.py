@@ -27,7 +27,9 @@ def _check_id(value):
 def _check_capabilities(capabilities):
     # Keep admission primitives exact: str/tuple subclasses may override
     # equality, hashing or iteration after constructor-time checks.
-    if type(capabilities) is not tuple or any(type(name) is not str for name in capabilities):
+    # Reject over-budget tuples before inspecting any of their elements.
+    if (type(capabilities) is not tuple or len(capabilities) > 128
+            or any(type(name) is not str for name in capabilities)):
         raise PlacementError("invalid capability set")
     try:
         _validated(Offer(PROTOCOL, "fixture", capabilities))

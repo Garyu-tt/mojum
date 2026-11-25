@@ -4,8 +4,13 @@ from collections import defaultdict
 import json
 import math
 
+from ._json_nesting import MAX_JSON_DEPTH, exceeds_json_depth
+
 SCHEMA = "mechanicus.universal-graph/1"
-MAX_JSON_DEPTH = 256
+# Match the offline graph audit input budget. This bounds decoding BEFORE JSON
+# structure checks, so CLI/portable hosts cannot allocate arbitrarily large
+# graph JSON just by passing a path to an untrusted file.
+MAX_GRAPH_BYTES = 256 * 1024
 
 # Input/output port name -> type. Future plugin definitions require signed registration.
 PORTS = {
@@ -32,33 +37,8 @@ def _unique_json_object(pairs):
 
 
 def _check_json_depth(raw):
-    """Reject deeply nested JSON before invoking the recursive decoder.
-
-    ``json.loads`` has no portable public depth limit.  A deeply nested graph
-    can otherwise raise ``RecursionError`` on one Python version and be
-    accepted on another.  Brackets inside JSON strings are ignored; the JSON
-    decoder remains responsible for all other syntax validation.
-    """
-    depth = 0
-    in_string = False
-    escaped = False
-    for char in raw:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char in "[{":
-            depth += 1
-            if depth > MAX_JSON_DEPTH:
-                raise GraphError("Graph JSON nesting depth exceeded")
-        elif char in "]}" and depth:
-            depth -= 1
+    if exceeds_json_depth(raw, MAX_JSON_DEPTH):
+        raise GraphError("Graph JSON nesting depth exceeded")
 
 
 def _require_lossless_json(graph):
@@ -92,16 +72,25 @@ def _parse_json_float(token):
 
 
 def load_graph(path):
-    """Read UTF-8 graph JSON without collapsing duplicate keys."""
+    """Read bounded UTF-8 graph JSON without collapsing duplicate keys.
+
+    Reading only MAX_GRAPH_BYTES + 1 bytes avoids creating an unbounded Python
+    string before the depth, duplicate-key and numeric gates can inspect it.
+    The byte limit also counts non-ASCII UTF-8 and insignificant whitespace.
+    """
     try:
-        raw = path.read_text(encoding="utf-8")
+        with path.open("rb") as stream:
+            payload = stream.read(MAX_GRAPH_BYTES + 1)
+        if len(payload) > MAX_GRAPH_BYTES:
+            raise GraphError("Graph JSON exceeds 256 KiB byte limit")
+        raw = payload.decode("utf-8", errors="strict")
         _check_json_depth(raw)
         return json.loads(raw, object_pairs_hook=_unique_json_object,
                           parse_constant=_reject_json_constant,
                           parse_float=_parse_json_float)
     except GraphError:
         raise
-    except (ValueError, RecursionError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         raise GraphError("Malformed graph JSON") from exc
 
 

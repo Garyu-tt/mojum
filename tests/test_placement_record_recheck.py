@@ -3,6 +3,7 @@
 stdlib only, synthetic/offline; no node enrollment, resource allocation or execution.
 """
 import unittest
+from unittest.mock import patch
 
 from mojum.placement import (
     Assignment, NodeBudget, PlacementError, PlacementPlan, StatelessJob, plan,
@@ -34,6 +35,27 @@ class PlacementAdmissionRecheckTests(unittest.TestCase):
         self.assertEqual(result, self.candidate)
         self.assertTrue(verify_placement(result, [self.job], [self.node],
                                          local_node_id="local-1"))
+
+    def test_capability_limit_accepts_128_distinct_names(self):
+        capabilities = tuple(f"cap-{index}" for index in range(128))
+        node = NodeBudget("local-1", 2, 64, capabilities)
+        job = StatelessJob("job-1", 1, 16, capabilities)
+        result = plan([job], [node], local_node_id="local-1")
+        self.assertEqual(result, self.candidate)
+        self.assertTrue(verify_placement(result, [job], [node],
+                                         local_node_id="local-1"))
+
+    def test_oversized_capabilities_rejected_before_element_scan(self):
+        for count in (129, 10_000):
+            capabilities = tuple(f"cap-{index}" for index in range(count))
+            for record_type in (NodeBudget, StatelessJob):
+                with self.subTest(count=count, record=record_type.__name__):
+                    # Cardinality is available in constant time. The type
+                    # scan must not run at all after this budget is exceeded.
+                    with patch("mojum.placement.any", create=True,
+                               side_effect=AssertionError("capability scan entered")):
+                        with self.assertRaises(PlacementError):
+                            record_type("record-1", 1, 16, capabilities)
 
     def test_post_construction_node_mutations_rejected_at_both_boundaries(self):
         cases = (
