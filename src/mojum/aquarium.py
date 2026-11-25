@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import math
+import sqlite3
 import unicodedata
 from dataclasses import asdict
 from importlib.resources import files
@@ -307,7 +308,9 @@ class Aquarium:
         # Only advance this head when the corresponding state is in memory.
         self._committed_head = EMPTY_HEAD
         self._committed_count = 0
-        first = _read_first_event(db_path, agent_id)
+        first = _read_first_event(
+            db_path, agent_id, external_expected_head=external_expected_head,
+        )
         if first is not None:
             self._check_bootstrap(first)
         elif external_expected_head is not None:
@@ -1001,52 +1004,56 @@ def main():
         room, start = load_cli_room(args.room_file, args.motor_mode)
     except RoomSpecError as exc:
         parser.error(str(exc))
-    seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    try:
+        seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+    except GenesisError as exc:
+        parser.error(f"invalid --genome ({exc})")
+    except (OSError, ValueError, RecursionError):
+        parser.error("--genome requires a readable UTF-8 JSON file")
     try:
         graph = load_graph(args.graph)
         validate_graph(graph)  # Fail before opening a new SQLite journal.
     except GraphError as exc:
         parser.error(str(exc))
     try:
-        aquarium = Aquarium(
+        with Aquarium(
             args.db, seed, graph, agent_id=seed["genome_id"], room=room, start=start,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, pulse_sum=args.pulse_sum,
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
             brain_mode=args.brain_mode,
             external_expected_head=args.expected_head,
-        )
-    except (AquariumError, NoosphereError) as exc:
-        # A wrong independent anchor or a foreign journal is a command error,
-        # not a traceback. Construction leaves no committed mutation behind.
-        parser.error(str(exc))
-    with aquarium:
-        # Reject the whole CLI batch before any frame is committed. The
-        # per-step gate remains authoritative for direct API callers.
-        try:
+        ) as aquarium:
+            # Reject the whole CLI batch before any frame is committed. The
+            # per-step gate remains authoritative for direct API callers.
             required = aquarium.required_events_for_steps(args.ticks)
-        except AquariumError as exc:
-            parser.error(str(exc))
-        if aquarium.stored_events + required > aquarium.journal_event_budget:
-            parser.error("requested ticks exceed remaining journal event budget")
-        for _ in range(args.ticks):
-            if aquarium.motor_mode == V4_MODE:
-                aquarium.step()
-            else:
-                aquarium.step(dx=dx, dy=dy)
-        # The checkpoint's final head check also covers the count read here.
-        stored_events = aquarium.stored_events
-        checkpoint = aquarium.checkpoint()
-        checkpoint["stored_events"] = stored_events
-        checkpoint["status"] = (
-            "SYNTHETIC_DEVELOPMENTAL_CONTROLLER_NOT_NEURAL_OR_MUJOCO"
-            if aquarium.brain_mode == "developmental_controller"
-            else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
-                  if aquarium.neural_mode == "shadow"
-                  else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
-        )
-        if aquarium.motor is not None:
-            checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"
-        print(json.dumps(checkpoint, indent=2, ensure_ascii=False, allow_nan=False))
+            if aquarium.stored_events + required > aquarium.journal_event_budget:
+                parser.error("requested ticks exceed remaining journal event budget")
+            for _ in range(args.ticks):
+                if aquarium.motor_mode == V4_MODE:
+                    aquarium.step()
+                else:
+                    aquarium.step(dx=dx, dy=dy)
+            # The checkpoint's final head check also covers the count read here.
+            stored_events = aquarium.stored_events
+            checkpoint = aquarium.checkpoint()
+            checkpoint["stored_events"] = stored_events
+            checkpoint["status"] = (
+                "SYNTHETIC_DEVELOPMENTAL_CONTROLLER_NOT_NEURAL_OR_MUJOCO"
+                if aquarium.brain_mode == "developmental_controller"
+                else ("SYNTHETIC_SHADOW_LEARNING_NOT_FULL_BRAIN_OR_MUJOCO"
+                      if aquarium.neural_mode == "shadow"
+                      else "SYNTHETIC_PLACEHOLDER_NOT_NEURAL_OR_MUJOCO")
+            )
+            if aquarium.motor is not None:
+                checkpoint["status"] += "_WITH_INTERNAL_SYNTHETIC_MOTOR_PLAY_NOT_REAL_ACTUATION"
+            # Escape Unicode so redirected legacy consoles can emit the checkpoint
+            # after committing ticks, including when the genome ID is non-ASCII.
+            print(json.dumps(checkpoint, indent=2, allow_nan=False))
+    except (AquariumError, NoosphereError, sqlite3.OperationalError) as exc:
+        storage_error = exc.__cause__ if isinstance(exc, NoosphereError) else exc
+        if isinstance(storage_error, sqlite3.OperationalError):
+            parser.exit(1, f"{parser.prog}: cannot access --db SQLite journal: {storage_error}\n")
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

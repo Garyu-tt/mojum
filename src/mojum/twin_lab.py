@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+from importlib.resources import files
 import math
 import os
 from pathlib import Path
@@ -148,7 +149,7 @@ def mentor_steps(db, agent_id, template, graph, *, ticks, dx, dy):
 
 def main():
     parser = argparse.ArgumentParser(description="Mojum offline synthetic twin lab")
-    root = Path(__file__).resolve().parents[2]
+    packaged = files("mojum").joinpath("data")
     commands = parser.add_subparsers(dest="command", required=True)
     pair = commands.add_parser("pair", help="create two new private local journals")
     for flag in ("left", "right"):
@@ -162,9 +163,9 @@ def main():
     mentor.add_argument("--dy", type=float, default=0.0)
     for command in (pair, mentor):
         command.add_argument("--genome", type=Path,
-                             default=root / "examples/genesis_seed.json")
+                             default=packaged.joinpath("genesis_seed.json"))
         command.add_argument("--graph", type=Path,
-                             default=root / "examples/first_loop.json")
+                             default=packaged.joinpath("first_loop.json"))
     args = parser.parse_args()
     template = json.loads(args.genome.read_text(encoding="utf-8"))
     graph = json.loads(args.graph.read_text(encoding="utf-8"))

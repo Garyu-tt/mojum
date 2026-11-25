@@ -4,8 +4,9 @@ from collections import defaultdict
 import json
 import math
 
+from ._json_nesting import MAX_JSON_DEPTH, exceeds_json_depth
+
 SCHEMA = "mechanicus.universal-graph/1"
-MAX_JSON_DEPTH = 256
 # Match the offline graph audit input budget. This bounds decoding BEFORE JSON
 # structure checks, so CLI/portable hosts cannot allocate arbitrarily large
 # graph JSON just by passing a path to an untrusted file.
@@ -36,33 +37,8 @@ def _unique_json_object(pairs):
 
 
 def _check_json_depth(raw):
-    """Reject deeply nested JSON before invoking the recursive decoder.
-
-    ``json.loads`` has no portable public depth limit.  A deeply nested graph
-    can otherwise raise ``RecursionError`` on one Python version and be
-    accepted on another.  Brackets inside JSON strings are ignored; the JSON
-    decoder remains responsible for all other syntax validation.
-    """
-    depth = 0
-    in_string = False
-    escaped = False
-    for char in raw:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char in "[{":
-            depth += 1
-            if depth > MAX_JSON_DEPTH:
-                raise GraphError("Graph JSON nesting depth exceeded")
-        elif char in "]}" and depth:
-            depth -= 1
+    if exceeds_json_depth(raw, MAX_JSON_DEPTH):
+        raise GraphError("Graph JSON nesting depth exceeded")
 
 
 def _require_lossless_json(graph):

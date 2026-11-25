@@ -11,7 +11,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from mojum.noosphere import EVENT_SCHEMA, LocalNoosphere, NoosphereError
 from mojum.segmented_noosphere import (
@@ -466,6 +466,142 @@ class AtomicSegmentQA(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 self.open()
         self.assertFalse(self.db.exists(), "must not re-create lost history")
+
+
+class ProjectionIntegrityQA(unittest.TestCase):
+    """Only disposable fixtures are corrupted; readers must never repair them."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "projection.sqlite3"
+        self.store = SegmentedNoosphere(self.path, OWNER, segment_size=64)
+        self.addCleanup(self.store.close)
+
+    def tamper(self, column, value, *, seq=1):
+        self.store._db.execute("DROP TRIGGER IF EXISTS no_segment_update")
+        self.store._db.execute("PRAGMA foreign_keys=OFF")
+        self.store._db.execute(
+            "UPDATE segmented_events SET " + column + " = ? WHERE seq = ?", (value, seq),
+        )
+
+    def readers(self, store=None):
+        store = self.store if store is None else store
+        return {
+            "dataset": lambda: store.dataset(include_nonpublic=True),
+            "stream": lambda: list(store.iter_events(include_nonpublic=True)),
+            "event_at": lambda: store.event_at(1),
+        }
+
+    def test_private_wire_cannot_be_published_by_relabeling_index(self):
+        head = self.store.append(record(0), expected_head=ZERO)
+        self.tamper("visibility", "PUBLIC")
+        with self.assertRaises(NoosphereError):
+            self.store.dataset()
+        with self.assertRaises(NoosphereError):
+            next(self.store.iter_events())
+        self.assertEqual((self.store.count(), self.store.head()), (1, head))
+        self.assertEqual(self.store._db.execute(
+            "SELECT visibility FROM segmented_events").fetchone()[0], "PUBLIC")
+
+    def test_all_readers_refuse_inconsistent_indexes_and_hash_envelope(self):
+        self.store.append(record(0, visibility="PUBLIC"), expected_head=ZERO)
+        original = dict(self.store._db.execute("SELECT * FROM segmented_events").fetchone())
+        corrupt = {"event_id": "forged-id", "recorded_at_ns": 1, "topic": "forged-topic",
+                   "visibility": "PRIVATE", "prev_hash": "f" * 64,
+                   "event_hash": "f" * 64, "segment_index": 1}
+        for column, value in corrupt.items():
+            with self.subTest(column=column):
+                self.tamper(column, value)
+                for name, read in self.readers().items():
+                    with self.subTest(reader=name), self.assertRaises(NoosphereError):
+                        read()
+                self.tamper(column, original[column])
+
+    def test_readers_validate_canonical_wire_and_schema(self):
+        event = record(0, visibility="PUBLIC")
+        self.store.append(event, expected_head=ZERO)
+        original = self.store._db.execute("SELECT wire_json FROM segmented_events").fetchone()[0]
+        invalid = [
+            "not JSON", "[]", original + " ",
+            original.replace('"source":', '"source":"decoy","source":'),
+            json.dumps({**event, "agent_id": "another-owner"}, sort_keys=True, separators=(",", ":")),
+            json.dumps({**event, "payload": {"changed": True}}, sort_keys=True, separators=(",", ":")),
+        ]
+        for wire in invalid:
+            self.tamper("wire_json", wire)
+            for name, read in self.readers().items():
+                with self.subTest(wire=wire, reader=name), self.assertRaises(NoosphereError):
+                    read()
+
+    def test_json_only_filters_cannot_hide_malformed_or_duplicate_candidates(self):
+        self.store.append(record(0, visibility="PUBLIC"), expected_head=ZERO)
+        original = self.store._db.execute("SELECT wire_json FROM segmented_events").fetchone()[0]
+        invalid = [
+            "not JSON",
+            original.replace('"source":', '"source":"decoy","source":'),
+            original.replace('"valid_from_ns":0', '"valid_from_ns":9000,"valid_from_ns":0'),
+        ]
+        for wire in invalid:
+            self.tamper("wire_json", wire)
+            for filters in ({"source": "absent"}, {"valid_at_ns": 0},
+                            {"source": "absent", "valid_at_ns": 0}):
+                with self.subTest(wire=wire, filters=filters), self.assertRaises(NoosphereError):
+                    self.store.dataset(**filters)
+
+    def test_source_validity_and_limit_apply_after_candidate_validation(self):
+        events = [record(n, visibility="PUBLIC") for n in range(270)]
+        for event in events[:130]:
+            event["source"] = "other"
+        for event in events[130:260]:
+            event["valid_to_ns"] = event["valid_from_ns"] + 1
+        for start in range(0, len(events), 128):
+            self.store.append_many(events[start:start+128], expected_head=self.store.head())
+        result = self.store.dataset(source=events[-1]["source"], valid_at_ns=1_000_000, limit=2)
+        self.assertEqual([item["seq"] for item in result["projection"]["items"]], [261, 262])
+        self.assertEqual(self.store.dataset(source="absent")["projection"]["items"], [])
+        self.assertEqual([item["seq"] for item in self.store.iter_events(after_seq=268, batch_size=1)],
+                         [269, 270])
+        self.assertEqual(self.store.verify_chain()["count"], 270)
+
+    def test_readonly_reopen_refuses_corrupt_selected_rows_without_changes(self):
+        self.store.append(record(0), expected_head=ZERO)
+        self.tamper("visibility", "PUBLIC")
+        self.store._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        before = self.path.read_bytes()
+        with SegmentedNoosphere(self.path, OWNER, segment_size=64, read_only=True) as reader:
+            for name, read in self.readers(reader).items():
+                with self.subTest(reader=name), self.assertRaises(NoosphereError):
+                    read()
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_stream_prefix_and_bounded_dataset_close_cursors(self):
+        self.store.append_many([record(0, visibility="PUBLIC"), record(1, visibility="PUBLIC")],
+                               expected_head=ZERO)
+        self.tamper("event_hash", "f" * 64, seq=2)
+        db = self.store._db
+        cursors = []
+
+        def execute(sql, parameters=()):
+            cursor = Mock(wraps=db.execute(sql, parameters))
+            cursors.append(cursor)
+            return cursor
+
+        proxy = Mock(wraps=db)
+        proxy.execute.side_effect = execute
+        with patch.object(self.store, "_db", proxy):
+            stream = self.store.iter_events(batch_size=1)
+            self.assertEqual(next(stream)["seq"], 1)
+            with self.assertRaises(NoosphereError):
+                next(stream)
+            cursors[-1].close.assert_called_once_with()
+            # A bounded projection checks its selected prefix, not the whole chain.
+            self.assertEqual(self.store.dataset(limit=1)["projection"]["items"][0]["seq"], 1)
+            cursors[-1].close.assert_called_once_with()
+            stream = self.store.iter_events(batch_size=1)
+            self.assertEqual(next(stream)["seq"], 1)
+            stream.close()
+            cursors[-1].close.assert_called_once_with()
 
 
 if __name__ == "__main__":
