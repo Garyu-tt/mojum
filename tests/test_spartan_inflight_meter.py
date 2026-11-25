@@ -5,10 +5,12 @@ import stat
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools import spartan_inflight_meter as meter
 from tools.spartan_inflight_meter import (
     begin, connect, create_schema, finish, heartbeat, snapshot, track_call,
 )
@@ -17,13 +19,23 @@ from tools.spartan_inflight_meter import (
 class MeterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.path = str(Path(self.temp.name) / "meter.sqlite3")
-        self.db = connect(self.path)
-        create_schema(self.db)
 
-    def tearDown(self):
-        self.db.close()
-        self.temp.cleanup()
+        # The production connector deliberately rejects non-POSIX storage.
+        # Substitute only its path-admission gate here so the platform-neutral
+        # SQLite state machine remains covered on Windows. The real fail-closed
+        # connector has a separate regression below.
+        if os.name != "posix":
+            gate = mock.patch.object(
+                meter, "_private_sqlite_path", side_effect=lambda path: Path(path)
+            )
+            gate.start()
+            self.addCleanup(gate.stop)
+
+        self.db = connect(self.path)
+        self.addCleanup(self.db.close)
+        create_schema(self.db)
 
     def test_open_close_and_reported_usage(self):
         begin(self.db, 1, "request-1", "model.x", now_ms=100)
@@ -217,6 +229,41 @@ class MeterTests(unittest.TestCase):
         alias.symlink_to(Path(self.path))
         with self.assertRaisesRegex(PermissionError, "private owner-only"):
             connect(str(alias))
+
+
+class PlatformGateTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "posix", "non-POSIX fail-closed contract")
+    def test_real_connect_fails_closed_without_filesystem_side_effects(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "meter.sqlite3"
+
+            with self.assertRaises(PermissionError) as raised:
+                meter.connect(str(path))
+
+            self.assertIs(type(raised.exception), PermissionError)
+            self.assertEqual(
+                str(raised.exception),
+                "private telemetry requires a POSIX owner/mode gate",
+            )
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_setup_failure_runs_registered_cleanup(self):
+        case = MeterTests("test_open_close_and_reported_usage")
+        module = sys.modules[__name__]
+
+        with mock.patch.object(
+            module, "connect", side_effect=RuntimeError("forced setup failure")
+        ):
+            result = unittest.TestResult()
+            case.run(result)
+
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("forced setup failure", result.errors[0][1])
+        self.assertEqual(result.failures, [])
+        self.assertFalse(Path(case.temp.name).exists())
 
 
 if __name__ == "__main__":
