@@ -10,6 +10,7 @@ This module is a **genuinely persistent** CPU-only event store for **one digital
 - Append via `BEGIN IMMEDIATE` + `expected_head` compare-and-swap. Concurrent writers do not silently overwrite. Duplicate IDs and nonmonotonic record times rejected.
 - SQLite `BEFORE UPDATE/DELETE` triggers protect append-only access through normal SQL statements; complete transactions are atomic. `verify_chain()` checks full event representation against indexed columns, contiguous sequence and cumulative SHA-256 event chain.
 - `dataset()` is read-only, ordered, filtered and deterministic for a fixed database state and parameter set; exports `PUBLIC` only unless `include_nonpublic=True` is explicitly supplied by the trusted same-owner process. Supports topic, source, as-of recorded time, valid-at time and row limit.
+- `dataset()` and `iter_events()` validate each selected event and require its indexed fields to match the decoded JSON before source filtering or export. A corrupted `PUBLIC` index cannot expose a wire event labelled `PRIVATE` or `RESTRICTED`, and inconsistent owner/topic/time indexes fail closed. These are candidate checks: excluded rows and the full hash chain still require `verify_chain()` with an independently trusted head when applicable. A streaming reader may yield valid earlier rows before a later corrupt candidate raises; a yielded prefix is not a whole-journal verification receipt.
 
 ## Security boundary — IMPORTANT
 
