@@ -12,6 +12,7 @@ import argparse
 import copy
 from dataclasses import dataclass
 import json
+from importlib.resources import files
 import math
 from pathlib import Path
 
@@ -439,9 +440,9 @@ class SensoryPlay:
 
 def main():
     p = argparse.ArgumentParser(description="CPU-only numeric sensory curiosity fixture")
-    root = Path(__file__).resolve().parents[2]
+    packaged = files("mojum").joinpath("data")
     p.add_argument("--db", type=Path, required=True)
-    p.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
+    p.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     p.add_argument("--ticks", type=int, default=120)
     p.add_argument("--watch", action="store_true",
                    help="emit synthetic PRIVATE numeric evidence to local stdout")
