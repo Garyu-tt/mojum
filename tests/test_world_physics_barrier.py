@@ -162,5 +162,29 @@ class JointRevisionBarrierTests(unittest.TestCase):
                 verify_barrier_receipt(corrupted)
 
 
+    def test_receipt_rejects_spoofed_key_types_before_comparison(self):
+        receipt = self.align()
+
+        class EqualLookingKey(str):
+            pass
+
+        # This used to pass set equality and even the checksum comparison.
+        alias = {EqualLookingKey(key) if key == "schema" else key: value
+                 for key, value in receipt.items()}
+        with self.assertRaisesRegex(ValueError, "fields"):
+            verify_barrier_receipt(alias)
+
+        class ExplosiveKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key equality must not run")
+
+        hostile = {ExplosiveKey(key) if key == "schema" else key: value
+                   for key, value in receipt.items()}
+        with self.assertRaisesRegex(ValueError, "fields"):
+            verify_barrier_receipt(hostile)
+
+
 if __name__ == "__main__":
     unittest.main()
