@@ -67,8 +67,8 @@ def _require_existing_source_journal(path, agent_id):
     with _open_readonly(path) as db:
         db.execute("BEGIN")
         tables = {row["name"] for row in db.execute(
-            "SELECT name FROM sqlite_schema "
-            "WHERE type='table' AND name IN ('metadata', 'events')"
+            "SELECT lower(name) AS name FROM sqlite_schema "
+            "WHERE type='table' AND lower(name) IN ('metadata', 'events')"
         )}
         if tables != {"metadata", "events"}:
             raise ValueError("export requires existing metadata and events tables")
