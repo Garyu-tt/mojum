@@ -123,7 +123,10 @@ class CPGProfile:
         )
         if sensory > correction:
             raise CPGError("sensory phase gain exceeds the correction bound")
-        maximum_advance = maximum * self.tick_us // _FREQUENCY_REMAINDER_DIVISOR
+        maximum_numerator = maximum * self.tick_us
+        maximum_advance = (
+            maximum_numerator + _FREQUENCY_REMAINDER_DIVISOR - 1
+        ) // _FREQUENCY_REMAINDER_DIVISOR
         maximum_applied_correction = min(correction, maximum_advance // 2)
         if maximum_advance + maximum_applied_correction > HALF_CYCLE:
             raise CPGError(

@@ -100,6 +100,24 @@ class ProfileAdmissionTests(unittest.TestCase):
         self.assertEqual(frame.right_phase_microturns, 950_000)
         self.assertEqual(frame.phase_correction_microturns, 25_000)
 
+    def test_profile_accounts_for_remainder_carry_in_worst_case_advance(self):
+        product = 4_011 * 99_726
+        first_advance, remainder = divmod(product, 1_000)
+        second_advance, _ = divmod(product + remainder, 1_000)
+        self.assertEqual((first_advance, remainder), (400_000, 986))
+        self.assertEqual(first_advance + 100_000, HALF_CYCLE)
+        self.assertEqual(second_advance + 100_000, HALF_CYCLE + 1)
+
+        with self.assertRaisesRegex(CPGError, "more than half a cycle"):
+            profile(
+                tick_us=99_726,
+                minimum_frequency_millihz=4_011,
+                base_frequency_millihz=4_011,
+                maximum_frequency_millihz=4_011,
+                sensory_phase_gain=100_000,
+                maximum_phase_correction=100_000,
+            )
+
 
 class FeedbackAdmissionTests(unittest.TestCase):
     def test_feedback_requires_explicit_synthetic_bounded_native_fields(self):

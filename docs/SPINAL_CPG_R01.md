@@ -27,7 +27,9 @@ math function participates in a transition.
 out-of-range integers, unordered frequency limits, and a sensory gain above the
 configured correction limit. A profile's SHA-256 covers every profile field.
 The maximum frequency/tick/correction combination is also rejected if either
-side could advance more than half a cycle in one transition.
+side could advance more than half a cycle in one transition. This admission
+uses the ceiling of the maximum frequency advance so a carried fixed-point
+remainder cannot add an unaccounted microturn on a later tick.
 
 `SensoryFeedback` is frozen, explicitly synthetic, bound to one profile
 revision, and accepted only for the next contiguous tick. Missing, repeated,
