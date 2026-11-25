@@ -46,6 +46,7 @@ _SIGNAL_KEYS = frozenset(
         "schema",
         "visibility",
         "consent",
+        "profile_revision",
         "event_id",
         "source_id",
         "source_revision",
@@ -218,8 +219,11 @@ def _validate_profile(profile: object) -> ConductionProfile:
     if type(profile) is not ConductionProfile:
         _fail("profile must be an exact compiled ConductionProfile")
     if (
-        profile.schema != PROFILE_SCHEMA
+        type(profile.schema) is not str
+        or profile.schema != PROFILE_SCHEMA
+        or type(profile.visibility) is not str
         or profile.visibility != PUBLIC_SYNTHETIC
+        or type(profile.consent) is not str
         or profile.consent != "explicit"
     ):
         _fail("profile envelope is unsupported")
@@ -253,9 +257,14 @@ def compile_conduction_profile(specification: object) -> ConductionProfile:
     """Validate and detach one bounded synthetic conduction profile."""
 
     value = _exact_dict(specification, _PROFILE_KEYS, "profile")
-    if value["schema"] != PROFILE_SCHEMA:
+    if type(value["schema"]) is not str or value["schema"] != PROFILE_SCHEMA:
         _fail("profile schema is unsupported")
-    if value["visibility"] != PUBLIC_SYNTHETIC or value["consent"] != "explicit":
+    if (
+        type(value["visibility"]) is not str
+        or value["visibility"] != PUBLIC_SYNTHETIC
+        or type(value["consent"]) is not str
+        or value["consent"] != "explicit"
+    ):
         _fail("profile must be explicitly PUBLIC_SYNTHETIC with explicit consent")
     revision = _native_int(value["revision"], 0, MAX_REVISION, "profile revision")
     max_pending = _native_int(
@@ -414,7 +423,7 @@ class SpinalConductionQueue:
         profile = _validate_profile(profile)
         if type(snapshot) is not ConductionSnapshot:
             _fail("snapshot must be an exact ConductionSnapshot")
-        if snapshot.schema != SNAPSHOT_SCHEMA:
+        if type(snapshot.schema) is not str or snapshot.schema != SNAPSHOT_SCHEMA:
             _fail("snapshot schema is unsupported")
         _native_int(snapshot.profile_revision, 0, MAX_REVISION, "snapshot profile revision")
         _native_int(snapshot.tick, 0, MAX_TICK, "snapshot tick")
@@ -510,10 +519,23 @@ class SpinalConductionQueue:
         admitted: list[PendingSignal] = []
         for index, supplied in enumerate(signals):
             value = _exact_dict(supplied, _SIGNAL_KEYS, f"signals[{index}]")
-            if value["schema"] != SIGNAL_SCHEMA:
+            if type(value["schema"]) is not str or value["schema"] != SIGNAL_SCHEMA:
                 _fail(f"signals[{index}] has an unsupported schema")
-            if value["visibility"] != PUBLIC_SYNTHETIC or value["consent"] != "explicit":
+            if (
+                type(value["visibility"]) is not str
+                or value["visibility"] != PUBLIC_SYNTHETIC
+                or type(value["consent"]) is not str
+                or value["consent"] != "explicit"
+            ):
                 _fail(f"signals[{index}] must be explicitly PUBLIC_SYNTHETIC with consent")
+            profile_revision = _native_int(
+                value["profile_revision"],
+                0,
+                MAX_REVISION,
+                f"signals[{index}].profile_revision",
+            )
+            if profile_revision != self._profile.revision:
+                _fail(f"signals[{index}] profile revision mismatch")
             event_id = _identifier(value["event_id"], f"signals[{index}].event_id")
             if event_id in seen:
                 _fail("signal event_id is already pending or duplicated in the batch")

@@ -48,6 +48,7 @@ signal has this exact envelope:
   "schema": "mojum.spinal-conduction.signal/1",
   "visibility": "PUBLIC_SYNTHETIC",
   "consent": "explicit",
+  "profile_revision": 7,
   "event_id": "fixture-event-0001",
   "source_id": "synthetic-fixture",
   "source_revision": 2,
@@ -56,14 +57,18 @@ signal has this exact envelope:
 }
 ```
 
+Each signal must carry the exact active profile revision, so a record produced
+for an older profile cannot be silently reinterpreted with new route delays.
 Signal magnitude is an opaque signed integer in `-1000..1000`; it has no
 physical unit or calibration claim. The emitted tick is the admitted step tick
 and the due tick is `emitted_tick + profile delay`. Delay zero is delivered in
 the same step. A delayed signal is delivered exactly once when its due tick is
 admitted.
 
-All validation, lifetime-overflow checks, duplicate-pending-event checks, and
-capacity checks complete before state changes. An invalid batch therefore does
+Envelope discriminators are exact native strings; string subclasses and objects
+that spoof equality cannot cross the boundary. All validation,
+lifetime-overflow checks, duplicate-pending-event checks, and capacity checks
+complete before state changes. An invalid batch therefore does
 not advance the queue or release already-due work. Pending capacity can be
 reused by signals delivered during the same successful step. Event IDs must be
 unique while pending; this R01 queue intentionally retains no unbounded global
@@ -75,6 +80,16 @@ delivery receipt binds the full profile identity, provenance, emitted/delivered
 ticks, delay, magnitude, and the fixed `PUBLIC_SYNTHETIC`/explicit-consent
 classification to canonical SHA-256. Frames explicitly report
 `physical_actuation=false`.
+
+## Resource envelope
+
+For `p` existing pending records and a batch of `b` signals, one successful
+step takes `O((p + b) log(p + b))` CPU time for canonical ordering plus linear
+validation, receipt hashing, and snapshot hashing. The queue retains at most
+1024 records; admission accepts at most 128 more, so the largest transient
+sortable record set is 1152. The canonical JSON byte budgets are 64 KiB per
+profile, 1 MiB per snapshot, and 8 KiB per delivery receipt. These checks are
+hard failures and occur before queue state changes.
 
 ## Snapshot and replay
 

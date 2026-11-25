@@ -43,6 +43,7 @@ def signal(event_id, route_id="route.fast", **changes):
         "schema": SIGNAL_SCHEMA,
         "visibility": "PUBLIC_SYNTHETIC",
         "consent": "explicit",
+        "profile_revision": 7,
         "event_id": event_id,
         "source_id": "synthetic-fixture",
         "source_revision": 2,
@@ -113,6 +114,30 @@ class ProfileAdmissionTests(unittest.TestCase):
         with self.assertRaises(SpinalConductionError):
             compile_conduction_profile(oversized)
 
+    def test_profile_envelope_cannot_be_spoofed_by_equality_or_string_subclasses(self):
+        class EqualToEverything:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class StringSubclass(str):
+            pass
+
+        for field, value in (
+            ("schema", EqualToEverything()),
+            ("visibility", EqualToEverything()),
+            ("consent", EqualToEverything()),
+            ("schema", StringSubclass(PROFILE_SCHEMA)),
+            ("visibility", StringSubclass("PUBLIC_SYNTHETIC")),
+            ("consent", StringSubclass("explicit")),
+        ):
+            with self.subTest(field=field, value=value), self.assertRaises(
+                SpinalConductionError
+            ):
+                compile_conduction_profile(profile_spec(**{field: value}))
+
     def test_profile_accepts_exact_route_and_delay_limits(self):
         routes = [
             {"route_id": f"r{index:02d}", "delay_ticks": MAX_ROUTE_DELAY_TICKS}
@@ -138,6 +163,17 @@ class ProfileAdmissionTests(unittest.TestCase):
                 valid,
                 routes=(ConductionRoute("route.slow", 3), ConductionRoute("route.fast", 1)),
             ))
+
+        class StringSubclass(str):
+            pass
+
+        for field, value in (
+            ("schema", StringSubclass(PROFILE_SCHEMA)),
+            ("visibility", StringSubclass("PUBLIC_SYNTHETIC")),
+            ("consent", StringSubclass("explicit")),
+        ):
+            with self.subTest(field=field), self.assertRaises(SpinalConductionError):
+                SpinalConductionQueue(dataclasses.replace(valid, **{field: value}))
 
 
 class QueueTransitionTests(unittest.TestCase):
@@ -189,6 +225,8 @@ class QueueTransitionTests(unittest.TestCase):
         invalid = (
             signal("e", "unknown"),
             signal("e", source_revision=True),
+            signal("e", profile_revision=True),
+            signal("e", profile_revision=8),
             signal("e", signal_milli=MAX_SIGNAL_MILLI + 1),
             signal("e", visibility="PRIVATE"),
             signal("e", consent="implicit"),
@@ -205,6 +243,33 @@ class QueueTransitionTests(unittest.TestCase):
         with self.assertRaises(SpinalConductionError):
             queue.step(1, tuple())
         self.assertEqual(queue.snapshot(), initial)
+
+    def test_signal_envelope_cannot_be_spoofed_by_equality_or_string_subclasses(self):
+        class EqualToEverything:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class StringSubclass(str):
+            pass
+
+        queue = SpinalConductionQueue(compile_conduction_profile(profile_spec()))
+        initial = queue.snapshot()
+        for field, value in (
+            ("schema", EqualToEverything()),
+            ("visibility", EqualToEverything()),
+            ("consent", EqualToEverything()),
+            ("schema", StringSubclass(SIGNAL_SCHEMA)),
+            ("visibility", StringSubclass("PUBLIC_SYNTHETIC")),
+            ("consent", StringSubclass("explicit")),
+        ):
+            with self.subTest(field=field, value=value), self.assertRaises(
+                SpinalConductionError
+            ):
+                queue.step(1, [signal("spoof", **{field: value})])
+            self.assertEqual(queue.snapshot(), initial)
 
     def test_duplicate_pending_or_batch_event_id_is_rejected_atomically(self):
         queue = SpinalConductionQueue(compile_conduction_profile(profile_spec()))
@@ -317,6 +382,27 @@ class SnapshotTests(unittest.TestCase):
             SpinalConductionQueue.from_snapshot(other, snapshot)
         with self.assertRaises(SpinalConductionError):
             SpinalConductionQueue.from_snapshot(profile, dataclasses.asdict(snapshot))
+
+        class EqualToEverything:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        with self.assertRaises(SpinalConductionError):
+            SpinalConductionQueue.from_snapshot(
+                profile, dataclasses.replace(snapshot, schema=EqualToEverything())
+            )
+
+        class StringSubclass(str):
+            pass
+
+        with self.assertRaises(SpinalConductionError):
+            SpinalConductionQueue.from_snapshot(
+                profile,
+                dataclasses.replace(snapshot, schema=StringSubclass(snapshot.schema)),
+            )
 
     def test_restore_rejects_already_due_and_unknown_route_records(self):
         profile = compile_conduction_profile(profile_spec())
