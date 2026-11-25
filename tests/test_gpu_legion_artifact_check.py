@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -53,18 +54,43 @@ class ArtifactCheckTests(unittest.TestCase):
 
     def test_reject_symlink(self):
         shortcut = self.root / "shortcut.gguf"
-        shortcut.symlink_to(self.file)
+        try:
+            shortcut.symlink_to(self.file)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != 1314:
+                raise
+            self.skipTest("Windows user lacks symlink creation privileges")
         with self.assertRaises((OSError, artifact.ArtifactError)):
             artifact.verify(shortcut, self.digest, len(self.data))
 
-    def test_reject_directory_and_fifo(self):
+    def test_reject_directory(self):
         with self.assertRaisesRegex(artifact.ArtifactError, "not a regular file"):
             artifact.verify(self.root, self.digest, len(self.data))
-        import os
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO support required")
+    def test_reject_fifo(self):
         fifo = self.root / "fifo"
         os.mkfifo(fifo)
         with self.assertRaises((OSError, artifact.ArtifactError)):
             artifact.verify(fifo, self.digest, len(self.data))
+
+    @unittest.skipUnless(os.name == "nt", "Windows handle support required")
+    def test_windows_rejects_nonlocal_paths_and_namespaces(self):
+        for path in (r"\\example.invalid\share\model.gguf", r"\\.\NUL", str(self.file) + ":data"):
+            with self.subTest(path=path), self.assertRaisesRegex(
+                artifact.ArtifactError, "local drive path"
+            ):
+                artifact.verify(path, self.digest, len(self.data))
+
+    @unittest.skipUnless(os.name == "nt", "Windows file sharing required")
+    def test_windows_reads_unicode_path_and_rejects_existing_writer(self):
+        sample = self.file.rename(self.root / "модель 模型.gguf")
+        self.assertTrue(artifact.verify(sample, self.digest, len(self.data))["verified"])
+        with sample.open("r+b"):
+            with self.assertRaises(OSError) as raised:
+                artifact.verify(sample, self.digest, len(self.data))
+            self.assertEqual(raised.exception.winerror, 32)
+        self.assertEqual(sample.read_bytes(), self.data)
 
     def test_reject_bad_digest_and_size_type(self):
         for bad in ("x"*64, "A"*64, "0"*63, "", None):
