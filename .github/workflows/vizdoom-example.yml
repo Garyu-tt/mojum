@@ -1,0 +1,50 @@
+name: ViZDoom offline navigation example
+
+on:
+  pull_request:
+    paths:
+      - "examples/vizdoom/**"
+      - "tests/test_vizdoom_example.py"
+      - "docs/VIZDOOM_EXAMPLE_R01.md"
+      - ".github/workflows/vizdoom-example.yml"
+  push:
+    branches:
+      - "build/700-vizdoom-example-r2-20261124"
+    paths:
+      - "examples/vizdoom/**"
+      - "tests/test_vizdoom_example.py"
+      - "docs/VIZDOOM_EXAMPLE_R01.md"
+      - ".github/workflows/vizdoom-example.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact submitted revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out revision
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused offline regression suite
+        run: python -m unittest discover -s tests -p "test_vizdoom_example.py" -v
+      - name: Run deterministic frozen baseline
+        run: python examples/vizdoom/offline_navigation.py --seed 7 --policy frozen
+      - name: Run deterministic wait control
+        run: python examples/vizdoom/offline_navigation.py --seed 7 --policy wait --max-steps 12
