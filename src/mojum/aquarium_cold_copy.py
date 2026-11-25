@@ -18,7 +18,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError, MOTOR_MODES, load_cli_room
-from .genesis import validate_seed
+from .genome_file import load_seed_file
 from .graph import load_graph
 from .noosphere import STORE_SCHEMA, _open_readonly
 from .noosphere import _read_first_event
@@ -280,7 +280,7 @@ def main():
         options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
                        brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
                        temporal_mode=args.temporal_mode, room=room, start=start)
-        seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+        seed = load_seed_file(args.genome)
         graph = load_graph(args.graph)
         agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
         if args.mode == "export":

@@ -19,6 +19,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from .genesis import GenomeLedger, GenesisError, sha256 as genome_sha256, validate_seed
+from .genome_file import GenomeFileError, load_seed_file
 from .body_genetics import (compile_body, compile_body_at_month,
                             validate_human_name)
 from .neural import NATIVE_PULSE_SUM, PulsePredictor
@@ -1005,11 +1006,11 @@ def main():
     except RoomSpecError as exc:
         parser.error(str(exc))
     try:
-        seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
+        seed = load_seed_file(args.genome)
+    except GenomeFileError as exc:
+        parser.error(str(exc))
     except GenesisError as exc:
         parser.error(f"invalid --genome ({exc})")
-    except (OSError, ValueError, RecursionError):
-        parser.error("--genome requires a readable UTF-8 JSON file")
     try:
         graph = load_graph(args.graph)
         validate_graph(graph)  # Fail before opening a new SQLite journal.
