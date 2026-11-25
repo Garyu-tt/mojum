@@ -86,6 +86,15 @@ metadata does **not** mean the organism sees it.
 - Reopening validates the hash chain, original scene/start/graph/seed
   manifest and exact deterministic replay of *every* committed event.
   This is integrity checking, **not** cryptographic authentication.
+- Replay binds its event count and final hash to the verified journal
+  revision. If replay detects another writer advancing the journal,
+  reopening fails and the caller must retry from the latest history.
+  Checkpoints reject a stale instance after assembling the local state;
+  subsequent writes use the head of that instance's last successful replay
+  or append. A rejected append leaves the local model, world and RNG intact.
+  The CLI reports `private_events = checkpoint.tick + 1` (one bootstrap
+  and one frame per tick), so the count and checkpoint describe the same
+  revision even if a different writer commits immediately afterwards.
 - Default Noosphere dataset projections exclude all these PRIVATE
   events. The local explicit `--watch` stream is also private. No
   server, remote feed or third-party transmission is implemented.
