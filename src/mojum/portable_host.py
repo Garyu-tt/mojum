@@ -15,7 +15,6 @@ import json
 from importlib.resources import files
 from pathlib import Path
 import signal
-import threading
 import time
 
 from .aquarium import Aquarium, AquariumError, V4_MODE
@@ -34,6 +33,25 @@ MAX_TICKS = 1000
 
 class PortableHostError(ValueError):
     """Invalid host plan or unsupported Aquarium mode."""
+
+
+class _SignalStop:
+    """Stop flag shared by the foreground loop and its Python signal handler."""
+
+    def __init__(self):
+        self._requested = False
+
+    def set(self):
+        # A signal can interrupt the main thread while it holds a wait lock.
+        self._requested = True
+
+    def is_set(self):
+        return self._requested
+
+    def wait(self, timeout):
+        # Sleep may resume after a signal handler returns. Bound each sleep so
+        # run_paced rechecks the flag promptly even for long pacing intervals.
+        time.sleep(min(timeout, 0.1))
 
 
 def validate_plan(ticks, interval_ms):
@@ -220,7 +238,7 @@ def main(argv=None):
     elif args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
 
-    stopped = threading.Event()
+    stopped = _SignalStop()
     started = time.monotonic()
     with termination_signals(stopped):
         try:
