@@ -178,7 +178,9 @@ def main():
                                   ticks=args.ticks, dx=args.dx, dy=args.dy)
     except (AquariumError, ValueError) as exc:
         parser.error(str(exc))
-    print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
+    # Journals are already committed. Escape Unicode IDs so narrow stdout
+    # encodings can report success without losing their decoded JSON values.
+    print(json.dumps(result, indent=2, ensure_ascii=True, allow_nan=False))
 
 
 if __name__ == "__main__":
