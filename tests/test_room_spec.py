@@ -402,6 +402,25 @@ class CliTests(unittest.TestCase):
         self.assertIn("INVALID: 1 error(s)", out)
         self.assertIn("error: start lies inside obstacles[0]", out)
 
+    def test_text_report_respects_strict_stdout_encoding(self):
+        for encoding, key, rendered in (
+            ("cp1251", "имя 图像", "имя \\u56fe\\u50cf"),
+            ("utf-8", "имя 图像", "имя 图像"),
+            ("utf-8", "\ud800", "\\ud800"),
+        ):
+            with self.subTest(encoding=encoding, key=key):
+                path = self._write(encode({**CANONICAL, key: "extra"}))
+                raw, err = io.BytesIO(), io.StringIO()
+                with io.TextIOWrapper(raw, encoding=encoding, errors="strict",
+                                      write_through=True) as out:
+                    with redirect_stdout(out), redirect_stderr(err):
+                        code = main([str(path)])
+                    report = raw.getvalue().decode(encoding)
+                self.assertEqual(code, 1)
+                self.assertIn("INVALID: 1 error(s)", report)
+                self.assertIn(f"unexpected room key(s): {rendered}", report)
+                self.assertEqual(err.getvalue(), "")
+
     def test_json_format_is_machine_readable(self):
         path = self._write(encode(CANONICAL))
         code, out, _ = self._run([str(path), "--format", "json"])
