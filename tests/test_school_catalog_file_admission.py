@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from mojum.school import MAX_CATALOG_BYTES, SchoolContractError, load_catalog
 
@@ -13,6 +14,14 @@ CATALOG = Path(__file__).resolve().parents[1] / "examples" / "school_catalog_r01
 
 
 class CatalogFileAdmissionTests(unittest.TestCase):
+    def test_posix_without_nonblocking_open_fails_before_opening(self):
+        with mock.patch("mojum.school.os.name", "posix"), \
+             mock.patch("mojum.school.hasattr", return_value=False, create=True), \
+             mock.patch("mojum.school.os.open") as open_file:
+            with self.assertRaisesRegex(SchoolContractError, "nonblocking opens required"):
+                load_catalog(CATALOG)
+            open_file.assert_not_called()
+
     def test_regular_catalog_and_size_limit(self):
         expected = load_catalog(CATALOG)
         with tempfile.TemporaryDirectory() as directory:

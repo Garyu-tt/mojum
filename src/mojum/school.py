@@ -109,8 +109,11 @@ def load_catalog(path: str | Path) -> dict[str, Any]:
     # POSIX nonblocking open lets fstat reject special files before reading.
     # On platforms without O_NONBLOCK, preflight the path as a best effort;
     # fstat still checks the descriptor actually opened.
-    if not hasattr(os, "O_NONBLOCK") and not stat.S_ISREG(os.stat(path).st_mode):
-        raise SchoolContractError("school catalog must be a regular file")
+    if not hasattr(os, "O_NONBLOCK"):
+        if os.name == "posix":
+            raise SchoolContractError("nonblocking opens required for school catalogs")
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            raise SchoolContractError("school catalog must be a regular file")
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
     fd = os.open(path, flags)
     try:
