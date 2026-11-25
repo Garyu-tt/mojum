@@ -36,7 +36,9 @@ The segment head hashes a canonical, sorted-key, compact UTF-8 JSON object conta
 - SHA-256 fields are exactly 64 lowercase hexadecimal characters.
 - Canonical JSON is UTF-8, sorted-key and compact; duplicate keys and alternate encodings are rejected.
 - Maximum encoded manifest size is 16 KiB; text labels are at most 256 characters.
+- Text length is admitted before scanning its contents. Canonical serialization and content verification revalidate an exact `SegmentManifest` snapshot; incomplete records and inaccessible wire buffers raise `SegmentManifestError`.
 - Segment content verification accepts exact `bytes` supplied by the caller, capped at 64 MiB before hashing, and performs no filesystem or network access.
+- Content verification compares against the validated snapshot even if the caller's original record is mutated while hashing.
 
 ## Example
 
@@ -61,7 +63,7 @@ assert manifest.event_count == 3
 ## Test
 
 ```sh
-python -m unittest tests.test_segment_manifest -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_segment_manifest.py' -v
 ```
 
 No claim is made about durable file writes, independent replica survival, encryption at rest, measured resource use on Android, or distributed failover.

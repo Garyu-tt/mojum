@@ -28,7 +28,7 @@ class SegmentManifestError(ValueError):
 
 
 def _text(value: Any, field: str) -> str:
-    if type(value) is not str or not value.strip() or len(value) > _MAX_TEXT:
+    if type(value) is not str or len(value) > _MAX_TEXT or not value.strip():
         raise SegmentManifestError(f"{field} must be a nonempty string of at most {_MAX_TEXT} characters")
     try:
         value.encode("utf-8", errors="strict")
@@ -115,7 +115,7 @@ class SegmentManifest:
     def canonical_bytes(self) -> bytes:
         # Public dataclass construction can bypass create_manifest(); never
         # serialize or hash an unvalidated instance through this API.
-        validated = validate_manifest(self.to_dict())
+        validated = _validated_snapshot(self)
         return _canonical(validated.to_dict())
 
     @property
@@ -205,14 +205,30 @@ def validate_manifest(value: dict[str, Any]) -> SegmentManifest:
     return _validate_fields(value)
 
 
+def _validated_snapshot(manifest: SegmentManifest) -> SegmentManifest:
+    if type(manifest) is not SegmentManifest:
+        raise SegmentManifestError("manifest must be a validated SegmentManifest")
+    try:
+        snapshot = manifest.to_dict()
+    except (AttributeError, TypeError) as exc:
+        raise SegmentManifestError("manifest record is incomplete") from exc
+    return validate_manifest(snapshot)
+
+
 def parse_manifest(raw: bytes | bytearray | memoryview) -> SegmentManifest:
     """Parse canonical UTF-8 JSON, rejecting duplicate keys and wire ambiguity."""
     if type(raw) not in (bytes, bytearray, memoryview):
         raise SegmentManifestError("manifest wire input must be bytes-like")
-    raw_size = raw.nbytes if type(raw) is memoryview else len(raw)
+    try:
+        raw_size = raw.nbytes if type(raw) is memoryview else len(raw)
+    except (ValueError, TypeError, BufferError) as exc:
+        raise SegmentManifestError("manifest wire buffer is inaccessible") from exc
     if raw_size == 0 or raw_size > MAX_MANIFEST_BYTES:
         raise SegmentManifestError("manifest wire size is outside the supported range")
-    wire = bytes(raw)
+    try:
+        wire = bytes(raw)
+    except (ValueError, TypeError, BufferError) as exc:
+        raise SegmentManifestError("manifest wire buffer is inaccessible") from exc
     if len(wire) != raw_size:
         raise SegmentManifestError("manifest wire size is outside the supported range")
 
@@ -241,17 +257,12 @@ def parse_manifest(raw: bytes | bytearray | memoryview) -> SegmentManifest:
 
 def verify_segment_bytes(manifest: SegmentManifest, segment_bytes: bytes) -> bool:
     """Compare caller-supplied segment bytes with content_sha256; performs no I/O."""
-    if type(manifest) is not SegmentManifest:
-        raise SegmentManifestError("manifest must be a validated SegmentManifest")
     # Dataclasses can be instantiated directly, bypassing the factory. Re-run
-    # the public contract before trusting the digest field.
-    try:
-        snapshot = manifest.to_dict()
-    except (AttributeError, TypeError) as exc:
-        raise SegmentManifestError("manifest record is incomplete") from exc
-    validate_manifest(snapshot)
+    # the public contract and use that snapshot throughout verification; the
+    # caller's record may be changed through object.__setattr__ while hashing.
+    validated = _validated_snapshot(manifest)
     if type(segment_bytes) is not bytes:
         raise SegmentManifestError("segment_bytes must be exact bytes")
     if len(segment_bytes) > MAX_SEGMENT_BYTES:
         raise SegmentManifestError("segment bytes exceed the verification budget")
-    return hashlib.sha256(segment_bytes).hexdigest() == manifest.content_sha256
+    return hashlib.sha256(segment_bytes).hexdigest() == validated.content_sha256

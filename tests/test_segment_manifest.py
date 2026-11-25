@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 import unittest
 from unittest.mock import patch
 from dataclasses import FrozenInstanceError
@@ -130,6 +131,29 @@ class SegmentManifestTests(unittest.TestCase):
         self.assertTrue(verify_segment_bytes(manifest, self.segment))
         self.assertFalse(verify_segment_bytes(manifest, b"tampered"))
 
+    def test_content_verification_uses_validated_snapshot_during_record_mutation(self):
+        manifest = self.make()
+        original_head = manifest.segment_head
+        unrelated_payload = b"not the manifested segment"
+        real_sha256 = hashlib.sha256
+
+        def mutate_record_during_hash(data):
+            if data is unrelated_payload:
+                object.__setattr__(
+                    manifest, "content_sha256", real_sha256(data).hexdigest()
+                )
+            return real_sha256(data)
+
+        with patch(
+            "mojum.segment_manifest.hashlib.sha256",
+            side_effect=mutate_record_during_hash,
+        ):
+            self.assertFalse(verify_segment_bytes(manifest, unrelated_payload))
+        self.assertEqual(manifest.segment_head, original_head)
+        self.assertEqual(
+            manifest.content_sha256, real_sha256(unrelated_payload).hexdigest()
+        )
+
     def test_exact_bytes_required_for_content_verification(self):
         with self.assertRaises(SegmentManifestError):
             verify_segment_bytes(self.make(), bytearray(self.segment))
@@ -175,6 +199,28 @@ class SegmentManifestTests(unittest.TestCase):
         with self.assertRaises(SegmentManifestError):
             verify_segment_bytes(forged, self.segment)
 
+    def test_uninitialized_manifest_cannot_be_serialized_or_hashed(self):
+        forged = object.__new__(SegmentManifest)
+        with self.assertRaises(SegmentManifestError):
+            forged.canonical_bytes()
+        with self.assertRaises(SegmentManifestError):
+            _ = forged.manifest_sha256
+
+    def test_canonical_serialization_rejects_subclass_before_custom_snapshot(self):
+        class HostileManifest(SegmentManifest):
+            def to_dict(self):
+                raise RuntimeError("caller-controlled snapshot executed")
+
+        manifest = HostileManifest(**self.make().to_dict())
+        with self.assertRaises(SegmentManifestError):
+            manifest.canonical_bytes()
+
+    def test_released_wire_buffer_is_rejected_with_contract_error(self):
+        raw = memoryview(self.make().canonical_bytes())
+        raw.release()
+        with self.assertRaises(SegmentManifestError):
+            parse_manifest(raw)
+
     def test_wrong_schema_is_rejected(self):
         data = self.make().to_dict()
         data["schema"] = "mojum.noosphere.segment-manifest/999"
@@ -186,6 +232,27 @@ class SegmentManifestTests(unittest.TestCase):
             self.make(agent_id="\ud800")
         with self.assertRaises(SegmentManifestError):
             self.make(origin_device="  ")
+
+    def test_oversized_text_is_rejected_before_whitespace_scan(self):
+        oversized = " " * 4096
+        scans = []
+
+        def record_scans(frame, event, operation):
+            if (
+                event == "c_call"
+                and getattr(operation, "__self__", None) is oversized
+                and getattr(operation, "__name__", None) == "strip"
+            ):
+                scans.append("strip")
+
+        previous_profile = sys.getprofile()
+        try:
+            sys.setprofile(record_scans)
+            with self.assertRaises(SegmentManifestError):
+                self.make(agent_id=oversized)
+        finally:
+            sys.setprofile(previous_profile)
+        self.assertEqual(scans, [], "oversized text was scanned before rejection")
 
     def test_exact_dict_only(self):
         class DictSubclass(dict):
