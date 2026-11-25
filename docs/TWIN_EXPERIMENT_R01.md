@@ -25,9 +25,17 @@ PYTHONPATH=src python -m mojum.twin_lab mentor \
   --db ./twin_b.sqlite3 --agent-id mentor-b-chosen --ticks 4 --dx -0.05
 ```
 
-The `mentor` command operates on only one journal, cold-replays its entire
-history and refuses a missing file, a wrong owner ID, bad displacements, or
-event-budget overflow. The original `Aquarium` remains the storage authority.
+The `mentor` command operates on only one existing journal. It cold-replays
+the entire history through a read-only connection before opening storage for
+continuation, and refuses missing or empty files, unrelated SQLite databases,
+missing bootstrap events, a wrong owner ID, corrupt history, bad displacements,
+or event-budget overflow. Rejected admission does not initialize a new twin or
+change the source's journal mode or permissions. A zero-step request remains
+read-only. For positive steps, the writable reopen must match the verified
+journal head; a concurrent advance requires a fresh request. Receipts count
+only the events verified or committed by that request. The original `Aquarium`
+remains the storage authority; the extra admission replay does not change the
+persisted format or make the two opens a filesystem transaction.
 
 **Important limits:** movement comes from the mentor's scripted external
 input and resulting position divergence does not prove learned development.
