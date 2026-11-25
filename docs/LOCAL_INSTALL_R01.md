@@ -72,6 +72,30 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 
 The workflow also runs for release tags and checks that the installed version matches the tag. The successful Python 3.13 tag job attaches the verified wheel and `SHA256SUMS` to its workflow run.
 
+## Design a custom room from the installed wheel
+
+Create the standalone editor, open the HTML file in your browser, and save
+your room as `my-room.json`:
+
+```sh
+python -m mojum.room_designer --output ./room-designer.html
+```
+
+The editor includes its scripts and works offline. The command prints a byte
+count and SHA-256 and refuses to replace an existing file. Validate the saved
+draft, then start a new synthetic Aquarium journal in that room:
+
+```sh
+mojum-room-check ./my-room.json --format json
+mojum-aquarium --db ./custom-room.sqlite3 --room-file ./my-room.json --ticks 120
+mojum-aquarium --db ./custom-room.sqlite3 --room-file ./my-room.json --ticks 30
+```
+
+Keep the same room file and mode flags when reopening the journal. Changing
+its pinned geometry is rejected. The editor is separate from the running
+Aquarium and does not modify a journal. See the
+[room designer guide](R015_VISUAL_ROOM_DESIGNER.md) for controls and limits.
+
 ## Limits
 
 No Android or Pixel 9 on-device execution has been demonstrated. Termux or similar Python distributions might work if they provide compatible CPython, SQLite and packaging tools, but device verification is outstanding. The process does not guarantee indefinite execution while a phone is asleep. Using an ordinary local path does not encrypt the PRIVATE Noosphere journal; guard the path with OS-level access controls and avoid including it in public artifacts. The experimental package is not a production release.

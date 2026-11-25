@@ -182,6 +182,33 @@ untouched_twin = run_module(
 )
 assert (untouched_twin["twin"]["tick"], untouched_twin["twin"]["stored_events"]) == (0, 1)
 
+# Wheel-only room authoring supplies the complete editor with no sibling JS.
+designer = run_module("mojum.room_designer", "--output", "room-designer.html")
+designer_bytes = Path("room-designer.html").read_bytes()
+assert designer_bytes == files("mojum").joinpath("data", "room_designer.html").read_bytes()
+assert designer["schema"] == "mojum.room-designer.export/1"
+assert designer["bytes"] == len(designer_bytes)
+from hashlib import sha256
+assert designer["sha256"] == sha256(designer_bytes).hexdigest()
+occupied_designer = subprocess.run(
+    [sys.executable, "-I", "-m", "mojum.room_designer", "--output", "room-designer.html"],
+    capture_output=True, text=True, timeout=20,
+)
+assert occupied_designer.returncode == 2 and occupied_designer.stdout == ""
+assert Path("room-designer.html").read_bytes() == designer_bytes
+# This exact default draft is covered by the real editor-core JSON tests.
+Path("authored-room.json").write_bytes(
+    (Path(sys.argv[1]).parent / "examples" / "room_simple_mixed.json").read_bytes()
+)
+assert run("mojum-room-check", "authored-room.json", "--format", "json")["valid"]
+room_options = ("--room-file", "authored-room.json", "--neural-mode", "disabled")
+room_start = run("mojum-aquarium", "--db", "authored.sqlite3", "--ticks", "2", *room_options)
+room_resume = run("mojum-aquarium", "--db", "authored.sqlite3", "--ticks", "1", *room_options,
+                  "--expected-head", room_start["journal_head"])
+assert (room_resume["tick"], room_resume["stored_events"]) == (3, 4)
+assert room_resume == run("mojum-aquarium", "--db", "authored-control.sqlite3",
+                          "--ticks", "3", *room_options)
+
 print(f'Offline wheel verified: {resumed["tick"]} ticks, {resumed["stored_events"]} events, '
       f'journal head {resumed["journal_head"]}')
 PY
