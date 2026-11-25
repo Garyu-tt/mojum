@@ -32,6 +32,13 @@ def _point(value, label):
     return tuple(float(x) for x in value)
 
 
+def _same_point(value, fixed):
+    # Constructor endpoints contain only builtin floats. Validate that shape
+    # before equality so a replacement cannot execute coordinate callbacks.
+    return (type(value) is tuple and len(value) == 2
+            and all(type(x) is float for x in value) and value == fixed)
+
+
 class PointRoomEpisode:
     """Finite fixed-start episode; no randomness or private state in observations."""
 
@@ -72,8 +79,8 @@ class PointRoomEpisode:
     def _assert_configuration(self):
         """Reject facade mutation before a reset or reward-producing step."""
         if (self.room is not self._fixed_room
-                or type(self.start) is not tuple or self.start != self._fixed_start
-                or type(self.goal) is not tuple or self.goal != self._fixed_goal
+                or not _same_point(self.start, self._fixed_start)
+                or not _same_point(self.goal, self._fixed_goal)
                 or type(self.step_m) is not float or self.step_m != self._fixed_step_m
                 or type(self.max_steps) is not int or self.max_steps != self._fixed_max_steps
                 or type(self.goal_radius_m) is not float
