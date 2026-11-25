@@ -264,8 +264,9 @@ class LocalNoosphere:
             raise NoosphereError("database path cannot be a symbolic link")
         if path.is_dir():
             raise NoosphereError("database path cannot be a directory")
-        # Explicit file path required. Not ':memory:' or URI addresses.
-        if not path.name or str(db_path) == ":memory:":
+        # Check the normalized filename passed to SQLite: Path removes dot
+        # components and trailing separators from aliases such as './:memory:'.
+        if not path.name or str(path) == ":memory:":
             raise NoosphereError("a persistent SQLite database file is required")
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
