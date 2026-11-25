@@ -41,5 +41,5 @@ change existing archive serialization, schema or restore policy.
 
 `PYTHONPATH=src python -m unittest discover -s tests -p 'test_archive_path_admission.py' -v`
 
-Expected: ten hermetic tests; CI and independent QA must verify the exact PR
+Expected: eleven hermetic tests; CI and independent QA must verify the exact PR
 head before merge. This submission does not claim a complete #141 fix.
