@@ -21,7 +21,7 @@ report = reduce_contacts([
 ])
 ```
 
-All fields are integer-domain values:
+Each sample contains exactly four fields:
 - `tick`: nonnegative simulation tick, monotone nondecreasing.
 - `contact`: one of `body`, `hand`, `world`.
 - `normal_force_mn`: nonnegative milli-newtons.
@@ -36,7 +36,8 @@ multiple samples in one step. The reducer never reads wall-clock time.
 - stdlib-only, CPU-only and offline; no imports of MuJoCo/Jolt/PBD.
 - 2,048 samples per call; fixed numeric ranges and explicit aggregate ceiling.
 - Exact native Python types; booleans are not integers for this protocol.
-- Exact sample keys; unsupported visibility/classification fails closed.
+- Exact sample keys; reject any other field count before copying or scanning
+  keys. Unsupported visibility/classification fails closed.
 - Stable canonical SHA-256 is an integrity/determinism receipt, **not a
   signature, authenticity proof, or source identity**.
 - No disk, network, SQLite, Noosphere, device, motor, or runtime side effects.

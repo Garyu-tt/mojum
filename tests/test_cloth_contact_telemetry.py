@@ -1,4 +1,9 @@
 """Adversarial tests for bounded synthetic cloth contact telemetry."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import textwrap
 import unittest
 
 from mojum.cloth_contact_telemetry import (
@@ -74,6 +79,45 @@ class ClothContactTelemetryTests(unittest.TestCase):
                 reduce_contacts([item])
         with self.assertRaises(ClothTelemetryError):
             reduce_contacts(sample())
+
+    def test_oversized_sample_shape_is_rejected_with_bounded_extra_memory(self):
+        # Build the caller's dictionary before tracing. Rejection must not
+        # allocate a tuple/set proportional to every unexpected field. Keep
+        # the tracer isolated from any surrounding resource-warning audit.
+        script = textwrap.dedent("""\
+            import tracemalloc
+            from mojum.cloth_contact_telemetry import ClothTelemetryError, reduce_contacts
+            samples = [{f"unexpected_{i}": 0 for i in range(100_000)}]
+            tracemalloc.start()
+            try:
+                reduce_contacts(samples)
+            except ClothTelemetryError:
+                pass
+            else:
+                raise AssertionError("oversized sample was accepted")
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            print(peak)
+        """)
+        environment = dict(os.environ)
+        environment.pop("PYTHONTRACEMALLOC", None)
+        environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+        result = subprocess.run(
+            [sys.executable, "-c", script], env=environment,
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+        self.assertLess(int(result.stdout), 256 * 1024)
+
+    def test_four_fields_still_require_exact_native_keys(self):
+        class KeyAlias(str):
+            pass
+
+        for key in ("unknown", 0, KeyAlias("tick")):
+            item = sample()
+            item[key] = item.pop("tick")
+            self.assertEqual(len(item), 4)
+            with self.subTest(key=key), self.assertRaises(ClothTelemetryError):
+                reduce_contacts([item])
 
     def test_ranges_and_classification_fail_closed(self):
         for item in (
