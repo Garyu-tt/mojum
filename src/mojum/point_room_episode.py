@@ -18,6 +18,11 @@ class PointRoomEpisode:
     Actions are (dx, dy) displacement pairs in metres. A blocked move consumes
     a tick. Reaching the target terminates; exhausting max_steps truncates.
     Reward is a documented synthetic benchmark signal, not organism affect.
+
+    Room, horizon, action budget and goal radius are fixed at construction.
+    Replacing those public attributes makes reset/step fail before changing
+    episode state. Construct another episode to change its configuration;
+    reset still accepts a new seed, start and goal.
     """
 
     def __init__(self, room: Room, *, max_steps: int = 100,
@@ -34,9 +39,25 @@ class PointRoomEpisode:
         self.max_steps = max_steps
         self.max_action_m = float(max_action_m)
         self.goal_radius_m = float(goal_radius_m)
+        self._configured_room = self.room
+        self._configured_max_steps = self.max_steps
+        self._configured_max_action_m = self.max_action_m
+        self._configured_goal_radius_m = self.goal_radius_m
         self._state = None
         self._goal = None
         self._done = False
+
+    def _assert_configuration(self):
+        # Check native types before equality so replacement objects cannot
+        # run comparison hooks or masquerade as the validated numeric values.
+        if (self.room is not self._configured_room
+                or type(self.max_steps) is not int
+                or self.max_steps != self._configured_max_steps
+                or type(self.max_action_m) is not float
+                or self.max_action_m != self._configured_max_action_m
+                or type(self.goal_radius_m) is not float
+                or self.goal_radius_m != self._configured_goal_radius_m):
+            raise ValueError("episode configuration mutated after construction")
 
     @staticmethod
     def _position(value, name):
@@ -47,7 +68,11 @@ class PointRoomEpisode:
         return tuple(value)
 
     def reset(self, *, seed: int = 0, start=None, goal=None):
-        """Return (observation, info). Same seed and geometry yield same episode."""
+        """Return (observation, info); validation failure preserves prior state.
+
+        Same seed and geometry yield the same episode.
+        """
+        self._assert_configuration()
         if type(seed) is not int or not 0 <= seed < 2**64:
             raise ValueError("invalid seed")
         rng = random.Random(seed)
@@ -90,6 +115,7 @@ class PointRoomEpisode:
             raise RuntimeError("reset required")
         if self._done:
             raise RuntimeError("episode finished; reset required")
+        self._assert_configuration()
         dx, dy = self._position(action, "action")
         if math.hypot(dx, dy) > self.max_action_m:
             raise ValueError("action exceeds max_action_m")
