@@ -16,7 +16,7 @@ from importlib.resources import files
 import math
 from pathlib import Path
 
-from .graph import validate as validate_graph
+from .graph import GraphError, load_graph, validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, _read_first_event
 from .sim import Simulation, digest
 from .world_room import Room, advance, initial_state
@@ -457,7 +457,12 @@ def main():
     args = p.parse_args()
     if not 0 <= args.ticks <= 1000:
         p.error("--ticks must be within 0..1000")
-    with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8"))) as baby:
+    try:
+        graph = load_graph(args.graph)
+        validate_graph(graph)
+    except GraphError as exc:
+        p.error(f"invalid graph input: {exc}")
+    with SensoryPlay(args.db, graph) as baby:
         for _ in range(args.ticks):
             row = baby.step()
             if args.watch:

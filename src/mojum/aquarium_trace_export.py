@@ -308,7 +308,9 @@ def main():
         )
     except (ValueError, OSError, sqlite3.Error) as exc:
         parser.error(str(exc))
-    print(json.dumps(meta, sort_keys=True, ensure_ascii=False, allow_nan=False))
+    # Publication has already succeeded; keep its receipt encodable on legacy
+    # stdout streams without changing the Unicode values or UTF-8 trace bytes.
+    print(json.dumps(meta, sort_keys=True, ensure_ascii=True, allow_nan=False))
 
 
 if __name__ == "__main__":

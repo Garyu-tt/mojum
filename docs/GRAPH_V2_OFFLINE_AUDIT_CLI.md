@@ -44,6 +44,11 @@ Safety / limits:
 - Reject malformed UTF-8, duplicate JSON keys, NaN/Infinity, unsupported
   schemas and mixed v1/v2 shapes. Size bounds: 256 KiB graph input,
   16 KiB labels, 1 MiB output.
+- Read graph and labels inputs only from regular files. On POSIX, open
+  nonblocking and check the opened descriptor before reading, so named
+  pipes and device files are rejected without waiting for a writer.
+  Symlinks to regular files remain supported. A rejected input never
+  publishes an output or leaves a staged export.
 - Stage output with owner-only `0600` permissions, sync the temporary
   content, then use atomic hard-link no-clobber publication; refuse an
   existing destination (including symlinks) without overwriting it.
@@ -59,7 +64,7 @@ Safety / limits:
 Focused tests:
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests -p test_graph_audit_cli.py -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_graph_audit_cli*.py' -v
 ```
 
 Merge requires independent review and the full Python 3.11/3.12/3.13
