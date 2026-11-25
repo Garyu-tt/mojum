@@ -14,6 +14,16 @@ from mojum.merge_gate import MAX_INPUT_BYTES, FetchError, SnapshotError, _load_s
 
 
 class SnapshotFileInputTests(unittest.TestCase):
+    def test_merge_gate_file_starts_from_an_isolated_python(self):
+        script = Path(__file__).resolve().parents[1] / "src" / "mojum" / "merge_gate.py"
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-I", str(script), "--help"],
+                cwd=cwd, text=True, capture_output=True, timeout=10,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--expected-head-sha", result.stdout)
+
     def test_regular_json_is_read_and_path_read_text_is_not_used(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "pr.json"

@@ -21,6 +21,7 @@ import stat
 import tempfile
 
 from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA, MOTOR_MODES
+from .aquarium import load_cli_room
 from .genesis import validate_seed
 from .graph import load_graph
 
@@ -70,6 +71,8 @@ def _stage_sqlite(source, stage):
     uri = source.resolve().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as original:
         original.execute("PRAGMA trusted_schema=OFF")
+        # Pin the budgeted snapshot across all backup batches.
+        original.execute("BEGIN")
         _limit_source_pages(original)
         with closing(sqlite3.connect(str(stage))) as target:
             original.backup(target, pages=256, sleep=0.05)
@@ -273,6 +276,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
     parser.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
+    parser.add_argument("--room-file", type=Path,
+                        help="room draft used when creating the source journal")
     parser.add_argument("--agent-id", help="override journal owner from the supplied genome ID")
     parser.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
     parser.add_argument("--brain-mode", choices=("placeholder", "developmental_controller"),
@@ -291,8 +296,9 @@ def main():
     try:
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
+        room, start = load_cli_room(args.room_file, args.motor_mode)
         meta = export_private_trace(
-            args.db, args.output, seed, graph,
+            args.db, args.output, seed, graph, room=room, start=start,
             agent_id=seed["genome_id"] if args.agent_id is None else args.agent_id,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, brain_mode=args.brain_mode,
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
