@@ -138,13 +138,26 @@ def interpolate_measured_poses(frame_a: Any, frame_b: Any, *, target_timestamp_n
     if names_a != names_b:
         _fail("source frames must have identical joint inventories")
     names = tuple(sorted(names_a))
-    ratio = (target_timestamp_ns - a["timestamp_ns"]) / (b["timestamp_ns"] - a["timestamp_ns"])
+    elapsed_ns = target_timestamp_ns - a["timestamp_ns"]
+    remaining_ns = b["timestamp_ns"] - target_timestamp_ns
+    duration_ns = b["timestamp_ns"] - a["timestamp_ns"]
+    ratio = elapsed_ns / duration_ns
     interpolated: list[tuple[float, float, float]] = []
     for name in names:
         left, right = a["joints"][name], b["joints"][name]
         if any(abs(y - x) > max_delta for x, y in zip(left, right)):
             _fail(f"joint {name} exceeds caller-supplied discontinuity bound")
-        point = tuple(x + (y - x) * ratio for x, y in zip(left, right))
+        if elapsed_ns == 0:
+            point = left
+        elif remaining_ns == 0:
+            point = right
+        elif elapsed_ns <= remaining_ns:
+            point = tuple(x + (y - x) * ratio for x, y in zip(left, right))
+        else:
+            # Do not derive this weight as 1 - ratio: the display ratio may
+            # round to 1.0 for an interior nanosecond in a long interval.
+            reverse_ratio = remaining_ns / duration_ns
+            point = tuple(y + (x - y) * reverse_ratio for x, y in zip(left, right))
         if any(not math.isfinite(value) for value in point):
             _fail("interpolation produced a non-finite coordinate")
         interpolated.append(point)
