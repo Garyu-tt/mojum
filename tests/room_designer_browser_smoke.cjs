@@ -8,6 +8,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const assert = require("node:assert/strict");
+const { waitForDevToolsPort } = require("./chrome_startup.cjs");
 
 const binary = process.env.CHROME_BINARY ||
   ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"]
@@ -17,19 +18,6 @@ const HTML = process.env.MOJUM_ROOM_HTML
   ? path.resolve(process.env.MOJUM_ROOM_HTML)
   : path.resolve(__dirname, "../tools/room_designer.html");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-async function waitPort(dir, child) {
-  for (let i = 0; i < 150; i++) {
-    if (child.exitCode !== null) throw new Error("Chrome exited before DevTools startup");
-    const file = path.join(dir, "DevToolsActivePort");
-    if (fs.existsSync(file)) {
-      const line = fs.readFileSync(file, "utf8").split("\n")[0];
-      if (/^[0-9]+$/.test(line)) return Number(line);
-    }
-    await sleep(100);
-  }
-  throw new Error("Chrome startup timeout");
-}
 
 async function connect(url) {
   if (typeof WebSocket !== "function") throw new Error("Node 22 WebSocket required");
@@ -89,7 +77,7 @@ async function main() {
   chrome.stderr.on("data",data => { diagnostic=(diagnostic+data).slice(-1200); });
   let cdp;
   try {
-    const port = await waitPort(profile, chrome);
+    const port = await waitForDevToolsPort(profile, chrome);
     const list = await (await fetch("http://127.0.0.1:" + port + "/json")).json();
     const page = list.find(item => item.type === "page");
     assert.ok(page,"Chrome must supply a page target");

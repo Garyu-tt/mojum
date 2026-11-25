@@ -12,22 +12,45 @@ on:
       - 'tools/spartan_inflight_meter.py'
       - 'tests/test_spartan_inflight_meter.py'
       - '.github/workflows/spartan-inflight-meter.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   offline-stdlib:
-    runs-on: ubuntu-latest
+    name: offline stdlib (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        include:
+          - os: ubuntu-24.04
+            python-version: '3.11'
+          - os: ubuntu-24.04
+            python-version: '3.12'
+          - os: ubuntu-24.04
+            python-version: '3.13'
+          - os: ubuntu-24.04
+            python-version: '3.14'
+          - os: windows-latest
+            python-version: '3.12'
+          - os: windows-latest
+            python-version: '3.14'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Run SQLite meter regressions without model credentials
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONWARNINGS: error::ResourceWarning
         run: python -m unittest discover -s tests -p test_spartan_inflight_meter.py -v
