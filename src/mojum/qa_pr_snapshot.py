@@ -17,7 +17,10 @@ MAX_DEPENDENCIES = 64
 MAX_TEXT = 200
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
-_BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]{1,200}$")
+# Branch names are validated beneath refs/heads, where '@', Unicode and '+'
+# are allowed. Reject Git's forbidden characters and non-UTF-8 surrogate
+# code points before checking path components.
+_BRANCH_RE = re.compile(r"^[^\x00-\x20\x7f~^:?*\[\\\ud800-\udfff]{1,200}$")
 _ALLOWED = frozenset({
     "repository", "number", "state", "draft", "merged", "mergeable",
     "base_ref", "base_sha", "head_ref", "head_sha", "created_at",
@@ -59,7 +62,7 @@ def _text(value: Any, field: str, pattern: re.Pattern[str] | None = None) -> str
 def _repository(value: Any) -> str:
     repository = _text(value, "repository", _REPO_RE)
     owner, name = repository.split("/")
-    if owner in {".", ".."} or name in {".", ".."} or owner.startswith(".") or name.startswith("."):
+    if owner in {".", ".."} or name in {".", ".."} or owner.startswith("."):
         raise ValueError("repository components are invalid")
     return repository.lower()
 
@@ -68,7 +71,7 @@ def _branch(value: Any, field: str) -> str:
     branch = _text(value, field, _BRANCH_RE)
     parts = branch.split("/")
     if (
-        branch in {"", "@"}
+        branch == "HEAD"
         or branch.startswith(("/", "-"))
         or branch.endswith(("/", "."))
         or "//" in branch
@@ -77,7 +80,6 @@ def _branch(value: Any, field: str) -> str:
         or any(
             part in {"", ".", ".."}
             or part.startswith(".")
-            or part.endswith(".")
             or part.endswith(".lock")
             for part in parts
         )
@@ -126,8 +128,8 @@ def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
     number = raw["number"]
     if type(number) is not int or not 1 <= number <= 2**31 - 1:
         raise ValueError("number must be a positive bounded integer")
-    state = raw["state"]
-    if type(state) is not str or state not in {"open", "closed"}:
+    state = _text(raw["state"], "state")
+    if state not in {"open", "closed"}:
         raise ValueError("state must be open or closed")
     for field in ("draft", "merged"):
         if type(raw[field]) is not bool:
@@ -137,8 +139,8 @@ def admit_pr_snapshot(raw: Mapping[str, Any]) -> PRSnapshot:
         raise ValueError("mergeable must be boolean or null")
     if raw["merged"] and state != "closed":
         raise ValueError("merged snapshots must be closed")
-    if raw["draft"] and (state != "open" or raw["merged"]):
-        raise ValueError("draft snapshots must be open and not merged")
+    # GitHub can retain draft=True on closed records, including historical
+    # merged records. Preserve that metadata; eligibility is a separate gate.
     base_ref = _branch(raw["base_ref"], "base_ref")
     head_ref = _branch(raw["head_ref"], "head_ref")
     base_sha = _text(raw["base_sha"], "base_sha", _SHA_RE)

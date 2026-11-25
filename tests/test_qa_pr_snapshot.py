@@ -60,10 +60,16 @@ class PRSnapshotTests(unittest.TestCase):
             admit_pr_snapshot(raw)
 
     def test_rejects_invalid_repository_components(self):
+        for repository in ("../mojum", "owner/.", "owner/..", ".owner/repo"):
+            raw = fixture()
+            raw["repository"] = repository
+            with self.subTest(repository=repository), self.assertRaises(ValueError):
+                admit_pr_snapshot(raw)
+
+    def test_admits_dot_prefixed_repository_name(self):
         raw = fixture()
-        raw["repository"] = "../mojum"
-        with self.assertRaises(ValueError):
-            admit_pr_snapshot(raw)
+        raw["repository"] = "Example-Org/.github"
+        self.assertEqual(admit_pr_snapshot(raw).repository, "example-org/.github")
 
     def test_rejects_invalid_sha_and_ref(self):
         for key, value in (("head_sha", "z" * 40), ("base_ref", "../main"),
@@ -73,16 +79,29 @@ class PRSnapshotTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 admit_pr_snapshot(raw)
 
-    def test_rejects_git_invalid_at_only_and_component_trailing_dot_refs(self):
-        for field, value in (
-            ("base_ref", "@"),
-            ("base_ref", "refs/heads/feature/foo./bar"),
-            ("head_ref", "feature/segment./child"),
-        ):
-            raw = fixture()
-            raw[field] = value
-            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
-                admit_pr_snapshot(raw)
+    def test_admits_valid_git_branch_names_without_rewriting_them(self):
+        # These are branch names beneath refs/heads, not standalone full refs.
+        # A dot may end an intermediate component, and '@' is a valid branch.
+        for field in ("base_ref", "head_ref"):
+            for value in ("@", "feature/segment./child", "feature/a+b",
+                          "feature/user@name", "feature/\u0442\u0435\u0441\u0442"):
+                raw = fixture()
+                raw[field] = value
+                with self.subTest(field=field, value=value):
+                    self.assertEqual(getattr(admit_pr_snapshot(raw), field), value)
+
+    def test_rejects_invalid_git_branch_names(self):
+        for field in ("base_ref", "head_ref"):
+            for value in ("HEAD", "-option", "/start", "end/", "end.", "double//slash",
+                          "two..dots", "feature/.hidden", "feature/name.lock/child",
+                          "feature/@{name}", "with space", "with\tcontrol",
+                          "with\x7fcontrol", "with~tilde", "with^caret", "with:colon",
+                          "with?question", "with*star", "with[bracket", "with\\slash",
+                          "feature/\ud800", "feature/\udfff"):
+                raw = fixture()
+                raw[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    admit_pr_snapshot(raw)
 
     def test_rejects_timezone_free_and_reversed_timestamps(self):
         raw = fixture()
@@ -103,14 +122,28 @@ class PRSnapshotTests(unittest.TestCase):
 
     def test_rejects_inconsistent_pr_lifecycle_states(self):
         for changes in (
-            {"state": "open", "merged": True},
-            {"state": "closed", "draft": True},
+            {"state": "open", "draft": False, "merged": True},
             {"state": "open", "draft": True, "merged": True},
         ):
             raw = fixture()
             raw.update(changes)
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 admit_pr_snapshot(raw)
+
+    def test_preserves_draft_metadata_on_closed_snapshots(self):
+        # GitHub retains the draft flag on closed records. Admission records
+        # upstream metadata; it is not a ready-to-merge decision.
+        for merged in (False, True):
+            raw = fixture()
+            open_digest = admit_pr_snapshot(raw).digest
+            raw.update(state="closed", draft=True, merged=merged, mergeable=False)
+            with self.subTest(merged=merged):
+                result = admit_pr_snapshot(raw)
+                self.assertEqual(result.state, "closed")
+                self.assertIs(result.draft, True)
+                self.assertIs(result.merged, merged)
+                self.assertIs(result.mergeable, False)
+                self.assertNotEqual(result.digest, open_digest)
 
     def test_rejects_unknown_states_and_non_native_booleans(self):
         raw = fixture()
@@ -120,6 +153,12 @@ class PRSnapshotTests(unittest.TestCase):
         raw = fixture()
         raw["draft"] = 1
         with self.assertRaises(ValueError):
+            admit_pr_snapshot(raw)
+
+    def test_bounds_state_before_enum_lookup(self):
+        raw = fixture()
+        raw["state"] = "x" * 1_000_000
+        with self.assertRaisesRegex(ValueError, "bounded string"):
             admit_pr_snapshot(raw)
 
     def test_rejects_non_mapping_and_non_string_keys(self):
