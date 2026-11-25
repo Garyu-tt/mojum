@@ -165,7 +165,16 @@ code{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
         if (i === lines.length - 1 && original === "") continue;
         throw new Error("Пустая JSONL-строка " + (i + 1));
       }
-      if (source.length > MAX_LINE) throw new Error("Слишком длинная JSONL-строка " + (i+1));
+      // Match the exporter's Python len(str): Unicode code points, not
+      // JavaScript UTF-16 code units. Keep the usual short-line fast path
+      // and stop at the limit without allocating a second character array.
+      if (source.length > MAX_LINE) {
+        let codePoints = 0;
+        for (const character of source) {
+          if (++codePoints > MAX_LINE)
+            throw new Error("Слишком длинная JSONL-строка " + (i+1));
+        }
+      }
       let value;
       try { value = JSON.parse(source); }
       catch (_) { throw new Error("Неверный JSON в строке " + (i+1)); }
