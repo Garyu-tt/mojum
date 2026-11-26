@@ -1,0 +1,41 @@
+name: Packaging contract
+# Exact-head checks for the offline packaging contract.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/packaging-contract.yml"
+      - "pyproject.toml"
+      - "src/mojum/**"
+      - "tests/test_packaging_contract.py"
+  push:
+    branches:
+      - "build/11-offline-packaging-20261124"
+permissions:
+  contents: read
+jobs:
+  packaging-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact tested revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install build backend before offline verification
+        run: python -m pip install --disable-pip-version-check "setuptools>=61"
+      - name: Compile contract test
+        run: python -m compileall -q tests/test_packaging_contract.py
+      - name: Run packaging contract tests (wheel build itself is offline)
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_packaging_contract.py" -v
