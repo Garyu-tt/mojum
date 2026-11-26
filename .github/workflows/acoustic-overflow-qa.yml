@@ -1,0 +1,42 @@
+name: Acoustic event sensor overflow QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/acoustic-overflow-qa.yml"
+      - "src/mojum/world_acoustics.py"
+      - "tests/test_world_acoustics.py"
+  push:
+    branches:
+      - "qa/1056-acoustic-millimetre-overflow-20261123"
+
+permissions:
+  contents: read
+
+jobs:
+  acoustic-overflow:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Set up CPython
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile changed module and tests
+        run: python -m compileall -q src/mojum/world_acoustics.py tests/test_world_acoustics.py
+      - name: Run acoustic event regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_world_acoustics.py" -v
