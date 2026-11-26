@@ -58,6 +58,15 @@ def _token(value: Any, field: str, maximum: int = _MAX_CONTEXT) -> str:
     return value
 
 
+def _check_name(value: Any, field: str) -> str:
+    """Validate GitHub check contexts/names without forbidding ordinary spaces."""
+    if type(value) is not str or not value or len(value) > _MAX_CONTEXT:
+        raise ValueError(f"{field} must be a non-empty native string of at most {_MAX_CONTEXT} characters")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError(f"{field} contains control characters")
+    return value
+
+
 def _positive_int(value: Any, field: str) -> int:
     if type(value) is not int or value <= 0 or value > 2_147_483_647:
         raise ValueError(f"{field} must be a positive bounded native integer")
@@ -116,7 +125,7 @@ def reconcile_ruleset_checks(ruleset: dict, check_runs_snapshot: dict, expected_
     contexts = set()
     for index, raw in enumerate(descriptors):
         descriptor = _dict(raw, f"required_status_checks[{index}]")
-        context = _token(descriptor.get("context"), "required check context")
+        context = _check_name(descriptor.get("context"), "required check context")
         app_id = _positive_int(descriptor.get("integration_id"), "required check integration_id")
         if context in contexts:
             raise ValueError("ruleset contains duplicate required check contexts")
@@ -128,7 +137,6 @@ def reconcile_ruleset_checks(ruleset: dict, check_runs_snapshot: dict, expected_
         raise ValueError(f"check_runs.total_count must be a native integer in 0..{_MAX_RUNS}")
     runs = _list(snapshot.get("check_runs"), "check_runs.check_runs", _MAX_RUNS)
     if total_count != len(runs):
-        # A partial page must never be interpreted as a missing or successful check.
         complete = False
     else:
         complete = True
@@ -136,7 +144,7 @@ def reconcile_ruleset_checks(ruleset: dict, check_runs_snapshot: dict, expected_
     by_identity: dict[tuple[str, int], list[dict]] = {}
     for index, raw in enumerate(runs):
         run = _dict(raw, f"check_runs[{index}]")
-        name = _token(run.get("name"), "check run name")
+        name = _check_name(run.get("name"), "check run name")
         head = _sha(run.get("head_sha"), "check run head_sha")
         status = _token(run.get("status"), "check run status", 32).lower()
         conclusion = run.get("conclusion")
