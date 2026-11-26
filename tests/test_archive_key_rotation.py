@@ -172,6 +172,12 @@ class RotationChainTests(unittest.TestCase):
                     self.assertNotIn(oversized, scanned)
                     self.assertTrue(all(type(value) is str and len(value) == 64 for value in scanned))
 
+    def test_oversized_schema_rejected_before_comparison(self):
+        record = make_rotation(1, self.k0, self.k1)
+        record["schema"] = "x" * 1_000_000
+        with self.assertRaisesRegex(RotationError, "schema"):
+            verify_rotation_chain(self.k0, 0, [record], {}, key_fingerprint(self.k1))
+
 
 if __name__ == "__main__":
     unittest.main()
