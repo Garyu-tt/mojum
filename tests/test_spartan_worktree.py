@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 MODULE = Path(__file__).resolve().parents[1] / "tools" / "spartan_worktree.py"
 spec = importlib.util.spec_from_file_location("spartan_worktree", MODULE)
@@ -57,6 +58,25 @@ class WorktreeTests(unittest.TestCase):
         mod.prepare(self.repo, self.root, "task-1", self.sha)
         with self.assertRaises(mod.IsolationError):
             mod.prepare(self.repo, self.root, "task-1", self.sha)
+
+    def test_git_absolute_path_in_another_namespace(self):
+        # Model an MSYS-style absolute path that the host cannot resolve.
+        # Actual worktree creation still goes through the real Git process.
+        run = subprocess.run
+
+        def foreign_top_level(args, **kwargs):
+            # MSYS2 can also remove braces from revision arguments.
+            args = [arg.replace("^{commit}", "^commit") for arg in args]
+            result = run(args, **kwargs)
+            if "--show-toplevel" in args:
+                result.stdout = "/foreign-git-namespace/repo\n"
+            return result
+
+        subdir = self.repo / "nested"
+        subdir.mkdir()
+        with mock.patch.object(mod.subprocess, "run", side_effect=foreign_top_level):
+            dest = mod.prepare(subdir, self.root, "foreign-git-path", self.sha)
+        self.assertTrue(dest.is_dir())
 
     def test_rejects_existing_branch_without_touching_it(self):
         # A worker must not adopt another worker's existing branch, even
