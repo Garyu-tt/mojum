@@ -12,6 +12,12 @@ Each metadata text field is rejected by character count before UTF-8 encoding if
 
 The initial `lstat()` rejects a path that is already a symlink and enforces the main database file's initial size. It is **not** an fd-bound no-follow open: callers must use a trusted directory that is not concurrently modified. This utility does not claim resistance to rename/symlink TOCTOU races. SQLite may consult WAL sidecars; the main-file size check is not a bound on sidecar sizes or total I/O. Do not use this utility as a hostile-path sandbox or as a content-integrity/backup validator.
 
+Use a stable database snapshot. When the database header specifies WAL and
+no WAL, SHM or rollback-journal file exists, the audit opens the snapshot with
+SQLite's immutable option to avoid creating sidecars. Databases with existing
+sidecars use the regular read-only connection so committed schema changes in
+the WAL are included. [SQLite WAL documentation](https://sqlite.org/wal.html#readonly)
+
 ## Verification
 
 Focused tests: `PYTHONPATH=src python -m unittest discover -s tests -p 'test_sqlite_schema_fingerprint.py' -v`. Exact-head CPython 3.11/3.12/3.13 CI is provided by the companion workflow.

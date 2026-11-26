@@ -51,12 +51,13 @@ def _unique_keys(pairs):
 
 
 
-def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
+def _optimal_placement(devices, model_mib, reserve_mib, max_gpus, max_replicas=32):
     """Exact, deterministic maximum-replica set packing for at most 12 GPUs.
 
     The old smallest-cardinality-first greedy selection can strand small
     devices: 9+9 GiB occupies both large GPUs, although 9+3+3 twice fits.
-    Cache by used-device mask and allow skipping a device entirely.
+    Cache by used-device mask and remaining replica budget. Optimize the
+    requested plan directly: truncating a larger optimum can waste cards.
     """
     indices = sorted(devices)
     if len(indices) > 12:
@@ -73,11 +74,13 @@ def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
         )
 
     @lru_cache(maxsize=None)
-    def search(mask):
+    def search(mask, remaining_replicas):
+        if remaining_replicas == 0:
+            return ()
         first = next((i for i in range(n) if not mask & (1 << i)), None)
         if first is None:
             return ()
-        best = search(mask | (1 << first))
+        best = search(mask | (1 << first), remaining_replicas)
         remaining = [i for i in range(first + 1, n) if not mask & (1 << i)]
         for count in range(1, min(max_gpus, len(remaining) + 1) + 1):
             for tail in itertools.combinations(remaining, count - 1):
@@ -86,12 +89,13 @@ def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
                 if sum(usable[i] for i in candidate_group) < model_mib:
                     continue
                 group_mask = sum(1 << i for i in positions)
-                candidate = (candidate_group,) + search(mask | group_mask)
+                candidate = (candidate_group,) + search(mask | group_mask,
+                                                        remaining_replicas - 1)
                 if score(candidate) < score(best):
                     best = candidate
         return best
 
-    return search(0)
+    return search(0, min(max_replicas, n))
 
 
 def validate_inventory(data):
@@ -233,9 +237,10 @@ def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE
         raise InventoryError("invalid model path")
 
     unused = {gpu["index"]: gpu for gpu in gpus if gpu["supported"]}
-    # Exact maximum-replica placement is bounded at 12 devices (4096 masks).
+    # Exact placement is bounded at 12 devices (4096 masks, <=12 replica slots).
     # Larger fleets retain a deterministic greedy estimate, explicitly labeled.
-    exact_groups = (_optimal_placement(unused, model_mib, reserve_mib, max_gpus)
+    exact_groups = (_optimal_placement(unused, model_mib, reserve_mib, max_gpus,
+                                       max_replicas)
                     if len(unused) <= 12 else None)
     groups = []
     while len(groups) < max_replicas:

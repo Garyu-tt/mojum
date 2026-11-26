@@ -1,0 +1,38 @@
+name: GPU Legion capped placement
+
+on:
+  pull_request:
+    paths:
+      - tools/gpu_legion_plan.py
+      - tools/_json_input.py
+      - tests/test_gpu_legion_plan.py
+      - tests/test_gpu_legion_capped_placement.py
+      - .github/workflows/gpu-legion-capped-placement.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capped-placement:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+        python: ['3.12', '3.14']
+        include:
+          - os: ubuntu-24.04
+            python: '3.11'
+          - os: ubuntu-24.04
+            python: '3.13'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -p 'test_gpu_legion_capped_placement.py' -v
+      - name: Existing secure-inventory regression (POSIX descriptor contract)
+        if: runner.os == 'Linux'
+        run: python -m unittest discover -s tests -p 'test_gpu_legion_plan.py' -v
