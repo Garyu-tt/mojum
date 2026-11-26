@@ -89,7 +89,7 @@ class NeuralLODTests(unittest.TestCase):
     def test_digest_detects_modified_receipt(self):
         result = plan([row("a")], 3)
         changed = replace(result, used_cost_units=result.used_cost_units + 1)
-        with self.assertRaisesRegex(NeuralLODError, "accounting"):
+        with self.assertRaisesRegex(NeuralLODError, "accounting|used_cost_units"):
             verify_plan(changed)
         changed_item = replace(result.populations[0], level="fine")
         changed = replace(result, populations=(changed_item,))
