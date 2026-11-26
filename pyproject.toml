@@ -1,13 +1,15 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mojum"
-version = "0.1.0"
+version = "0.1.2"
 description = "Experimental CPU-first synthetic organism aquarium (not a complete digital organism)"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 dependencies = []
 
 [project.scripts]
@@ -29,4 +31,4 @@ where = ["src"]
 include = ["mojum*"]
 
 [tool.setuptools.package-data]
-mojum = ["data/*.json"]
+mojum = ["data/*.json", "data/*.html"]

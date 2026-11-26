@@ -1,8 +1,10 @@
-"""CLI movement preflight regression: invalid input must not bootstrap SQLite."""
+"""Aquarium CLI rejects invalid input and reports recoverable journal errors."""
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -12,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-class AquariumCliMovementPreflightTests(unittest.TestCase):
+class AquariumCliPreflightTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -54,6 +56,63 @@ class AquariumCliMovementPreflightTests(unittest.TestCase):
         reopened = self.run_cli(0)
         self.assertEqual(reopened.returncode, 0, reopened.stderr)
         self.assertEqual(json.loads(reopened.stdout), checkpoint)
+
+    def test_missing_or_malformed_genome_does_not_create_journal(self):
+        genome = self.db.with_name("genome.json")
+        inputs = {
+            "missing file": None,
+            "malformed JSON": b"{",
+            "invalid UTF-8": b"\xff",
+            "deeply nested malformed JSON": b"[" * 2000,
+        }
+        for description, data in inputs.items():
+            with self.subTest(description=description):
+                if data is not None:
+                    genome.write_bytes(data)
+                result = self.run_cli(1, "--genome", str(genome))
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("--genome requires a readable UTF-8 JSON file", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(self.db.exists())
+
+    def test_invalid_genome_schema_preserves_existing_journal(self):
+        started = self.run_cli(1)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        before = self.db.read_bytes()
+        genome = self.db.with_name("genome.json")
+        genome.write_text("{}", encoding="utf-8")
+
+        result = self.run_cli(1, "--genome", str(genome))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("invalid --genome", result.stderr)
+        self.assertIn("seed must have exactly", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.db.read_bytes(), before)
+
+    def test_busy_journal_reports_storage_error_and_can_resume(self):
+        first = self.run_cli(1)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        checkpoint = json.loads(first.stdout)
+        anchor = ("--expected-head", checkpoint["journal_head"])
+
+        for locking_mode, transaction in (("NORMAL", "IMMEDIATE"), ("EXCLUSIVE", "EXCLUSIVE")):
+            with self.subTest(locking_mode=locking_mode):
+                with closing(sqlite3.connect(self.db)) as writer:
+                    writer.execute(f"PRAGMA locking_mode={locking_mode}")
+                    writer.execute(f"BEGIN {transaction}")
+                    blocked = self.run_cli(1, *anchor)
+
+                self.assertEqual(blocked.returncode, 1, blocked.stderr)
+                self.assertEqual(blocked.stdout, "")
+                self.assertIn("cannot access --db SQLite journal: database is locked", blocked.stderr)
+                self.assertNotIn("Traceback", blocked.stderr)
+
+        resumed = self.run_cli(1, *anchor)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        report = json.loads(resumed.stdout)
+        self.assertEqual((report["tick"], report["stored_events"]), (2, 3))
 
 
 if __name__ == "__main__":

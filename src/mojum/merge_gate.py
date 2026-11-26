@@ -31,7 +31,9 @@ no network access are required when ``--input`` is used.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from dataclasses import dataclass, field
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
@@ -41,6 +43,16 @@ import subprocess
 import sys
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import quote
+
+if __package__:
+    from . import _json_nesting
+else:
+    # The direct-file entry point has no package import context.
+    _json_spec = spec_from_file_location(
+        "_json_nesting", Path(__file__).resolve().with_name("_json_nesting.py"),
+    )
+    _json_nesting = module_from_spec(_json_spec)
+    _json_spec.loader.exec_module(_json_nesting)
 
 SCHEMA = "mojum.merge-gate.v1"
 MAX_INPUT_BYTES = 4 * 1024 * 1024
@@ -188,15 +200,48 @@ def _read_ref(raw: Mapping[str, object], label: str, *keys: str) -> str | None:
     return ref
 
 
+def _read_draft(raw: Mapping[str, object]) -> bool:
+    draft = None
+    for key in ("isDraft", "is_draft", "draft"):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, bool):
+            raise SnapshotError("isDraft must be a boolean")
+        if draft is not None and draft != value:
+            raise SnapshotError("snapshot draft state has conflicting aliases")
+        draft = value
+    return False if draft is None else draft
+
+
+def _read_merge_state(raw: Mapping[str, object]) -> str | None:
+    state = None
+    present = False
+    for key in ("mergeStateStatus", "merge_state_status"):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if value is not None:
+            if not isinstance(value, str) or not value.strip():
+                raise SnapshotError("snapshot merge state must be a nonblank string or null")
+            value = value.strip().upper()
+        # Explicit null is unknown evidence, not permission to prefer CLEAN
+        # from another alias. A single unknown state still defers as before.
+        if present and state != value:
+            raise SnapshotError("snapshot merge state has conflicting aliases")
+        state, present = value, True
+    return state
+
+
 def _parse_check(raw: object, index: int) -> CheckOutcome:
     if not isinstance(raw, Mapping):
         raise SnapshotError(f"check[{index}] must be an object")
 
-    name = _text(raw, "name", "context")
+    name = _read_ref(raw, f"check[{index}] name", "name", "context")
     if not name:
         raise SnapshotError(f"check[{index}] has no name or context")
 
-    workflow = _text(raw, "workflowName", "workflow")
+    workflow = _read_ref(raw, f"check[{index}] workflow", "workflowName", "workflow")
     head_sha = _read_oid(raw, f"check[{index}] head SHA", "headSha", "head_sha")
     status_raw = _text(raw, "status")
     has_explicit_run_status = (
@@ -204,6 +249,8 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
     )
     conclusion_raw = _text(raw, "conclusion")
     state_raw = _text(raw, "state")
+    if "state" in raw and state_raw is None:
+        raise SnapshotError(f"check[{index}] state must be a nonblank string")
 
     if state_raw is not None:
         # StatusContext: EXPECTED/PENDING are non-terminal; SUCCESS/FAILURE/
@@ -211,12 +258,15 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
         state = state_raw.upper()
         if state in {"FAILURE", "ERROR"}:
             conclusion_raw = state
-        if status_raw is None:
-            if state in {"SUCCESS", "FAILURE", "ERROR"}:
+        if state in {"SUCCESS", "FAILURE", "ERROR"}:
+            if status_raw is None:
                 status_raw = "COMPLETED"
                 conclusion_raw = conclusion_raw or state
-            else:
-                status_raw = state
+        else:
+            # A hybrid record must retain pending or unknown legacy evidence
+            # even when its CheckRun fields claim completion. Preserve any
+            # failed conclusion so evaluate() still gives failure priority.
+            status_raw = "PENDING" if state in PENDING_STATES else "UNKNOWN"
 
     if status_raw is None:
         if conclusion_raw is not None:
@@ -243,6 +293,35 @@ def _parse_check(raw: object, index: int) -> CheckOutcome:
     )
 
 
+def _check_evidence(checks: tuple[CheckOutcome, ...]) -> Counter:
+    # Rollup order is not evidence. Keep multiplicity: a duplicate required
+    # check must still defer rather than disappear during alias comparison.
+    return Counter(
+        (check.name, check.status, check.conclusion, check.workflow,
+         check.head_sha.lower() if check.head_sha is not None else None,
+         check.has_explicit_run_status)
+        for check in checks
+    )
+
+
+def _read_checks(raw: Mapping[str, object]) -> tuple[CheckOutcome, ...]:
+    checks = None
+    for key in ("statusCheckRollup", "checks"):
+        if key not in raw:
+            continue
+        rollup = raw[key]
+        if rollup is None:
+            rollup = []
+        if not isinstance(rollup, Sequence) or isinstance(rollup, (str, bytes)):
+            raise SnapshotError("statusCheckRollup must be a list")
+        candidate = tuple(_parse_check(item, index) for index, item in enumerate(rollup))
+        if checks is None:
+            checks = candidate
+        elif _check_evidence(checks) != _check_evidence(candidate):
+            raise SnapshotError("snapshot check rollup has conflicting aliases")
+    return () if checks is None else checks
+
+
 def parse_snapshot(raw: object) -> PullRequestFacts:
     """Accept ``gh pr view --json`` output or the snake_case fixture schema."""
 
@@ -265,19 +344,11 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
         "currentBaseSha",
     )
 
-    rollup = raw.get("statusCheckRollup", raw.get("checks", []))
-    if rollup is None:
-        rollup = []
-    if not isinstance(rollup, Sequence) or isinstance(rollup, (str, bytes)):
-        raise SnapshotError("statusCheckRollup must be a list")
-    checks = tuple(_parse_check(item, index) for index, item in enumerate(rollup))
-
-    is_draft_raw = raw.get("isDraft", raw.get("is_draft", raw.get("draft", False)))
-    if not isinstance(is_draft_raw, bool):
-        raise SnapshotError("isDraft must be a boolean")
+    checks = _read_checks(raw)
+    is_draft_raw = _read_draft(raw)
 
     mergeable = _text(raw, "mergeable") or "UNKNOWN"
-    merge_state = _text(raw, "mergeStateStatus", "merge_state_status")
+    merge_state = _read_merge_state(raw)
     number = raw.get("number")
     if number is not None and (not isinstance(number, int) or isinstance(number, bool)):
         raise SnapshotError("number must be an integer")
@@ -292,7 +363,7 @@ def parse_snapshot(raw: object) -> PullRequestFacts:
         head_ref=_text(raw, "headRefName", "head_ref", "headRef"),
         is_draft=is_draft_raw,
         mergeable=mergeable.upper(),
-        merge_state_status=merge_state.upper() if merge_state else None,
+        merge_state_status=merge_state,
     )
 
 
@@ -660,8 +731,10 @@ def _unique_snapshot_object(pairs: list[tuple[str, object]]) -> dict[str, object
 def _decode_snapshot_bytes(data: bytes) -> object:
     """Reject parser-depth exhaustion and ambiguous JSON object fields."""
     try:
-        return json.loads(data.decode("utf-8"),
-                          object_pairs_hook=_unique_snapshot_object)
+        text = data.decode("utf-8")
+        if _json_nesting.exceeds_json_depth(text):
+            raise SnapshotError("snapshot JSON exceeds parser nesting limit")
+        return json.loads(text, object_pairs_hook=_unique_snapshot_object)
     except UnicodeDecodeError as exc:
         raise SnapshotError("snapshot JSON is not valid UTF-8") from exc
     except RecursionError as exc:
