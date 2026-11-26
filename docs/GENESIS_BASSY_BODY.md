@@ -168,6 +168,9 @@ with Aquarium("dante.sqlite3", seed, graph, neural_mode="disabled") as a:
   caller-supplied and **are not authenticated**; they must be guarded by an
   authenticated human-facing service before real deployment. Rename and name
   generation are intentionally unsupported.
+  Installed users can inspect and assign this name through
+  [`python -m mojum.aquarium_identity status|assign`](AQUARIUM_IDENTITY_CLI_R01.md)
+  with an existing journal and an explicit expected head for assignment.
 - Reopening the same aquarium replays naming and age milestones alongside
   frames. Old fixture logs containing only bootstrap, frames and acquisitions
   remain readable. The bootstrapping manifest and genotype v1 hash are

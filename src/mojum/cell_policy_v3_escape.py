@@ -58,6 +58,16 @@ class CellV3EscapeError(ValueError):
     """Invalid snapshot, causal observation or exhausted replay envelope."""
 
 
+def _exact_native_key_set(value, label, maximum):
+    """Validate bounded native dict keys before any hashing or equality."""
+    if type(value) is not dict or len(value) > maximum:
+        raise CellV3EscapeError(f"invalid {label} mapping")
+    keys = tuple(value.keys())
+    if any(type(key) is not str or not key or len(key) > 64 for key in keys):
+        raise CellV3EscapeError(f"invalid {label} mapping keys")
+    return frozenset(keys)
+
+
 def _check_streak_counters(state):
     """Reject streak counters that no real observe() history can produce.
 
@@ -134,6 +144,8 @@ class CellExplorerV3Escape:
         self.forgotten_observations = 0
         self.consecutive_rests = 0
         self.consecutive_blocked_probes = 0
+        self.outcome_tail = []
+        self.history_complete = False
 
     @staticmethod
     def _cell(sense):
@@ -145,7 +157,13 @@ class CellExplorerV3Escape:
             round(sense.y / STEP_METERS),
         )
 
-    def snapshot(self):
+    def journal_snapshot(self):
+        """Return the fixed policy projection hashed by existing journals.
+
+        The chronological tail belongs to the strict standalone snapshot.
+        Journal replay reconstructs it from verified ordered frame outcomes;
+        adding it to this legacy wire projection would change stored digests.
+        """
         return {
             "schema": SCHEMA,
             "cell_size_m": STEP_METERS,
@@ -159,15 +177,45 @@ class CellExplorerV3Escape:
             "consecutive_blocked_probes": self.consecutive_blocked_probes,
         }
 
+    def snapshot(self):
+        return {
+            **self.journal_snapshot(),
+            "snapshot_version": 2,
+            "history_complete": self.history_complete,
+            "outcome_tail": copy.deepcopy(self.outcome_tail),
+        }
+
     @classmethod
     def from_snapshot(cls, state):
-        mandatory = {
+        legacy_mandatory = {
             "schema", "cell_size_m", "last_tick", "updates", "records",
             "last_seen_at", "evictions", "forgotten_observations",
             "consecutive_rests", "consecutive_blocked_probes",
         }
-        if (type(state) is not dict or set(state) != mandatory
+        legacy_keys = _exact_native_key_set(
+            state, "snapshot", len(legacy_mandatory) + 3,
+        )
+        if legacy_keys == frozenset(legacy_mandatory):
+            if (type(state.get("consecutive_rests")) is not int
+                    or type(state.get("consecutive_blocked_probes")) is not int):
+                raise CellV3EscapeError("invalid legacy streak counters")
+            if state["consecutive_rests"] or state["consecutive_blocked_probes"]:
+                raise CellV3EscapeError(
+                    "legacy snapshot lacks chronology evidence for strict streak attestation"
+                )
+            state = dict(state)
+            state["snapshot_version"] = 2
+            state["history_complete"] = False
+            state["outcome_tail"] = []
+        mandatory = legacy_mandatory | {"snapshot_version", "history_complete", "outcome_tail"}
+        if (_exact_native_key_set(state, "snapshot", len(mandatory)) != frozenset(mandatory)
+                or type(state["schema"]) is not str
                 or state["schema"] != SCHEMA
+                or type(state["snapshot_version"]) is not int
+                or state["snapshot_version"] != 2
+                or type(state["history_complete"]) is not bool
+                or type(state["outcome_tail"]) is not list
+                or len(state["outcome_tail"]) > REPROBE_BLOCKED_BEFORE_REST
                 or type(state["cell_size_m"]) is not float
                 or state["cell_size_m"] != STEP_METERS
                 or type(state["last_tick"]) is not int
@@ -177,7 +225,8 @@ class CellExplorerV3Escape:
                 or type(state["records"]) is not dict
                 or type(state["last_seen_at"]) is not dict
                 or not 0 <= len(state["records"]) <= MAX_CELLS
-                or set(state["records"]) != set(state["last_seen_at"])
+                or _exact_native_key_set(state["records"], "records", MAX_CELLS)
+                    != _exact_native_key_set(state["last_seen_at"], "last_seen_at", MAX_CELLS)
                 or type(state["evictions"]) is not int
                 or type(state["forgotten_observations"]) is not int
                 or not 0 <= state["evictions"] <= state["forgotten_observations"]
@@ -197,7 +246,8 @@ class CellExplorerV3Escape:
             if (type(key) is not str or _ZONE.fullmatch(key) is None
                     or any(int(c) > 25000 for c in key.split(":"))
                     or type(actions) is not dict or not actions
-                    or not set(actions) <= set(ACTIONS)):
+                    or not _exact_native_key_set(actions, "actions", len(ACTIONS))
+                        <= frozenset(ACTIONS)):
                 raise CellV3EscapeError("invalid escape cell or action records")
             last_seen = state["last_seen_at"][key]
             if (type(last_seen) is not int
@@ -232,7 +282,6 @@ class CellExplorerV3Escape:
         if state["updates"] == 0 and state["records"]:
             raise CellV3EscapeError("unobserved stored escape cells")
         _check_streak_counters(state)
-
         # Each observation belongs to exactly one cell and tick. A live
         # snapshot must retain the latest observed cell, and an eviction can
         # only happen after the bounded table has first reached capacity.
@@ -256,6 +305,61 @@ class CellExplorerV3Escape:
                     "combined escape cell observations exceed elapsed ticks"
                 )
 
+        tail = state["outcome_tail"]
+        if len(tail) > min(state["updates"], REPROBE_BLOCKED_BEFORE_REST):
+            raise CellV3EscapeError("oversized measured-outcome chronology tail")
+        if state["history_complete"] != (len(tail) == REPROBE_BLOCKED_BEFORE_REST):
+            raise CellV3EscapeError("measured-outcome chronology completeness flag disagrees with tail")
+        tail_counts = {}
+        tail_last_seen = {}
+        for offset, item in enumerate(tail):
+            if _exact_native_key_set(item, "chronology item", 4) != frozenset(
+                {"tick", "cell", "action", "blocked"}
+            ):
+                raise CellV3EscapeError("invalid measured-outcome chronology tail")
+            if (type(item["tick"]) is not int
+                    or item["tick"] != state["last_tick"] - len(tail) + 1 + offset
+                    or type(item["cell"]) is not str
+                    or _ZONE.fullmatch(item["cell"]) is None
+                    or item["cell"] not in state["records"]
+                    or type(item["action"]) is not str
+                    or item["action"] not in ACTIONS
+                    or item["action"] not in state["records"][item["cell"]]
+                    or type(item["blocked"]) is not bool
+                    or (item["action"] == "rest" and item["blocked"])
+                    or state["last_seen_at"][item["cell"]] < item["tick"]):
+                raise CellV3EscapeError("invalid measured-outcome chronology tail")
+            key = (item["cell"], item["action"])
+            counts = tail_counts.setdefault(key, [0, 0])
+            counts[0] += 1
+            counts[1] += int(item["blocked"])
+            tail_last_seen[item["cell"]] = item["tick"]
+        for (cell, action), counts in tail_counts.items():
+            stored = state["records"][cell][action]
+            if (stored[0] < counts[0] or stored[1] < counts[1]
+                    or stored[0] - stored[1] < counts[0] - counts[1]):
+                raise CellV3EscapeError("chronology tail exceeds measured aggregates")
+        first_tail_tick = state["last_tick"] - len(tail) + 1
+        for cell, last_seen in state["last_seen_at"].items():
+            if last_seen >= first_tail_tick and tail_last_seen.get(cell) != last_seen:
+                raise CellV3EscapeError(
+                    "chronology tail disagrees with last observed cell tick"
+                )
+        rest_suffix = 0
+        for item in reversed(tail):
+            if item["action"] == "rest" and not item["blocked"]:
+                rest_suffix += 1
+            else:
+                break
+        blocked_suffix = 0
+        for item in reversed(tail):
+            if item["action"] != "rest" and item["blocked"]:
+                blocked_suffix += 1
+            else:
+                break
+        if (rest_suffix != state["consecutive_rests"]
+                or blocked_suffix != state["consecutive_blocked_probes"]):
+            raise CellV3EscapeError("terminal streak counters disagree with ordered outcomes")
         model = cls()
         model.last_tick = state["last_tick"]
         model.updates = state["updates"]
@@ -265,6 +369,8 @@ class CellExplorerV3Escape:
         model.forgotten_observations = state["forgotten_observations"]
         model.consecutive_rests = state["consecutive_rests"]
         model.consecutive_blocked_probes = state["consecutive_blocked_probes"]
+        model.outcome_tail = copy.deepcopy(state["outcome_tail"])
+        model.history_complete = state["history_complete"]
         return model
 
     def decide(self, sense):
@@ -349,6 +455,11 @@ class CellExplorerV3Escape:
             self.consecutive_blocked_probes = (
                 self.consecutive_blocked_probes + 1 if blocked else 0
             )
+        self.outcome_tail.append({
+            "tick": sense.tick, "cell": cell, "action": action, "blocked": blocked,
+        })
+        del self.outcome_tail[:-REPROBE_BLOCKED_BEFORE_REST]
+        self.history_complete = len(self.outcome_tail) == REPROBE_BLOCKED_BEFORE_REST
         return {
             "schema": LEARNING_SCHEMA,
             "action": action,

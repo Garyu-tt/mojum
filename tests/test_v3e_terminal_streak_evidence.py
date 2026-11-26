@@ -17,7 +17,12 @@ class TerminalStreakEvidenceTests(unittest.TestCase):
         # one cell, latest tick 2, and a real rest observation exists.
         # Only the causal claim of THREE consecutive rests is fabricated.
         state = {
-            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "schema": SCHEMA, "snapshot_version": 2, "history_complete": False,
+            "outcome_tail": [
+                {"tick": 0, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 1, "cell": "0:0", "action": "x+", "blocked": False},
+                {"tick": 2, "cell": "0:0", "action": "rest", "blocked": False},
+            ], "cell_size_m": STEP_METERS,
             "last_tick": 2, "updates": 3,
             "records": {"0:0": {"rest": [1, 0], "x+": [2, 0]}},
             "last_seen_at": {"0:0": 2}, "evictions": 0,
@@ -38,7 +43,11 @@ class TerminalStreakEvidenceTests(unittest.TestCase):
             for tick in range(1, 513)
         }
         state = {
-            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "schema": SCHEMA, "snapshot_version": 2, "history_complete": True,
+            "outcome_tail": [
+                {"tick": tick, "cell": f"{tick}:0", "action": "x+", "blocked": tick == 512}
+                for tick in range(509, 513)
+            ], "cell_size_m": STEP_METERS,
             "last_tick": 512, "updates": 513, "records": records,
             "last_seen_at": {f"{tick}:0": tick for tick in range(1, 513)},
             "evictions": 1, "forgotten_observations": 1,
@@ -52,7 +61,12 @@ class TerminalStreakEvidenceTests(unittest.TestCase):
         # Tick 1 was necessarily a movement, hence ticks 1..2 cannot be
         # consecutive rests even though two older aggregate rests exist.
         state = {
-            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "schema": SCHEMA, "snapshot_version": 2, "history_complete": False,
+            "outcome_tail": [
+                {"tick": 0, "cell": "0:0", "action": "rest", "blocked": False},
+                {"tick": 1, "cell": "1:0", "action": "x+", "blocked": False},
+                {"tick": 2, "cell": "0:0", "action": "rest", "blocked": False},
+            ], "cell_size_m": STEP_METERS,
             "last_tick": 2, "updates": 3,
             "records": {
                 "0:0": {"rest": [2, 0]},
@@ -70,7 +84,12 @@ class TerminalStreakEvidenceTests(unittest.TestCase):
         # Tick 1 was necessarily unblocked; two blocked outcomes in an
         # older cell cannot justify a two-tick terminal blocked streak.
         state = {
-            "schema": SCHEMA, "cell_size_m": STEP_METERS,
+            "schema": SCHEMA, "snapshot_version": 2, "history_complete": False,
+            "outcome_tail": [
+                {"tick": 0, "cell": "0:0", "action": "x+", "blocked": True},
+                {"tick": 1, "cell": "1:0", "action": "y+", "blocked": False},
+                {"tick": 2, "cell": "0:0", "action": "x+", "blocked": True},
+            ], "cell_size_m": STEP_METERS,
             "last_tick": 2, "updates": 3,
             "records": {
                 "0:0": {"x+": [2, 2]},
