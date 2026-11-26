@@ -1,0 +1,42 @@
+name: World acoustics admission QA
+on:
+  pull_request:
+    paths:
+      - "src/mojum/world_acoustics.py"
+      - "tests/test_world_acoustics.py"
+      - "docs/WORLD_ACOUSTICS_R01.md"
+      - ".github/workflows/world-acoustics-qa.yml"
+  push:
+    branches:
+      - "build/1161-world-acoustics-r01"
+    paths:
+      - "src/mojum/world_acoustics.py"
+      - "tests/test_world_acoustics.py"
+      - "docs/WORLD_ACOUSTICS_R01.md"
+      - ".github/workflows/world-acoustics-qa.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact submitted revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Run focused acoustic regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_world_acoustics.py" -v
