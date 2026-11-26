@@ -2,16 +2,19 @@
 
 import copy
 from contextlib import closing
+import gc
 from importlib.resources import files
 import json
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
+import weakref
 
 from mojum.aquarium import Aquarium, AquariumError
-from mojum.motor_mobility import MobilityAuditError, audit_journal, summarize, _verify_motion_transitions
-from mojum.noosphere import NoosphereError
+from mojum.motor_mobility import MobilityAuditError, _committed_start, _verified_motion, audit_journal, summarize
+from mojum.noosphere import NoosphereError, _verify_chain
 
 DATA = files("mojum").joinpath("data")
 SEED = json.loads(DATA.joinpath("genesis_seed.json").read_text(encoding="utf-8"))
@@ -26,11 +29,24 @@ def frame(tick, kind, blocked, position, *, world_blocked=None):
         "interoception": {}, "brain": {}, "learning_observer": None,
         "world": {"blocked": blocked if world_blocked is None else world_blocked,
                   "position": list(position)},
-        "movement_request": {"dx": 0.0, "dy": 0.0},
+        "movement_request": {
+            "east": {"dx": 0.125, "dy": 0.0},
+            "north": {"dx": 0.0, "dy": 0.125},
+            "west": {"dx": -0.125, "dy": 0.0},
+            "south": {"dx": 0.0, "dy": -0.125},
+            "rest": {"dx": 0.0, "dy": 0.0},
+        }[kind],
         "physical_model": "NONE_FIXTURE_ONLY",
         "developmental_controller": {
             "schema": "mojum.developmental.motor-play/1",
-            "intent": {"kind": kind}, "outcome": {"observed_blocked": blocked},
+            "intent": {
+                "kind": kind,
+                **({"east": {"dx": 0.125, "dy": 0.0},
+                   "north": {"dx": 0.0, "dy": 0.125},
+                   "west": {"dx": -0.125, "dy": 0.0},
+                   "south": {"dx": 0.0, "dy": -0.125},
+                   "rest": {"dx": 0.0, "dy": 0.0}}[kind]),
+            }, "outcome": {"observed_blocked": blocked},
             "action_source": "internal_committed_prior_outcomes_only",
             "real_actuation": False,
         },
@@ -90,7 +106,7 @@ class SummarizeTests(unittest.TestCase):
         frames = []
         for tick in range(40):
             position = (0.0, 0.0) if tick % 2 == 0 else (0.125, 0.0)
-            frames.append(frame(tick, "east" if tick % 2 == 0 else "west",
+            frames.append(frame(tick, "west" if tick % 2 == 0 else "east",
                                 False, position))
         report = summarize(manifest(), frames)
         self.assertEqual(report["distinct_positions"], 2)
@@ -136,6 +152,11 @@ class SummarizeTests(unittest.TestCase):
     def test_committed_trajectory_must_match_action_and_initial_position(self):
         data = {**manifest(), "room": {"start": [1.0, 2.0]}}
 
+        def verify(frames):
+            previous = _committed_start(data)
+            for item in frames:
+                _, _, previous = _verified_motion(item, data["motor_policy_schema"], previous)
+
         def action(tick, kind, blocked, position, dx, dy):
             item = frame(tick, kind, blocked, position)
             item["movement_request"] = {"dx": dx, "dy": dy}
@@ -144,7 +165,7 @@ class SummarizeTests(unittest.TestCase):
 
         first = action(0, "east", False, (1.125, 2.0), 0.125, 0.0)
         second = action(1, "north", False, (1.125, 2.125), 0.0, 0.125)
-        _verify_motion_transitions(data, [first, second])
+        verify([first, second])
         report = summarize(data, [first, second])
         self.assertEqual(report["path_length_m"], 0.25)
 
@@ -153,13 +174,15 @@ class SummarizeTests(unittest.TestCase):
                 wrong = copy.deepcopy(first)
                 wrong["world"]["position"] = list(position)
                 with self.assertRaisesRegex(MobilityAuditError, "world position"):
-                    _verify_motion_transitions(data, [wrong])
+                    verify([wrong])
+                with self.assertRaisesRegex(MobilityAuditError, "world position"):
+                    summarize(data, [wrong])
 
         blocked = action(0, "east", True, (1.125, 2.0), 0.125, 0.0)
         resting = action(0, "rest", False, (1.125, 2.0), 0.0, 0.0)
         for bad in (blocked, resting):
             with self.assertRaisesRegex(MobilityAuditError, "world position"):
-                _verify_motion_transitions(data, [bad])
+                verify([bad])
 
         for field in ("movement_request", "intent"):
             wrong = copy.deepcopy(first)
@@ -169,10 +192,10 @@ class SummarizeTests(unittest.TestCase):
                 wrong["developmental_controller"]["intent"]["dx"] = 0.0
             with self.subTest(field=field):
                 with self.assertRaisesRegex(MobilityAuditError, "displacement"):
-                    _verify_motion_transitions(data, [wrong])
+                    verify([wrong])
 
         with self.assertRaisesRegex(MobilityAuditError, "room start"):
-            _verify_motion_transitions(manifest(), [first])
+            _committed_start(manifest())
 
     def test_empty_history_is_explicitly_not_averaged(self):
         report = summarize(manifest(), [])
@@ -255,6 +278,36 @@ class JournalAuditTests(unittest.TestCase):
         unanchored = audit_journal(self.db)
         self.assertEqual(unanchored["integrity"], "chain-checked-not-authenticated")
         self.assertEqual(unanchored["verdict"], report["verdict"])
+
+    def test_audit_releases_unused_frame_payload_before_next_verified_frame(self):
+        with Aquarium(self.db, SEED, GRAPH, motor_mode="developmental_fixture") as aquarium:
+            for _ in range(3):
+                aquarium.step()
+
+        class FrameMarker:
+            pass
+
+        def track_chain(db, owner, *, inspect_event, **options):
+            previous_marker = None
+
+            def track_frame(seq, event):
+                nonlocal previous_marker
+                if previous_marker is not None:
+                    gc.collect()
+                    self.assertIsNone(previous_marker(), "previous decoded frame is still retained")
+                if event["topic"] == "aquarium.frame":
+                    # The chain has verified this payload. Attach a lifetime
+                    # marker to metadata ignored by the motion metrics.
+                    marker = FrameMarker()
+                    event["payload"]["brain"] = marker
+                    previous_marker = weakref.ref(marker)
+                inspect_event(seq, event)
+
+            return _verify_chain(db, owner, inspect_event=track_frame, **options)
+
+        with patch("mojum.motor_mobility._verify_chain", side_effect=track_chain):
+            report = audit_journal(self.db)
+        self.assertEqual(report["frames"], 3)
 
     def test_wrong_external_head_and_scripted_journal_are_rejected(self):
         with Aquarium(self.db, SEED, GRAPH, motor_mode="developmental_fixture") as aquarium:

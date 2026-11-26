@@ -27,6 +27,11 @@ SCHEMA = "mojum.aquarium.mobility-audit/1"
 GATE_SCHEMA = "mojum.aquarium.mobility-gates/1"
 MOVE_KINDS = frozenset(("east", "north", "west", "south"))
 REST_KIND = "rest"
+_MOTOR_STEPS = {
+    "east": (0.125, 0.0), "north": (0.0, 0.125),
+    "west": (-0.125, 0.0), "south": (0.0, -0.125),
+    REST_KIND: (0.0, 0.0),
+}
 
 # Versioned, deliberately conservative thresholds. They flag *silent collapse*,
 # never a policy's right to rest, and are not a quality score.
@@ -115,39 +120,31 @@ def _manifest_policy(manifest):
     }
 
 
-
-def _verify_motion_transitions(manifest, frames):
-    """Check each measured position against the bootstrap start and motor intent.
-
-    Integrity of the SQLite hash chain does not establish that movement fields
-    inside a consistently hashed event are semantically possible.
-    """
+def _committed_start(manifest):
     room = manifest.get("room") if type(manifest) is dict else None
     if type(room) is not dict:
         raise MobilityAuditError("committed room start is missing")
-    previous = _position(room.get("start"))
-    steps = {
-        "east": (0.125, 0.0), "north": (0.0, 0.125),
-        "west": (-0.125, 0.0), "south": (0.0, -0.125),
-        "rest": (0.0, 0.0),
-    }
-    schema = _manifest_policy(manifest)["motor_policy_schema"]
-    for frame in frames:
-        kind, blocked, position = _action_fields(frame, schema)
-        dx, dy = steps[kind]
-        intent = frame["developmental_controller"]["intent"]
-        request = frame["movement_request"]
-        if (type(request) is not dict or set(request) != {"dx", "dy"}
-                or not {"dx", "dy"} <= intent.keys()
-                or any(not _finite(value) for value in
-                       (intent["dx"], intent["dy"], request["dx"], request["dy"]))
-                or (intent["dx"], intent["dy"]) != (dx, dy)
-                or (request["dx"], request["dy"]) != (dx, dy)):
-            raise MobilityAuditError("committed motor displacement mismatch")
+    return _position(room.get("start"))
+
+
+def _verified_motion(frame, schema, previous):
+    """Validate a committed transition and return only its measured motion."""
+    kind, blocked, position = _action_fields(frame, schema)
+    dx, dy = _MOTOR_STEPS[kind]
+    intent = frame["developmental_controller"]["intent"]
+    request = frame["movement_request"]
+    if (type(request) is not dict or set(request) != {"dx", "dy"}
+            or not {"dx", "dy"} <= intent.keys()
+            or any(not _finite(value) for value in
+                   (intent["dx"], intent["dy"], request["dx"], request["dy"]))
+            or (intent["dx"], intent["dy"]) != (dx, dy)
+            or (request["dx"], request["dy"]) != (dx, dy)):
+        raise MobilityAuditError("committed motor displacement mismatch")
+    if previous is not None:
         expected = previous if blocked else (previous[0] + dx, previous[1] + dy)
         if position != expected:
-            raise MobilityAuditError("committed world position disagrees with motor action")
-        previous = position
+            raise MobilityAuditError("measured position: committed world position disagrees with motor action")
+    return kind, blocked, position
 
 
 def summarize(manifest, frames):
@@ -158,18 +155,29 @@ def summarize(manifest, frames):
     if len(frames) > MAX_REPLAY_EVENTS:
         raise MobilityAuditError("mobility audit exceeds its frame limit")
 
+    room = manifest.get("room")
+    previous = _position(room["start"]) if type(room) is dict and "start" in room else None
+
+    def motion_records():
+        nonlocal previous
+        for expected_tick, frame in enumerate(frames):
+            if type(frame) is not dict or type(frame.get("tick")) is not int:
+                raise MobilityAuditError("invalid frame tick")
+            if frame["tick"] != expected_tick:
+                raise MobilityAuditError("frame tick discontinuity")
+            motion = _verified_motion(frame, policy["motor_policy_schema"], previous)
+            previous = motion[2]
+            yield motion
+
+    return _summarize_motion(policy, previous, motion_records())
+
+
+def _summarize_motion(policy, previous, records):
     rest_actions = move_actions = blocked_attempts = successful_moves = 0
     longest_rest_streak = streak = 0
     positions = set()
     path_length = 0.0
-    room = manifest.get("room")
-    previous = _position(room["start"]) if type(room) is dict and "start" in room else None
-    for expected_tick, frame in enumerate(frames):
-        if type(frame) is not dict or type(frame.get("tick")) is not int:
-            raise MobilityAuditError("invalid frame tick")
-        if frame["tick"] != expected_tick:
-            raise MobilityAuditError("frame tick discontinuity")
-        kind, blocked, position = _action_fields(frame, policy["motor_policy_schema"])
+    for kind, blocked, position in records:
         # These are *measured* outcomes, not policy intentions: a rest or
         # blocked motor attempt must not move the point-room body, and a
         # reported successful move must actually change its position.
@@ -195,7 +203,7 @@ def summarize(manifest, frames):
             path_length += math.hypot(position[0] - previous[0], position[1] - previous[1])
         previous = position
 
-    frames_count = len(frames)
+    frames_count = rest_actions + move_actions
     idle_fraction = rest_actions / frames_count if frames_count else 0.0
     xs = [p[0] for p in positions]
     ys = [p[1] for p in positions]
@@ -253,11 +261,12 @@ def summarize(manifest, frames):
 
 def audit_journal(path, *, external_expected_head=None):
     """Stream a read-only journal and summarize its committed motor frames."""
-    manifest = None
-    frames = []
+    policy = None
+    start = previous = None
+    motions = []
 
     def inspect_event(seq, event):
-        nonlocal manifest
+        nonlocal policy, start, previous
         if seq > MAX_REPLAY_EVENTS:
             raise NoosphereError("mobility audit exceeds its event limit")
         if event["source"] != "mojum.aquarium.fixture" or event["visibility"] != "PRIVATE":
@@ -267,15 +276,19 @@ def audit_journal(path, *, external_expected_head=None):
             if topic != "aquarium.bootstrap" or event["event_id"] != "aquarium-bootstrap":
                 raise NoosphereError("first event must bootstrap Aquarium")
             manifest = event["payload"]
+            policy = _manifest_policy(manifest)
+            start = previous = _committed_start(manifest)
         elif topic not in _FRAME_TOPICS:
             raise NoosphereError("unknown Aquarium event topic")
         elif topic == "aquarium.frame":
             frame = event["payload"]
             if type(frame) is not dict or frame.get("schema") != FRAME_SCHEMA:
                 raise NoosphereError("unknown Aquarium frame schema")
-            if type(frame.get("tick")) is not int or frame["tick"] != len(frames):
+            if type(frame.get("tick")) is not int or frame["tick"] != len(motions):
                 raise NoosphereError("invalid Aquarium frame sequence")
-            frames.append(frame)
+            motion = _verified_motion(frame, policy["motor_policy_schema"], previous)
+            motions.append(motion)
+            previous = motion[2]
 
     if external_expected_head is not None and (
         type(external_expected_head) is not str
@@ -293,10 +306,9 @@ def audit_journal(path, *, external_expected_head=None):
             db, owner, external_expected_head=external_expected_head,
             strict_wire=True, inspect_event=inspect_event,
         )
-    if manifest is None:
+    if policy is None:
         raise MobilityAuditError("no committed Aquarium bootstrap")
-    _verify_motion_transitions(manifest, frames)
-    report = summarize(manifest, frames)
+    report = _summarize_motion(policy, start, motions)
     report.update({
         "events": verified["count"],
         "journal_head": verified["head"],
