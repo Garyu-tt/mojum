@@ -68,7 +68,7 @@ class WorktreeTests(unittest.TestCase):
             args = [arg.replace("^{commit}", "^commit") for arg in args]
             result = run(args, **kwargs)
             if "--show-cdup" in args:
-                result.stdout = "../\\n"
+                result.stdout = "../\n"
             return result
 
         subdir = self.repo / "nested"
