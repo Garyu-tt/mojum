@@ -15,21 +15,42 @@ permissions:
 
 jobs:
   budget-private-storage:
-    name: budget-private-storage (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-24.04
+    name: budget-private-storage (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        include:
+          - os: ubuntu-24.04
+            python-version: '3.11'
+          - os: ubuntu-24.04
+            python-version: '3.12'
+          - os: ubuntu-24.04
+            python-version: '3.13'
+          - os: ubuntu-24.04
+            python-version: '3.14'
+          - os: windows-latest
+            python-version: '3.12'
+          - os: windows-latest
+            python-version: '3.14'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Run immutable budget and private SQLite regressions
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONWARNINGS: error::ResourceWarning
         run: |
           python -m unittest discover -s tests -p 'test_spartan_lifetime_budget.py' -v
           python -m unittest discover -s tests -p 'test_spartan_budget_private_storage.py' -v

@@ -264,8 +264,9 @@ class LocalNoosphere:
             raise NoosphereError("database path cannot be a symbolic link")
         if path.is_dir():
             raise NoosphereError("database path cannot be a directory")
-        # Explicit file path required. Not ':memory:' or URI addresses.
-        if not path.name or str(db_path) == ":memory:":
+        # Check the normalized filename passed to SQLite: Path removes dot
+        # components and trailing separators from aliases such as './:memory:'.
+        if not path.name or str(path) == ":memory:":
             raise NoosphereError("a persistent SQLite database file is required")
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
@@ -289,6 +290,17 @@ class LocalNoosphere:
                 if saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
                     raise NoosphereError("read-only journal owner or schema mismatch")
             else:
+                # Refuse an existing foreign/incompatible journal before
+                # changing its persistent journal mode or file permissions.
+                # _setup still rechecks inside its write transaction because
+                # another connection can change metadata after this read.
+                if self._db.execute(
+                    "SELECT 1 FROM sqlite_schema "
+                    "WHERE type IN ('table','view') AND name='metadata' COLLATE NOCASE"
+                ).fetchone():
+                    saved = dict(self._db.execute("SELECT k,v FROM metadata"))
+                    if saved and saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
+                        raise NoosphereError("database schema or agent owner does not match")
                 self._db.execute("PRAGMA synchronous=FULL")
                 self._db.execute("PRAGMA journal_mode=WAL")
                 self._db.execute("PRAGMA foreign_keys=ON")
