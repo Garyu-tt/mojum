@@ -113,11 +113,11 @@ def admit_frame(
     must explicitly establish a new epoch rather than silently reset history.
     """
     value = _exact_dict(raw, _FRAME_KEYS, "frame")
-    if value["schema"] != FRAME_SCHEMA or type(value["schema"]) is not str:
+    if type(value["schema"]) is not str or value["schema"] != FRAME_SCHEMA:
         _fail("unsupported frame schema")
-    if value["visibility"] != PUBLIC_SYNTHETIC or type(value["visibility"]) is not str:
+    if type(value["visibility"]) is not str or value["visibility"] != PUBLIC_SYNTHETIC:
         _fail("frame must be PUBLIC_SYNTHETIC")
-    if value["consent"] != "explicit" or type(value["consent"]) is not str:
+    if type(value["consent"]) is not str or value["consent"] != "explicit":
         _fail("frame requires explicit consent")
 
     source_id = _identifier(value["source_id"], "source_id", MAX_SOURCE_ID_CHARS)
@@ -145,11 +145,29 @@ def admit_frame(
     if previous is not None:
         if type(previous) is not IngressState:
             _fail("previous must be an IngressState")
-        if source_id != previous.source_id or source_revision != previous.source_revision:
+        previous_source = _identifier(
+            previous.source_id, "previous.source_id", MAX_SOURCE_ID_CHARS
+        )
+        previous_revision = _integer(
+            previous.source_revision, "previous.source_revision", 0, MAX_REVISION
+        )
+        previous_sequence = _integer(
+            previous.last_sequence, "previous.last_sequence", 0, MAX_SEQUENCE
+        )
+        previous_tick = _integer(
+            previous.last_tick, "previous.last_tick", 0, MAX_TICK
+        )
+        digest = previous.frame_sha256
+        if (
+            type(digest) is not str or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            _fail("previous.frame_sha256 must be a lowercase SHA-256 digest")
+        if source_id != previous_source or source_revision != previous_revision:
             _fail("source identity/revision changed; start an explicit new stream")
-        if sequence != previous.last_sequence + 1:
+        if previous_sequence == MAX_SEQUENCE or sequence != previous_sequence + 1:
             _fail("sequence must be contiguous with the previous frame")
-        if tick <= previous.last_tick:
+        if tick <= previous_tick:
             _fail("tick must strictly increase")
 
     canonical = {
