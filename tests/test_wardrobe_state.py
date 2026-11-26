@@ -102,6 +102,12 @@ class WardrobeStateTests(unittest.TestCase):
         with self.assertRaisesRegex(WardrobeError, "revision"):
             _verify_state(replace(self.state, revision=HostileStr(self.state.revision)))
 
+    def test_revision_must_be_bounded_lowercase_sha256(self):
+        for malformed in ("0" * 63, "0" * 65, "g" * 64):
+            with self.subTest(length=len(malformed), value=malformed[:2]):
+                with self.assertRaisesRegex(WardrobeError, "bounded lowercase SHA-256"):
+                    _verify_state(replace(self.state, revision=malformed))
+
     def test_sequence_limit_fails_closed_before_emitting_invalid_state(self):
         terminal = _make_state("rig-r1", 2**63 - 2, (), ())
         with self.assertRaisesRegex(WardrobeError, "sequence limit"):
