@@ -1,0 +1,38 @@
+name: Cloth topology exact-head QA
+
+on:
+  push:
+    branches:
+      - build/376-cloth-topology-audit-20261123-1801
+    paths:
+      - "src/mojum/cloth_topology.py"
+      - "tests/test_cloth_topology.py"
+      - ".github/workflows/cloth-topology-exact-head-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact pushed HEAD
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_cloth_topology.py' -v
