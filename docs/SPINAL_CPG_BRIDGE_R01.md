@@ -40,7 +40,7 @@ or privileged future world state.
 ## Run focused tests
 
 ```sh
-python -m unittest tests.test_spinal_cpg_bridge -v
+python -m unittest discover -s tests -p "test_spinal_cpg_bridge.py" -v
 ```
 
 This is a focused adapter contract test only. It does not establish physical
