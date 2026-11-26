@@ -4,6 +4,16 @@
 
 ## Open and edit
 
+With an installed wheel, obtain the complete standalone editor from any
+working directory:
+
+```sh
+python -m mojum.room_designer --output ./room-designer.html
+```
+
+Open that HTML file in your browser. No sibling scripts or source checkout
+are needed. Existing output paths are never overwritten.
+
 Open `tools/room_designer.html` in a modern browser with the three adjacent JS files (`room_designer_core.js`, `room_designer_history.js`, `room_walk_preview.js`). Alternatively generate one portable HTML file:
 
 ```sh
@@ -16,8 +26,36 @@ This emits a NEW no-clobber local HTML file; the output is not signed or remotel
 
 Click **Тест прогулки** and move the blue dot with the directional buttons (0.25 metres per step). The bounded 512-step demonstration enforces the local point-room's closed obstacle edges, swept segment collisions and room walls. It never changes the draft JSON, commits a tick to Aquarium or learns.
 
-## Important integration boundary
+## Run an authored room
 
-The original stacked #163 implementation assumes the typed-room CLI from #151. That code is **not on current main** even though #151 was merged into another feature branch. Consequently this forward-port deliberately **does not advertise or run** `python -m mojum.room_input`, `--new-room-contract`, `--room-numeric-contract` or `--resume-typed-room`. JSON produced here must not be treated as a supported current-main Aquarium CLI input until its separate runtime contract has been integrated and accepted.
+Current Aquarium accepts the exported `mojum.world.point-room-draft/1`
+document through `--room-file`. Validate the file before creating a journal:
 
-The tests on this branch cover Node model/undo/walk, real offline Chrome interactions, packaging, and Python `world_room.advance` motion parity. Cross-language SQLite birth/replay tests stay with the original stacked lineage and must be rerun after a reviewed runtime bridge is forward-ported. This is not MuJoCo, cognition, real sensing or distributed Noosphere.
+```sh
+mojum-room-check ./my-room.json --format json
+mojum-aquarium --db ./custom-room.sqlite3 --room-file ./my-room.json --ticks 120
+```
+
+Pass the same room and runtime modes on every restart, trace export and
+cold-copy operation. Aquarium pins the converted runtime geometry and start;
+it does not pin the original numeric token spelling. The fixed historical
+`local_cell_*` profiles do not accept custom geometry. The editor itself
+remains input-only and cannot edit a running organism.
+
+The older stacked #163/#151 commands (`mojum.room_input`, `--new-room-contract`,
+`--room-numeric-contract`, `--resume-typed-room`) remain outside this supported
+flow. This is a synthetic 2D point-room, not MuJoCo or physical contact.
+
+## Packaged asset maintenance
+
+The four `tools/room_designer*` / `tools/room_walk_preview.js` sources and
+`tools/package_room_designer.py` remain canonical. Generate the single
+packaged `src/mojum/data/room_designer.html` with that packer's
+`standalone_html()` function after changing them. The package regression
+regenerates the bundle and requires exact byte equality.
+
+Tests cover the Node model/undo/walk, offline browser interactions, exclusive
+packaging and Python motion parity. The package integration additionally runs
+the bundled JavaScript model's JSON export through real Python room validation,
+Aquarium creation and cold resume. Node model execution does not establish
+browser rendering behavior; the separate real-Chrome workflow remains its gate.

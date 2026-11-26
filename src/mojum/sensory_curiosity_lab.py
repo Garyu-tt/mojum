@@ -12,10 +12,11 @@ import argparse
 import copy
 from dataclasses import dataclass
 import json
+from importlib.resources import files
 import math
 from pathlib import Path
 
-from .graph import validate as validate_graph
+from .graph import GraphError, load_graph, validate as validate_graph
 from .noosphere import EVENT_SCHEMA, LocalNoosphere, _read_first_event
 from .sim import Simulation, digest
 from .world_room import Room, advance, initial_state
@@ -35,7 +36,7 @@ class CuriosityError(ValueError):
 
 
 def _finite(value):
-    if type(value) not in (int, float):
+    if type(value) is not int and type(value) is not float:
         return False
     try:
         return math.isfinite(value)
@@ -402,13 +403,17 @@ class SensoryPlay:
         return copy.deepcopy(payload)
 
     def _replay(self):
-        self.store.verify_chain()
-        n = self.store.count()
+        verified = self.store.verify_chain()
+        n = verified["count"]
         if n > MAX_EVENTS:
             raise CuriosityError("oversized sensory replay journal")
         rows = self.store.dataset(include_nonpublic=True, limit=MAX_EVENTS)["projection"]["items"]
-        if len(rows) != n or not rows:
+        if not rows:
             raise CuriosityError("incomplete sensory journal")
+        # Verification and projection are separate reads. Never rebuild state
+        # from a different revision than the chain that was actually checked.
+        if len(rows) != n or rows[-1]["event_hash"] != verified["head"]:
+            raise CuriosityError("sensory journal advanced during replay; reopen")
         if rows[0]["event"] != self._event(
             "sensory.bootstrap", "sensory-bootstrap", self.manifest, 0,
         ):
@@ -423,11 +428,12 @@ class SensoryPlay:
                 raise CuriosityError("sensory experience replay mismatch")
             self.world, self.model, self.rng = world, model, rng
             self.tick += 1
+        if self.store.head() != verified["head"]:
+            raise CuriosityError("sensory journal advanced during replay; reopen")
+        self._committed_head = verified["head"]
 
     def checkpoint(self):
-        if self.store.head() != self._committed_head:
-            raise CuriosityError("stale sensory checkpoint: journal head advanced")
-        return {
+        state = {
             "schema": "mojum.sensory-curiosity.checkpoint/1",
             "agent_id": self.agent_id, "tick": self.tick,
             "world_revision": self.world.revision,
@@ -435,27 +441,38 @@ class SensoryPlay:
             "rng": self.rng, "head": self._committed_head,
             "integrity": "local_checksum_not_authenticated",
         }
+        if self.store.head() != self._committed_head:
+            raise CuriosityError("stale sensory checkpoint: journal head advanced")
+        return state
 
 
 def main():
     p = argparse.ArgumentParser(description="CPU-only numeric sensory curiosity fixture")
-    root = Path(__file__).resolve().parents[2]
+    packaged = files("mojum").joinpath("data")
     p.add_argument("--db", type=Path, required=True)
-    p.add_argument("--graph", type=Path, default=root / "examples/first_loop.json")
+    p.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
     p.add_argument("--ticks", type=int, default=120)
     p.add_argument("--watch", action="store_true",
                    help="emit synthetic PRIVATE numeric evidence to local stdout")
     args = p.parse_args()
     if not 0 <= args.ticks <= 1000:
         p.error("--ticks must be within 0..1000")
-    with SensoryPlay(args.db, json.loads(args.graph.read_text(encoding="utf-8"))) as baby:
+    try:
+        graph = load_graph(args.graph)
+        validate_graph(graph)
+    except GraphError as exc:
+        p.error(f"invalid graph input: {exc}")
+    with SensoryPlay(args.db, graph) as baby:
         for _ in range(args.ticks):
             row = baby.step()
             if args.watch:
                 print(json.dumps(row, sort_keys=True, ensure_ascii=False, allow_nan=False),
                       flush=True)
-        print(json.dumps({"checkpoint": baby.checkpoint(),
-                          "private_events": baby.store.count()},
+        checkpoint = baby.checkpoint()
+        # One bootstrap plus one frame per tick, from this same checkpoint.
+        # A separate live count could include another writer's later append.
+        print(json.dumps({"checkpoint": checkpoint,
+                          "private_events": checkpoint["tick"] + 1},
                          ensure_ascii=False, sort_keys=True, allow_nan=False))
 
 

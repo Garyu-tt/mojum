@@ -4,6 +4,12 @@ set -euo pipefail
 umask 077
 unset PYTHONPATH PYTHONHOME
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd)
+comparison_repo=
+if [[ -n ${2:-} ]]; then
+    comparison_repo=$(cd -- "$2" && pwd)
+    : "${SOURCE_DATE_EPOCH:?supply a fixed source timestamp to compare wheel builds}"
+fi
+release_tag=${3:-}
 mkdir -- "${1:?supply a new working directory for the smoke test}"
 cd -- "$1"
 
@@ -16,17 +22,27 @@ if interfaces != {"lo"}:
     raise SystemExit(f"offline smoke requires a loopback-only namespace, found {interfaces}")
 PY
 
-python -I -m pip --isolated --disable-pip-version-check wheel --no-index --no-deps \
-    --no-build-isolation --no-cache-dir --wheel-dir wheels "$repo"
+build_wheel() {
+    python -I -m pip --isolated --disable-pip-version-check wheel --no-index --no-deps \
+        --no-build-isolation --no-cache-dir --wheel-dir "$1" "$2"
+}
+
+build_wheel wheels "$repo"
+if [[ -n $comparison_repo ]]; then
+    build_wheel comparison-wheels "$comparison_repo"
+    cmp -- wheels/mojum-*.whl comparison-wheels/mojum-*.whl
+fi
 python -I -m venv runtime
 runtime/bin/python -I -m pip --isolated --disable-pip-version-check install \
     --no-index --no-cache-dir wheels/mojum-*.whl
 
-runtime/bin/python -I - <<'PY'
+runtime/bin/python -I - "$repo/LICENSE" "$release_tag" <<'PY'
+import hashlib
 import json
 import subprocess
 import sys
 import sysconfig
+from importlib.metadata import distribution
 from importlib.resources import files
 from pathlib import Path
 
@@ -38,7 +54,36 @@ def run(script, *args):
     return json.loads(subprocess.check_output(command, text=True))
 
 
+def run_module(module, *args):
+    command = [sys.executable, "-I", "-m", module, *args]
+    return json.loads(subprocess.check_output(command, text=True, timeout=60))
+
+
 assert Path(mojum.__file__).resolve().is_relative_to(Path(sysconfig.get_path("purelib")).resolve())
+installed = distribution("mojum")
+tag = sys.argv[2]
+if tag and tag != f"v{installed.version}":
+    raise SystemExit(f"release tag {tag!r} does not match installed version {installed.version!r}")
+assert installed.metadata["License-Expression"] == "GPL-3.0-or-later"
+assert installed.metadata.get_all("License-File") == ["LICENSE"]
+licenses = [path for path in installed.files or () if path.parts[-2:] == ("licenses", "LICENSE")]
+assert len(licenses) == 1
+assert installed.locate_file(licenses[0]).read_bytes() == Path(sys.argv[1]).read_bytes()
+
+# The wheel supplies the standalone observer without a source checkout.
+viewer = run_module("mojum.trace_viewer", "--output", "viewer.html")
+viewer_bytes = Path("viewer.html").read_bytes()
+assert viewer_bytes == files("mojum").joinpath("data", "aquarium_trace_viewer.html").read_bytes()
+assert viewer_bytes == (Path(sys.argv[1]).parent / "examples" / "aquarium_trace_viewer.html").read_bytes()
+assert viewer == {"schema": "mojum.trace-viewer.export/1", "bytes": len(viewer_bytes),
+                  "sha256": hashlib.sha256(viewer_bytes).hexdigest()}
+occupied_viewer = subprocess.run(
+    [sys.executable, "-I", "-m", "mojum.trace_viewer", "--output", "viewer.html"],
+    capture_output=True, text=True, timeout=20,
+)
+assert occupied_viewer.returncode == 2 and occupied_viewer.stdout == ""
+assert Path("viewer.html").read_bytes() == viewer_bytes
+
 first = run("mojum-aquarium", "--db", "resumed.sqlite3", "--ticks", "120")
 assert (first["tick"], first["stored_events"], first["neural_mode"]) == (120, 121, "shadow")
 resumed = run("mojum-aquarium", "--db", "resumed.sqlite3", "--ticks", "30")
@@ -115,6 +160,74 @@ custom = run("mojum-fixture", "bright.json", "--ticks", "2")
 assert custom["last_episode"]["brain_observation"]["world_light"] == "bright"
 assert custom["graph_sha256"] != fixture["graph_sha256"]
 
+# Experimental labs are distributed in the same wheel. They must read the
+# packaged defaults without a source checkout, including on cold restart.
+for module, basename, events_key in (
+    ("mojum.infant_play", "infant", "events"),
+    ("mojum.sensory_curiosity_lab", "curiosity", "private_events"),
+):
+    journal = f"{basename}.sqlite3"
+    started = run_module(module, "--db", journal, "--ticks", "2")
+    assert (started["checkpoint"]["tick"], started[events_key]) == (2, 3)
+    resumed_lab = run_module(module, "--db", journal, "--ticks", "1")
+    assert (resumed_lab["checkpoint"]["tick"], resumed_lab[events_key]) == (3, 4)
+    assert resumed_lab == run_module(
+        module, "--db", f"{basename}-continuous.sqlite3", "--ticks", "3",
+    )
+
+twins = run_module(
+    "mojum.twin_lab", "pair", "--left-db", "twin-left.sqlite3",
+    "--right-db", "twin-right.sqlite3", "--left-id", "wheel-twin-left",
+    "--right-id", "wheel-twin-right",
+)
+assert [(t["agent_id"], t["tick"], t["stored_events"]) for t in twins["twins"]] == [
+    ("wheel-twin-left", 0, 1), ("wheel-twin-right", 0, 1),
+]
+mentor_options = ("mentor", "--db", "twin-left.sqlite3",
+                  "--agent-id", "wheel-twin-left")
+mentored = run_module("mojum.twin_lab", *mentor_options, "--ticks", "2")
+continued_twin = run_module("mojum.twin_lab", *mentor_options, "--ticks", "1")
+assert (mentored["twin"]["tick"], mentored["twin"]["stored_events"]) == (2, 3)
+assert (continued_twin["twin"]["tick"], continued_twin["twin"]["stored_events"]) == (3, 4)
+assert continued_twin["shared_heritable_sha256"] == twins["shared_heritable_sha256"]
+assert run_module("mojum.twin_lab", *mentor_options, "--ticks", "0") == continued_twin
+untouched_twin = run_module(
+    "mojum.twin_lab", "mentor", "--db", "twin-right.sqlite3",
+    "--agent-id", "wheel-twin-right", "--ticks", "0",
+)
+assert (untouched_twin["twin"]["tick"], untouched_twin["twin"]["stored_events"]) == (0, 1)
+
+# Wheel-only room authoring supplies the complete editor with no sibling JS.
+designer = run_module("mojum.room_designer", "--output", "room-designer.html")
+designer_bytes = Path("room-designer.html").read_bytes()
+assert designer_bytes == files("mojum").joinpath("data", "room_designer.html").read_bytes()
+assert designer["schema"] == "mojum.room-designer.export/1"
+assert designer["bytes"] == len(designer_bytes)
+from hashlib import sha256
+assert designer["sha256"] == sha256(designer_bytes).hexdigest()
+occupied_designer = subprocess.run(
+    [sys.executable, "-I", "-m", "mojum.room_designer", "--output", "room-designer.html"],
+    capture_output=True, text=True, timeout=20,
+)
+assert occupied_designer.returncode == 2 and occupied_designer.stdout == ""
+assert Path("room-designer.html").read_bytes() == designer_bytes
+# This exact default draft is covered by the real editor-core JSON tests.
+Path("authored-room.json").write_bytes(
+    (Path(sys.argv[1]).parent / "examples" / "room_simple_mixed.json").read_bytes()
+)
+assert run("mojum-room-check", "authored-room.json", "--format", "json")["valid"]
+room_options = ("--room-file", "authored-room.json", "--neural-mode", "disabled")
+room_start = run("mojum-aquarium", "--db", "authored.sqlite3", "--ticks", "2", *room_options)
+room_resume = run("mojum-aquarium", "--db", "authored.sqlite3", "--ticks", "1", *room_options,
+                  "--expected-head", room_start["journal_head"])
+assert (room_resume["tick"], room_resume["stored_events"]) == (3, 4)
+assert room_resume == run("mojum-aquarium", "--db", "authored-control.sqlite3",
+                          "--ticks", "3", *room_options)
+
 print(f'Offline wheel verified: {resumed["tick"]} ticks, {resumed["stored_events"]} events, '
       f'journal head {resumed["journal_head"]}')
 PY
+
+# Exercise the authored-room host, journaled development and both export CLIs
+# through the installed package; -I also isolates each test's CLI subprocess.
+runtime/bin/python -I "$repo/tests/test_installed_aquarium_workflow.py" -v
