@@ -1,11 +1,14 @@
 """Credential-free Spartan budget tests; uses only Python stdlib."""
 import concurrent.futures
-from contextlib import closing
+from contextlib import closing, redirect_stderr, redirect_stdout
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,17 +17,45 @@ if str(ROOT) not in sys.path:
 from tools import spartan_budget as budget
 
 
+class _NonPosixBehaviorPath(os.PathLike):
+    """Open a disposable DB while bypassing POSIX-only owner probes in tests."""
+
+    def __init__(self, path):
+        self._real = os.fspath(path)
+
+    def __fspath__(self):
+        return self._real
+
+    def __add__(self, suffix):
+        # sqlite3.connect() consumes __fspath__ and opens the real test DB.
+        # The production post-open privacy check constructs paths with `+`;
+        # redirect those probes to absent names because Windows has no UID or
+        # POSIX mode contract. Real production calls are tested unpatched.
+        return self._real + ".nonposix-owner-probe" + suffix
+
+
 class BudgetTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "budget.sqlite3"
+
+        # Production storage deliberately fails closed outside POSIX. Replace
+        # only the module-private path gate here so the platform-independent
+        # ledger state machine remains covered on Windows. The real connector
+        # and subprocess CLI have separate fail-closed regressions below.
+        if os.name != "posix":
+            gate = mock.patch.object(
+                budget, "_private_ledger_path",
+                side_effect=_NonPosixBehaviorPath,
+            )
+            gate.start()
+            self.addCleanup(gate.stop)
+
         self.db = budget.connect(self.path)
+        self.addCleanup(self.db.close)
         budget.schema(self.db)
         budget.configure(self.db, 100, 900)
-
-    def tearDown(self):
-        self.db.close()
-        self.temp.cleanup()
 
     def test_first_reservation_allows_dispatch_once(self):
         one = budget.reserve(self.db, "request-1", 1, 30, 90)
@@ -156,7 +187,20 @@ class BudgetTests(unittest.TestCase):
         path = str(Path(self.temp.name) / "cli.sqlite3")
         cmd = [sys.executable, str(ROOT / "tools" / "spartan_budget.py"), "--db", path]
         def run(*args):
-            return subprocess.run(cmd + list(args), capture_output=True, text=True)
+            if os.name == "posix":
+                return subprocess.run(
+                    cmd + list(args), capture_output=True, text=True, timeout=10
+                )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            try:
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    returncode = budget.main(["--db", path, *args])
+            except SystemExit as exc:
+                returncode = exc.code
+            return subprocess.CompletedProcess(
+                cmd + list(args), returncode, stdout.getvalue(), stderr.getvalue()
+            )
         self.assertEqual(run("init", "--tokens", "3", "--micro-usd", "0").returncode, 0)
         a = run("reserve", "--id", "r", "--worker", "2", "--tokens", "2", "--micro-usd", "0")
         self.assertTrue(json.loads(a.stdout)["dispatch_allowed"])
@@ -164,6 +208,71 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(run("reserve", "--id", "too-big", "--worker", "1", "--tokens", "2", "--micro-usd", "0").returncode, 2)
         self.assertEqual(run("settle", "--id", "r", "--worker", "2", "--actual-tokens", "1", "--actual-micro-usd", "0").returncode, 0)
         self.assertEqual(json.loads(run("status").stdout)["debited_tokens"], 2)
+
+
+class PlatformGateTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "posix", "non-POSIX fail-closed contract")
+    def test_real_connect_fails_closed_without_filesystem_side_effects(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "budget.sqlite3"
+
+            with self.assertRaises(budget.BudgetError) as raised:
+                budget.connect(path)
+
+            self.assertIs(type(raised.exception), budget.BudgetError)
+            self.assertEqual(
+                str(raised.exception), "private POSIX ledger storage is required"
+            )
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipIf(os.name == "posix", "non-POSIX fail-closed contract")
+    def test_real_cli_fails_closed_without_traceback_or_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "budget.sqlite3"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "spartan_budget.py"),
+                    "--db",
+                    str(path),
+                    "init",
+                    "--tokens",
+                    "3",
+                    "--micro-usd",
+                    "0",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(
+                result.stderr,
+                "budget denied: private POSIX ledger storage is required\n",
+            )
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_setup_failure_runs_registered_cleanup(self):
+        case = BudgetTests("test_first_reservation_allows_dispatch_once")
+
+        with mock.patch.object(
+            budget, "connect", side_effect=RuntimeError("forced setup failure")
+        ):
+            result = unittest.TestResult()
+            case.run(result)
+
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("forced setup failure", result.errors[0][1])
+        self.assertEqual(result.failures, [])
+        self.assertFalse(Path(case.temp.name).exists())
 
 
 if __name__ == "__main__":

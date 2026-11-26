@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+from importlib.resources import files
 import math
 import os
 from pathlib import Path
@@ -55,21 +56,7 @@ def _reserve_new_path(path):
         raise AquariumError("refusing an existing or symlinked journal") from exc
     except OSError as exc:
         raise AquariumError("cannot exclusively reserve a new twin journal") from exc
-    try:
-        stat = os.fstat(fd)
-        return stat.st_dev, stat.st_ino
-    finally:
-        os.close(fd)
-
-
-def _undo_reservation(path, identity):
-    """Undo only our empty reservation if the second exclusive create failed."""
-    try:
-        stat = path.lstat()
-        if (stat.st_dev, stat.st_ino) == identity and path.is_file():
-            path.unlink()
-    except FileNotFoundError:
-        pass
+    os.close(fd)
 
 
 def _summary(a):
@@ -82,6 +69,7 @@ def create_pair(left_db, right_db, left_id, right_id, template, graph):
     """Initialize independent zero-step organisms, never an existing journal.
 
     Creation is only atomic *per SQLite database*, not across both files.
+    Published reservations remain on failure; inspect both paths before retry.
     """
     template = validate_seed(template)
     left_seed = _seed_for(template, left_id)
@@ -98,14 +86,11 @@ def create_pair(left_db, right_db, left_id, right_id, template, graph):
     # first so a competing creator cannot insert a journal after preflight.
     # This is not a cross-file transaction or protection from a hostile
     # process with the same account's write permissions.
-    reserved = []
-    try:
-        for path in (left_db, right_db):
-            reserved.append((path, _reserve_new_path(path)))
-    except BaseException:
-        for path, identity in reversed(reserved):
-            _undo_reservation(path, identity)
-        raise
+    # Once a name is visible, another ordinary Aquarium writer may open and
+    # populate it. Even checking its inode and size cannot make a later
+    # unlink safe, so retain partial reservations if the next create fails.
+    for path in (left_db, right_db):
+        _reserve_new_path(path)
     with Aquarium(left_db, left_seed, graph, agent_id=left_id) as left:
         with Aquarium(right_db, right_seed, graph, agent_id=right_id) as right:
             return {
@@ -148,7 +133,7 @@ def mentor_steps(db, agent_id, template, graph, *, ticks, dx, dy):
 
 def main():
     parser = argparse.ArgumentParser(description="Mojum offline synthetic twin lab")
-    root = Path(__file__).resolve().parents[2]
+    packaged = files("mojum").joinpath("data")
     commands = parser.add_subparsers(dest="command", required=True)
     pair = commands.add_parser("pair", help="create two new private local journals")
     for flag in ("left", "right"):
@@ -162,9 +147,9 @@ def main():
     mentor.add_argument("--dy", type=float, default=0.0)
     for command in (pair, mentor):
         command.add_argument("--genome", type=Path,
-                             default=root / "examples/genesis_seed.json")
+                             default=packaged.joinpath("genesis_seed.json"))
         command.add_argument("--graph", type=Path,
-                             default=root / "examples/first_loop.json")
+                             default=packaged.joinpath("first_loop.json"))
     args = parser.parse_args()
     template = json.loads(args.genome.read_text(encoding="utf-8"))
     graph = json.loads(args.graph.read_text(encoding="utf-8"))

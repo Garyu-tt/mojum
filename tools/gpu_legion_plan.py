@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 from functools import lru_cache
+from importlib.util import module_from_spec, spec_from_file_location
 import itertools
 import json
 import os
@@ -17,6 +18,16 @@ import re
 import stat
 import subprocess
 import sys
+
+if __package__:
+    from . import _json_input
+else:
+    # Isolated Python omits the script directory from its import search path.
+    _json_spec = spec_from_file_location(
+        "_json_input", Path(__file__).resolve().with_name("_json_input.py"),
+    )
+    _json_input = module_from_spec(_json_spec)
+    _json_spec.loader.exec_module(_json_input)
 
 MAX_GPUS = 32
 MAX_INPUT_BYTES = 65536
@@ -40,12 +51,13 @@ def _unique_keys(pairs):
 
 
 
-def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
+def _optimal_placement(devices, model_mib, reserve_mib, max_gpus, max_replicas=32):
     """Exact, deterministic maximum-replica set packing for at most 12 GPUs.
 
     The old smallest-cardinality-first greedy selection can strand small
     devices: 9+9 GiB occupies both large GPUs, although 9+3+3 twice fits.
-    Cache by used-device mask and allow skipping a device entirely.
+    Cache by used-device mask and remaining replica budget. Optimize the
+    requested plan directly: truncating a larger optimum can waste cards.
     """
     indices = sorted(devices)
     if len(indices) > 12:
@@ -62,11 +74,13 @@ def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
         )
 
     @lru_cache(maxsize=None)
-    def search(mask):
+    def search(mask, remaining_replicas):
+        if remaining_replicas == 0:
+            return ()
         first = next((i for i in range(n) if not mask & (1 << i)), None)
         if first is None:
             return ()
-        best = search(mask | (1 << first))
+        best = search(mask | (1 << first), remaining_replicas)
         remaining = [i for i in range(first + 1, n) if not mask & (1 << i)]
         for count in range(1, min(max_gpus, len(remaining) + 1) + 1):
             for tail in itertools.combinations(remaining, count - 1):
@@ -75,12 +89,13 @@ def _optimal_placement(devices, model_mib, reserve_mib, max_gpus):
                 if sum(usable[i] for i in candidate_group) < model_mib:
                     continue
                 group_mask = sum(1 << i for i in positions)
-                candidate = (candidate_group,) + search(mask | group_mask)
+                candidate = (candidate_group,) + search(mask | group_mask,
+                                                        remaining_replicas - 1)
                 if score(candidate) < score(best):
                     best = candidate
         return best
 
-    return search(0)
+    return search(0, min(max_replicas, n))
 
 
 def validate_inventory(data):
@@ -162,7 +177,10 @@ def load_inventory(path):
     if len(raw) > MAX_INPUT_BYTES:
         raise InventoryError("GPU inventory exceeds 64 KiB")
     try:
-        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+        text = raw.decode("utf-8")
+        if _json_input.exceeds_json_depth(text):
+            raise InventoryError("GPU inventory JSON exceeds parser limits")
+        data = json.loads(text, object_pairs_hook=_unique_keys)
     except (RecursionError, ValueError) as exc:
         # A <64 KiB JSON document can still contain tens of thousands of
         # nested arrays, or a numeric token that exceeds Python integer
@@ -219,9 +237,10 @@ def plan(data, gpus, *, model_mib=DEFAULT_MODEL_MIB, reserve_mib=DEFAULT_RESERVE
         raise InventoryError("invalid model path")
 
     unused = {gpu["index"]: gpu for gpu in gpus if gpu["supported"]}
-    # Exact maximum-replica placement is bounded at 12 devices (4096 masks).
+    # Exact placement is bounded at 12 devices (4096 masks, <=12 replica slots).
     # Larger fleets retain a deterministic greedy estimate, explicitly labeled.
-    exact_groups = (_optimal_placement(unused, model_mib, reserve_mib, max_gpus)
+    exact_groups = (_optimal_placement(unused, model_mib, reserve_mib, max_gpus,
+                                       max_replicas)
                     if len(unused) <= 12 else None)
     groups = []
     while len(groups) < max_replicas:

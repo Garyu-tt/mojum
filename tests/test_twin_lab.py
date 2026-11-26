@@ -92,7 +92,7 @@ class TwinLabTests(unittest.TestCase):
             with self.assertRaisesRegex(AquariumError, "existing"):
                 self.pair()
         self.assertEqual(self.right.read_bytes(), foreign_bytes)
-        self.assertFalse(self.left.exists())
+        self.assertEqual(self.left.read_bytes(), b"")
         self.assertFalse(Path(str(self.right) + "-wal").exists())
 
     def test_mentor_validation_prevents_partial_append(self):

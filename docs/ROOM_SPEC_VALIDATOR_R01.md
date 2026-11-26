@@ -12,6 +12,13 @@ PYTHONPATH=src python3 -m mojum.room_spec room.json --format json
 
 Exit codes: `0` valid, `1` invalid or unreadable document, `2` CLI usage error.
 
+The CLI accepts regular files and symlinks to regular files. It checks the
+opened descriptor before reading, rejects pipes, devices and other special
+files, and reads at most 256 KiB plus one byte to detect an oversized input.
+On POSIX, opening uses nonblocking mode so a writerless FIFO is rejected
+without waiting for a writer. Invalid inputs retain the selected text or JSON
+report format and exit with code `1`.
+
 ## Why number tokens matter
 
 Legacy bootstrap manifests hash the *exact* JSON spelling of the built-in
