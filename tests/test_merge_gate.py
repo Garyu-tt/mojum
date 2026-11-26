@@ -777,7 +777,7 @@ class CliTests(unittest.TestCase):
 
     def test_pr_mode_uses_gh_and_reports_snapshot(self):
         view = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=json.dumps(self.snapshot()), stderr=""
+            args=[], returncode=0, stdout=json.dumps(self.snapshot()).encode("utf-8"), stderr=b""
         )
         pull = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=json.dumps({
@@ -788,10 +788,11 @@ class CliTests(unittest.TestCase):
                     "sha": BASE,
                     "repo": {"full_name": "Garyu-tt/mojum"},
                 },
-            }), stderr="",
+            }).encode("utf-8"), stderr=b"",
         )
         current = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=json.dumps({"object": {"sha": BASE}}), stderr=""
+            args=[], returncode=0, stdout=json.dumps({"object": {"sha": BASE}}).encode("utf-8"),
+            stderr=b"",
         )
         with mock.patch(
             "mojum.merge_gate.subprocess.run", side_effect=[view, pull, current]
@@ -818,7 +819,7 @@ class CliTests(unittest.TestCase):
 
     def test_pr_mode_rejects_a_head_that_changes_between_queries(self):
         view = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=json.dumps(self.snapshot()), stderr=""
+            args=[], returncode=0, stdout=json.dumps(self.snapshot()).encode("utf-8"), stderr=b""
         )
         pull = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=json.dumps({
@@ -829,7 +830,7 @@ class CliTests(unittest.TestCase):
                     "sha": BASE,
                     "repo": {"full_name": "Garyu-tt/mojum"},
                 },
-            }), stderr="",
+            }).encode("utf-8"), stderr=b"",
         )
         with mock.patch(
             "mojum.merge_gate.subprocess.run", side_effect=[view, pull]
@@ -844,7 +845,7 @@ class CliTests(unittest.TestCase):
 
     def test_pr_mode_rejects_base_retarget_between_queries(self):
         view = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=json.dumps(self.snapshot()), stderr=""
+            args=[], returncode=0, stdout=json.dumps(self.snapshot()).encode("utf-8"), stderr=b""
         )
         pull = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=json.dumps({
@@ -855,7 +856,7 @@ class CliTests(unittest.TestCase):
                     "sha": BASE,
                     "repo": {"full_name": "Garyu-tt/mojum"},
                 },
-            }), stderr="",
+            }).encode("utf-8"), stderr=b"",
         )
         with mock.patch(
             "mojum.merge_gate.subprocess.run", side_effect=[view, pull]
@@ -871,7 +872,7 @@ class CliTests(unittest.TestCase):
 
     def test_pr_mode_failure_is_invalid_input(self):
         completed = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="not found"
+            args=[], returncode=1, stdout=b"", stderr=b"not found"
         )
         with mock.patch("mojum.merge_gate.subprocess.run", return_value=completed):
             code, result, _ = self.invoke(

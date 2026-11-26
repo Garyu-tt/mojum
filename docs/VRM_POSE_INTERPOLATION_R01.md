@@ -7,6 +7,7 @@ This optional stdlib utility interpolates between two **already measured** pose 
 - Input schema: `mojum.vrm-measured-pose/1`; output schema: `mojum.vrm-pose-interpolation/1`.
 - Both inputs must be exact native dictionaries marked `PUBLIC_SYNTHETIC`, with the same body epoch, rig revision, coordinate system and exact joint inventory.
 - Source timestamps must be strictly increasing. The requested timestamp must lie within the closed source interval; extrapolation is rejected.
+- At either endpoint, output coordinates preserve the admitted source floats exactly, including signed zero. Interior coordinates are interpolated from the nearer endpoint using integer timestamp distances, avoiding loss of a small representable residual near the second frame. The `ratio` field remains an approximate float and may round to `1.0` at an interior timestamp in a very long interval; the original integer timestamps determine endpoint selection.
 - Joint coordinates are finite bounded metre-space XYZ triples. Every per-joint component delta must remain within the caller-supplied discontinuity bound.
 - Joint names are sorted for deterministic output. Output is detached and immutable; its SHA-256 digest is a consistency witness only, not authentication.
 
