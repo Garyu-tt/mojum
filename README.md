@@ -57,7 +57,13 @@ checked on input, but the stored Aquarium manifest pins converted Python
 float geometry, **not a hash of the original draft bytes**. This remains a
 synthetic 2D point-room, not MuJoCo or physical contact. The legacy
 fixed-room `local_cell_*` modes intentionally refuse custom rooms. The
-portable foreground host has not yet gained `--room-file` support.
+portable foreground host also accepts `--room-file` with its developmental
+profile; see [paced custom-room startup and replay](docs/PORTABLE_HOST_ROOM_DRAFT_R01.md).
+
+For an Aquarium CLI journal created with a room draft, pass the same `--room-file` and
+runtime modes to `python -m mojum.aquarium_trace_export` and both
+`python -m mojum.aquarium_cold_copy` subcommands (`export` and `verify`).
+Replay checks the room geometry and start position against the journal.
 
 The editor itself is input-only and does not edit a running organism.
 
@@ -237,7 +243,7 @@ The fixture does not need an Internet connection, a GPU, Node.js, Node-RED, or M
 With CPython 3.11+ and a locally built Mojum wheel, install into a virtual environment and run from any working directory:
 
 ```sh
-python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+python -m pip install --no-index ./mojum-0.1.2-py3-none-any.whl
 mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 120
 mojum-aquarium --db ./dante_fixture.sqlite3 --ticks 30
 ```
@@ -346,7 +352,7 @@ Aquarium manifest, CLI motor modes, SQLite wire format or existing journals.
 
 Five equal peers work through scoped GitHub issues and PRs, independent review, reproducible CPU tests, and final-head CI. Do not treat a green stacked branch as a released feature. No secrets, infrastructure addresses, or private memories belong in this public repository. Physical actuation is disabled and no snapshot may reset an emergency stop.
 
-**License:** undecided; repository visibility does not grant a license.
+Mojum is licensed under the GNU General Public License version 3 or any later version (`GPL-3.0-or-later`). [Full license text](LICENSE)
 
 ## Offline trace import safety
 

@@ -13,6 +13,8 @@ on:
       - "tests/room_walk_preview.test.cjs"
       - "tests/test_room_walk_python_parity.py"
       - "tests/room_designer_browser_smoke.cjs"
+      - "tests/chrome_startup.cjs"
+      - "tests/chrome_startup.test.cjs"
       - "examples/room_simple_mixed.json"
       - "docs/R015_VISUAL_ROOM_DESIGNER.md"
       - "docs/R015_OFFLINE_WALK_PREVIEW.md"
@@ -44,6 +46,8 @@ jobs:
         run: |
           set -euo pipefail
           node --test tests/room_designer_core.test.cjs tests/room_designer_history.test.cjs tests/room_walk_preview.test.cjs
+      - name: Bounded browser startup process regression
+        run: node --test tests/chrome_startup.test.cjs
       - name: Real offline Chrome SVG pointer and DOM acceptance
         run: |
           set -euo pipefail
