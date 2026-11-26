@@ -66,7 +66,13 @@ memories. Existing bootstrap/replay hashes and v1 genome seed remain intact.
   root, never absolute filesystem paths or URLs.
 - Validate the manifest with `validate_bassy_manifest`, select the nearest
   keyframe using `select_bassy_asset`; the result supplies a fixed-point
-  scale multiplier. This is **keyframe selection, not mesh interpolation**.
+  scale multiplier. Monthly previews use the exact developmental `age_months`
+  (72..192), which must agree with the whole-year `age_years` floor. For example,
+  127 months selects the 12-year keyframe from 6/9/12/16, while the exact
+  midpoint at 126 months retains the younger 9-year keyframe. Whole-year
+  previews retain their existing selections and result fields; the result's
+  `age_years` remains the body's whole-year age. This is **keyframe selection,
+  not mesh interpolation**.
   Rig compatibility across different exports is **not guaranteed**.
 - Before loading, call `verify_local_glb(root, selection)`. It checks a
   root-contained resolved path, size, binary GLB2 header and SHA-256. It is
