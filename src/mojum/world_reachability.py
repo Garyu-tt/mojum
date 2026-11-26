@@ -172,6 +172,12 @@ def find_sampled_path(room, start, goal, *, columns=16, rows=16):
     }
 
 
+def _exact_string_keys(mapping, expected):
+    """Check native keys before any untrusted hash or equality operation."""
+    return (type(mapping) is dict and len(mapping) == len(expected)
+            and all(type(key) is str and key in expected for key in mapping))
+
+
 def verify_witness(room, report):
     """Fail closed unless a complete report replays against the SAME room.
 
@@ -179,14 +185,14 @@ def verify_witness(room, report):
     """
     expected = {"schema", "status", "start_revision", "goal", "grid",
                 "sampled_cells", "walkable_centers", "visited_vertices", "path"}
-    if type(report) is not dict or set(report) != expected:
+    if not _exact_string_keys(report, expected):
         raise ValueError("invalid route witness shape")
     if (type(report["schema"]) is not str or report["schema"] != SCHEMA
             or type(report["status"]) is not str
             or report["status"] != "witness_found"):
         raise ValueError("no route witness to verify")
     grid = report["grid"]
-    if type(grid) is not dict or set(grid) != {"columns", "rows"}:
+    if not _exact_string_keys(grid, {"columns", "rows"}):
         raise ValueError("invalid grid metadata")
     columns, rows = grid["columns"], grid["rows"]
     _guard(room, columns, rows)
@@ -204,8 +210,7 @@ def verify_witness(room, report):
         raise ValueError("invalid route witness length")
     state = None
     for step, frame in enumerate(path):
-        if (type(frame) is not dict
-                or set(frame) != {"tick", "position", "revision"}
+        if (not _exact_string_keys(frame, {"tick", "position", "revision"})
                 or type(frame["tick"]) is not int or frame["tick"] != step
                 or type(frame["revision"]) is not str
                 or len(frame["revision"]) != 64
