@@ -92,12 +92,18 @@ def _valid_frame(
         raise CPGBridgeError("invalid profile revision")
     if frame.profile_revision != gate.revision or frame.profile_revision != profile.revision:
         raise CPGBridgeError("CPG frame revision does not match profile and MotorGate")
-    if frame.profile_sha256 != profile.sha256:
+    if type(frame.profile_sha256) is not str or frame.profile_sha256 != profile.sha256:
         raise CPGBridgeError("CPG frame profile digest does not match supplied profile")
     if type(frame.state_sha256) is not str or _SHA256.fullmatch(frame.state_sha256) is None:
         raise CPGBridgeError("invalid CPG state digest")
-    if frame.frequency_millihz < profile.minimum_frequency_millihz or frame.frequency_millihz > profile.maximum_frequency_millihz:
+    if type(frame.frequency_millihz) is not int:
+        raise CPGBridgeError("frame frequency must be a native integer")
+    if not profile.minimum_frequency_millihz <= frame.frequency_millihz <= profile.maximum_frequency_millihz:
         raise CPGBridgeError("frame frequency is outside the supplied profile")
+    for name in ("left_phase_microturns", "right_phase_microturns"):
+        phase = getattr(frame, name)
+        if type(phase) is not int or not 0 <= phase < PHASE_MICROTURNS:
+            raise CPGBridgeError(f"invalid {name}")
 
     # from_snapshot verifies the profile binding, phase bounds and state digest.
     try:
