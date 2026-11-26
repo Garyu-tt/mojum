@@ -78,6 +78,32 @@ class FingerSenseIngressTests(unittest.TestCase):
                 with self.assertRaises(FingerSenseIngressError):
                     admit_frame(candidate)
 
+    def test_oversized_mappings_are_rejected_before_key_comparison(self):
+        class ExplodingKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key comparison executed")
+
+        envelope = frame()
+        envelope[ExplodingKey("unexpected")] = None
+        with self.assertRaises(FingerSenseIngressError):
+            admit_frame(envelope)
+
+        sample = {
+            "finger_id": "index",
+            "channel_id": "pressure",
+            "value_milli": 1,
+            ExplodingKey("unexpected"): None,
+        }
+        with self.assertRaises(FingerSenseIngressError):
+            admit_frame(frame(samples=[sample]))
+
+        many_keys = frame()
+        many_keys.update({f"extra-{index}": index for index in range(10_000)})
+        with self.assertRaises(FingerSenseIngressError):
+            admit_frame(many_keys)
+
     def test_rejects_boolean_float_and_out_of_range_values(self):
         for bad in (True, 1.0, -1, 1_000_001):
             candidate = frame()
