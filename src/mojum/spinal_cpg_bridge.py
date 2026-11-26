@@ -1,4 +1,4 @@
-"""Fail-closed bridge from synthetic CPG frames to the existing MotorGate.
+"""Fail-closed bridge from verified synthetic CPG frames to MotorGate.
 
 This adapter only creates validated virtual motor intents. It does not step a
 physics engine, command hardware, or claim that a waveform is locomotion.
@@ -10,8 +10,16 @@ import re
 from collections.abc import Sequence
 
 from .motor_gate import MotorGate, MotorIntent
-from .spinal_cpg import CPGFrame, SensoryFeedback, FRAME_SCHEMA, OUTPUT_MILLI
-
+from .spinal_cpg import (
+    BilateralCPG,
+    CPGFrame,
+    CPGProfile,
+    CPGSnapshot,
+    SensoryFeedback,
+    FRAME_SCHEMA,
+    OUTPUT_MILLI,
+    PHASE_MICROTURNS,
+)
 
 BRIDGE_SCHEMA = "mojum.spinal-cpg.motor-bridge/1"
 MAX_CHANNELS = 128
@@ -48,9 +56,32 @@ class JointChannel:
             raise CPGBridgeError("scale_millirad is outside the admitted range")
 
 
-def _valid_frame(frame: CPGFrame, gate: MotorGate) -> None:
+def _triangle_milli(phase: int) -> int:
+    quarter = PHASE_MICROTURNS // 4
+    if phase < quarter:
+        return phase * OUTPUT_MILLI // quarter
+    if phase < 2 * quarter:
+        return OUTPUT_MILLI - (phase - quarter) * OUTPUT_MILLI // quarter
+    if phase < 3 * quarter:
+        return -((phase - 2 * quarter) * OUTPUT_MILLI // quarter)
+    return -OUTPUT_MILLI + (phase - 3 * quarter) * OUTPUT_MILLI // quarter
+
+
+def _scaled_toward_zero(value: int, numerator: int, denominator: int) -> int:
+    magnitude = abs(value) * numerator // denominator
+    return -magnitude if value < 0 else magnitude
+
+
+def _valid_frame(
+    frame: CPGFrame,
+    gate: MotorGate,
+    profile: CPGProfile,
+    snapshot: CPGSnapshot,
+) -> None:
     if type(frame) is not CPGFrame:
         raise CPGBridgeError("an exact CPGFrame is required")
+    if type(profile) is not CPGProfile or type(snapshot) is not CPGSnapshot:
+        raise CPGBridgeError("an exact CPGProfile and CPGSnapshot are required")
     if frame.schema != FRAME_SCHEMA or frame.waveform != "FIXED_POINT_TRIANGLE":
         raise CPGBridgeError("unsupported CPG frame schema or waveform")
     if frame.physical_actuation is not False:
@@ -59,31 +90,60 @@ def _valid_frame(frame: CPGFrame, gate: MotorGate) -> None:
         raise CPGBridgeError("invalid frame tick")
     if type(frame.profile_revision) is not int or not 0 <= frame.profile_revision <= MAX_REVISION:
         raise CPGBridgeError("invalid profile revision")
-    if frame.profile_revision != gate.revision:
-        raise CPGBridgeError("CPG frame revision does not match MotorGate")
-    if type(frame.profile_sha256) is not str or _SHA256.fullmatch(frame.profile_sha256) is None:
-        raise CPGBridgeError("invalid CPG profile digest")
+    if frame.profile_revision != gate.revision or frame.profile_revision != profile.revision:
+        raise CPGBridgeError("CPG frame revision does not match profile and MotorGate")
+    if frame.profile_sha256 != profile.sha256:
+        raise CPGBridgeError("CPG frame profile digest does not match supplied profile")
     if type(frame.state_sha256) is not str or _SHA256.fullmatch(frame.state_sha256) is None:
         raise CPGBridgeError("invalid CPG state digest")
+    if frame.frequency_millihz < profile.minimum_frequency_millihz or frame.frequency_millihz > profile.maximum_frequency_millihz:
+        raise CPGBridgeError("frame frequency is outside the supplied profile")
+
+    # from_snapshot verifies the profile binding, phase bounds and state digest.
+    try:
+        BilateralCPG.from_snapshot(profile, snapshot)
+    except (TypeError, ValueError) as exc:
+        raise CPGBridgeError("invalid or mismatched CPG snapshot") from exc
+    if (
+        snapshot.tick != frame.tick
+        or snapshot.profile_revision != frame.profile_revision
+        or snapshot.profile_sha256 != frame.profile_sha256
+        or snapshot.state_sha256 != frame.state_sha256
+        or snapshot.left_phase_microturns != frame.left_phase_microturns
+        or snapshot.right_phase_microturns != frame.right_phase_microturns
+    ):
+        raise CPGBridgeError("frame does not match its verified CPG snapshot")
+
     for name in ("left_output_milli", "right_output_milli"):
         value = getattr(frame, name)
         if type(value) is not int or not -OUTPUT_MILLI <= value <= OUTPUT_MILLI:
             raise CPGBridgeError(f"invalid {name}")
+    if (
+        frame.left_output_milli
+        != _scaled_toward_zero(_triangle_milli(frame.left_phase_microturns), profile.amplitude_milli, OUTPUT_MILLI)
+        or frame.right_output_milli
+        != _scaled_toward_zero(_triangle_milli(frame.right_phase_microturns), profile.amplitude_milli, OUTPUT_MILLI)
+    ):
+        raise CPGBridgeError("frame outputs do not match verified CPG phases and profile")
 
 
 def intents_from_frame(
     frame: CPGFrame,
     channels: Sequence[JointChannel],
     gate: MotorGate,
+    *,
+    profile: CPGProfile,
+    snapshot: CPGSnapshot,
 ) -> tuple[MotorIntent, ...]:
-    """Convert a frame to intents, validating every target before returning any.
+    """Convert a verified frame to intents, validating every target before return.
 
-    The caller must still pass these intents through the normal motor pipeline.
+    The profile and post-step snapshot bind the public frame fields to a
+    verifiable CPG state. The caller must still use the normal motor pipeline.
     No actuator or MuJoCo API is invoked here.
     """
     if type(gate) is not MotorGate:
         raise CPGBridgeError("an exact MotorGate is required")
-    _valid_frame(frame, gate)
+    _valid_frame(frame, gate, profile, snapshot)
     if type(channels) not in (tuple, list) or not 1 <= len(channels) <= MAX_CHANNELS:
         raise CPGBridgeError("channels must be a nonempty bounded list or tuple")
 
