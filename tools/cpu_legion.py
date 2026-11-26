@@ -10,6 +10,7 @@ import re
 import stat
 import subprocess
 import time
+from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from tools import spartan_coordinator as queue
@@ -140,8 +141,14 @@ def generate(url, model, text, timeout):
     }).encode(), headers={"Content-Type": "application/json"}, method="POST")
     # No environment-provided proxy and no HTTP redirect off loopback.
     opener = build_opener(ProxyHandler({}), _NoRedirect())
-    with opener.open(req, timeout=timeout) as response:
-        result = response.read(200001)
+    try:
+        with opener.open(req, timeout=timeout) as response:
+            result = response.read(200001)
+    except HTTPError as exc:
+        # HTTPError owns the rejected response body.  Re-raise the same public
+        # exception, but do not defer descriptor cleanup to its finalizer.
+        exc.close()
+        raise
     if len(result) > 200000:
         raise ValueError("model response too large")
     return json.loads(result)["choices"][0]["message"]["content"]
