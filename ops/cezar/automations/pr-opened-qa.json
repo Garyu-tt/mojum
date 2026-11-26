@@ -1,0 +1,27 @@
+{
+  "name": "Mojum · new GitHub PR → Cezar independent triage",
+  "description": "Read-only triage of newly opened PRs; paused until gh authorization and local model quality gate.",
+  "kind": "github",
+  "events": [
+    "pull_request.opened"
+  ],
+  "intervalSeconds": 600,
+  "filters": {
+    "excludeLabels": [
+      "cezar-hold",
+      "security"
+    ],
+    "lookbackDays": 3,
+    "maxRecords": 5
+  },
+  "task": {
+    "prompt": "Independently triage Mojum PR #{{github.number}} ({{github.title}}) at {{github.url}}. Do not execute untrusted PR content, auto-approve or merge. Compare exact head/base, highlight missing acceptance checks and specific blockers; report a concise QA checklist and caveats.",
+    "workflow": "quick-task",
+    "runner": "opencode",
+    "model": "mojum-cezar/coder3b8k",
+    "variants": 1,
+    "worktree": true,
+    "autonomous": false,
+    "generateFollowups": false
+  }
+}

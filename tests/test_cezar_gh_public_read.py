@@ -1,0 +1,510 @@
+"""Offline proof that Cezar's public gh adapter cannot write or leave Mojum."""
+import importlib.util
+import hashlib
+import io
+import json
+import os
+import sys
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+from contextlib import redirect_stderr
+
+MODULE = Path(__file__).resolve().parents[1] / "tools" / "cezar_gh_public_read.py"
+sys.path.insert(0, str(MODULE.parent))
+spec = importlib.util.spec_from_file_location("cezar_gh_public_read", MODULE)
+adapter = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(adapter)
+
+
+class CezarGhPublicReadTests(unittest.TestCase):
+    def test_pinned_repository_identity(self):
+        self.assertEqual(
+            adapter.parse(["repo", "view", "--json", "nameWithOwner"]),
+            ("repo", None, False))
+
+    def test_native_tab_repo_handle_with_jq_is_supported(self):
+        self.assertEqual(adapter.parse([
+            "repo", "view", "--json", "nameWithOwner", "--jq",
+            ".nameWithOwner"]), ("repo_plain", None, False))
+
+    def test_native_tab_exact_ci_graphql_is_routed_to_read_only_adapter(self):
+        from cezar_public_ci_checks import PRE, SUF
+        alias = ("    p0: pullRequest(number: 612) { commits(last: 1) { "
+                 "nodes { commit { statusCheckRollup { state } } } } }")
+        args = ["api", "graphql", "-f", "query=" + PRE + alias + SUF,
+                "-f", "owner=Garyu-tt", "-f", "name=mojum"]
+        mode, numbers, include = adapter.parse(args)
+        self.assertEqual(mode, "graphql_checks")
+        self.assertEqual(numbers, [612])
+        self.assertFalse(include)
+
+    def test_native_tab_graphql_is_read_only_and_bounded(self):
+        from cezar_public_github_tab import parse_graphql
+        query = ("query ($owner: String!, $name: String!, $issuesLimit: Int!, $prsLimit: Int!) "
+                 "{ repository { issues(first: $issuesLimit, after: $issuesCursor, states: OPEN, "
+                 "orderBy: {field: CREATED_AT, direction: DESC}) {totalCount pageInfo} "
+                 "pullRequests(first: $prsLimit, after: $prsCursor, states: OPEN, "
+                 "orderBy: {field: CREATED_AT, direction: DESC}) {isDraft totalCount pageInfo} } }")
+        args = ["api", "graphql", "-f", "query=" + query,
+                "-f", "owner=Garyu-tt", "-f", "name=mojum",
+                "-F", "issuesLimit=12", "-F", "prsLimit=50"]
+        mode, parsed, include = adapter.parse(args)
+        self.assertEqual(mode, "graphql")
+        self.assertEqual(parsed["prsLimit"], 50)
+        self.assertFalse(include)
+        with self.assertRaises(adapter.Refused):
+            adapter.parse(["api", "graphql", "-f",
+                           "query=mutation { deleteRepository(input: {}) }",
+                           "-f", "owner=Garyu-tt", "-f", "name=mojum",
+                           "-F", "issuesLimit=1", "-F", "prsLimit=1"])
+
+    def test_search_for_public_mojum_prs_is_allowed(self):
+        mode, request, include = adapter.parse([
+            "api", "--method", "GET", "/search/issues",
+            "-f", "q=repo:Garyu-tt/mojum is:pr created:>=2026-11-20",
+            "-f", "per_page=5", "-f", "sort=created", "-f", "order=asc",
+        ])
+        self.assertEqual(mode, "api")
+        self.assertEqual(request[1], 90)
+        self.assertTrue(request[0].startswith("https://api.github.com/search/issues?"))
+        self.assertIn("is%3Apr", request[0])
+        self.assertIn("is%3Aopen", request[0])  # no obsolete closed PR triage
+        self.assertFalse(include)
+
+    def test_issue_label_updates_and_explicit_closed_events_are_unchanged(self):
+        for query in ("repo:Garyu-tt/mojum is:issue updated:>=2026-11-21",
+                      "repo:Garyu-tt/mojum is:pr closed:>=2026-11-21"):
+            _, request, _ = adapter.parse([
+                "api", "--method", "GET", "/search/issues", "-f", "q=" + query
+            ])
+            self.assertNotIn("is%3Aopen", request[0])
+
+    def test_explicit_closed_pr_created_query_remains_closed(self):
+        # PRs created in the time window may have closed since; these are
+        # historical queries, not new-open-PR intake.
+        from urllib.parse import parse_qs, urlsplit
+        for state in ("is:closed", "state:closed"):
+            query = ("repo:Garyu-tt/mojum is:pr " + state
+                     + " created:>=2026-11-20")
+            with self.subTest(state=state):
+                _, request, _ = adapter.parse([
+                    "api", "--method", "GET", "/search/issues",
+                    "-f", "q=" + query])
+                result_q = parse_qs(urlsplit(request[0]).query)["q"][0]
+                self.assertEqual(result_q, query)
+                self.assertNotIn("is:open", result_q)
+
+    def test_created_pr_with_explicit_closed_date_stays_historical(self):
+        from urllib.parse import parse_qs, urlsplit
+        for suffix in ("closed:>=2026-11-21", "is:open", "state:open"):
+            with self.subTest(suffix=suffix):
+                query = ("repo:Garyu-tt/mojum is:pr created:>=2026-11-20 "
+                         + suffix)
+                _, request, _ = adapter.parse([
+                    "api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+                self.assertEqual(
+                    parse_qs(urlsplit(request[0]).query)["q"], [query])
+
+    def test_non_intake_created_window_does_not_gain_open_filter(self):
+        from urllib.parse import parse_qs, urlsplit
+        query = "repo:Garyu-tt/mojum is:pr created:<=2026-11-20"
+        _, request, _ = adapter.parse([
+            "api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+        self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
+
+    def test_conflicting_pr_states_fail_closed(self):
+        query = ("repo:Garyu-tt/mojum is:pr is:closed "
+                 "state:open created:>=2026-11-20")
+        with self.assertRaisesRegex(adapter.Refused, "conflicting"):
+            adapter.parse(["api", "--method", "GET", "/search/issues",
+                           "-f", "q=" + query])
+
+    def test_rejects_search_boolean_scope_escape(self):
+        forbidden = [
+            "repo:Garyu-tt/mojum is:pr OR repo:another/repo is:pr",
+            "repo:Garyu-tt/mojum is:pr -repo:Garyu-tt/mojum",
+            "repo:Garyu-tt/mojum is:pr OR (is:issue)",
+            "repo:Garyu-tt/mojum is:pr user:another",
+            "repo:Garyu-tt/mojum is:pr org:another",
+            "repo:Garyu-tt/mojum is:pr is:issue",
+        ]
+        for query in forbidden:
+            with self.subTest(query=query), self.assertRaises(adapter.Refused):
+                adapter.parse(["api", "--method", "GET", "/search/issues",
+                               "-f", "q=" + query])
+
+    def test_allows_bounded_single_repo_filters(self):
+        query = ("repo:Garyu-tt/mojum is:issue state:open label:cezar-ready "
+                 "-label:cezar-hold updated:>=2026-11-20")
+        mode, request, include = adapter.parse(
+            ["api", "--method", "GET", "/search/issues", "-f", "q=" + query])
+        self.assertEqual(mode, "api")
+        self.assertFalse(include)
+        from urllib.parse import parse_qs, urlsplit
+        self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"], [query])
+
+    def test_created_pr_query_preserves_explicit_closed_and_open_filters(self):
+        from urllib.parse import parse_qs, urlsplit
+        # Created-date triage may default to open PRs only when the caller
+        # did not explicitly ask for a historical closed subset.
+        for suffix in ("is:closed", "state:closed", "is:open", "state:open",
+                       "closed:>=2026-11-21"):
+            query = ("repo:Garyu-tt/mojum is:pr created:>=2026-11-20 "
+                     + suffix)
+            with self.subTest(suffix=suffix):
+                mode, request, include = adapter.parse([
+                    "api", "--method", "GET", "/search/issues",
+                    "-f", "q=" + query,
+                ])
+                self.assertEqual(mode, "api")
+                self.assertFalse(include)
+                self.assertEqual(parse_qs(urlsplit(request[0]).query)["q"],
+                                 [query])
+
+    def test_read_only_label_timeline_with_headers(self):
+        mode, request, include = adapter.parse([
+            "api", "--include", "--method", "GET",
+            "repos/Garyu-tt/mojum/issues/478/timeline",
+            "-H", "Accept: application/vnd.github+json",
+            "-f", "per_page=100", "-f", "page=2",
+        ])
+        self.assertEqual(mode, "api")
+        self.assertTrue(request[0].startswith("https://api.github.com/repos/Garyu-tt/mojum/issues/478/timeline?"))
+        self.assertEqual(request[1], 600)
+        self.assertTrue(include)
+
+    def test_writes_auth_and_cross_repo_requests_are_refused(self):
+        forbidden = [
+            ["pr", "create"], ["pr", "merge", "478"], ["issue", "edit", "478"],
+            ["api", "--method", "POST", "/repos/Garyu-tt/mojum/issues/478/comments"],
+            ["api", "--method", "DELETE", "/repos/Garyu-tt/mojum/issues/478"],
+            ["api", "--method", "GET", "/repos/Garyu-tt/mojum/contents/README.md"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:another/repo is:pr"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr OR repo:another/repo is:pr"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:issue or repo:another/repo is:issue"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr OR repo:another/repo"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr repo:another/repo"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr -org:another"],
+            ["api", "--method", "GET", "repos/another/repo/issues/478/timeline"],
+            ["repo", "view", "other/repo", "--json", "nameWithOwner"],
+        ]
+        for args in forbidden:
+            with self.subTest(args=args), self.assertRaises(adapter.Refused):
+                adapter.parse(args)
+
+    def test_limits_and_unapproved_headers_fail_closed(self):
+        invalid = [
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr", "-f", "per_page=101"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:issue", "-f", "page=11"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum is:pr", "-f", "q=duplicated"],
+            ["api", "--method", "GET", "/search/issues", "-H",
+             "Authorization: token secret", "-f", "q=repo:Garyu-tt/mojum is:pr"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum " + "x"*500 + " is:issue"],
+            ["api", "--method", "GET", "/search/issues", "-f",
+             "q=repo:Garyu-tt/mojum unrelated"],
+        ]
+        for args in invalid:
+            with self.subTest(args=args), self.assertRaises(adapter.Refused):
+                adapter.parse(args)
+
+    def test_api_redirect_rejected_before_following_untrusted_location(self):
+        # A post-request response.geturl() check is too late: urllib normally
+        # follows 302 responses before returning a response to our caller.
+        with self.assertRaisesRegex(adapter.Refused, "redirect forbidden"):
+            adapter.NoRedirect().redirect_request(
+                None, None, 302, "Found",
+                {"Location": "https://example.invalid/redirect"},
+                "https://example.invalid/redirect",
+            )
+
+        def inspect_opener(*handlers):
+            self.assertTrue(any(isinstance(h, adapter.NoRedirect)
+                                for h in handlers),
+                            "API read must install the redirect-denying handler")
+            raise RuntimeError("handler confirmed before outgoing request")
+
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(adapter, "CACHE_DIR", Path(tmp)), patch.object(
+                    adapter.urllib.request, "build_opener",
+                    side_effect=inspect_opener):
+                with self.assertRaisesRegex(RuntimeError, "handler confirmed"):
+                    adapter.read(url, ttl=0)
+
+    def test_public_cache_never_authenticates_and_reuses_response(self):
+        class FakeResponse:
+            status = 200
+            headers = {"Link": "<https://api.github.com/next>; rel=\"next\""}
+            def __init__(self, url):
+                self.url = url
+            def geturl(self):
+                return self.url
+            def read(self, count):
+                return b'{"items":[]}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = 0
+            def open(self, req, timeout):
+                self.calls += 1
+                self_url = req.full_url
+                self.assert_header = dict(req.header_items())
+                return FakeResponse(self_url)
+
+        target = "https://api.github.com/search/issues?q=repo%3AGaryu-tt%2Fmojum+is%3Apr"
+        with tempfile.TemporaryDirectory() as tmp:
+            client = FakeClient()
+            with patch.object(adapter, "CACHE_DIR", Path(tmp)), patch.object(
+                    adapter.urllib.request, "build_opener", return_value=client):
+                first, link = adapter.read(target, ttl=300)
+                second, _ = adapter.read(target, ttl=300)
+                self.assertEqual(first, b'{"items":[]}')
+                self.assertEqual(second, first)
+                self.assertEqual(client.calls, 1)
+                self.assertIn('rel="next"', link)
+                self.assertFalse(any("Authorization" in str(a) for a in
+                                     client.assert_header.items()))
+
+    def test_cached_response_cannot_be_swapped_to_unrelated_file(self):
+        # Inject the race at the descriptor-relative open the adapter actually
+        # performs. A stale Path.is_symlink mock would never exercise the
+        # fixed implementation and could yield a false-green regression.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            cached = cache_dir / filename
+            cached.write_text(json.dumps({
+                "body": '{"kind":"trusted"}', "link": "",
+            }), encoding="utf-8")
+            cached.chmod(0o600)
+            foreign = Path(tmp) / "foreign.json"
+            foreign_content = json.dumps({
+                "body": '{"kind":"swapped"}', "link": "",
+            })
+            foreign.write_text(foreign_content, encoding="utf-8")
+            foreign.chmod(0o600)
+            original_open = os.open
+            observed_flags = []
+
+            def swap_at_actual_open(path, flags, *args, **kwargs):
+                if path == filename and kwargs.get("dir_fd") is not None:
+                    observed_flags.append(flags)
+                    cached.unlink()
+                    cached.symlink_to(foreign)
+                return original_open(path, flags, *args, **kwargs)
+
+            with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
+                    adapter.os, "open", side_effect=swap_at_actual_open):
+                with self.assertRaisesRegex(adapter.Refused,
+                                            "untrusted cache entry"):
+                    adapter.read(url, ttl=300)
+            self.assertEqual(len(observed_flags), 1,
+                             "cache race injection never executed")
+            self.assertTrue(observed_flags[0] & os.O_NOFOLLOW,
+                            "cached entry must never follow a symlink")
+            self.assertTrue(cached.is_symlink())
+            self.assertEqual(foreign.read_text(encoding="utf-8"), foreign_content)
+
+    def test_cache_rejects_hardlinked_external_file(self):
+        # A regular mode-0600 file may be a hard link to unrelated content.
+        # Owner/mode and O_NOFOLLOW checks alone do not detect that alias.
+        if not hasattr(os, "link"):
+            self.skipTest("hard links unsupported on this platform")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            external = Path(tmp) / "unrelated.json"
+            injected = '{"items":[{"forged":true}]}'
+            external.write_text(json.dumps({"body": injected, "link": ""}),
+                                encoding="utf-8")
+            external.chmod(0o600)
+            os.link(external, cache_dir / filename)
+            with patch.object(adapter, "CACHE_DIR", cache_dir):
+                with self.assertRaisesRegex(adapter.Refused,
+                                            "cache entry not owner-private"):
+                    adapter.read(url, ttl=300)
+            self.assertEqual(json.loads(external.read_text(encoding="utf-8"))["body"],
+                             injected)
+
+    def test_cache_rejects_symlink_in_ancestor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            private = root / "private"
+            directory = private / "cache"
+            directory.mkdir(parents=True, mode=0o700)
+            alias = root / "alias"
+            alias.symlink_to(private, target_is_directory=True)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            cached = directory / filename
+            cached.write_text(json.dumps({
+                "body": '{"kind":"outside"}', "link": "",
+            }), encoding="utf-8")
+            cached.chmod(0o600)
+            with patch.object(adapter, "CACHE_DIR", alias / "cache"):
+                with self.assertRaises((adapter.Refused, OSError)):
+                    adapter.read(url, ttl=300)
+
+    def test_fifo_cache_entry_is_rejected_without_blocking_open(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("POSIX FIFO required")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir(mode=0o700)
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            filename = hashlib.sha256(url.encode()).hexdigest() + ".json"
+            os.mkfifo(cache_dir / filename, mode=0o600)
+            actual_open = os.open
+
+            def checked_open(path, flags, *args, **kwargs):
+                if path == filename and not (flags & os.O_NONBLOCK):
+                    self.fail("cached entry must be opened O_NONBLOCK before fstat")
+                return actual_open(path, flags, *args, **kwargs)
+
+            with patch.object(adapter, "CACHE_DIR", cache_dir), patch.object(
+                    adapter.os, "open", side_effect=checked_open):
+                with self.assertRaisesRegex(adapter.Refused, "regular"):
+                    adapter.read(url, ttl=300)
+
+    def test_symlink_ancestor_cannot_create_missing_cache_child(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "private"
+            target.mkdir(mode=0o700)
+            alias = root / "alias"
+            alias.symlink_to(target, target_is_directory=True)
+            child = target / "must-not-be-created"
+            url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+            with patch.object(adapter, "CACHE_DIR", alias / child.name):
+                with self.assertRaises((adapter.Refused, OSError)):
+                    adapter.read(url, ttl=300)
+            self.assertFalse(child.exists(),
+                             "unsafe mkdir followed a symlinked ancestor")
+
+    def test_interrupted_cache_temp_does_not_block_next_fetch(self):
+        # A prior killed process may leave a mode-0600 <token>.tmp.<pid>
+        # behind. PID reuse or two writes in one process must not prevent
+        # a later cache refresh or overwrite the unrelated stale artifact.
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        class FakeResponse:
+            status = 200
+            headers = {}
+            def geturl(self):
+                return url
+            def read(self, limit):
+                return b'{"items":[]}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+        class FakeClient:
+            def open(self, req, timeout):
+                return FakeResponse()
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            token = hashlib.sha256(url.encode()).hexdigest()
+            stale = cache / (token + ".tmp." + str(os.getpid()))
+            stale.write_bytes(b"prior aborted write")
+            stale.chmod(0o600)
+            with patch.object(adapter, "CACHE_DIR", cache), patch.object(
+                    adapter.urllib.request, "build_opener", return_value=FakeClient()):
+                body, link = adapter.read(url, ttl=300)
+                again, _ = adapter.read(url, ttl=300)
+            self.assertEqual(body, b'{"items":[]}')
+            self.assertEqual(again, body)
+            self.assertEqual(link, "")
+            self.assertEqual(stale.read_bytes(), b"prior aborted write")
+            self.assertTrue((cache / (token + ".json")).is_file())
+
+    def test_deeply_nested_cached_json_refreshes_without_crashing(self):
+        # A private but corrupt bounded cache entry must not crash Cezar.
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        class FakeResponse:
+            status = 200
+            headers = {}
+            def geturl(self):
+                return url
+            def read(self, count):
+                return b'{"items":[]}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+        class FakeClient:
+            def open(self, req, timeout):
+                return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            token = hashlib.sha256(url.encode()).hexdigest()
+            entry = cache / (token + ".json")
+            entry.write_bytes(b"[" * 15000 + b"]" * 15000)
+            entry.chmod(0o600)
+            with patch.object(adapter, "CACHE_DIR", cache), patch.object(
+                    adapter.urllib.request, "build_opener",
+                    return_value=FakeClient()):
+                body, link = adapter.read(url, ttl=300)
+            self.assertEqual(body, b'{"items":[]}')
+            self.assertEqual(link, "")
+            self.assertIn('"body"', entry.read_text(encoding="utf-8"))
+
+    def test_deeply_nested_public_json_refuses_without_cache_write(self):
+        # Max-byte bounds are not enough to bound the JSON parser's depth.
+        url = adapter.BASE + "/search/issues?q=repo%3AGaryu-tt%2Fmojum"
+        class FakeResponse:
+            status = 200
+            headers = {}
+            def geturl(self):
+                return url
+            def read(self, count):
+                return b"[" * 15000 + b"]" * 15000
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+        class FakeClient:
+            def open(self, req, timeout):
+                return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            token = hashlib.sha256(url.encode()).hexdigest()
+            with patch.object(adapter, "CACHE_DIR", cache), patch.object(
+                    adapter.urllib.request, "build_opener",
+                    return_value=FakeClient()):
+                with self.assertRaisesRegex(adapter.Refused, "nesting"):
+                    adapter.read(url, ttl=300)
+            self.assertFalse((cache / (token + ".json")).exists())
+
+    def test_refused_cli_does_not_echo_sensitive_arguments(self):
+        secret = "token_please_never_log_this"
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            code = adapter.main(["api", "--method", "POST", "/x", "-f", secret])
+        self.assertEqual(code, 2)
+        self.assertNotIn(secret, errors.getvalue())
+        self.assertIn("Refused", errors.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

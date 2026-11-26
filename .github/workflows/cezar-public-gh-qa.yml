@@ -1,0 +1,60 @@
+name: Cezar public GitHub read-only adapter QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cezar_gh_public_read.py'
+      - 'tools/cezar_public_github_tab.py'
+      - 'tools/cezar_public_ci_checks.py'
+      - 'tests/test_cezar_public_ci_checks.py'
+      - 'tests/test_cezar_public_github_tab.py'
+      - 'tools/cezar_admission.py'
+      - 'tests/test_cezar_admission.py'
+      - 'tools/cezar_intake.py'
+      - 'tools/cezar_reconcile.py'
+      - 'tests/test_cezar_reconcile.py'
+      - 'tests/test_cezar_intake.py'
+      - 'tools/cezar_legacy_history_index.py'
+      - 'tests/test_cezar_legacy_history_index.py'
+      - 'tests/test_cezar_gh_public_read.py'
+      - 'tests/test_cezar_github_automation_templates.py'
+      - 'ops/cezar/automations/**'
+      - 'ops/cezar/systemd/**'
+      - '.github/workflows/cezar-public-gh-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-read-boundary:
+    name: public-read-boundary (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify hermetic public read-only and repo-scope boundaries
+        run: python -m unittest discover -s tests -p 'test_cezar_gh_public_read.py' -v
+      - name: Verify native GitHub PR/Issue panel against read-only REST data
+        run: python -m unittest discover -s tests -p 'test_cezar_public_github_tab.py' -v
+      - name: Verify bounded exact-head public CI checks and fail-closed status handling
+        run: python -m unittest discover -s tests -p 'test_cezar_public_ci_checks.py' -v
+      - name: Verify bounded and paused GitHub automation templates
+        run: python -m unittest discover -s tests -p 'test_cezar_github_automation_templates.py' -v
+      - name: Verify private legacy task deduplication and no-replay guarantees
+        run: python -m unittest discover -s tests -p 'test_cezar_legacy_history_index.py' -v
+      - name: Verify cross-rule atomic admission and one-shot guarded Cezar dispatch
+        run: python -m unittest discover -s tests -p 'test_cezar_admission.py' -v
+      - name: Verify bounded label intake and one unresolved local model task
+        run: python -m unittest discover -s tests -p 'test_cezar_intake.py' -v
+      - name: Verify fail-closed cancellation and historical run reconciliation
+        run: python -m unittest discover -s tests -p 'test_cezar_reconcile.py' -v
