@@ -17,6 +17,7 @@ on:
       - "src/mojum/aquarium_trace_export.py"
       - "src/mojum/cell_policy_v2.py"
       - "tests/test_v2a_v2b_migration.py"
+      - "tests/test_local_cell_transfer_input.py"
       - "docs/R014_V2A_TO_V2B_NEW_JOURNAL.md"
   workflow_dispatch:
 
@@ -76,7 +77,8 @@ jobs:
           MOJUM_ARCHIVE122_SOURCE: sources/policy122
         run: |
           set -o pipefail
-          python -m unittest discover -s tests -p test_v2a_v2b_migration.py -v 2>&1 | tee transfer-qa.log
+          python -m unittest discover -s tests -p test_local_cell_transfer_input.py -v 2>&1 | tee transfer-qa.log
+          python -m unittest discover -s tests -p test_v2a_v2b_migration.py -v 2>&1 | tee -a transfer-qa.log
           python -m unittest discover -s tests -p test_aquarium_cell_policy_v3.py -v 2>&1 | tee -a transfer-qa.log
           if grep -q 'ResourceWarning: unclosed database' transfer-qa.log; then
             echo "FAIL: migration leaked SQLite connection" >&2

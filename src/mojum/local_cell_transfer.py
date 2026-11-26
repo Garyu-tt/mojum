@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import sys
 import tempfile
 
@@ -22,6 +23,29 @@ from .local_cell_sense import STEP_METERS
 from .noosphere import LocalNoosphere, NoosphereError
 from .sim import canonical
 from .world_room import Room
+
+
+MAX_TRANSFER_INPUT_BYTES = 16 * 1024 * 1024
+
+
+def _read_transfer_json(path):
+    """Read a bounded regular file without blocking on POSIX special files."""
+    if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+        raise TransferError("cannot safely read transfer input without O_NONBLOCK")
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise TransferError("transfer input must be a regular file")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            raw = handle.read(MAX_TRANSFER_INPUT_BYTES + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(raw) > MAX_TRANSFER_INPUT_BYTES:
+        raise TransferError("transfer input exceeds byte limit")
+    return json.loads(raw.decode("utf-8"))
 
 
 _HEX = frozenset("0123456789abcdef")
@@ -363,8 +387,8 @@ def transfer_cli(transfer, argv=None):
     parser.add_argument("--max-ticks", type=int, default=transfer.max_ticks)
     args = parser.parse_args(argv)
     try:
-        seed = json.loads(args.genome.read_text(encoding="utf-8"))
-        graph = json.loads(args.graph.read_text(encoding="utf-8"))
+        seed = _read_transfer_json(args.genome)
+        graph = _read_transfer_json(args.graph)
         result = transfer_journal(
             args.source, args.destination, transfer=transfer,
             expected_source_head=args.expected_source_head,
