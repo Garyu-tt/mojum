@@ -29,6 +29,10 @@ The `mentor` command operates on only one journal, cold-replays its entire
 history and refuses a missing file, a wrong owner ID, bad displacements, or
 event-budget overflow. The original `Aquarium` remains the storage authority.
 
+Both commands print ASCII-safe JSON receipts, including on ASCII or CP1251
+terminals. Unicode actor IDs use JSON escapes and retain their original values
+when the receipt is decoded with a JSON parser.
+
 **Important limits:** movement comes from the mentor's scripted external
 input and resulting position divergence does not prove learned development.
 No sensory meeting events, transfer of knowledge, encrypted backup, observer
