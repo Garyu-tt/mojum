@@ -17,22 +17,31 @@ def audit_obstacles(obstacles: list[dict]) -> dict:
     """Return deterministic geometry metrics and positive-area overlaps.
 
     Rectangles use x_min, y_min, x_max, y_max in integer millimetres.
-    Touching edges are not considered overlaps. Mapping keys are admitted
-    before set comparisons so hostile str subclasses cannot run user code.
+    Touching edges are not considered overlaps. All record cardinalities
+    are preflighted before any key hashing or set allocation.
     """
     if type(obstacles) is not list or len(obstacles) > MAX_OBSTACLES:
         raise ValueError("obstacles must be a bounded native list")
-    validated = []
-    ids = set()
+
+    # First pass: inspect only exact container types and O(1) cardinalities.
+    # This ensures an oversized later record is rejected before any set/hash
+    # work is attempted for an earlier otherwise-valid record.
     for item in obstacles:
         if type(item) is not dict:
             raise ValueError("invalid rectangle fields")
-        # Check key types before set()/equality: str subclasses can override
-        # hashing/equality and execute arbitrary code during comparisons.
-        if any(type(key) is not str for key in item):
-            raise ValueError("rectangle keys must be exact native strings")
+        if len(item) != len(_EXPECTED_FIELDS):
+            raise ValueError("invalid rectangle field count")
+
+    # Second pass: exact native bounded keys are safe to hash/compare.
+    for item in obstacles:
+        if any(type(key) is not str or len(key) > 32 for key in item):
+            raise ValueError("rectangle keys must be bounded exact native strings")
         if set(item) != _EXPECTED_FIELDS:
             raise ValueError("invalid rectangle fields")
+
+    validated = []
+    ids = set()
+    for item in obstacles:
         identifier = item["id"]
         if type(identifier) is not str or not (1 <= len(identifier) <= 64) or not all(c.isascii() and (c.isalnum() or c in "_-") for c in identifier):
             raise ValueError("invalid obstacle id")

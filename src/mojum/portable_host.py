@@ -15,7 +15,6 @@ import json
 from importlib.resources import files
 from pathlib import Path
 import signal
-import threading
 import time
 
 from .aquarium import Aquarium, AquariumError, V4_MODE
@@ -24,6 +23,9 @@ from .aquarium import MAX_MOTOR_REPLAY_EVENTS as MAX_REPLAY_EVENTS
 from .graph import GraphError, load_graph
 from .genesis import GenesisError, validate_seed
 from .noosphere import NoosphereError
+from .room_draft_runtime import load_runtime_room
+from .room_spec import RoomSpecError
+from .sensory_play import ToyScene
 
 
 SCHEMA = "mojum.portable-host.run/2"
@@ -34,6 +36,25 @@ MAX_TICKS = 1000
 
 class PortableHostError(ValueError):
     """Invalid host plan or unsupported Aquarium mode."""
+
+
+class _SignalStop:
+    """Stop flag shared by the foreground loop and its Python signal handler."""
+
+    def __init__(self):
+        self._requested = False
+
+    def set(self):
+        # A signal can interrupt the main thread while it holds a wait lock.
+        self._requested = True
+
+    def is_set(self):
+        return self._requested
+
+    def wait(self, timeout):
+        # Sleep may resume after a signal handler returns. Bound each sleep so
+        # run_paced rechecks the flag promptly even for long pacing intervals.
+        time.sleep(min(timeout, 0.1))
 
 
 def validate_plan(ticks, interval_ms):
@@ -196,6 +217,8 @@ def main(argv=None):
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"),
                         default="range_guided",
                         help="whether measured range outcomes guide later actions")
+    parser.add_argument("--room-file", type=Path,
+                        help="optional strict offline point-room draft; pinned on restart")
     parser.add_argument("--expected-head",
                         help="optional independently pinned journal head SHA-256")
     args = parser.parse_args(argv)
@@ -220,7 +243,25 @@ def main(argv=None):
     elif args.temporal_mode == "range_guided" and args.sensory_mode != "toy_probe":
         parser.error("--temporal-mode range_guided requires --sensory-mode toy_probe")
 
-    stopped = threading.Event()
+    # Run the same admission path as the Aquarium CLI *before* opening the
+    # PRIVATE journal. Legacy local-cell policies pin exact built-in geometry.
+    room_options = {}
+    if args.room_file is not None:
+        if args.motor_mode == V4_MODE:
+            parser.error("--room-file is unsupported for local_cell_v4 compatibility journals")
+        try:
+            room, start = load_runtime_room(args.room_file)
+        except RoomSpecError as exc:
+            parser.error(f"invalid --room-file: {exc}")
+        # Room drafts contain geometry, not virtual toy definitions. Supply a
+        # dimension-matched empty scene instead of silently adding the fixed
+        # 4x4 built-in toys (which may lie inside authored walls).
+        room_options = {
+            "room": room, "start": start,
+            "sensory_scene": ToyScene(width=room.width, height=room.height, toys=()),
+        }
+
+    stopped = _SignalStop()
     started = time.monotonic()
     with termination_signals(stopped):
         try:
@@ -232,6 +273,7 @@ def main(argv=None):
                 sensory_mode=args.sensory_mode,
                 temporal_mode=args.temporal_mode,
                 external_expected_head=args.expected_head,
+                **room_options,
             ) as aquarium:
                 begin_tick = aquarium.tick
                 committed = run_paced(
@@ -246,7 +288,9 @@ def main(argv=None):
                     "end_tick": aquarium.tick,
                     "committed_ticks": committed,
                     "journal_head": checkpoint["journal_head"],
-                    "journal_events": aquarium.store.count(),
+                    # Bind the count to this process's verified/committed
+                    # prefix; another WAL writer may append after checkpoint.
+                    "journal_events": aquarium.stored_events,
                     "virtual_dt_ns": aquarium.dt_ns,
                     "wall_interval_ms": args.interval_ms,
                     "brain_mode": args.brain_mode,
@@ -268,7 +312,9 @@ def main(argv=None):
             parser.error(str(exc))
     # Stdout contains metadata only, never private frames, genome, sensor
     # measurements or learner state.
-    print(json.dumps(status, sort_keys=True, ensure_ascii=False, allow_nan=False))
+    # Escape Unicode so a legacy redirected console can report committed ticks
+    # and the resume anchor even when it cannot encode the organism ID.
+    print(json.dumps(status, sort_keys=True, allow_nan=False))
     return status
 
 

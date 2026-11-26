@@ -5,9 +5,9 @@ This package is an **experimental, CPU-first, single-device synthetic fixture**.
 ## Requirements
 
 - CPython 3.11 or newer with standard-library `sqlite3`.
-- `pip` to install a local wheel. Only source builds use `setuptools>=61` and older setuptools versions also need `wheel` available on the builder.
+- `pip` to install a local wheel. Source builds require `setuptools>=77.0.3` on the builder.
 - No mandatory third-party **runtime** dependencies and no GPU.
-- **License undecided:** this in-repository install support does not grant permission to redistribute or publish on PyPI.
+- Distribution uses the GNU General Public License version 3 or any later version. [Full license text](../LICENSE)
 
 ## Install from a local source checkout
 
@@ -25,10 +25,10 @@ Alternatively, build a wheel once for transfer to another compatible machine.
 python -m pip wheel --no-index --no-build-isolation --no-deps --wheel-dir dist .
 ```
 
-Copy `dist/mojum-0.1.0-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
+Copy `dist/mojum-0.1.2-py3-none-any.whl` to the target. In a virtual environment there, run the following command from the directory containing the wheel.
 
 ```sh
-python -m pip install --no-index ./mojum-0.1.0-py3-none-any.whl
+python -m pip install --no-index ./mojum-0.1.2-py3-none-any.whl
 ```
 
 The source checkout and the installed package contain the same example synthetic GENESIS seed and Universal Graph IR. The installed defaults are read through `importlib.resources`, not through a repository-relative `__file__` path.
@@ -60,6 +60,21 @@ The v1 pulse predictor stores exact floating-point predictions in the journal. C
 
 A very short history can match both rules. In that case `auto` continues with the local rule. To preserve the source's future predictions when moving such a history, pass `--pulse-sum ordered` for a standard CPython 3.11 source or `--pulse-sum compensated` for a standard CPython 3.12/3.13 source. Use the same explicit choice from birth when comparing independent runs across interpreters. [Python 3.12 summation change](https://docs.python.org/3.12/library/functions.html#sum)
 
+## View an exported trace from the installed wheel
+
+The wheel includes the standalone offline viewer. Create a local HTML file,
+open it in your browser, then select an exported Aquarium JSONL trace:
+
+```sh
+python -m mojum.trace_viewer --output ./aquarium-viewer.html
+```
+
+The command works from any directory and refuses to replace an existing file.
+It prints the HTML byte count and SHA-256, without opening a journal, selecting
+a trace, launching a browser or starting a server. The viewer itself is fully
+offline. Keep exported PRIVATE traces local; see the
+[export and verification instructions](REAL_AQUARIUM_TRACE_VIEWER_R01.md).
+
 ## Isolated test
 
 The full stdlib suite remains:
@@ -68,7 +83,37 @@ The full stdlib suite remains:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow provisions the build tools, then builds the wheel, installs it in a fresh virtual environment, and runs both console commands outside the checkout in a Linux network namespace with only loopback. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
+`tests/test_installable_package.py` checks the source fixtures and command defaults. The package workflow builds the wheel from two clean exports of the same commit using its timestamp for `SOURCE_DATE_EPOCH`, then compares the wheel bytes. It installs the wheel in a fresh virtual environment and runs the console commands in a loopback-only Linux network namespace. It compares the complete checkpoint from 120 ticks plus a 30-tick restart with one from 150 uninterrupted ticks, including the journal hash and learner state.
+
+The workflow also runs for release tags and checks that the installed version matches the tag. The successful Python 3.13 tag job attaches the verified wheel and `SHA256SUMS` to its workflow run.
+
+## Design a custom room from the installed wheel
+
+Create the standalone editor, open the HTML file in your browser, and save
+your room as `my-room.json`:
+
+```sh
+python -m mojum.room_designer --output ./room-designer.html
+```
+
+The editor includes its scripts and works offline. The command prints a byte
+count and SHA-256 and refuses to replace an existing file. Validate the saved
+draft, then start a new synthetic Aquarium journal in that room:
+
+```sh
+mojum-room-check ./my-room.json --format json
+mojum-aquarium --db ./custom-room.sqlite3 --room-file ./my-room.json --ticks 120
+mojum-aquarium --db ./custom-room.sqlite3 --room-file ./my-room.json --ticks 30
+```
+
+Keep the same room file and mode flags when reopening the journal. Changing
+its pinned geometry is rejected. The editor is separate from the running
+Aquarium and does not modify a journal. See the
+[room designer guide](R015_VISUAL_ROOM_DESIGNER.md) for controls and limits.
+
+For a paced foreground session with developmental milestones, trace viewing
+and verified backup of the same journal, follow the
+[installed Aquarium workflow](INSTALLED_AQUARIUM_WORKFLOW_R01.md).
 
 ## Limits
 

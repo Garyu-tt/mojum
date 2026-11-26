@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
 
 from .graph import GraphError, SCHEMA as V1_SCHEMA, _check_json_depth
@@ -36,8 +37,25 @@ def _nonfinite_constant(value):
 
 def _read_json(path: Path, limit: int):
     """Bound bytes and nesting before UTF-8/JSON parsing, with no silent key collapsing."""
-    with path.open("rb") as stream:
-        raw = stream.read(limit + 1)
+    # A byte cap cannot bound a blocking FIFO open/read. Open nonblocking
+    # first, then inspect the actual descriptor before reading any bytes.
+    # Regular-file symlinks remain supported; a symlink to a FIFO/device is
+    # rejected by the same descriptor check without waiting for a writer.
+    if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+        raise GraphError("cannot safely read graph or labels without O_NONBLOCK")
+    descriptor = -1
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise GraphError("graph or labels input must be a regular file")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            raw = stream.read(limit + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if len(raw) > limit:
         raise GraphError("graph or labels file exceeds byte limit")
     try:
