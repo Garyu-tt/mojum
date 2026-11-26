@@ -1,0 +1,150 @@
+import dataclasses
+import unittest
+from unittest import mock
+
+from mojum.world_room import Room, initial_state
+from mojum.world_odor import (
+    OdorSource, SamplePoint, SCHEMA, PROFILE, sample_odor_field,
+)
+
+
+class WorldOdorTests(unittest.TestCase):
+    def setUp(self):
+        self.room = Room(10, 10)
+        self.state = initial_state(self.room, 1, 1)
+        self.source = OdorSource("s1", 1000, 1000, 10000)
+
+    def sample(self, sources=None, points=None, **kwargs):
+        return sample_odor_field(
+            self.room, self.state,
+            [self.source] if sources is None else sources,
+            [SamplePoint("p1", 1000, 1000)] if points is None else points,
+            consent=True, **kwargs,
+        )
+
+    def test_schema_and_at_source_value(self):
+        result = self.sample()
+        self.assertEqual((result.schema, result.profile), (SCHEMA, PROFILE))
+        self.assertEqual(result.readings[0].concentration, 10000)
+        self.assertEqual(len(result.digest), 64)
+
+    def test_inverse_square_like_attenuation_is_monotonic(self):
+        near = self.sample(points=[SamplePoint("near", 2000, 1000)]).readings[0].concentration
+        far = self.sample(points=[SamplePoint("far", 4000, 1000)]).readings[0].concentration
+        self.assertGreater(near, far)
+        self.assertGreater(far, 0)
+
+    def test_logical_tick_decay(self):
+        from mojum.world_room import _revision, RoomState
+        state = RoomState(2, 1, 1, _revision(self.room, 2, 1, 1))
+        result = sample_odor_field(
+            self.room, state,
+            [OdorSource("s1", 1000, 1000, 10000, 0, 1, 2)],
+            [SamplePoint("p1", 1000, 1000)], consent=True,
+        )
+        self.assertEqual(result.readings[0].concentration, 2500)
+
+    def test_occlusion_blocks_source_contribution(self):
+        room = Room(10, 10, ((4, 0, 1, 10),))
+        state = initial_state(room, 1, 1)
+        result = sample_odor_field(
+            room, state, [self.source], [SamplePoint("p1", 7000, 1000)],
+            consent=True, occlusion=True,
+        )
+        self.assertEqual(result.readings[0].concentration, 0)
+        unoccluded = sample_odor_field(
+            room, state, [self.source], [SamplePoint("p1", 7000, 1000)],
+            consent=True, occlusion=False,
+        )
+        self.assertGreater(unoccluded.readings[0].concentration, 0)
+
+    def test_order_independent_digest(self):
+        sources = [OdorSource("b", 2000, 1000, 500), self.source]
+        points = [SamplePoint("z", 3000, 1000), SamplePoint("a", 1000, 1000)]
+        first = self.sample(sources=sources, points=points)
+        second = self.sample(sources=list(reversed(sources)), points=list(reversed(points)))
+        self.assertEqual(first, second)
+
+    def test_duplicate_ids_rejected(self):
+        with self.assertRaises(ValueError):
+            self.sample(sources=[self.source, self.source])
+
+    def test_bool_is_not_integer(self):
+        bad = OdorSource("bad", True, 1000, 1)
+        with self.assertRaises(ValueError):
+            self.sample(sources=[bad])
+
+    def test_non_native_dataclass_subclass_rejected(self):
+        class Derived(OdorSource):
+            pass
+        with self.assertRaises(ValueError):
+            self.sample(sources=[Derived("s", 1000, 1000, 10)])
+
+    def test_forged_room_dimensions_rejected_after_construction(self):
+        room = Room(10, 10)
+        state = initial_state(room, 1, 1)
+        object.__setattr__(room, "width", -1)
+        with self.assertRaises(ValueError):
+            sample_odor_field(room, state, [self.source], [SamplePoint("p", 1000, 1000)], consent=True)
+
+    def test_forged_obstacle_bounds_rejected_after_construction(self):
+        room = Room(10, 10)
+        state = initial_state(room, 1, 1)
+        object.__setattr__(room, "obstacles", ((9, 9, 5, 5),))
+        with self.assertRaises(ValueError):
+            sample_odor_field(room, state, [self.source], [SamplePoint("p", 1000, 1000)], consent=True)
+
+    def test_stale_room_revision_rejected(self):
+        from mojum.world_room import RoomState
+        with self.assertRaises(ValueError):
+            sample_odor_field(self.room, RoomState(0, 1, 1, "0" * 64),
+                              [self.source], [SamplePoint("p", 1000, 1000)], consent=True)
+
+    def test_invalid_state_coordinates_rejected_before_revision_hashing(self):
+        invalid_values = (
+            ("list", []), ("object", object()), ("bool", True),
+            ("huge_int", 10 ** 5000), ("nan", float("nan")),
+            ("infinity", float("inf")), ("negative", -1),
+            ("outside_room", 11),
+        )
+        for axis in ("x", "y"):
+            for kind, value in invalid_values:
+                with self.subTest(axis=axis, kind=kind):
+                    state = dataclasses.replace(self.state, **{axis: value})
+                    with mock.patch(
+                        "mojum.world_odor._revision",
+                        side_effect=AssertionError("invalid coordinate reached revision hashing"),
+                    ) as revision:
+                        with self.assertRaisesRegex(ValueError, "stale or invalid RoomState"):
+                            sample_odor_field(
+                                self.room, state, [self.source],
+                                [SamplePoint("p", 1000, 1000)], consent=True,
+                            )
+                        revision.assert_not_called()
+
+    def test_consent_and_bounds(self):
+        with self.assertRaises(ValueError):
+            sample_odor_field(self.room, self.state, [self.source],
+                              [SamplePoint("p", 1000, 1000)], consent=False)
+        with self.assertRaises(ValueError):
+            self.sample(points=[SamplePoint("outside", 11000, 1000)])
+
+    def test_deterministic_digest_and_immutable_result(self):
+        first = self.sample()
+        second = self.sample()
+        self.assertEqual(first.digest, second.digest)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            first.readings[0].concentration = 2
+
+    def test_room_geometry_work_budget(self):
+        obstacles = tuple((4, 4, 1, 1) for _ in range(4096))
+        room = Room(10, 10, obstacles)
+        state = initial_state(room, 1, 1)
+        sources = [OdorSource(f"s{i}", 1000, 1000, 1) for i in range(16)]
+        points = [SamplePoint(f"p{i}", 2000, 2000) for i in range(16)]
+        with self.assertRaisesRegex(ValueError, "room geometry work budget exceeded"):
+            sample_odor_field(room, state, sources, points, consent=True, occlusion=True)
+
+
+if __name__ == "__main__":
+    unittest.main()
