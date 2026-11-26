@@ -12,7 +12,6 @@ from importlib.resources import files
 import os
 from pathlib import Path
 import re
-import shutil
 import sqlite3
 import stat
 import tempfile
@@ -80,18 +79,21 @@ def _require_existing_source_journal(path, agent_id):
             raise ValueError("export requires an existing committed Aquarium event")
 
 
-def _sha256(path):
+def _sha256(path, *, copy_to=None):
+    """Hash a bounded file, optionally copying the bytes that were hashed."""
     hasher = hashlib.sha256()
     size = 0
     with open(path, "rb") as stream:
         while True:
-            block = stream.read(1024 * 1024)
+            block = stream.read(min(1024 * 1024, MAX_BACKUP_BYTES - size + 1))
             if not block:
                 break
             size += len(block)
             if size > MAX_BACKUP_BYTES:
                 raise ValueError("SQLite backup exceeds size budget")
             hasher.update(block)
+            if copy_to is not None:
+                copy_to.write(block)
     return hasher.hexdigest()
 
 
@@ -127,8 +129,11 @@ def verify_cold_copy(path, seed, graph, *, expected_agent_id,
         raise ValueError("cold-copy file checksum mismatch")
     with tempfile.TemporaryDirectory(prefix="mojum-cold-verify-") as scratch:
         staged = Path(scratch) / "candidate.sqlite3"
-        shutil.copyfile(source, staged)
-        if _sha256(staged) != checksum:
+        # Enforce the byte limit again while copying a file that may have
+        # grown since the checksum preflight.
+        with staged.open("xb") as output:
+            staged_checksum = _sha256(source, copy_to=output)
+        if staged_checksum != checksum:
             raise ValueError("cold-copy source changed during verification")
         # SQLite setup/replay may write: isolate all such effects in this
         # private temporary copy, never the caller's original artifact.
