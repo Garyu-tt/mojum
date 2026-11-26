@@ -158,6 +158,17 @@ class NeuralLODTests(unittest.TestCase):
         with self.assertRaises(NeuralLODError):
             verify_plan(bad)
 
+    def test_receipt_rejects_uninitialized_forged_dataclasses(self):
+        forged_plan = LODPlan.__new__(LODPlan)
+        with self.assertRaisesRegex(NeuralLODError, "incomplete or forged"):
+            verify_plan(forged_plan)
+
+        result = plan([row("a")], 3)
+        forged_population = PopulationLOD.__new__(PopulationLOD)
+        bad = replace(result, populations=(forged_population,))
+        with self.assertRaisesRegex(NeuralLODError, "incomplete or forged"):
+            verify_plan(bad)
+
 
 if __name__ == "__main__":
     unittest.main()
