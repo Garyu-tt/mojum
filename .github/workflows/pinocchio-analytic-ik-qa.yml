@@ -1,0 +1,37 @@
+name: Mojum optional Pinocchio analytic-IK native QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/optional_pinocchio_benchmark.py"
+      - "tests/test_optional_pinocchio_benchmark.py"
+      - "docs/PINOCCHIO_KINEMATICS_SPIKE_R01.md"
+      - ".github/workflows/pinocchio-analytic-ik-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-pinocchio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install real pinned opt-in upstream wheel
+        run: python -m pip install --disable-pip-version-check 'pin==4.1.0'
+      - name: Confirm native dependency version
+        run: |
+          python - <<'PY'
+          from importlib import metadata
+          assert metadata.version("pin") == "4.1.0"
+          import pinocchio
+          print("pin==4.1.0 imported")
+          PY
+      - name: Run all analytic and native-boundary regressions
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_optional_pinocchio_benchmark.py' -v
+      - name: Exercise actual Pinocchio FK and independently analytic IK
+        run: PYTHONPATH=src python -m mojum.optional_pinocchio_benchmark --backend pinocchio --seed 702 --cases 128
