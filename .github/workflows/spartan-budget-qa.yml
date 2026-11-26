@@ -1,0 +1,35 @@
+name: Spartan provider budget ledger independent QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/spartan_budget.py'
+      - 'tests/test_spartan_budget.py'
+      - 'docs/SPARTAN_PROVIDER_BUDGET_R01.md'
+      - '.github/workflows/spartan-budget-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  budget-ledger-stdlib:
+    name: budget-ledger-stdlib (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run isolated SQLite budget admission tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_spartan_budget.py' -v
