@@ -1,0 +1,36 @@
+name: QA poll policy
+on:
+  pull_request:
+    paths:
+      - "src/mojum/qa_poll_policy.py"
+      - "tests/test_qa_poll_policy.py"
+      - "docs/QA_POLL_POLICY_R01.md"
+      - ".github/workflows/qa-poll-policy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact checked-out revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Run focused contract suite
+        run: python -m unittest discover -s tests -p 'test_qa_poll_policy.py' -v
+        env:
+          PYTHONPATH: src
