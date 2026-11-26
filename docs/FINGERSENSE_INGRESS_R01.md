@@ -16,7 +16,7 @@
 ```python
 from mojum.fingersense_ingress import admit_frame
 
-frame, cursor = admit_frame({
+first_input_frame = {
     "schema": "mojum.fingersense-frame/1",
     "visibility": "PUBLIC_SYNTHETIC",
     "consent": "explicit",
@@ -27,7 +27,21 @@ frame, cursor = admit_frame({
     "samples": [
         {"finger_id": "index", "channel_id": "pressure", "value_milli": 125000},
     ],
-})
+}
+first_frame, cursor = admit_frame(first_input_frame)
+
+next_input_frame = {
+    "schema": "mojum.fingersense-frame/1",
+    "visibility": "PUBLIC_SYNTHETIC",
+    "consent": "explicit",
+    "source_id": "fixture-hand-left",
+    "source_revision": 1,
+    "sequence": 1,
+    "tick": 11,
+    "samples": [
+        {"finger_id": "index", "channel_id": "pressure", "value_milli": 130000},
+    ],
+}
 next_frame, cursor = admit_frame(next_input_frame, cursor)
 ```
 
