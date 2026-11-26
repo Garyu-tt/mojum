@@ -12,6 +12,7 @@ PROVENANCE = "PUBLIC_SYNTHETIC"
 MAX_ITEMS = 32
 MAX_ID = 96
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
+_HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _SLOTS = frozenset({"head", "torso", "legs", "feet", "hands", "accessory", "outerwear"})
 
 
@@ -116,8 +117,8 @@ def _verify_state(state):
         raise WardrobeError("invalid operation history entry")
     if len(set(state.recent_operations)) != len(state.recent_operations):
         raise WardrobeError("duplicate operation history entry")
-    if type(state.revision) is not str:
-        raise WardrobeError("state revision must be an exact native string")
+    if type(state.revision) is not str or _HEX_SHA256.fullmatch(state.revision) is None:
+        raise WardrobeError("state revision must be a bounded lowercase SHA-256 digest")
     expected = _digest(_state_payload(state.body_revision, state.sequence,
                                       state.equipped, state.recent_operations))
     if state.revision != expected:
