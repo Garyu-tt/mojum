@@ -207,6 +207,20 @@ function tickState() {
 """
 
 
+def _run_node(node, script, *args):
+    """Run Node with its documented UTF-8 stream encoding, never host locale."""
+    completed = subprocess.run(
+        [node, "-e", script, *map(str, args)],
+        cwd=ROOT, capture_output=True, timeout=20, check=False,
+    )
+    return subprocess.CompletedProcess(
+        completed.args,
+        completed.returncode,
+        completed.stdout.decode("utf-8", errors="strict"),
+        completed.stderr.decode("utf-8", errors="strict"),
+    )
+
+
 class OfflineViewerControlsQA(unittest.TestCase):
     def _require_node_for_ci(self):
         node = shutil.which("node")
@@ -228,12 +242,14 @@ class OfflineViewerControlsQA(unittest.TestCase):
                 with self.assertRaises(unittest.SkipTest):
                     self._require_node_for_ci()
 
+    def test_node_output_must_be_valid_utf8(self):
+        node = self._require_node_for_ci()
+        with self.assertRaises(UnicodeDecodeError):
+            _run_node(node, "process.stdout.write(Buffer.from([0xff]));")
+
     def test_verified_file_play_pause_seek_speed_and_numeric_telemetry(self):
         node = self._require_node_for_ci()
-        run = subprocess.run(
-            [node, "-e", NODE_HARNESS, str(VIEWER)],
-            cwd=ROOT, text=True, capture_output=True, timeout=20, check=False,
-        )
+        run = _run_node(node, NODE_HARNESS, VIEWER)
         self.assertEqual(run.returncode, 0, run.stderr)
         values = json.loads(run.stdout)
         loaded = values["loaded"]
