@@ -80,7 +80,16 @@ summary reports how many unsealed events were present in that snapshot.
 Retain the verified sealed head separately from the archive. It can differ
 from the full source head.
 Verification and restore use that independent anchor without opening the
-source. Restore publishes a new SQLite file after checking the full
+source. Verification also rejects repeated event IDs throughout the sealed
+prefix, including IDs repeated in a different segment, before restore creates
+a staging database. Correctly recomputed hashes and a matching anchor do not
+make duplicate identities valid for the journal's unique-ID contract.
+The verifier streams event payloads and retains one 32-byte SHA-256 digest
+per ID, capped at 262,144 entries by the existing journal limit, plus set
+overhead. It uses each ID's exact UTF-8 spelling without case folding or
+Unicode normalization. A digest collision conservatively rejects the archive;
+errors do not disclose the repeated ID or event payload.
+Restore publishes a new SQLite file after checking the full
 reconstructed chain. Choose a destination without existing SQLite
 sidecars and wait for restore to finish before opening the destination.
 A no-clobber `NEW_DB.mojum-restore.lock` marker (0600 on POSIX) fences Mojum
