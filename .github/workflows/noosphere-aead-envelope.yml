@@ -1,0 +1,43 @@
+name: Noosphere AEAD envelope tests
+on:
+  pull_request:
+    paths:
+      - "src/mojum/noosphere_envelope.py"
+      - "tests/test_noosphere_envelope.py"
+      - ".github/workflows/noosphere-aead-envelope.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/mojum/noosphere_envelope.py"
+      - "tests/test_noosphere_envelope.py"
+      - ".github/workflows/noosphere-aead-envelope.yml"
+permissions:
+  contents: read
+jobs:
+  envelope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install optional crypto provider
+        run: python -m pip install "cryptography>=42"
+      - name: Compile envelope implementation and tests
+        run: python -m py_compile src/mojum/noosphere_envelope.py tests/test_noosphere_envelope.py
+      - name: Run authenticated envelope regression
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_noosphere_envelope.py" -v
