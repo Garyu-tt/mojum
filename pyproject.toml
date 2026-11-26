@@ -12,6 +12,9 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 dependencies = []
 
+[project.optional-dependencies]
+vector-search = ["sqlite-vec==0.1.9"]
+
 [project.scripts]
 mojum-aquarium = "mojum.aquarium:main"
 mojum-aquarium-wire = "mojum.aquarium_wire:main"
