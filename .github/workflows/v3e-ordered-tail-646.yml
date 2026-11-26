@@ -1,0 +1,36 @@
+name: Mojum v3e ordered outcome tail QA (#646)
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/cell_policy_v3_escape.py'
+      - 'tests/test_v3e_ordered_tail_646.py'
+      - 'tests/test_cell_policy_v3_escape.py'
+      - 'tests/test_v3e_terminal_streak_evidence.py'
+      - 'tests/test_aquarium_v3_escape_mode.py'
+      - 'tests/test_aquarium_wire_v3_escape.py'
+      - '.github/workflows/v3e-ordered-tail-646.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ordered-tail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Offline v3-escape ordered tail, Aquarium, wire and legacy QA
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p 'test_v3e_ordered_tail_646.py' -v
+          python -m unittest discover -s tests -p 'test_cell_policy_v3_escape.py' -v
+          python -m unittest discover -s tests -p 'test_v3e_terminal_streak_evidence.py' -v
+          python -m unittest discover -s tests -p 'test_aquarium_v3_escape_mode.py' -v
+          python -m unittest discover -s tests -p 'test_aquarium_wire_v3_escape.py' -v

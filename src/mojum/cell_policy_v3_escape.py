@@ -41,6 +41,10 @@ MAX_CONSECUTIVE_RESTS = 3
 # Bounded re-probing: rest only after this many consecutive failed probes in
 # a cell where every move already has measured blocked evidence.
 REPROBE_BLOCKED_BEFORE_REST = 4
+# Format v1 is an optional, bounded chronological proof attached to v3-escape.
+# The original SCHEMA remains stable for existing Aquarium manifests/journals.
+ORDERED_TAIL_SCHEMA = "mojum.developmental.local-cell.outcome-tail/1"
+MAX_ORDERED_OUTCOMES = max(MAX_CONSECUTIVE_RESTS, REPROBE_BLOCKED_BEFORE_REST)
 
 _ZONE = re.compile(
     r"(?:0|[1-9][0-9]{0,4}):(?:0|[1-9][0-9]{0,4})\Z", re.ASCII
@@ -122,6 +126,121 @@ def _check_streak_counters(state):
             raise CellV3EscapeError("recent cell lacks measured blocked move")
 
 
+def _check_ordered_tail(state, *, require_ordered_tail=False):
+    """Check terminal *order* from bounded measured evidence, not aggregates.
+
+    Original v3-escape snapshots have no chronological rows. They remain
+    loadable for historical replay, but are never described as attested.
+    In a migrated snapshot only observations after ordered_from_tick have
+    chronological evidence. A strict caller must reject an uncovered streak.
+    """
+    legacy = {
+        "schema", "cell_size_m", "last_tick", "updates", "records",
+        "last_seen_at", "evictions", "forgotten_observations",
+        "consecutive_rests", "consecutive_blocked_probes",
+    }
+    new = legacy | {
+        "ordered_tail_schema", "ordered_from_tick", "ordered_outcomes",
+    }
+    if set(state) == legacy:
+        if require_ordered_tail and state["updates"]:
+            raise CellV3EscapeError("ordered tail unavailable for legacy snapshot")
+        return None
+    if set(state) != new:
+        raise CellV3EscapeError("incomplete ordered tail envelope")
+    if state["ordered_tail_schema"] != ORDERED_TAIL_SCHEMA:
+        raise CellV3EscapeError("unknown ordered tail version")
+    start = state["ordered_from_tick"]
+    tail = state["ordered_outcomes"]
+    if (type(start) is not int or not 0 <= start < state["updates"]
+            or type(tail) is not list
+            or len(tail) != min(MAX_ORDERED_OUTCOMES, state["updates"] - start)):
+        raise CellV3EscapeError("invalid ordered tail length or start")
+    counts = {}
+    blocked_counts = {}
+    last_in_tail = {}
+    first_tick = state["updates"] - len(tail)
+    for index, item in enumerate(tail):
+        if (type(item) is not dict or set(item) !=
+                {"tick", "cell", "action", "blocked"}
+                or type(item["tick"]) is not int
+                or item["tick"] != first_tick + index
+                or type(item["cell"]) is not str
+                or item["cell"] not in state["records"]
+                or type(item["action"]) is not str
+                or item["action"] not in ACTIONS
+                or type(item["blocked"]) is not bool
+                or (item["action"] == "rest" and item["blocked"])):
+            raise CellV3EscapeError("invalid ordered tail event")
+        cell, action = item["cell"], item["action"]
+        if action not in state["records"][cell]:
+            raise CellV3EscapeError("ordered tail action missing from aggregates")
+        key = (cell, action)
+        counts[key] = counts.get(key, 0) + 1
+        blocked_counts[key] = blocked_counts.get(key, 0) + int(item["blocked"])
+        last_in_tail[cell] = item["tick"]
+    for (cell, action), total in counts.items():
+        observed, blocked = state["records"][cell][action]
+        if (total > observed or blocked_counts[cell, action] > blocked
+                or (observed - total) < (blocked - blocked_counts[cell, action])):
+            raise CellV3EscapeError("ordered tail exceeds measured aggregates")
+    for cell, tick in last_in_tail.items():
+        if state["last_seen_at"][cell] != tick:
+            raise CellV3EscapeError("ordered tail disagrees with cell last_seen_at")
+    if start == 0 and state["updates"] <= MAX_ORDERED_OUTCOMES:
+        if (state["evictions"] or
+                sum(v[0] for row in state["records"].values()
+                    for v in row.values()) != len(tail)):
+            raise CellV3EscapeError("ordered tail disagrees with complete history")
+        for cell, row in state["records"].items():
+            for action, (observed, blocked) in row.items():
+                if (counts.get((cell, action), 0) != observed
+                        or blocked_counts.get((cell, action), 0) != blocked):
+                    raise CellV3EscapeError("ordered tail mismatches complete counters")
+
+    rests = state["consecutive_rests"]
+    probes = state["consecutive_blocked_probes"]
+    if not tail:
+        raise CellV3EscapeError("ordered tail missing latest observation")
+    last = tail[-1]
+    if last["action"] == "rest":
+        kind = "rest"
+        claimed = rests
+    elif last["blocked"]:
+        kind = "probe"
+        claimed = probes
+    else:
+        kind = "success"
+        claimed = 0
+    if kind == "success":
+        if rests or probes:
+            raise CellV3EscapeError("ordered tail contradicts terminal counters")
+        return tail
+    if claimed == 0 or (kind == "rest" and probes) or (
+            kind == "probe" and rests):
+        raise CellV3EscapeError("ordered tail contradicts terminal counters")
+    if len(tail) < claimed:
+        if require_ordered_tail:
+            raise CellV3EscapeError("ordered tail cannot attest legacy streak")
+        # This can occur immediately after restoring a historical snapshot.
+        # Even then, the observed part of the claimed streak must match.
+        span = len(tail)
+    else:
+        span = claimed
+    for item in tail[-span:]:
+        matches = (item["action"] == "rest" if kind == "rest"
+                   else item["action"] != "rest" and item["blocked"])
+        if not matches:
+            raise CellV3EscapeError("ordered tail has interleaved streak outcome")
+    if len(tail) > claimed:
+        preceding = tail[-claimed - 1]
+        same = (preceding["action"] == "rest" if kind == "rest"
+                else preceding["action"] != "rest" and preceding["blocked"])
+        if same:
+            raise CellV3EscapeError("ordered tail understates terminal streak")
+    return tail
+
+
 class CellExplorerV3Escape:
     """Bounded 4cm memory plus measured rest-escape probing (opt-in profile)."""
 
@@ -134,6 +253,8 @@ class CellExplorerV3Escape:
         self.forgotten_observations = 0
         self.consecutive_rests = 0
         self.consecutive_blocked_probes = 0
+        self._ordered_from_tick = 0
+        self._ordered_outcomes = []
 
     @staticmethod
     def _cell(sense):
@@ -146,7 +267,7 @@ class CellExplorerV3Escape:
         )
 
     def snapshot(self):
-        return {
+        snapshot = {
             "schema": SCHEMA,
             "cell_size_m": STEP_METERS,
             "last_tick": self.last_tick,
@@ -158,15 +279,25 @@ class CellExplorerV3Escape:
             "consecutive_rests": self.consecutive_rests,
             "consecutive_blocked_probes": self.consecutive_blocked_probes,
         }
+        if self._ordered_outcomes:
+            snapshot.update({
+                "ordered_tail_schema": ORDERED_TAIL_SCHEMA,
+                "ordered_from_tick": self._ordered_from_tick,
+                "ordered_outcomes": copy.deepcopy(self._ordered_outcomes),
+            })
+        return snapshot
 
     @classmethod
-    def from_snapshot(cls, state):
+    def from_snapshot(cls, state, *, require_ordered_tail=False):
         mandatory = {
             "schema", "cell_size_m", "last_tick", "updates", "records",
             "last_seen_at", "evictions", "forgotten_observations",
             "consecutive_rests", "consecutive_blocked_probes",
         }
-        if (type(state) is not dict or set(state) != mandatory
+        ordered_keys = {"ordered_tail_schema", "ordered_from_tick", "ordered_outcomes"}
+        if (type(require_ordered_tail) is not bool
+                or type(state) is not dict
+                or set(state) not in (mandatory, mandatory | ordered_keys)
                 or state["schema"] != SCHEMA
                 or type(state["cell_size_m"]) is not float
                 or state["cell_size_m"] != STEP_METERS
@@ -256,7 +387,11 @@ class CellExplorerV3Escape:
                     "combined escape cell observations exceed elapsed ticks"
                 )
 
+        tail = _check_ordered_tail(state, require_ordered_tail=require_ordered_tail)
         model = cls()
+        model._ordered_from_tick = (state["ordered_from_tick"] if tail is not None
+                                    else state["updates"])
+        model._ordered_outcomes = copy.deepcopy(tail) if tail is not None else []
         model.last_tick = state["last_tick"]
         model.updates = state["updates"]
         model.records = copy.deepcopy(state["records"])
@@ -341,6 +476,12 @@ class CellExplorerV3Escape:
         self.last_seen_at[cell] = sense.tick
         self.last_tick = sense.tick
         self.updates += 1
+        self._ordered_outcomes.append({
+            "tick": sense.tick, "cell": cell, "action": action,
+            "blocked": blocked,
+        })
+        if len(self._ordered_outcomes) > MAX_ORDERED_OUTCOMES:
+            self._ordered_outcomes.pop(0)
         if action == "rest":
             self.consecutive_rests += 1
             self.consecutive_blocked_probes = 0
