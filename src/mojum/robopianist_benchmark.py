@@ -144,18 +144,23 @@ def make_trace(task: Any, *, mode: str = "policy") -> dict:
     checked = validate_task(task)
     if type(mode) is not str or mode not in ("policy", "frozen"):
         raise BenchmarkError("unknown trace mode")
+    notes = checked["notes"]
+    # Apply one common offset so chronology is preserved even at either edge
+    # of the admitted tick domain. A boundary-spanning task uses zero shift.
+    offset = 0
+    if mode == "frozen" and notes[-1][3] < MAX_TICK:
+        offset = 1
+    elif mode == "frozen" and notes[0][3] > 0:
+        offset = -1
     events = []
-    for index, key, finger, tick, duration in checked["notes"]:
+    for index, key, finger, tick, duration in notes:
         if mode == "policy":
-            actual_key, actual_finger, actual_tick = key, finger, tick
+            actual_key, actual_finger = key, finger
         else:
             actual_key = KEYS[0]
             actual_finger = _finger_for_key(actual_key)
-            # Keep the deliberately shifted control inside the admitted tick
-            # domain when a valid task uses the maximum representable tick.
-            actual_tick = tick if tick == MAX_TICK else tick + 1
         events.append({"index": index, "key": actual_key, "finger": actual_finger,
-                       "tick": actual_tick, "duration_ticks": duration})
+                       "tick": tick + offset, "duration_ticks": duration})
     trace = {"schema": TRACE_SCHEMA, "provenance": PROVENANCE, "consent": True,
              "task_sha256": checked["sha256"], "mode": mode, "events": events}
     trace["sha256"] = _digest(trace)
