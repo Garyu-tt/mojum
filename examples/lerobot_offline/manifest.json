@@ -1,0 +1,11 @@
+{
+  "schema": "mojum.lerobot-export/1",
+  "lerobot_format": "v3.0",
+  "repo_id": "synthetic/held-out",
+  "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "license": "CC0-1.0",
+  "fps": 10,
+  "state_dim": 1,
+  "action_dim": 1,
+  "frames_sha256": "96b82508aee030d248ea0fce0a611fa92d8d71fa561536478fe46a547b77123d"
+}
