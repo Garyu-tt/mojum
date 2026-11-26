@@ -1,0 +1,37 @@
+name: Cloth benchmark comparator QA
+
+on:
+  pull_request:
+    paths:
+      - "tools/cloth_benchmark_compare.py"
+      - "tests/test_cloth_benchmark_compare.py"
+      - "docs/CLOTH_BENCHMARK_COMPARE_R01.md"
+      - ".github/workflows/cloth-benchmark-compare.yml"
+  push:
+    paths:
+      - "tools/cloth_benchmark_compare.py"
+      - "tests/test_cloth_benchmark_compare.py"
+      - "docs/CLOTH_BENCHMARK_COMPARE_R01.md"
+      - ".github/workflows/cloth-benchmark-compare.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run bounded offline regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_cloth_benchmark_compare.py -v
