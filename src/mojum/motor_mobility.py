@@ -140,9 +140,10 @@ def _verified_motion(frame, schema, previous):
             or (intent["dx"], intent["dy"]) != (dx, dy)
             or (request["dx"], request["dy"]) != (dx, dy)):
         raise MobilityAuditError("committed motor displacement mismatch")
-    expected = previous if blocked else (previous[0] + dx, previous[1] + dy)
-    if position != expected:
-        raise MobilityAuditError("committed world position disagrees with motor action")
+    if previous is not None:
+        expected = previous if blocked else (previous[0] + dx, previous[1] + dy)
+        if position != expected:
+            raise MobilityAuditError("committed world position disagrees with motor action")
     return kind, blocked, position
 
 
@@ -154,17 +155,21 @@ def summarize(manifest, frames):
     if len(frames) > MAX_REPLAY_EVENTS:
         raise MobilityAuditError("mobility audit exceeds its frame limit")
 
+    room = manifest.get("room")
+    previous = _position(room["start"]) if type(room) is dict and "start" in room else None
+
     def motion_records():
+        nonlocal previous
         for expected_tick, frame in enumerate(frames):
             if type(frame) is not dict or type(frame.get("tick")) is not int:
                 raise MobilityAuditError("invalid frame tick")
             if frame["tick"] != expected_tick:
                 raise MobilityAuditError("frame tick discontinuity")
-            yield _action_fields(frame, policy["motor_policy_schema"])
+            motion = _verified_motion(frame, policy["motor_policy_schema"], previous)
+            previous = motion[2]
+            yield motion
 
-    room = manifest.get("room")
-    start = _position(room["start"]) if type(room) is dict and "start" in room else None
-    return _summarize_motion(policy, start, motion_records())
+    return _summarize_motion(policy, None, motion_records())
 
 
 def _summarize_motion(policy, previous, records):
