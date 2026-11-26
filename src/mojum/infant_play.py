@@ -13,8 +13,8 @@ import math
 from pathlib import Path
 
 from .graph import validate as validate_graph
-from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere
-from .sim import Simulation, digest
+from .noosphere import EMPTY_HEAD, EVENT_SCHEMA, LocalNoosphere, _read_first_event
+from .sim import Simulation, canonical, digest
 from .world_room import Room, advance, initial_state
 
 
@@ -224,6 +224,17 @@ class InfantPlay:
                      "start": list(self.start)},
             "goal": None, "provenance": "synthetic-fixture-no-real-world-observation",
         }
+        # Existing files are history, not permission to create or repair a
+        # journal. Inspect the bootstrap before writable SQLite initialization
+        # can change journal mode, permissions, metadata or application tables.
+        existing = Path(db_path)
+        first = _read_first_event(db_path, agent_id)
+        if existing.exists() or existing.is_symlink():
+            if first is None:
+                raise InfantError("existing infant journal lacks bootstrap")
+            expected = self._event("infant.bootstrap", "infant-bootstrap", self.manifest, 0)
+            if canonical(first) != canonical(expected):
+                raise InfantError("incompatible infant bootstrap")
         self._committed_head = EMPTY_HEAD
         self.store = LocalNoosphere(db_path, agent_id)
         try:
