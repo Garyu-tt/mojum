@@ -108,7 +108,8 @@ def reconcile_ruleset_checks(ruleset: dict, check_runs_snapshot: dict, expected_
     required_rules = []
     for rule in rules:
         item = _dict(rule, "ruleset rule")
-        if item.get("type") == "required_status_checks":
+        rule_type = item.get("type")
+        if type(rule_type) is str and rule_type == "required_status_checks":
             required_rules.append(item)
 
     if len(required_rules) != 1:
