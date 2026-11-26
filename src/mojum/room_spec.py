@@ -17,7 +17,9 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
 import math
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -362,6 +364,32 @@ def _text_report(report):
     return "\n".join(lines)
 
 
+def _read_room_file(path):
+    """Read a bounded regular descriptor without waiting for a FIFO writer."""
+    if os.name == "posix" and not getattr(os, "O_NONBLOCK", 0):
+        raise RoomSpecError("cannot safely read room document without O_NONBLOCK")
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_BINARY", 0),
+        )
+        # Check the opened object; a pathname check can race with replacement.
+        # Symlinks to ordinary files retain the CLI's existing behavior.
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise RoomSpecError("room document must be a regular file")
+        if info.st_size > MAX_INPUT_BYTES:
+            raise RoomSpecError("room document exceeds byte limit")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            # Keep the bound even if the file grows after descriptor inspection.
+            return stream.read(MAX_INPUT_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="mojum-room-check",
@@ -378,8 +406,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        with args.path.open("rb") as stream:
-            raw = stream.read(MAX_INPUT_BYTES + 1)
+        raw = _read_room_file(args.path)
+    except RoomSpecError as exc:
+        report = RoomReport((str(exc),), (), None)
     except OSError as exc:
         report = RoomReport(("cannot read room document: %s" % (exc.strerror,),), (), None)
     else:
