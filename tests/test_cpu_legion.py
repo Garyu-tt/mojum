@@ -8,7 +8,31 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from urllib.error import HTTPError
 from pathlib import Path
+from contextlib import contextmanager
 from unittest.mock import patch
+
+
+@contextmanager
+def _patched_environment(values):
+    """Temporarily override only named environment keys.
+
+    ``patch.dict(os.environ, ...)`` snapshots, clears and repopulates the
+    entire process environment on exit. On Windows that can make an unrelated
+    empty GIT_CONFIG_VALUE_0 inherited from the host impossible to restore.
+    Keep unrelated variables untouched instead.
+    """
+    missing = object()
+    previous = {key: os.environ.get(key, missing) for key in values}
+    try:
+        for key, value in values.items():
+            os.environ[key] = value
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is missing:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 from tools.cpu_legion import generate, local_url, parallel_limit, safe_file, task_context, verify
 from tools import cpu_legion as legion
 
@@ -97,8 +121,7 @@ class CpuLegionTests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(payload)
 
-            def log_message(self, *_):
-                pass
+            def log_message(self, *_):                pass
 
         class Proxy(BaseHTTPRequestHandler):
             used = False
@@ -120,7 +143,8 @@ class CpuLegionTests(unittest.TestCase):
         try:
             endpoint = f"http://127.0.0.1:{model.server_port}/v1/chat/completions"
             proxy_url = f"http://127.0.0.1:{proxy.server_port}"
-            with patch.dict(os.environ, {
+            inherited_git_config = os.environ.get("GIT_CONFIG_VALUE_0")
+            with _patched_environment({
                 "http_proxy": proxy_url,
                 "HTTP_PROXY": proxy_url,
                 "no_proxy": "",
@@ -129,6 +153,12 @@ class CpuLegionTests(unittest.TestCase):
                 self.assertEqual(generate(endpoint, "fixture", "hello", 2),
                                  "direct")
             self.assertFalse(Proxy.used)
+            self.assertEqual(os.environ.get("GIT_CONFIG_VALUE_0"), inherited_git_config)
+            git_status = subprocess.run(
+                ["git", "-C", str(self.root), "status", "--porcelain"],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(git_status.returncode, 0, git_status.stderr.decode("utf-8", "replace"))
         finally:
             model.shutdown()
             proxy.shutdown()
@@ -198,7 +228,6 @@ class CpuLegionTests(unittest.TestCase):
         secret = self.root / "secret.py"
         secret.write_text("PASSWORD=private\n")
         path = self.root / "src/test.py"
-
         def swap(root, name, **kwargs):
             validated = original_safe(root, name, **kwargs)
             path.unlink()
@@ -297,8 +326,7 @@ sys.exit(1)
     def test_patch_artifact_private_directory_and_exclusive_mode(self):
         out = self.root / "private" / "patches"
         legion._write_private_patch(out, "candidate.patch", "diff fixture\\n")
-        artifact = out / "candidate.patch"
-        self.assertEqual(artifact.read_text(), "diff fixture\\n")
+        artifact = out / "candidate.patch"        self.assertEqual(artifact.read_text(), "diff fixture\\n")
         self.assertEqual(artifact.stat().st_mode & 0o777, 0o600)
         self.assertEqual(out.stat().st_mode & 0o777, 0o700)
         with self.assertRaises(ValueError):
@@ -397,8 +425,7 @@ sys.exit(1)
     @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
                          and os.open in os.supports_dir_fd
                          and os.mkdir in os.supports_dir_fd,
-                         "POSIX pinned output directory writes required")
-    def test_patch_artifact_rejects_symlinked_ancestor(self):
+                         "POSIX pinned output directory writes required")    def test_patch_artifact_rejects_symlinked_ancestor(self):
         trusted = self.root / "trusted"
         trusted.mkdir()
         link = self.root / "link"
@@ -497,8 +524,7 @@ sys.exit(1)
             exit_code = legion.main()
         records = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(records[0]["actual_parallel_limit"], 2)
-        self.assertEqual(len(records), 3)
-        return exit_code, records[1:]
+        self.assertEqual(len(records), 3)        return exit_code, records[1:]
 
     def test_cli_partial_block_fails_closed_but_reports_successful_peer(self):
         def worker(_db, worker_id, *_args):
