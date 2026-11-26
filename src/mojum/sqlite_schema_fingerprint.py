@@ -26,12 +26,29 @@ class SchemaAuditError(ValueError):
     """An unsafe or unsupported schema inspection."""
 
 
+def _sidecar_free_wal_snapshot(target: Path) -> bool:
+    # SQLite header bytes 18 and 19 both equal 2 for WAL databases.
+    with target.open("rb", buffering=0) as source:
+        header = source.read(20)
+    if not header.startswith(b"SQLite format 3\x00") or header[18:20] != b"\x02\x02":
+        return False
+
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = target.with_name(target.name + suffix)
+        try:
+            sidecar.lstat()
+        except FileNotFoundError:
+            continue
+        return False
+    return True
+
+
 def fingerprint(path: str | os.PathLike[str]) -> dict[str, object]:
     """Inspect only sqlite_schema through a read-only SQLite connection.
 
-    The caller must supply a trusted directory that is not concurrently
-    modified. The pathname lstat check is not an fd-bound no-follow open and
-    therefore does not protect against an adversarial rename/symlink race.
+    The caller must supply a stable database in a trusted directory. A
+    sidecar-free WAL snapshot is opened without SQLite locking. The pathname
+    lstat check is not an fd-bound no-follow open.
     """
     target = Path(path)
     try:
@@ -45,6 +62,10 @@ def fingerprint(path: str | os.PathLike[str]) -> dict[str, object]:
 
     uri = "file:" + quote(str(target.absolute()), safe="/") + "?mode=ro"
     try:
+        # SQLite can create both WAL sidecars even in mode=ro. Only disable
+        # its WAL machinery when the stable snapshot has no sidecars to read.
+        if _sidecar_free_wal_snapshot(target):
+            uri += "&immutable=1"
         # sqlite3.Connection's context manager controls transactions, not
         # lifetime. closing() guarantees release on success and exceptions.
         with closing(sqlite3.connect(uri, uri=True, timeout=1.0)) as db:
@@ -81,7 +102,7 @@ def fingerprint(path: str | os.PathLike[str]) -> dict[str, object]:
                 if count == 0:
                     raise SchemaAuditError("empty schema is not an accepted Mojum journal")
                 return {"schema": SCHEMA, "entries": count, "sha256": digest.hexdigest()}
-    except (sqlite3.Error, UnicodeError, OverflowError) as exc:
+    except (sqlite3.Error, OSError, UnicodeError, OverflowError) as exc:
         raise SchemaAuditError("SQLite schema inspection failed") from exc
 
 

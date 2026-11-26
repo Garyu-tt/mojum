@@ -59,6 +59,15 @@ PYTHONPATH=src python -m mojum.infant_play --db ./dante_infant.sqlite3 --ticks 4
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
+Use a new pathname for the first run. An existing file must already contain
+a compatible InfantPlay bootstrap for the selected owner, graph, room, seed
+and virtual clock. Empty files, unrelated SQLite databases, missing metadata
+and incompatible bootstraps are rejected through a read-only inspection
+before writable initialization, including for `--ticks 0`. They are not
+adopted, repaired or migrated. Compatible histories still undergo full replay
+verification after opening. Keep the journal in a trusted private directory;
+this admission check does not lock its pathname against concurrent replacement.
+
 `--watch` prints local terminal JSONL (one observer event per tick, followed
 by a checkpoint summary). This is **not** a network server or automatically
 public spectator feed. Redirecting or sharing that output is an explicit

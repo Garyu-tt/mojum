@@ -31,6 +31,16 @@ publishing the selected PRIVATE frames.
 
 ## Open and verify
 
+For an installed wheel, first create the bundled HTML in a new local file:
+
+```sh
+python -m mojum.trace_viewer --output ./aquarium-viewer.html
+```
+
+This works without a source checkout and never replaces an existing path.
+The command prints the HTML byte count and SHA-256. No trace is included in
+the HTML; choose your exported file after opening the viewer.
+
 Open the HTML file directly in a browser and choose the exported JSONL. The
 viewer runs without a local web server and keeps the selected file in browser
 memory. It checks consecutive ticks, numeric room bounds, the terminal
@@ -61,3 +71,10 @@ PYTHONPATH=src python -m unittest -v tests.test_private_trace_integrity
 
 These are offline synthetic-fixture checks, not manual browser/mobile
 acceptance and not evidence of a trained brain or a complete digital organism.
+
+## Updating the bundled viewer
+
+`examples/aquarium_trace_viewer.html` remains the canonical source. When editing
+it, copy the same bytes to `src/mojum/data/aquarium_trace_viewer.html` so the
+wheel carries the same application. `tests/test_trace_viewer_package.py` and
+the installed-wheel smoke enforce exact byte equality.

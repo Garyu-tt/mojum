@@ -33,7 +33,8 @@ class InstallableAquariumTests(unittest.TestCase):
         self.assertEqual(metadata["project"]["dependencies"], [])
         self.assertEqual(metadata["project"]["requires-python"], ">=3.11")
         self.assertEqual(metadata["project"]["scripts"]["mojum-aquarium"], "mojum.aquarium:main")
-        self.assertEqual(metadata["tool"]["setuptools"]["package-data"]["mojum"], ["data/*.json"])
+        self.assertEqual(metadata["tool"]["setuptools"]["package-data"]["mojum"],
+                         ["data/*.json", "data/*.html"])
 
     def test_cli_defaults_start_and_resume_outside_repository(self):
         with tempfile.TemporaryDirectory() as folder:

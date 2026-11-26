@@ -5,11 +5,13 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from types import MappingProxyType
 
 from mojum.genesis import GenomeLedger, ACQUISITION_SCHEMA
 from mojum.body_genetics import (
     ASSET_SCHEMA, BODY_SCHEMA, CHROMOSOME_SCHEMA, IDENTITY_SCHEMA,
-    BodyContractError, compile_body, select_bassy_asset, validate_bassy_manifest,
+    BodyContractError, compile_body, compile_body_at_month, select_bassy_asset,
+    validate_bassy_manifest,
     validate_chromosome, validate_human_name, verify_local_glb,
 )
 
@@ -142,6 +144,116 @@ class BassyAssetTests(unittest.TestCase):
         self.assertTrue(selected["display_credits"])
         self.assertEqual(selected["credits"]["text"], "Made with Bassy")
         self.assertGreater(selected["scale_milli"], 1000)
+
+    def keyframe_manifest(self, ages=(6, 9, 12, 16)):
+        result = manifest()
+        result["stages"] = [
+            {"age_years": age, "path": f"dante/age_{age:02d}.glb",
+             "sha256": f"{age:064x}", "native_height_mm": 1000 + age * 30,
+             "rig_id": f"fixture-rig-{age}"}
+            for age in ages
+        ]
+        return result
+
+    def test_monthly_selection_uses_nearest_keyframe_with_younger_ties(self):
+        phenotype = GenomeLedger(SEED).phenotype(0)
+        for ages in ((6, 9, 12, 16), (6, 16), (9, 12), (6,), (16,),
+                     tuple(range(6, 17))):
+            assets = self.keyframe_manifest(ages)
+            for months in range(72, 193):
+                with self.subTest(ages=ages, months=months):
+                    # Independent interval oracle: move past a keyframe only
+                    # after the midpoint to its successor, retaining ties.
+                    expected = ages[0]
+                    for younger, older in zip(ages, ages[1:]):
+                        if 2 * months > 12 * (younger + older):
+                            expected = older
+                    body = compile_body_at_month(phenotype, CHROMOSOME, months)
+                    selected = select_bassy_asset(body, assets)
+                    self.assertEqual(selected["asset_age_years"], expected)
+
+    def test_whole_year_selection_matches_exact_month_boundaries(self):
+        phenotype = GenomeLedger(SEED).phenotype(0)
+        for assets in (manifest(), self.keyframe_manifest()):
+            for age in range(6, 17):
+                with self.subTest(ages=[s["age_years"] for s in assets["stages"]],
+                                  age=age):
+                    whole_year = compile_body(phenotype, CHROMOSOME, age)
+                    monthly = compile_body_at_month(phenotype, CHROMOSOME, age * 12)
+                    legacy = select_bassy_asset(whole_year, assets)
+                    self.assertEqual(select_bassy_asset(monthly, assets), legacy)
+                    self.assertEqual(
+                        select_bassy_asset(MappingProxyType(whole_year), assets), legacy)
+
+    def test_monthly_mapping_preserves_metadata_and_inputs(self):
+        body = compile_body_at_month(GenomeLedger(SEED).phenotype(0), CHROMOSOME, 127)
+        body["local_extension"] = {"label": "preview only"}
+        assets = self.keyframe_manifest()
+        before_body, before_assets = copy.deepcopy(body), copy.deepcopy(assets)
+        selected = select_bassy_asset(MappingProxyType(body), assets)
+        expected_stage = assets["stages"][2]
+        self.assertEqual(selected["asset_age_years"], 12)
+        for field in ("path", "sha256", "rig_id"):
+            self.assertEqual(selected[field], expected_stage[field])
+        self.assertEqual(selected["age_years"], body["age_years"])
+        self.assertEqual(selected["genome_id"], body["genome_id"])
+        self.assertEqual(selected["schema"], "mojum.avatar.selection/1")
+        self.assertEqual(set(selected), {
+            "schema", "genome_id", "age_years", "asset_age_years", "path",
+            "sha256", "rig_id", "scale_milli", "strategy", "credits", "display_credits",
+        })
+        self.assertEqual(selected["credits"], assets["credits"])
+        self.assertTrue(selected["display_credits"])
+        self.assertEqual(selected["strategy"], "keyframe_glb_no_mesh_morph")
+        height = body["dimensions"]["height_mm"]
+        native = expected_stage["native_height_mm"]
+        self.assertEqual(selected["scale_milli"], (height * 1000 + native // 2) // native)
+        self.assertEqual(body, before_body)
+        self.assertEqual(assets, before_assets)
+
+    def test_reject_invalid_or_inconsistent_optional_months(self):
+        body = compile_body_at_month(GenomeLedger(SEED).phenotype(0), CHROMOSOME, 127)
+        for months in (None, True, 71, 193, 127.0, "127", 72, 132, 192):
+            with self.subTest(months=months), self.assertRaises(BodyContractError):
+                select_bassy_asset(dict(body, age_months=months), self.keyframe_manifest())
+
+    def test_journaled_development_selects_monthly_asset_after_cold_replay(self):
+        from mojum.aquarium import Aquarium
+
+        graph = json.loads((ROOT / "examples" / "first_loop.json").read_text())
+        assets = self.keyframe_manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for stage in assets["stages"]:
+                path = root / stage["path"]
+                path.parent.mkdir(exist_ok=True)
+                path.write_bytes(GLB_HEADER)
+                stage["sha256"] = hashlib.sha256(GLB_HEADER).hexdigest()
+            db = root / "development.sqlite3"
+            with Aquarium(db, SEED, graph, neural_mode="shadow") as aquarium:
+                aquarium.step(dx=0, dy=0)
+                for months, expected in ((91, 9), (127, 12), (169, 16)):
+                    while aquarium.development_months < months:
+                        aquarium.advance_development(
+                            min(12, months - aquarium.development_months))
+                    checkpoint = aquarium.checkpoint()
+                    body = aquarium.body_preview(CHROMOSOME)
+                    selected = select_bassy_asset(body, assets)
+                    self.assertEqual(selected["asset_age_years"], expected)
+                    self.assertTrue(verify_local_glb(root, selected))
+                    self.assertEqual(aquarium.checkpoint(), checkpoint)
+            before_bytes = db.read_bytes()
+            before_stat = db.stat()
+            with Aquarium(db, SEED, graph, neural_mode="shadow", read_only=True) as recovered:
+                self.assertEqual(recovered.checkpoint(), checkpoint)
+                self.assertEqual(recovered.body_preview(CHROMOSOME), body)
+                self.assertEqual(select_bassy_asset(recovered.body_preview(CHROMOSOME),
+                                                   assets), selected)
+                self.assertTrue(verify_local_glb(root, selected))
+                self.assertEqual(recovered.checkpoint(), checkpoint)
+            self.assertEqual(db.read_bytes(), before_bytes)
+            self.assertEqual(db.stat().st_mtime_ns, before_stat.st_mtime_ns)
+            self.assertEqual(db.stat().st_mode, before_stat.st_mode)
 
     def test_manifest_strictness_and_path_traversal(self):
         for path in ("../escape.glb", "/tmp/dante.glb", "C:/dante.glb",

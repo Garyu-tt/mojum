@@ -20,14 +20,26 @@ def main():
     if not 1 <= args.ticks <= 100_000 or not 1 <= args.dt_ms <= 1000:
         parser.error("ticks must be 1..100000, dt-ms must be 1..1000")
     try:
-        graph = load_graph(args.graph)
+        _run_fixture(args)
     except GraphError as exc:
         parser.error(str(exc))
+
+
+def _run_fixture(args):
+    graph = load_graph(args.graph)
     runtime = Simulation(graph, args.dt_ms * 1_000_000)
     last = None
     for _ in range(args.ticks):
         last = runtime.step()
-    print(json.dumps({"status": "R0.1_SYNTHETIC_FIXTURE", "tick": runtime.tick, "graph_sha256": runtime.graph_hash, "last_frame": last, "last_episode": runtime.episodes[-1] if runtime.episodes else None, "snapshot_sha256": runtime.snapshot()["sha256"]}, ensure_ascii=False, indent=2, allow_nan=False))
+    result = {
+        "status": "R0.1_SYNTHETIC_FIXTURE",
+        "tick": runtime.tick,
+        "graph_sha256": runtime.graph_hash,
+        "last_frame": last,
+        "last_episode": runtime.episodes[-1] if runtime.episodes else None,
+        "snapshot_sha256": runtime.snapshot()["sha256"],
+    }
+    print(json.dumps(result, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
