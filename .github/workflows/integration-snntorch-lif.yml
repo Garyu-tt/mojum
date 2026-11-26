@@ -1,0 +1,25 @@
+name: integration-snnTorch-LIF-offline
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/snntorch_lif_probe.py'
+      - 'tests/test_snntorch_lif_probe.py'
+      - 'docs/SNNTORCH_LIF_CPU_R01.md'
+      - '.github/workflows/integration-snntorch-lif.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stdlib-offline:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Offline dependency-free LIF regression
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_snntorch_lif_probe.py' -v
