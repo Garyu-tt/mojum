@@ -1,0 +1,39 @@
+name: VRM offline pose contract
+
+on:
+  pull_request:
+    paths:
+      - 'tools/vrm_*.mjs'
+      - 'tests/vrm_pose_bridge.test.mjs'
+      - 'examples/vrm_pose_fixture_r01.json'
+      - 'docs/VRM_RENDERER_R01.md'
+      - '.github/workflows/vrm-pose-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Check dependency-free adapter syntax
+        run: |
+          node --check tools/vrm_pose_bridge.mjs
+          node --check tools/vrm_glb_guard.mjs
+          node --check tools/vrm_optional_viewer.mjs
+      - name: Exercise deterministic offline pose and GLB rejection
+        run: node --test tests/vrm_pose_bridge.test.mjs
+      - name: Check public fixture shape
+        run: python3 -m json.tool examples/vrm_pose_fixture_r01.json >/dev/null
