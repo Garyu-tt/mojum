@@ -45,6 +45,15 @@ class RulesetCheckReconcileTests(unittest.TestCase):
         self.assertEqual(result.passed, ("required-0", "required-1"))
         self.assertEqual(len(result.receipt_sha256), 64)
 
+    def test_check_context_and_run_name_may_contain_spaces(self):
+        ruleset, snapshot = fixture(count=1)
+        context = "Build and Test / Windows"
+        ruleset["rules"][0]["parameters"]["required_status_checks"][0]["context"] = context
+        snapshot["check_runs"][0]["name"] = context
+        result = reconcile_ruleset_checks(ruleset, snapshot, SHA)
+        self.assertEqual(result.verdict, "PASS")
+        self.assertEqual(result.passed, (context,))
+
     def test_check_on_different_commit_is_missing(self):
         _, snap = fixture()
         snap["check_runs"][0]["head_sha"] = "b" * 40
