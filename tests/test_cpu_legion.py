@@ -121,7 +121,8 @@ class CpuLegionTests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(payload)
 
-            def log_message(self, *_):                pass
+            def log_message(self, *_):
+                pass
 
         class Proxy(BaseHTTPRequestHandler):
             used = False
@@ -228,6 +229,7 @@ class CpuLegionTests(unittest.TestCase):
         secret = self.root / "secret.py"
         secret.write_text("PASSWORD=private\n")
         path = self.root / "src/test.py"
+
         def swap(root, name, **kwargs):
             validated = original_safe(root, name, **kwargs)
             path.unlink()
@@ -326,7 +328,8 @@ sys.exit(1)
     def test_patch_artifact_private_directory_and_exclusive_mode(self):
         out = self.root / "private" / "patches"
         legion._write_private_patch(out, "candidate.patch", "diff fixture\\n")
-        artifact = out / "candidate.patch"        self.assertEqual(artifact.read_text(), "diff fixture\\n")
+        artifact = out / "candidate.patch"
+        self.assertEqual(artifact.read_text(), "diff fixture\\n")
         self.assertEqual(artifact.stat().st_mode & 0o777, 0o600)
         self.assertEqual(out.stat().st_mode & 0o777, 0o700)
         with self.assertRaises(ValueError):
@@ -425,7 +428,8 @@ sys.exit(1)
     @unittest.skipUnless(os.name == "posix" and getattr(os, "O_NOFOLLOW", 0)
                          and os.open in os.supports_dir_fd
                          and os.mkdir in os.supports_dir_fd,
-                         "POSIX pinned output directory writes required")    def test_patch_artifact_rejects_symlinked_ancestor(self):
+                         "POSIX pinned output directory writes required")
+    def test_patch_artifact_rejects_symlinked_ancestor(self):
         trusted = self.root / "trusted"
         trusted.mkdir()
         link = self.root / "link"
@@ -524,7 +528,8 @@ sys.exit(1)
             exit_code = legion.main()
         records = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(records[0]["actual_parallel_limit"], 2)
-        self.assertEqual(len(records), 3)        return exit_code, records[1:]
+        self.assertEqual(len(records), 3)
+        return exit_code, records[1:]
 
     def test_cli_partial_block_fails_closed_but_reports_successful_peer(self):
         def worker(_db, worker_id, *_args):
