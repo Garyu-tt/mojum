@@ -1,0 +1,42 @@
+name: Physics benchmark comparison QA
+on:
+  pull_request:
+    paths:
+      - "src/mojum/physics_benchmark_compare.py"
+      - "tests/test_physics_benchmark_compare.py"
+      - "docs/PHYSICS_BENCHMARK_COMPARE_R01.md"
+      - ".github/workflows/physics-benchmark-compare-qa.yml"
+  push:
+    branches:
+      - "build/702-physics-benchmark-compare-20261123"
+    paths:
+      - "src/mojum/physics_benchmark_compare.py"
+      - "tests/test_physics_benchmark_compare.py"
+      - "docs/PHYSICS_BENCHMARK_COMPARE_R01.md"
+      - ".github/workflows/physics-benchmark-compare-qa.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact submitted revision
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Run focused benchmark comparison tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_physics_benchmark_compare.py" -v
