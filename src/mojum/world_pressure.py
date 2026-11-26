@@ -1,0 +1,133 @@
+"""Bounded synthetic barometric-pressure observations for point-room fixtures."""
+from dataclasses import dataclass
+import hashlib
+import json
+import re
+
+from .world_room import Room, RoomState, _revision, _valid
+
+SCHEMA = "mojum.world.pressure-profile/1"
+OBSERVATION_SCHEMA = "mojum.world.pressure-observation/1"
+MAX_TICK = (1 << 53) - 1
+MAX_DIMENSION_MM = 1_000_000_000
+MIN_PRESSURE_PA = 30_000
+MAX_PRESSURE_PA = 120_000
+MAX_GRADIENT_PA_PER_KM = 500
+MAX_DRIFT_PA_PER_TICK = 10
+MAX_OBSERVATION_KEY_LENGTH = len("physical_sensor")
+_HEX = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+
+
+@dataclass(frozen=True)
+class PressureProfile:
+    """Integer-only synthetic field; pressure is expressed in pascals."""
+    room_revision: str
+    width_mm: int
+    height_mm: int
+    base_pressure_pa: int
+    gradient_x_pa_per_km: int = 0
+    gradient_y_pa_per_km: int = 0
+    drift_pa_per_tick: int = 0
+    epoch_tick: int = 0
+
+
+def _integer(value, low, high):
+    return type(value) is int and low <= value <= high
+
+
+def _profile(profile):
+    if type(profile) is not PressureProfile:
+        raise ValueError("invalid pressure profile type")
+    if (type(profile.room_revision) is not str or _HEX.fullmatch(profile.room_revision) is None
+            or not _integer(profile.width_mm, 1, MAX_DIMENSION_MM)
+            or not _integer(profile.height_mm, 1, MAX_DIMENSION_MM)
+            or not _integer(profile.base_pressure_pa, MIN_PRESSURE_PA, MAX_PRESSURE_PA)
+            or not _integer(profile.gradient_x_pa_per_km, -MAX_GRADIENT_PA_PER_KM, MAX_GRADIENT_PA_PER_KM)
+            or not _integer(profile.gradient_y_pa_per_km, -MAX_GRADIENT_PA_PER_KM, MAX_GRADIENT_PA_PER_KM)
+            or not _integer(profile.drift_pa_per_tick, -MAX_DRIFT_PA_PER_TICK, MAX_DRIFT_PA_PER_TICK)
+            or not _integer(profile.epoch_tick, 0, MAX_TICK)):
+        raise ValueError("invalid pressure profile fields")
+    return profile
+
+
+def _validated_room(room):
+    """Reconstruct exact Room instances to re-run canonical geometry validation."""
+    if type(room) is not Room:
+        raise ValueError("room must be the canonical Room")
+    try:
+        return Room(room.width, room.height, room.obstacles)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("invalid canonical room geometry") from exc
+
+
+def _digest(payload):
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True,
+                         separators=(",", ":"), allow_nan=False).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def observe_pressure(profile: PressureProfile, *, room: Room, state: RoomState,
+                     tick: int, x_mm: int, y_mm: int) -> dict:
+    """Sample at a caller-selected point, bound to the exact canonical room state."""
+    p = _profile(profile)
+    if type(state) is not RoomState:
+        raise ValueError("invalid room or room-state type")
+    room = _validated_room(room)
+    if (not _integer(state.tick, 0, MAX_TICK)
+            or type(state.revision) is not str or _HEX.fullmatch(state.revision) is None
+            or type(state.x) not in (int, float) or type(state.y) not in (int, float)
+            or not _valid(room, state.x, state.y)
+            or state.revision != _revision(room, state.tick, state.x, state.y)):
+        raise ValueError("stale or invalid room state")
+    if (not _integer(tick, p.epoch_tick, MAX_TICK) or tick != state.tick
+            or state.revision != p.room_revision):
+        raise ValueError("stale room revision or tick")
+    # Convert the exact millimetre dimensions to Room's metre representation;
+    # multiplying a valid float such as 1.001 back by 1000 need not be integral.
+    if room.width != p.width_mm / 1000 or room.height != p.height_mm / 1000:
+        raise ValueError("profile dimensions do not match room")
+    if (not _integer(x_mm, 0, p.width_mm - 1)
+            or not _integer(y_mm, 0, p.height_mm - 1)
+            or not _valid(room, x_mm / 1000, y_mm / 1000)):
+        raise ValueError("sample position outside room or inside obstacle")
+    raw = (p.base_pressure_pa
+           + (p.gradient_x_pa_per_km * x_mm) // 1_000_000
+           + (p.gradient_y_pa_per_km * y_mm) // 1_000_000
+           + p.drift_pa_per_tick * (tick - p.epoch_tick))
+    if not MIN_PRESSURE_PA <= raw <= MAX_PRESSURE_PA:
+        raise ValueError("computed pressure outside supported pascal range")
+    body = {
+        "schema": OBSERVATION_SCHEMA, "profile_schema": SCHEMA,
+        "room_revision": p.room_revision, "tick": tick,
+        "position_mm": [x_mm, y_mm], "pressure_pa": raw,
+        "provenance": "public-synthetic-barometric-pressure-field/v1",
+        "physical_sensor": False,
+    }
+    return {**body, "digest": _digest(body)}
+
+
+def verify_observation(observation: dict) -> bool:
+    """Verify exact wire shape and canonical digest; this is not authentication."""
+    keys = {"schema", "profile_schema", "room_revision", "tick", "position_mm",
+            "pressure_pa", "provenance", "physical_sensor", "digest"}
+    if type(observation) is not dict or len(observation) != len(keys):
+        raise ValueError("invalid observation object")
+    for key in observation:
+        if type(key) is not str or len(key) > MAX_OBSERVATION_KEY_LENGTH:
+            raise ValueError("invalid observation key")
+    if set(observation) != keys:
+        raise ValueError("invalid observation fields")
+    if (type(observation["schema"]) is not str or observation["schema"] != OBSERVATION_SCHEMA
+            or type(observation["profile_schema"]) is not str or observation["profile_schema"] != SCHEMA
+            or type(observation["room_revision"]) is not str or _HEX.fullmatch(observation["room_revision"]) is None
+            or not _integer(observation["tick"], 0, MAX_TICK)
+            or type(observation["position_mm"]) is not list or len(observation["position_mm"]) != 2
+            or not all(_integer(v, 0, MAX_DIMENSION_MM - 1) for v in observation["position_mm"])
+            or not _integer(observation["pressure_pa"], MIN_PRESSURE_PA, MAX_PRESSURE_PA)
+            or type(observation["provenance"]) is not str
+            or observation["provenance"] != "public-synthetic-barometric-pressure-field/v1"
+            or type(observation["physical_sensor"]) is not bool or observation["physical_sensor"] is not False
+            or type(observation["digest"]) is not str or _HEX.fullmatch(observation["digest"]) is None):
+        raise ValueError("invalid observation values")
+    body = {key: value for key, value in observation.items() if key != "digest"}
+    return _digest(body) == observation["digest"]
