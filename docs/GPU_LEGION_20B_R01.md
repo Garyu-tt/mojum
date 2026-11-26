@@ -184,6 +184,10 @@ revision**, without altering ALT. The stdlib-only verifier rejects changed
 bytes, wrong GGUF magic, symlinks, pipes and size mismatches. It reads the
 whole model in bounded chunks, without downloading it or launching a model.
 
+On Windows, pass a drive-letter path on a mounted local volume. The verifier
+rejects paths through reparse points and requires the file to be free of
+open writers while hashing.
+
 For the **selected immutable revision 41e8a94...**:
 
 ```sh
