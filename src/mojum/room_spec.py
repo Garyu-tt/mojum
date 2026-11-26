@@ -391,7 +391,11 @@ def main(argv=None):
     if args.format == "json":
         sys.stdout.write(json.dumps(report.as_json(), indent=2, sort_keys=True) + "\n")
     else:
-        sys.stdout.write(_text_report(report) + "\n")
+        text = _text_report(report) + "\n"
+        encoding = getattr(sys.stdout, "encoding", None)
+        if encoding is not None:
+            text = text.encode(encoding, errors="backslashreplace").decode(encoding)
+        sys.stdout.write(text)
     return 0 if report.valid else 1
 
 
