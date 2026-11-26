@@ -91,6 +91,12 @@ class CPGBridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(CPGBridgeError, "profile digest"):
             self.convert(profile=other)
 
+    def test_rejects_non_native_phase_and_frequency_fields(self):
+        with self.assertRaisesRegex(CPGBridgeError, "left_phase"):
+            self.convert(frame=replace(self.frame, left_phase_microturns=True))
+        with self.assertRaisesRegex(CPGBridgeError, "frequency"):
+            self.convert(frame=replace(self.frame, frequency_millihz="1000"))
+
     def test_rejects_duplicate_joint_mapping(self):
         with self.assertRaisesRegex(CPGBridgeError, "duplicate"):
             self.convert(channels=(self.channels[0], self.channels[0]))
