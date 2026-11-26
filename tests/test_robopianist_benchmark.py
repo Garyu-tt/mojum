@@ -52,6 +52,21 @@ class RoboPianistBenchmarkTests(unittest.TestCase):
         comparison = compare_controls(task)
         self.assertEqual(comparison["frozen_control"]["note_count"], 4)
 
+    def test_frozen_control_preserves_dense_upper_boundary_chronology(self):
+        task = make_task(14, note_count=4)
+        maximum = 2**31 - 1
+        for index, note in enumerate(task["notes"]):
+            note["tick"] = maximum - 3 + index
+        unsigned = {key: task[key] for key in (
+            "schema", "provenance", "consent", "seed", "split",
+            "tempo_ticks_per_second", "notes",
+        )}
+        task["sha256"] = _digest(unsigned)
+        comparison = compare_controls(task)
+        ticks = [event["tick"] for event in make_trace(task, mode="frozen")["events"]]
+        self.assertEqual(ticks, sorted(ticks))
+        self.assertEqual(comparison["frozen_control"]["note_count"], 4)
+
     def test_score_requires_explicit_consent_and_matching_task(self):
         task = make_task(1)
         trace = make_trace(task)
