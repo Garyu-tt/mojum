@@ -163,7 +163,7 @@ def _open_readonly(path):
         raise NoosphereError("cannot read SQLite event journal") from exc
 
 
-def _read_first_event(path, agent_id):
+def _read_first_event(path, agent_id, *, external_expected_head=None):
     """Inspect existing bootstrap before any writable SQLite initialization."""
     path = Path(path)
     if path.is_symlink():
@@ -193,6 +193,12 @@ def _read_first_event(path, agent_id):
         first = db.execute("SELECT wire_json FROM events ORDER BY seq LIMIT 1").fetchone()
         if first is None:
             return None
+        if external_expected_head is not None:
+            # Check the tip in the same snapshot as the bootstrap. This
+            # preflight cannot replace full replay verification after opening.
+            tip = db.execute("SELECT event_hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+            if tip["event_hash"] != external_expected_head:
+                raise NoosphereError("hash head differs from independent external anchor")
         try:
             event = _loads_wire(first["wire_json"])
         except NoosphereError as exc:
@@ -258,8 +264,9 @@ class LocalNoosphere:
             raise NoosphereError("database path cannot be a symbolic link")
         if path.is_dir():
             raise NoosphereError("database path cannot be a directory")
-        # Explicit file path required. Not ':memory:' or URI addresses.
-        if not path.name or str(db_path) == ":memory:":
+        # Check the normalized filename passed to SQLite: Path removes dot
+        # components and trailing separators from aliases such as './:memory:'.
+        if not path.name or str(path) == ":memory:":
             raise NoosphereError("a persistent SQLite database file is required")
         if not path.parent.is_dir():
             raise NoosphereError("database parent directory must exist")
@@ -283,6 +290,17 @@ class LocalNoosphere:
                 if saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
                     raise NoosphereError("read-only journal owner or schema mismatch")
             else:
+                # Refuse an existing foreign/incompatible journal before
+                # changing its persistent journal mode or file permissions.
+                # _setup still rechecks inside its write transaction because
+                # another connection can change metadata after this read.
+                if self._db.execute(
+                    "SELECT 1 FROM sqlite_schema "
+                    "WHERE type IN ('table','view') AND name='metadata' COLLATE NOCASE"
+                ).fetchone():
+                    saved = dict(self._db.execute("SELECT k,v FROM metadata"))
+                    if saved and saved != {"schema": STORE_SCHEMA, "owner": self.agent_id}:
+                        raise NoosphereError("database schema or agent owner does not match")
                 self._db.execute("PRAGMA synchronous=FULL")
                 self._db.execute("PRAGMA journal_mode=WAL")
                 self._db.execute("PRAGMA foreign_keys=ON")

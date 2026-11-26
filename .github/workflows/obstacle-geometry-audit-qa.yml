@@ -1,0 +1,48 @@
+name: obstacle-geometry-audit-qa focused QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/obstacle_geometry_audit.py"
+      - "tests/test_obstacle_geometry_audit.py"
+      - "docs/OBSTACLE_GEOMETRY_AUDIT_R01.md"
+      - ".github/workflows/obstacle-geometry-audit-qa.yml"
+  push:
+    branches:
+      - "qa/**"
+    paths:
+      - "src/mojum/obstacle_geometry_audit.py"
+      - "tests/test_obstacle_geometry_audit.py"
+      - "docs/OBSTACLE_GEOMETRY_AUDIT_R01.md"
+      - ".github/workflows/obstacle-geometry-audit-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact submitted revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_obstacle_geometry_audit.py" -v

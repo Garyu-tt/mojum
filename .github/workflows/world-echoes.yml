@@ -1,0 +1,43 @@
+name: World echo geometry QA
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/world-echoes.yml"
+      - "src/mojum/world_echoes.py"
+      - "tests/test_world_echoes.py"
+      - "src/mojum/world_room.py"
+  push:
+    branches:
+      - "build/7-world-echoes-20261124"
+
+permissions:
+  contents: read
+
+jobs:
+  world-echoes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Set up CPython
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile module and tests
+        run: python -m compileall -q src/mojum/world_echoes.py tests/test_world_echoes.py
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_world_echoes.py" -v

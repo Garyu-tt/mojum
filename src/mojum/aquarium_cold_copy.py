@@ -17,7 +17,8 @@ import sqlite3
 import stat
 import tempfile
 
-from .aquarium import Aquarium, AquariumError, MOTOR_MODES
+from .aquarium import Aquarium, AquariumError, MOTOR_MODES, load_cli_room
+from .cli_sensory_scene import SENSORY_SCENE_CHOICES, resolve_sensory_scene
 from .genesis import validate_seed
 from .graph import load_graph
 from .noosphere import STORE_SCHEMA, _open_readonly
@@ -162,7 +163,7 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
     committed WAL pages. Only the temporary backup is opened for full Aquarium
     replay with the supplied Aquarium configuration. The source history is
     never opened writable during export.
-    Concurrent commits are reflected in the backup's verified snapshot.
+    The backup includes commits visible when its page budget is checked.
     """
     source = _source_file(source_db)
     destination = _destination(destination_db)
@@ -186,6 +187,8 @@ def export_cold_copy(source_db, destination_db, seed, graph, *,
         with closing(sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
                                      uri=True, timeout=5.0)) as original:
             original.execute("PRAGMA query_only=ON")
+            # Hold one read snapshot for the budget check and the online backup.
+            original.execute("BEGIN")
             if (original.execute("PRAGMA page_count").fetchone()[0]
                     * original.execute("PRAGMA page_size").fetchone()[0]
                     > MAX_BACKUP_BYTES):
@@ -256,6 +259,8 @@ def main():
         p.add_argument("--db", type=Path, required=True)
         p.add_argument("--genome", type=Path, default=packaged.joinpath("genesis_seed.json"))
         p.add_argument("--graph", type=Path, default=packaged.joinpath("first_loop.json"))
+        p.add_argument("--room-file", type=Path,
+                       help="room draft used when creating the source journal")
         p.add_argument("--agent-id", help="journal owner, defaults to the supplied genome ID")
         p.add_argument("--neural-mode", choices=("shadow", "disabled"), default="shadow")
         p.add_argument("--motor-mode", choices=MOTOR_MODES, default="scripted")
@@ -263,6 +268,8 @@ def main():
                        default="placeholder")
         p.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                        default="none")
+        p.add_argument("--sensory-scene", choices=SENSORY_SCENE_CHOICES, default="default",
+                       help="scene used to create the journal; empty uses the selected room dimensions")
         p.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
         if mode == "export":
             p.add_argument("--output", type=Path, required=True)
@@ -271,10 +278,15 @@ def main():
             p.add_argument("--expected-sha256")
             p.add_argument("--expected-tick", type=int)
     args = parser.parse_args()
-    options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
-                   brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
-                   temporal_mode=args.temporal_mode)
     try:
+        room, start = load_cli_room(args.room_file, args.motor_mode)
+        sensory_scene = resolve_sensory_scene(
+            args.sensory_scene, sensory_mode=args.sensory_mode, room=room,
+        )
+        options = dict(neural_mode=args.neural_mode, motor_mode=args.motor_mode,
+                       brain_mode=args.brain_mode, sensory_mode=args.sensory_mode,
+                       temporal_mode=args.temporal_mode, room=room, start=start,
+                       sensory_scene=sensory_scene)
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
         agent_id = seed["genome_id"] if args.agent_id is None else args.agent_id
