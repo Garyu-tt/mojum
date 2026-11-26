@@ -1,0 +1,35 @@
+name: Neural transition witness
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/neural.py"
+      - "src/mojum/neural_transition_witness.py"
+      - "tests/test_neural_transition_witness.py"
+      - "docs/NEURAL_TRANSITION_WITNESS_R01.md"
+      - ".github/workflows/neural-transition-witness.yml"
+  push:
+    branches:
+      - "build/6-neural-transition-witness-20261123"
+
+permissions:
+  contents: read
+
+jobs:
+  witness:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m compileall -q src/mojum/neural.py src/mojum/neural_transition_witness.py tests/test_neural_transition_witness.py
+      - name: Run focused offline tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_neural_transition_witness.py' -v
