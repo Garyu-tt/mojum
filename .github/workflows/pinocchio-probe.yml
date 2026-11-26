@@ -1,0 +1,29 @@
+name: Pinocchio optional native probe
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/pinocchio_benchmark.py"
+      - "tests/test_pinocchio_benchmark.py"
+      - "docs/INTEGRATION_PINOCCHIO_702.md"
+      - ".github/workflows/pinocchio-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-pinocchio-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned optional upstream release
+        run: python -m pip install --disable-pip-version-check 'pin==4.1.0'
+      - name: Verify deterministic reference and real native adapter
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_pinocchio_benchmark.py' -v
+      - name: Verify native FK/IK report
+        run: PYTHONPATH=src python -m mojum.pinocchio_benchmark --backend pinocchio --samples 128
