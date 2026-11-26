@@ -1,0 +1,40 @@
+name: Mojum audio energy sequence independent QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/mojum/audio_energy.py"
+      - "src/mojum/audio_energy_sequence.py"
+      - "tests/test_audio_energy_sequence.py"
+      - ".github/workflows/audio-energy-sequence-qa.yml"
+  pull_request:
+    paths:
+      - "src/mojum/audio_energy.py"
+      - "src/mojum/audio_energy_sequence.py"
+      - "tests/test_audio_energy_sequence.py"
+      - ".github/workflows/audio-energy-sequence-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audio-energy-stdlib:
+    name: Audio energy stdlib
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile audio sequence and test modules
+        run: python -m compileall -q src/mojum/audio_energy.py src/mojum/audio_energy_sequence.py tests/test_audio_energy_sequence.py
+      - name: Run deterministic PCM16 sequence contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_audio_energy_sequence.py' -v
