@@ -1,0 +1,30 @@
+name: Piper TTS public synthetic offline probe
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/piper_tts.py'
+      - 'tests/test_piper_tts.py'
+      - 'docs/PIPER_TTS_OFFLINE_R01.md'
+      - '.github/workflows/piper-tts-offline-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fake-piper-stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate offline synthetic CLI adapter
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_piper_tts.py -v
