@@ -115,9 +115,12 @@ class FingerSenseIngressTests(unittest.TestCase):
         admitted_b, _ = admit_frame(second)
         self.assertEqual(admitted_a.sha256, admitted_b.sha256)
 
-    def test_rejects_invalid_state_type(self):
+    def test_rejects_invalid_state_type_and_contents(self):
         with self.assertRaises(FingerSenseIngressError):
             admit_frame(frame(), previous=object())
+        forged = IngressState("fixture-hand-left", 2, True, 10, "not-a-digest")
+        with self.assertRaises(FingerSenseIngressError):
+            admit_frame(frame(sequence=1, tick=11), previous=forged)
 
 
 if __name__ == "__main__":
