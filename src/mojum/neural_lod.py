@@ -214,7 +214,7 @@ def plan_lod(
     )
 
 
-def verify_plan(plan: object) -> bool:
+def _verify_plan(plan: object) -> bool:
     """Recompute a plan's bounded consistency digest and accounting invariants."""
     if type(plan) is not LODPlan:
         raise NeuralLODError("an exact LODPlan is required")
@@ -267,3 +267,11 @@ def verify_plan(plan: object) -> bool:
     if type(plan.sha256) is not str or plan.sha256 != expected:
         raise NeuralLODError("LOD plan digest mismatch")
     return True
+
+
+def verify_plan(plan: object) -> bool:
+    """Verify a receipt, normalizing forged or incomplete records to the public error."""
+    try:
+        return _verify_plan(plan)
+    except AttributeError as exc:
+        raise NeuralLODError("incomplete or forged LOD receipt") from exc
