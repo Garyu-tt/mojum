@@ -1,0 +1,58 @@
+name: Mikoshi coordination runtime bridge
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/mikoshi_coordination_runtime.py'
+      - 'src/mojum/cerebellar_coordination.py'
+      - 'src/mojum/autonomic_homeostasis.py'
+      - 'tests/test_mikoshi_coordination_runtime.py'
+      - '.github/workflows/mikoshi-coordination-runtime.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/mojum/mikoshi_coordination_runtime.py'
+      - 'src/mojum/cerebellar_coordination.py'
+      - 'src/mojum/autonomic_homeostasis.py'
+      - 'tests/test_mikoshi_coordination_runtime.py'
+      - '.github/workflows/mikoshi-coordination-runtime.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mikoshi-coordination-runtime-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile runtime and tests
+        run: >-
+          python -m py_compile
+          src/mojum/mikoshi_coordination_runtime.py
+          src/mojum/cerebellar_coordination.py
+          src/mojum/autonomic_homeostasis.py
+          tests/test_mikoshi_coordination_runtime.py
+      - name: Run bridge regression tests
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m unittest tests/test_mikoshi_coordination_runtime.py -v
+      - name: Run component regression tests
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m unittest tests/test_cerebellar_homeostasis.py -v
