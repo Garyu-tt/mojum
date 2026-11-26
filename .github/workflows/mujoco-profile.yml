@@ -1,0 +1,45 @@
+name: Mojum MuJoCo CPU profile contract
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/mujoco_profile.py"
+      - "tests/test_mujoco_profile.py"
+      - "docs/MUJOCO_PROFILE_R01.md"
+      - ".github/workflows/mujoco-profile.yml"
+  push:
+    branches: ["build/689-mujoco-cpu-profile-20261123"]
+    paths:
+      - "src/mojum/mujoco_profile.py"
+      - "tests/test_mujoco_profile.py"
+      - ".github/workflows/mujoco-profile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  profile-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run offline profile contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_mujoco_profile.py" -v
