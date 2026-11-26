@@ -56,6 +56,39 @@ class CPGBridgeTests(unittest.TestCase):
         for intent in intents:
             self.assertEqual(self.gate.validate(intent), intent.target)
 
+    def test_small_positive_and_negative_outputs_round_toward_zero_symmetrically(self):
+        profile = CPGProfile(
+            revision=3,
+            tick_us=1_000,
+            minimum_frequency_millihz=500,
+            base_frequency_millihz=500,
+            maximum_frequency_millihz=500,
+            amplitude_milli=1_000,
+            coupling_gain_milli=100,
+            sensory_phase_gain=50,
+            maximum_phase_correction=100,
+        )
+        cpg = BilateralCPG(profile)
+        frame = cpg.step(SensoryFeedback(tick=1, profile_revision=3))
+        snapshot = cpg.snapshot()
+        self.assertEqual(frame.left_output_milli, 2)
+        self.assertEqual(frame.right_output_milli, -2)
+        gate = MotorGate(
+            {"left_hip": (-1.0, 1.0), "right_hip": (-1.0, 1.0)},
+            revision=3,
+        )
+        intents = intents_from_frame(
+            frame,
+            (
+                JointChannel("left_hip", "left", 0, 250),
+                JointChannel("right_hip", "right", 0, 250),
+            ),
+            gate,
+            profile=profile,
+            snapshot=snapshot,
+        )
+        self.assertEqual([intent.target for intent in intents], [0.0, 0.0])
+
     def test_rejects_stale_frame_revision(self):
         with self.assertRaisesRegex(CPGBridgeError, "revision"):
             self.convert(frame=replace(self.frame, profile_revision=2))
