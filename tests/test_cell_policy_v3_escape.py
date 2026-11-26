@@ -6,6 +6,7 @@ blocked once. These tests pin the defect on the existing v3 policy, then prove
 the versioned escape profile stays bounded and honest without reading geometry.
 """
 
+import copy
 import inspect
 import unittest
 
@@ -188,13 +189,18 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         # claims five observations despite last being seen on tick zero.
         valid = CellExplorerV3Escape().snapshot()
         valid.update({
+            "snapshot_version": 2,
             "last_tick": 99,
             "updates": 100,
             "records": {
                 "0:0": {"rest": [1, 0]},
-                "2500:0": {"rest": [99, 0]},
+                "2500:0": {"rest": [95, 0], "x+": [4, 0]},
             },
             "last_seen_at": {"0:0": 0, "2500:0": 99},
+            "outcome_tail": [
+                {"tick": tick, "cell": "2500:0", "action": "x+", "blocked": False}
+                for tick in range(96, 100)
+            ],
         })
         self.assertEqual(
             CellExplorerV3Escape.from_snapshot(valid).snapshot(), valid,
@@ -234,6 +240,8 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
             "cell_size_m": STEP_METERS,
             "consecutive_rests": 0,
             "consecutive_blocked_probes": 0,
+            "snapshot_version": 2,
+            "outcome_tail": [],
         }
         forged = {
             "two_cells_stamped_same_tick": {
@@ -480,6 +488,99 @@ class ComparisonTests(unittest.TestCase):
         self.assertLessEqual(
             escape["longest_rest_streak"], MAX_CONSECUTIVE_RESTS,
         )
+
+
+class OrderedOutcomeTailTests(unittest.TestCase):
+    def test_snapshot_v2_carries_bounded_ordered_tail_and_roundtrips(self):
+        room, start = sealed_cell()
+        policy = CellExplorerV3Escape()
+        _tick_room(policy, room, start, 12)
+        snapshot = policy.snapshot()
+        self.assertEqual(snapshot["snapshot_version"], 2)
+        self.assertEqual(len(snapshot["outcome_tail"]), 4)
+        self.assertEqual(
+            [item["tick"] for item in snapshot["outcome_tail"]],
+            list(range(8, 12)),
+        )
+        restored = CellExplorerV3Escape.from_snapshot(snapshot)
+        self.assertEqual(restored.snapshot(), snapshot)
+
+    def test_rejects_blocked_success_blocked_forged_as_two_terminal_probes(self):
+        room, start = sealed_cell()
+        policy = CellExplorerV3Escape()
+        _tick_room(policy, room, start, 3)
+        forged = policy.snapshot()
+        tail = forged["outcome_tail"]
+        self.assertEqual(len(tail), 3)
+        # Keep aggregate counts internally consistent with the alleged middle
+        # successful probe. Only the chronology witness exposes the false
+        # terminal streak claim.
+        middle = tail[1]
+        self.assertNotEqual(middle["action"], "rest")
+        middle["blocked"] = False
+        counts = forged["records"][middle["cell"]][middle["action"]]
+        counts[1] -= 1
+        forged["consecutive_blocked_probes"] = 2
+        with self.assertRaisesRegex(
+            CellV3EscapeError, "terminal streak counters disagree"
+        ):
+            CellExplorerV3Escape.from_snapshot(forged)
+
+    def test_outcome_tail_bounds_keys_and_values_before_hash_or_regex(self):
+        policy = CellExplorerV3Escape()
+        sense = Proprioception(0, "0" * 64, 1.0, 2.0, False)
+        intent = policy.decide(sense)
+        policy.observe(sense, intent, False)
+        original = policy.snapshot()
+
+        class HostileKey(str):
+            armed = False
+            calls = 0
+
+            def __hash__(self):
+                type(self).calls += 1
+                if self.armed:
+                    raise AssertionError("hostile outcome key hash executed")
+                return str.__hash__(self)
+
+        hostile = copy.deepcopy(original)
+        entry = hostile["outcome_tail"][0]
+        key = HostileKey("tick")
+        entry[key] = entry.pop("tick")
+        key.armed = True
+        calls = HostileKey.calls
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(hostile)
+        self.assertEqual(HostileKey.calls, calls)
+
+        oversized_key = copy.deepcopy(original)
+        entry = oversized_key["outcome_tail"][0]
+        entry["x" * 17] = entry.pop("tick")
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(oversized_key)
+
+        oversized_cell = copy.deepcopy(original)
+        oversized_cell["outcome_tail"][0]["cell"] = "0" * 1_000_000
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(oversized_cell)
+
+        class HostileAction(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile action comparison executed")
+
+            __hash__ = str.__hash__
+
+        hostile_action = copy.deepcopy(original)
+        hostile_action["outcome_tail"][0]["action"] = HostileAction("rest")
+        with self.assertRaises(CellV3EscapeError):
+            CellExplorerV3Escape.from_snapshot(hostile_action)
+
+    def test_rejects_legacy_snapshot_without_explicit_chronology_version(self):
+        legacy = CellExplorerV3Escape().snapshot()
+        legacy.pop("snapshot_version")
+        legacy.pop("outcome_tail")
+        with self.assertRaisesRegex(CellV3EscapeError, "invalid escape retention envelope"):
+            CellExplorerV3Escape.from_snapshot(legacy)
 
 
 if __name__ == "__main__":
