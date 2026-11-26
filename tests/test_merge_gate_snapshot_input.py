@@ -59,14 +59,32 @@ class SnapshotFileInputTests(unittest.TestCase):
 
     def test_live_gh_json_cannot_bypass_duplicate_key_guard(self):
         # --pr uses live gh output; it must share the offline decoder.
-        duplicate = '{"headRefOid":"a","headRefOid":"b"}'
+        duplicate = b'{"headRefOid":"a","headRefOid":"b"}'
         completed = subprocess.CompletedProcess(
             args=["gh", "pr", "view"], returncode=0,
-            stdout=duplicate, stderr=""
+            stdout=duplicate, stderr=b""
         )
         with mock.patch("mojum.merge_gate.subprocess.run", return_value=completed):
             with self.assertRaisesRegex(SnapshotError, "duplicate JSON key"):
                 _run_gh_json(["gh", "pr", "view", "123"], label="gh pr view")
+
+    def test_live_gh_json_preserves_unicode_in_a_legacy_process_locale(self):
+        expected = {"baseRefName": "release/\u00e9preuve", "name": "Contr\u00f4le"}
+        wire = json.dumps(expected, ensure_ascii=False).encode("utf-8")
+        emit = f"import sys; sys.stdout.buffer.write({wire!r})"
+        script = (
+            "import json, sys\n"
+            "from mojum.merge_gate import _run_gh_json\n"
+            f"print(json.dumps(_run_gh_json([sys.executable, '-c', {emit!r}], "
+            "label='gh pr view')))\n"
+        )
+        source = Path(__file__).resolve().parents[1] / "src"
+        env = dict(os.environ, LC_ALL="C", PYTHONCOERCECLOCALE="0",
+                   PYTHONUTF8="0", PYTHONPATH=str(source))
+        completed = subprocess.run([sys.executable, "-c", script], env=env,
+                                   capture_output=True, timeout=10)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), expected)
 
     def test_duplicate_json_keys_cannot_mask_pr_or_check_state(self):
         # Last-wins JSON decoding can silently replace draft=True or a
@@ -97,7 +115,7 @@ class SnapshotFileInputTests(unittest.TestCase):
                 self.assertEqual(verdict["code"], "INVALID_INPUT")
                 self.assertFalse(verdict["merge_performed"])
 
-    def test_non_utf8_snapshot_and_gh_output_fail_closed(self):
+    def test_non_utf8_snapshot_fails_closed(self):
         payload = b'{"isDraft":\xff}'
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "invalid-encoding.json"
@@ -119,10 +137,12 @@ class SnapshotFileInputTests(unittest.TestCase):
             self.assertEqual(verdict["code"], "INVALID_INPUT")
             self.assertFalse(verdict["merge_performed"])
             self.assertNotIn(str(path), output.getvalue())
-        bad_text = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start")
-        with mock.patch("mojum.merge_gate.subprocess.run", side_effect=bad_text):
-            with self.assertRaisesRegex(FetchError, "undecodable UTF-8"):
-                _run_gh_json(["gh", "pr", "view", "123"], label="gh pr view")
+
+    def test_non_utf8_live_gh_output_fails_closed(self):
+        bad_wire = b'{"name":"\xff"}'
+        emit = f"import sys; sys.stdout.buffer.write({bad_wire!r})"
+        with self.assertRaisesRegex(FetchError, "undecodable UTF-8"):
+            _run_gh_json([sys.executable, "-c", emit], label="gh pr view")
 
     def test_distinct_nested_snapshot_fields_are_preserved(self):
         with tempfile.TemporaryDirectory() as temp:

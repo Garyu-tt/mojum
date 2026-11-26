@@ -21,6 +21,14 @@ The security check does not sandbox malicious code running as the same UID,
 and does not prevent trusted processes from altering a live DB. Non-POSIX
 storage is not admitted by this private POSIX implementation.
 
+The focused test suite keeps that production boundary intact. On non-POSIX
+hosts it verifies the real connector's exact fail-closed exception and that
+no DB, WAL or SHM file is created. A test-local path-gate substitution is
+used only to exercise the platform-independent SQLite state machine; it is
+not exported by the meter and cannot enable production storage. Dedicated
+CI runs these contracts on Ubuntu and Windows with `ResourceWarning` treated
+as an error.
+
 ## Trusted provider integration
 
 Integrate at the **real synchronous model API boundary**. Only a trusted adapter may wrap an actual RPC in `track_call` and report a success after the response returns. Opaque request IDs must be unique across the ledger; models and IDs may not contain secrets, prompt text or user identifiers.

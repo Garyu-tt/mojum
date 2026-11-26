@@ -162,7 +162,7 @@ def audit(path: str | Path, target: int = 300, max_events: int = MAX_EVENTS):
     used_response_ids = set()
     completed = []
     successful = []
-    total_cost = Decimal(0)
+    total_cost_nanos = cost_places = 0
     input_tokens = output_tokens = finished = ok = errors = count = 0
     last_ms = -1
     with _bounded_source(path) as stream:
@@ -202,7 +202,16 @@ def audit(path: str | Path, target: int = 300, max_events: int = MAX_EVENTS):
                 finished += 1
                 input_tokens += event["input_tokens"]
                 output_tokens += event["output_tokens"]
-                total_cost += event["cost_usd"]
+                # Decimal construction is exact, but Decimal addition obeys
+                # the caller's precision, exponent limits and traps. Costs
+                # admit at most nine fractional places; sum integer units.
+                cost_tuple = event["cost_usd"].as_tuple()
+                coefficient = 0
+                for digit in cost_tuple.digits:
+                    coefficient = coefficient * 10 + digit
+                places = -cost_tuple.exponent
+                total_cost_nanos += coefficient * 10 ** (9 - places)
+                cost_places = max(cost_places, places)
                 if event["outcome"] == "ok":
                     if event["response_id"] in used_response_ids:
                         raise AuditError(f"line {count}: reused provider response_id")
@@ -212,6 +221,10 @@ def audit(path: str | Path, target: int = 300, max_events: int = MAX_EVENTS):
                 else:
                     errors += 1
     peak = _peak(successful)
+    whole_cost, fractional_cost = divmod(total_cost_nanos, 10**9)
+    total_cost_text = str(whole_cost)
+    if cost_places:
+        total_cost_text += "." + f"{fractional_cost:09d}"[:cost_places]
     return {
         "target_distinct_workers": target,
         "target_met_in_log": peak["peak_distinct_workers"] >= target,
@@ -224,7 +237,7 @@ def audit(path: str | Path, target: int = 300, max_events: int = MAX_EVENTS):
         "unfinished": len(pending),
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "cost_usd": format(total_cost, "f"),
+        "cost_usd": total_cost_text,
         "evidence": "untrusted unless produced by an independently controlled provider-side collector",
     }
 
