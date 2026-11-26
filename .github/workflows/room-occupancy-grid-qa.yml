@@ -1,0 +1,42 @@
+name: Room occupancy grid admission QA
+on:
+  pull_request:
+    paths:
+      - "src/mojum/room_occupancy_grid.py"
+      - "tests/test_room_occupancy_grid.py"
+      - "docs/ROOM_OCCUPANCY_GRID_R01.md"
+      - ".github/workflows/room-occupancy-grid-qa.yml"
+  push:
+    branches:
+      - "build/1158-room-occupancy-grid-20261123"
+    paths:
+      - "src/mojum/room_occupancy_grid.py"
+      - "tests/test_room_occupancy_grid.py"
+      - "docs/ROOM_OCCUPANCY_GRID_R01.md"
+      - ".github/workflows/room-occupancy-grid-qa.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert exact submitted revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Run focused occupancy regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_room_occupancy_grid.py" -v
