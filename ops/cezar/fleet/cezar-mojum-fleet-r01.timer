@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Cezar fleet telemetry from actual read-only sources
+
+[Timer]
+OnBootSec=75s
+OnUnitInactiveSec=60s
+AccuracySec=15s
+Persistent=true
+Unit=cezar-mojum-fleet-r01.service
+
+[Install]
+WantedBy=timers.target
