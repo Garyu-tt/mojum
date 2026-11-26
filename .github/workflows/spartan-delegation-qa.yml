@@ -1,0 +1,38 @@
+name: Spartan delegated executor SQLite admission QA
+
+on:
+  pull_request:
+    paths:
+      - 'tools/spartan_delegate.py'
+      - 'tools/spartan_coordinator.py'
+      - 'tests/test_spartan_delegate.py'
+      - '.github/workflows/spartan-delegation-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delegated-sqlite-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout commit
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run crash, lease-fence, rollback and dispatch tests
+        env:
+          PYTHONPATH: .
+          PYTHONNOUSERSITE: '1'
+          PYTHONWARNINGS: error::ResourceWarning
+        run: python -m unittest discover -s tests -p 'test_spartan_delegate.py' -v
