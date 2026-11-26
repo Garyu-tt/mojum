@@ -160,6 +160,16 @@ class RulesetCheckReconcileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             reconcile_ruleset_checks(fixture()[0], fixture()[1], "A" * 40)
 
+    def test_hostile_rule_type_is_rejected_without_equality_dispatch(self):
+        class Hostile:
+            def __eq__(self, _other):
+                raise AssertionError("untrusted equality must not execute")
+
+        ruleset, _ = fixture()
+        ruleset["rules"][0]["type"] = Hostile()
+        with self.assertRaises(ValueError):
+            self.evaluate(ruleset=ruleset)
+
     def test_duplicate_required_rule_is_rejected(self):
         ruleset, _ = fixture()
         ruleset["rules"].append(copy.deepcopy(ruleset["rules"][0]))
