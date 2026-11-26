@@ -1,0 +1,51 @@
+name: PettingZoo opt-in RPS CPU benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/pettingzoo_benchmark.py'
+      - 'tests/test_pettingzoo_benchmark.py'
+      - 'docs/PETTINGZOO_RPS_INTEGRATION.md'
+      - '.github/workflows/pettingzoo-rps-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact PR HEAD checkout
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Pure stdlib regression with PettingZoo absent
+        run: PYTHONPATH=src python -m unittest discover -s tests -p test_pettingzoo_benchmark.py -v
+  pinned-upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact PR HEAD checkout
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install opt-in isolated benchmark extra
+        run: python -m pip install 'pettingzoo[classic]==1.27.0'
+      - name: Run real PettingZoo Parallel RPS reproducibility checks
+        run: PYTHONPATH=src python -m unittest discover -s tests -p test_pettingzoo_benchmark.py -v
+      - name: Execute opt-in public-only benchmark CLI
+        run: PYTHONPATH=src python -m mojum.pettingzoo_benchmark --execute
