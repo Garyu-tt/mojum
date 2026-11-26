@@ -223,7 +223,7 @@ class DeterminismAndSnapshotTests(unittest.TestCase):
         # Both early cells have two outcomes. Together they cannot finish
         # by tick two, although each count fits its individual deadline.
         snapshot["last_seen_at"].update({"0:25": 1, "1:25": 2})
-        with self.assertRaisesRegex(CellV3EscapeError, "combined escape cell observations"):
+        with self.assertRaisesRegex(CellV3EscapeError, "invalid measured-outcome chronology tail|combined escape cell observations"):
             CellExplorerV3Escape.from_snapshot(snapshot)
 
     def test_snapshot_refuses_impossible_tick_and_retention_history(self):

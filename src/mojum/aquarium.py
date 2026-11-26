@@ -597,7 +597,12 @@ class Aquarium:
                 "observation": sense.public(),
                 "intent": intent,
                 "learning": next_motor.observe(sense, intent, world_obs["blocked"]),
-                "policy_sha256": digest(next_motor.snapshot()),
+                # Preserve the existing v3-escape journal wire digest. State
+                # cloning still uses the full chronological snapshot above.
+                "policy_sha256": digest(
+                    next_motor.journal_snapshot()
+                    if self.motor_mode == V3_ESCAPE_MODE else next_motor.snapshot()
+                ),
                 "motor_capability": "SYNTHETIC_POINT_ROOM_ONLY",
             }
         elif next_motor is not None:
