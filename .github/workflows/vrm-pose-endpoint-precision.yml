@@ -1,0 +1,35 @@
+name: VRM pose endpoint precision
+
+on:
+  pull_request:
+    paths:
+      - src/mojum/vrm_pose_interpolation.py
+      - tests/test_vrm_pose*.py
+      - .github/workflows/vrm-pose-endpoint-precision.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  endpoint-precision:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+        python: ['3.12', '3.14']
+        include:
+          - os: ubuntu-24.04
+            python: '3.11'
+          - os: ubuntu-24.04
+            python: '3.13'
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -p 'test_vrm_pose*.py' -v

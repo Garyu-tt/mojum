@@ -48,6 +48,45 @@ class FingerprintTests(unittest.TestCase):
                     fingerprint(path)
                     gc.collect()
 
+    def test_closed_wal_snapshot_does_not_create_sidecars(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "schema %# снимок.sqlite3"
+            with self._connect(path) as db:
+                self.assertEqual(db.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+                with db:
+                    db.execute("CREATE TABLE t(value TEXT)")
+            before = path.read_bytes()
+            self.assertEqual(set(root.iterdir()), {path})
+
+            self.assertEqual(fingerprint(path)["entries"], 1)
+            self.assertEqual(set(root.iterdir()), {path})
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_existing_wal_contributes_committed_schema(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "schema.sqlite3"
+            with self._connect(path) as db:
+                self.assertEqual(db.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+                with db:
+                    db.execute("CREATE TABLE t(value TEXT)")
+            checkpointed = fingerprint(path)
+            main_bytes = path.read_bytes()
+
+            with self._connect(path) as db:
+                db.execute("PRAGMA wal_autocheckpoint=0")
+                with db:
+                    db.execute("CREATE INDEX ix ON t(value)")
+                wal = path.with_name(path.name + "-wal")
+                wal_bytes = wal.read_bytes()
+                self.assertTrue(wal_bytes)
+
+                pending_checkpoint = fingerprint(path)
+                self.assertEqual(pending_checkpoint["entries"], 2)
+                self.assertNotEqual(pending_checkpoint["sha256"], checkpointed["sha256"])
+                self.assertEqual(path.read_bytes(), main_bytes)
+                self.assertEqual(wal.read_bytes(), wal_bytes)
+
     def test_reject_oversized_schema_sql_before_encoding(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "oversized-schema.sqlite3"
@@ -80,7 +119,12 @@ class FingerprintTests(unittest.TestCase):
                 with db:
                     db.execute("CREATE TABLE t(x)")
             link = Path(temp) / "link"
-            link.symlink_to(path)
+            try:
+                link.symlink_to(path)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) != 1314:
+                    raise
+                self.skipTest("Windows user lacks symlink creation privileges")
             with self.assertRaises(SchemaAuditError):
                 fingerprint(link)
 
