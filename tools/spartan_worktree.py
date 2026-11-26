@@ -82,8 +82,8 @@ def prepare(repo: Path, root: Path, task: str, base_sha: str) -> Path:
         # Git implementations such as MSYS2 may print an absolute path in
         # their own namespace. --show-cdup is relative to -C and remains
         # meaningful to the Python process on both Windows and POSIX.
-        cdup = git("rev-parse", "--show-cdup").stdout.rstrip("\\r\\n")
-        if not re.fullmatch(r"(?:\\.\\./)*", cdup):
+        cdup = git("rev-parse", "--show-cdup").stdout.rstrip("\r\n")
+        if not re.fullmatch(r"(?:\.\./)*", cdup):
             raise IsolationError("unexpected Git top-level relative path")
         top = (repo / cdup).resolve(strict=True)
         if root == top or root in top.parents or top in root.parents:
