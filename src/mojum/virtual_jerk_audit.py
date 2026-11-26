@@ -103,9 +103,12 @@ def audit_joint_jerk(trajectory: object, jerk_limits: object) -> VirtualJerkRepo
         {"schema", "classification", "consent", "stream_id", "joint_names", "samples"},
         "trajectory",
     )
-    if type(data["schema"]) is not str or data["schema"] != SCHEMA:
+    if (type(data["schema"]) is not str or len(data["schema"]) != len(SCHEMA)
+            or data["schema"] != SCHEMA):
         raise VirtualJerkError("unsupported trajectory schema")
-    if type(data["classification"]) is not str or data["classification"] != PUBLIC_SYNTHETIC:
+    if (type(data["classification"]) is not str
+            or len(data["classification"]) != len(PUBLIC_SYNTHETIC)
+            or data["classification"] != PUBLIC_SYNTHETIC):
         raise VirtualJerkError("trajectory must be explicitly PUBLIC_SYNTHETIC")
     if type(data["consent"]) is not bool or data["consent"] is not True:
         raise VirtualJerkError("explicit synthetic-data consent is required")
