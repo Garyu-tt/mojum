@@ -86,10 +86,15 @@ def connect(path: str) -> sqlite3.Connection:
             os.close(descriptor)
         _check_private_file(filename)
     db = sqlite3.connect(path, timeout=30, isolation_level=None)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout=30000")
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA foreign_keys=ON")
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA foreign_keys=ON")
+    except BaseException:
+        # The caller cannot close a connection that was never returned.
+        db.close()
+        raise
     return db
 
 

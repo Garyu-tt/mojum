@@ -87,10 +87,15 @@ def connect(path: str) -> sqlite3.Connection:
             os.close(descriptor)
         _require_private_files(filename)
     db = sqlite3.connect(path, isolation_level=None, timeout=30)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout=30000")
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA synchronous=FULL")
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=FULL")
+    except BaseException:
+        # Initialization has not transferred ownership to the caller yet.
+        db.close()
+        raise
     return db
 
 
