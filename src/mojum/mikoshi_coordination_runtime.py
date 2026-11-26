@@ -78,23 +78,27 @@ class MikoshiCoordinationRuntime:
         revision: int = 0,
         start_tick: int = 0,
     ) -> None:
-        self._coordination_profile = (
+        selected_coordination = (
             coordination.default_profile()
             if coordination_profile is None
             else coordination_profile
         )
-        self._autonomic_profile = (
+        selected_autonomic = (
             autonomic.default_profile()
             if autonomic_profile is None
             else autonomic_profile
         )
-        # Reconstruct through the public validators to reject subclasses and
-        # mutable/forged objects at the boundary.
+        # Require exact immutable contract classes before reconstructing
+        # through their public validators.
+        if type(selected_coordination) is not coordination.CoordinationProfile:
+            raise RuntimeError("an exact CoordinationProfile is required")
+        if type(selected_autonomic) is not autonomic.AutonomicProfile:
+            raise RuntimeError("an exact AutonomicProfile is required")
         self._coordination_profile = coordination.CoordinationProfile(
-            **asdict(self._coordination_profile)
+            **asdict(selected_coordination)
         )
         self._autonomic_profile = autonomic.AutonomicProfile(
-            **asdict(self._autonomic_profile)
+            **asdict(selected_autonomic)
         )
         self._revision = _integer(revision, "revision", 0, MAX_REVISION)
         self._next_tick = _integer(start_tick, "start_tick", 0, MAX_TICK)
