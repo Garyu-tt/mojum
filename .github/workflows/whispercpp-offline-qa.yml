@@ -1,0 +1,36 @@
+name: whisper.cpp offline synthetic probe QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/whisper_cpp_probe.py'
+      - 'tests/test_whisper_cpp_probe.py'
+      - 'docs/WHISPER_CPP_OFFLINE_ASR_R01.md'
+      - '.github/workflows/whispercpp-offline-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact PR HEAD
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run synthetic local CLI and malicious-source regression tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_whisper_cpp_probe.py' -v
