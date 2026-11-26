@@ -28,6 +28,31 @@ def _canonical_bytes(value):
     ).encode("utf-8", errors="strict")
 
 
+
+def _require_native_json_tree(value):
+    """Refuse subclass equality/hash tricks before using caller-owned topology.
+
+    validate_v2 validates a canonical JSON *copy* but returns only an audit,
+    not sanitized nodes/edges. Its copy can be equal to a caller object with
+    overloaded __eq__, while raw endpoint __hash__ can alter graph traversal.
+    Check every key/value by exact native type, without equality comparisons.
+    This runs after canonical validation so cyclic / non-JSON values have
+    already been rejected by the canonical encoder.
+    """
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if type(item) is dict:
+            for key, child in item.items():
+                if type(key) is not str:
+                    raise GraphError("flow witness requires native JSON keys")
+                pending.append(child)
+        elif type(item) is list:
+            pending.extend(item)
+        elif type(item) not in (str, int, float, bool, type(None)):
+            raise GraphError("flow witness requires native JSON values")
+
+
 def attest_flow(graph):
     """Return a deterministic synthetic-friendly, non-executable v2 DAG witness.
 
@@ -55,6 +80,7 @@ def attest_flow(graph):
             raise GraphError("flow witness node ID byte budget exceeded")
 
     audit = validate_v2(graph)
+    _require_native_json_tree(graph)
     if audit["schema"] != V2_SCHEMA:
         raise GraphError("unexpected graph-v2 validator response")
     nodes = {node["id"]: node for node in raw_nodes}
