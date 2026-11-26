@@ -114,6 +114,13 @@ class VirtualJerkAuditTests(unittest.TestCase):
         with self.assertRaises(VirtualJerkError):
             audit_joint_jerk(data, {"elbow": 10.0})
 
+    def test_rejects_oversized_schema_and_classification(self):
+        for field in ("schema", "classification"):
+            data = trajectory([0, 1, 2, 3], [0, 1, 8, 27])
+            data[field] = "x" * 1_000_000
+            with self.subTest(field=field), self.assertRaises(VirtualJerkError):
+                audit_joint_jerk(data, {"elbow": 10.0})
+
 
 if __name__ == "__main__":
     unittest.main()
