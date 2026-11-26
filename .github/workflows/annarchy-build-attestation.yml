@@ -1,0 +1,48 @@
+name: ANNarchy build attestation
+
+on:
+  pull_request:
+    paths:
+      - "tools/annarchy_build_attestation.py"
+      - "tests/test_annarchy_build_attestation.py"
+      - "docs/ANNARCHY_BUILD_ATTESTATION_R01.md"
+      - ".github/workflows/annarchy-build-attestation.yml"
+  push:
+    branches:
+      - main
+      - build/691-annarchy-build-attestation-20261123
+    paths:
+      - "tools/annarchy_build_attestation.py"
+      - "tests/test_annarchy_build_attestation.py"
+      - "docs/ANNARCHY_BUILD_ATTESTATION_R01.md"
+      - ".github/workflows/annarchy-build-attestation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-attestation-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out commit
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile attestor and tests
+        run: python -m py_compile tools/annarchy_build_attestation.py tests/test_annarchy_build_attestation.py
+      - name: Run hermetic regression suite
+        run: python -m unittest tests.test_annarchy_build_attestation -v
+      - name: Verify stdlib-only import
+        run: python -S -c "from tools.annarchy_build_attestation import attest_build; print(attest_build.__name__)"
