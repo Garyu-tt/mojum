@@ -126,7 +126,7 @@ def verify_rotation_chain(
         previous = record["previous_fingerprint"]
         following = record["next_fingerprint"]
         signature = record["signature"]
-        if type(schema) is not str or schema != SCHEMA:
+        if type(schema) is not str or len(schema) != len(SCHEMA) or schema != SCHEMA:
             raise RotationError("unsupported rotation schema")
         if type(epoch) is not int or epoch != current_epoch + 1 or epoch > 2**31 - 1:
             raise RotationError("rotation epochs must be contiguous and increasing")
