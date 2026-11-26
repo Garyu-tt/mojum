@@ -1,0 +1,48 @@
+name: LeRobot trajectory focused QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/lerobot_trajectory.py"
+      - "tests/test_lerobot_trajectory.py"
+      - "docs/LEROBOT_TRAJECTORY_R01.md"
+      - ".github/workflows/lerobot-trajectory-qa.yml"
+  push:
+    branches:
+      - "build/700-lerobot-trajectory-20261123"
+    paths:
+      - "src/mojum/lerobot_trajectory.py"
+      - "tests/test_lerobot_trajectory.py"
+      - "docs/LEROBOT_TRAJECTORY_R01.md"
+      - ".github/workflows/lerobot-trajectory-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile source and tests
+        run: python -m py_compile src/mojum/lerobot_trajectory.py tests/test_lerobot_trajectory.py
+      - name: Run focused trajectory tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_lerobot_trajectory.py" -v
