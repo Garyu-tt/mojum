@@ -29,11 +29,24 @@ def frame(tick, kind, blocked, position, *, world_blocked=None):
         "interoception": {}, "brain": {}, "learning_observer": None,
         "world": {"blocked": blocked if world_blocked is None else world_blocked,
                   "position": list(position)},
-        "movement_request": {"dx": 0.0, "dy": 0.0},
+        "movement_request": {
+            "east": {"dx": 0.125, "dy": 0.0},
+            "north": {"dx": 0.0, "dy": 0.125},
+            "west": {"dx": -0.125, "dy": 0.0},
+            "south": {"dx": 0.0, "dy": -0.125},
+            "rest": {"dx": 0.0, "dy": 0.0},
+        }[kind],
         "physical_model": "NONE_FIXTURE_ONLY",
         "developmental_controller": {
             "schema": "mojum.developmental.motor-play/1",
-            "intent": {"kind": kind}, "outcome": {"observed_blocked": blocked},
+            "intent": {
+                "kind": kind,
+                **({"east": {"dx": 0.125, "dy": 0.0},
+                   "north": {"dx": 0.0, "dy": 0.125},
+                   "west": {"dx": -0.125, "dy": 0.0},
+                   "south": {"dx": 0.0, "dy": -0.125},
+                   "rest": {"dx": 0.0, "dy": 0.0}}[kind]),
+            }, "outcome": {"observed_blocked": blocked},
             "action_source": "internal_committed_prior_outcomes_only",
             "real_actuation": False,
         },
@@ -93,7 +106,7 @@ class SummarizeTests(unittest.TestCase):
         frames = []
         for tick in range(40):
             position = (0.0, 0.0) if tick % 2 == 0 else (0.125, 0.0)
-            frames.append(frame(tick, "east" if tick % 2 == 0 else "west",
+            frames.append(frame(tick, "west" if tick % 2 == 0 else "east",
                                 False, position))
         report = summarize(manifest(), frames)
         self.assertEqual(report["distinct_positions"], 2)
@@ -162,6 +175,8 @@ class SummarizeTests(unittest.TestCase):
                 wrong["world"]["position"] = list(position)
                 with self.assertRaisesRegex(MobilityAuditError, "world position"):
                     verify([wrong])
+                with self.assertRaisesRegex(MobilityAuditError, "world position"):
+                    summarize(data, [wrong])
 
         blocked = action(0, "east", True, (1.125, 2.0), 0.125, 0.0)
         resting = action(0, "rest", False, (1.125, 2.0), 0.0, 0.0)
