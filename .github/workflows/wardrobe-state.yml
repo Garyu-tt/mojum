@@ -1,0 +1,43 @@
+name: Wardrobe state contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/wardrobe-state.yml"
+      - "src/mojum/wardrobe_state.py"
+      - "tests/test_wardrobe_state.py"
+      - "docs/WARDROBE_STATE_R01.md"
+  push:
+    branches:
+      - "build/376-wardrobe-state-20261124"
+
+permissions:
+  contents: read
+
+jobs:
+  wardrobe-state:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Set up CPython
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile module and tests
+        run: python -m compileall -q src/mojum/wardrobe_state.py tests/test_wardrobe_state.py
+      - name: Run focused regression suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_wardrobe_state.py" -v
