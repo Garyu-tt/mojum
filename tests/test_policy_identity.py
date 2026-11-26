@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from mojum import aquarium, cell_policy_v2, cell_policy_v3, cell_policy_v3_escape, cell_policy_v4, developmental
@@ -231,6 +232,19 @@ class ListPoliciesCliTests(unittest.TestCase):
             "developmental_policy": "local_cell_v2",
         })
         self.assertNotEqual(v2a["state_schema"], v2b["state_schema"])
+
+    def test_listing_rejects_inspection_arguments(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / "absent.sqlite3"
+            database = ("--db", str(db))
+            anchor = ("--expected-head", "0" * 64)
+            for args in (database, anchor, database + anchor):
+                with self.subTest(args=args):
+                    done = self._run("--list-policies", *args)
+                    self.assertEqual(done.returncode, 2, done.stdout)
+                    self.assertEqual(done.stdout, "")
+                    self.assertIn("error:", done.stderr)
+            self.assertFalse(db.exists())
 
     def test_inspection_still_requires_a_database(self):
         done = self._run()
