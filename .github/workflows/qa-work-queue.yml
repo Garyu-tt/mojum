@@ -1,0 +1,49 @@
+name: QA work queue
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/qa_work_queue.py"
+      - "tests/test_qa_work_queue.py"
+      - "docs/QA_WORK_QUEUE_R01.md"
+      - ".github/workflows/qa-work-queue.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/mojum/qa_work_queue.py"
+      - "tests/test_qa_work_queue.py"
+      - "docs/QA_WORK_QUEUE_R01.md"
+      - ".github/workflows/qa-work-queue.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact tested revision
+        if: github.event_name == 'pull_request'
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          if [ "$actual_sha" != "$EXPECTED_SHA" ]; then
+            echo "Expected PR head $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run isolated queue tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_qa_work_queue -v
