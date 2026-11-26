@@ -65,9 +65,10 @@ def main(argv=None):
     except (OSError, sqlite3.Error):
         parser.error("archive or SQLite I/O failed; check storage and permissions")
     # Do not expose PRIVATE data or even absolute source/destination paths.
+    # JSON escapes preserve Unicode identities on ASCII and legacy consoles.
     print(json.dumps(
         {"operation": args.operation, **status},
-        ensure_ascii=False, sort_keys=True, allow_nan=False,
+        ensure_ascii=True, sort_keys=True, allow_nan=False,
     ))
     return status
 
