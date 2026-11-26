@@ -26,7 +26,7 @@ class ArchivePathAdmissionTests(unittest.TestCase):
             "", "/etc/passwd", "../escape", "a/../b", "./a", "a//b",
             "a/", "C:/Windows/file", "C:relative", "\\\\server\\share",
             "a\\b", "a/./b", "a/..", "a/evil.", "a/evil ",
-            "a/\x00b", "a/\nb", "a/\x7fb", "a" * 1025,
+            "a/\x00b", "a/\nb", "a/\x7fb", "a" * 1025, "x" * 1_000_000,
             "x/" + "z" * 256, "a/\ud800",
             "a/file:stream", "a/C:relative", "file.txt:payload",
         )
