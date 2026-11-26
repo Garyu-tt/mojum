@@ -12,6 +12,13 @@ maps that waveform through explicit `JointChannel` calibration records into
 malformed frame, duplicate joint, invalid calibration, e-stop, or out-of-limit
 target fails closed.
 
+The bridge additionally requires the originating `CPGProfile` and the
+post-step `CPGSnapshot`. It verifies the snapshot digest and profile binding,
+checks that the frame's tick, phases and state digest match that snapshot, and
+recomputes both waveform outputs from the verified phases and profile
+amplitude. A caller cannot change an in-range output while retaining an old
+state digest and have it accepted.
+
 The bridge does not call MuJoCo, apply forces, write to devices, or bypass the
 MotorGate. It has no mandatory third-party dependencies. The MuJoCo body
 adapter remains a separately reviewed optional integration; this module does
@@ -26,6 +33,8 @@ not import it.
   result to radians for the existing MotorGate API.
 - MotorGate's configured limits are authoritative. A channel calibration
   outside those limits is rejected rather than clipped.
+- Pass the exact profile used to create the frame and the CPG's snapshot
+  immediately after the corresponding step to `intents_from_frame`.
 
 A channel selects exactly one side (`left` or `right`). The mapping is
 explicit; no anatomical or rig mapping is inferred.
