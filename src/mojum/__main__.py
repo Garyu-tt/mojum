@@ -20,9 +20,13 @@ def main():
     if not 1 <= args.ticks <= 100_000 or not 1 <= args.dt_ms <= 1000:
         parser.error("ticks must be 1..100000, dt-ms must be 1..1000")
     try:
-        graph = load_graph(args.graph)
+        _run_fixture(args)
     except GraphError as exc:
         parser.error(str(exc))
+
+
+def _run_fixture(args):
+    graph = load_graph(args.graph)
     runtime = Simulation(graph, args.dt_ms * 1_000_000)
     last = None
     for _ in range(args.ticks):
