@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import struct
 import unicodedata
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
+
+from .genesis import GENES, PHENOTYPE_SCHEMA
 
 CHROMOSOME_SCHEMA = "mojum.genesis.somatic-chromosome/1"
 BODY_SCHEMA = "mojum.genesis.body-phenotype/1"
@@ -81,12 +84,136 @@ def _sha(value, path):
     return value
 
 
+def _json_string_size(value, path):
+    """Count canonical ensure_ascii=False UTF-8 JSON bytes without encoding it."""
+    size = 2  # quotes
+    short_escapes = {8, 9, 10, 12, 13}
+    for char in value:
+        code = ord(char)
+        if code in (34, 92):
+            size += 2
+        elif code < 32:
+            size += 2 if code in short_escapes else 6
+        elif 0xD800 <= code <= 0xDFFF:
+            raise BodyContractError(f"{path} contains invalid UTF-8 Unicode")
+        elif code <= 0x7F:
+            size += 1
+        elif code <= 0x7FF:
+            size += 2
+        elif code <= 0xFFFF:
+            size += 3
+        else:
+            size += 4
+        if size > 1_048_576:
+            raise BodyContractError(f"{path} exceeds the 1 MiB JSON budget")
+    return size
+
+
+def _admit_json_tree(root, path):
+    """Preflight exact native JSON trees and resource bounds before serialization."""
+    stack = [(root, 0, False)]
+    seen = set()
+    scheduled = 1
+    nodes = 0
+    encoded_size = 0
+
+    def add_size(amount):
+        nonlocal encoded_size
+        encoded_size += amount
+        if encoded_size > 1_048_576:
+            raise BodyContractError(f"{path} exceeds the 1 MiB JSON budget")
+
+    while stack:
+        value, depth, is_key = stack.pop()
+        nodes += 1
+        if nodes > 20_000:
+            raise BodyContractError(f"{path} exceeds the JSON node budget")
+        if depth > 32:
+            raise BodyContractError(f"{path} exceeds the JSON nesting budget")
+
+        kind = type(value)
+        if is_key:
+            if kind is not str:
+                raise BodyContractError(f"{path} contains a non-native JSON object key")
+            add_size(_json_string_size(value, path) + 1)  # key and colon
+        elif kind is dict:
+            child_count = 2 * len(value)  # one key and one value per entry
+            if scheduled + child_count > 20_000:
+                raise BodyContractError(f"{path} exceeds the JSON node budget")
+            scheduled += child_count
+            seen_id = id(value)
+            if seen_id in seen:
+                raise BodyContractError(f"{path} contains a cycle or shared container")
+            seen.add(seen_id)
+            add_size(2 + max(0, len(value) - 1))  # braces and commas
+            for key, child in value.items():
+                if type(key) is not str:
+                    raise BodyContractError(f"{path} contains a non-native JSON object key")
+                stack.append((child, depth + 1, False))
+                stack.append((key, depth + 1, True))
+        elif kind is list:
+            if scheduled + len(value) > 20_000:
+                raise BodyContractError(f"{path} exceeds the JSON node budget")
+            scheduled += len(value)
+            seen_id = id(value)
+            if seen_id in seen:
+                raise BodyContractError(f"{path} contains a cycle or shared container")
+            seen.add(seen_id)
+            add_size(2 + max(0, len(value) - 1))  # brackets and commas
+            for child in value:
+                stack.append((child, depth + 1, False))
+        elif kind is str:
+            add_size(_json_string_size(value, path))
+        elif kind is int:
+            if not -(2**63) <= value <= 2**63 - 1:
+                raise BodyContractError(f"{path} contains an out-of-range integer")
+            add_size(len(str(value)))
+        elif kind is float:
+            if not math.isfinite(value):
+                raise BodyContractError(f"{path} contains a non-finite number")
+            add_size(len(repr(value)))
+        elif kind is bool:
+            add_size(4 if value else 5)
+        elif value is None:
+            add_size(4)
+        else:
+            raise BodyContractError(f"{path} contains a non-native JSON value")
+
+
+def _json_object_copy(value, path):
+    """Return a detached native JSON object after bounded recursive admission.
+
+    Every nested container/scalar is checked before json.dumps can invoke
+    overridable methods on a caller-owned subclass or allocate encoded data.
+    """
+    if type(value) is not dict:
+        raise BodyContractError(f"{path} must be a native JSON object")
+    _admit_json_tree(value, path)
+    try:
+        encoded = json.dumps(
+            value, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False,
+        )
+        raw = encoded.encode("utf-8", errors="strict")
+        if len(raw) > 1_048_576:
+            raise BodyContractError(f"{path} exceeds the 1 MiB JSON budget")
+        copied = json.loads(encoded)
+    except BodyContractError:
+        raise
+    except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError) as exc:
+        raise BodyContractError(f"{path} must be canonical UTF-8 JSON") from exc
+    if type(copied) is not dict:
+        raise BodyContractError(f"{path} must be a JSON object")
+    return copied
+
+
 def _round_div(num, den):
     """Positive, deterministic half-up integer division."""
     return (num + den // 2) // den
 
 
 def validate_chromosome(chromosome):
+    chromosome = _json_object_copy(chromosome, "chromosome")
     _keys(chromosome, {"schema", "genome_id", "inherited"}, "chromosome")
     if chromosome["schema"] != CHROMOSOME_SCHEMA:
         raise BodyContractError("Unsupported somatic chromosome schema")
@@ -94,8 +221,8 @@ def validate_chromosome(chromosome):
     _keys(chromosome["inherited"], SOMATIC_GENES, "inherited somatic genes")
     for gene, (lo, hi) in SOMATIC_GENES.items():
         _int(chromosome["inherited"][gene], gene, lo, hi)
-    # A JSON round-trip also rejects unrecognized non-JSON values.
-    return json.loads(json.dumps(chromosome, ensure_ascii=False, allow_nan=False))
+    # Return only the detached copy; never retain caller-owned nested values.
+    return chromosome
 
 
 def _growth(age):
@@ -115,9 +242,10 @@ def compile_body(genesis_phenotype, chromosome, age_years):
     """
     _int(age_years, "age_years", AGE_MIN, AGE_MAX)
     body_genes = validate_chromosome(chromosome)
-    if not isinstance(genesis_phenotype, Mapping):
-        raise BodyContractError("GENESIS phenotype is not an object")
-    if genesis_phenotype.get("schema") != "mojum.genesis.phenotype/1":
+    genesis_phenotype = _json_object_copy(
+        genesis_phenotype, "GENESIS phenotype"
+    )
+    if genesis_phenotype.get("schema") != PHENOTYPE_SCHEMA:
         raise BodyContractError("GENESIS phenotype schema mismatch")
     genome_id = _str(genesis_phenotype.get("genome_id"), "phenotype.genome_id")
     if genome_id != body_genes["genome_id"]:
@@ -125,9 +253,12 @@ def compile_body(genesis_phenotype, chromosome, age_years):
     tick = _int(genesis_phenotype.get("at_tick"), "at_tick", 0, 2**63 - 1)
     revision = _sha(genesis_phenotype.get("ledger_revision"), "ledger_revision")
     params = genesis_phenotype.get("parameters")
-    if not isinstance(params, Mapping):
-        raise BodyContractError("Missing GENESIS parameters")
-    scale = _int(params.get("body_scale_milli"), "body_scale_milli", 500, 1500)
+    if type(params) is not dict:
+        raise BodyContractError("GENESIS parameters must be a native JSON object")
+    _keys(params, set(GENES), "GENESIS parameters")
+    for gene, (low, high) in GENES.items():
+        _int(params[gene], f"parameters.{gene}", low, high)
+    scale = params["body_scale_milli"]
     ref_height, ref_head, ref_leg, ref_shoulder = _growth(age_years)
     genes = body_genes["inherited"]
     height = _round_div(ref_height * scale * genes["height_bias_milli"], 1_000_000)
