@@ -162,8 +162,8 @@ def intents_from_frame(
             raise CPGBridgeError("duplicate joint channel")
         seen.add(channel.joint)
         output = frame.left_output_milli if channel.side == "left" else frame.right_output_milli
-        target_millirad = channel.center_millirad + (
-            output * channel.scale_millirad // OUTPUT_MILLI
+        target_millirad = channel.center_millirad + _scaled_toward_zero(
+            output, channel.scale_millirad, OUTPUT_MILLI
         )
         intent = MotorIntent(
             joint=channel.joint,
