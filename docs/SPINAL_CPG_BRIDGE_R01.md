@@ -17,7 +17,9 @@ post-step `CPGSnapshot`. It verifies the snapshot digest and profile binding,
 checks that the frame's tick, phases and state digest match that snapshot, and
 recomputes both waveform outputs from the verified phases and profile
 amplitude. A caller cannot change an in-range output while retaining an old
-state digest and have it accepted.
+state digest and have it accepted. The SHA-256 snapshot digest is a
+consistency check, not authentication against hostile code in the same Python
+process.
 
 The bridge does not call MuJoCo, apply forces, write to devices, or bypass the
 MotorGate. It has no mandatory third-party dependencies. The MuJoCo body
