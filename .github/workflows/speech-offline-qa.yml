@@ -1,0 +1,41 @@
+name: Offline sherpa ASR boundary QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/speech_offline.py'
+      - 'tests/test_speech_offline.py'
+      - '.github/workflows/speech-offline-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  speech-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - name: Check out exact PR HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify checked-out source SHA
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile ASR boundary
+        run: python -m compileall -q src/mojum/speech_offline.py
+      - name: Run offline privacy, time-window, and sample-count regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p test_speech_offline.py -v
