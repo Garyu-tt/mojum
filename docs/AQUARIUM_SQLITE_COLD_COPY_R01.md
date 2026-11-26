@@ -60,6 +60,10 @@ coordinated replication: writing to two forks creates divergent histories.
 ## Actual consistency checks
 
 - Preflights the original journal read-only, takes a consistent SQLite snapshot through a read-only connection, and fully replays **only the temporary copy**. Export never chmods, repairs or bootstraps the original.
+- Journal table names follow SQLite's case-insensitive identifier rules, so
+  `Metadata` and `Events` are accepted without renaming them. They must still
+  be real tables with the exact owning organism/schema metadata and committed
+  history. Views, incomplete metadata and empty histories remain invalid.
 - Uses SQLite's **online backup API** rather than copying an open WAL-backed
   `.sqlite3` file via ordinary file copy. No external network is used.
 - Pins the temporary copy's committed event head before any writable replay,
@@ -95,6 +99,7 @@ coordinated replication: writing to two forks creates divergent histories.
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -p test_aquarium_cold_copy.py -v
+PYTHONPATH=src python -m unittest discover -s tests -p test_cold_copy_table_case.py -v
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
