@@ -233,8 +233,8 @@ def verify_plan(plan: object) -> bool:
     if remaining != budget - used:
         raise NeuralLODError("LOD plan accounting mismatch")
     prior = ""
-    computed_baseline = 0
     computed_used = 0
+    computed_upgrades = 0
     for item in plan.populations:
         if type(item) is not PopulationLOD:
             raise NeuralLODError("LOD plan contains a noncanonical population")
@@ -247,10 +247,16 @@ def verify_plan(plan: object) -> bool:
         cost = _integer(item.cost_units, "cost_units", 1, MAX_COST_UNITS)
         _integer(item.importance_milli, "importance_milli", 0, MAX_IMPORTANCE_MILLI)
         computed_used += cost
-        # Every tier costs at least one unit; the baseline cannot be recovered
-        # from a selected tier without its original descriptor, so only check
-        # accounting and digest here.
-    if computed_used != used or upgrades > 2 * len(plan.populations):
+        computed_upgrades += _LEVELS.index(item.level)
+    # The original coarse costs are not included in the receipt, so the exact
+    # baseline cannot be reconstructed. The upgrade count is independently
+    # checkable from the selected tier indices.
+    if (
+        computed_used != used
+        or computed_upgrades != upgrades
+        or upgrades > 2 * len(plan.populations)
+        or baseline < len(plan.populations)
+    ):
         raise NeuralLODError("LOD plan accounting mismatch")
     payload = _canonical_payload(
         budget, baseline, used, upgrades, plan.populations
