@@ -1,0 +1,161 @@
+import copy, unittest, json
+from unittest.mock import patch
+from mojum.genesis import ACQUISITION_SCHEMA, GenomeLedger
+from mojum.genesis_phenotype_audit import (MAX_AUDIT_EVENTS, MAX_INPUT_BYTES,
+    PhenotypeAuditError, audit_phenotype_snapshot)
+
+SEED = {"schema":"mojum.genesis.genotype/1","genome_id":"public-synthetic-test","revision":"seed-r1","inherited":{"heartbeat_bpm":60,"body_scale_milli":1000,"sensory_gain_milli":1000}}
+
+
+class HostileString(str):
+    def __hash__(self):
+        return hash("events")
+    def __eq__(self, other):
+        raise RuntimeError("hostile key equality must not run")
+def make_ledger():
+    ledger = GenomeLedger(SEED)
+    event = {"schema":ACQUISITION_SCHEMA,"event_id":"event-1","genome_id":SEED["genome_id"],"gene":"heartbeat_bpm","delta":4,"valid_from_tick":5,"observed_at_ns":10,"recorded_at_ns":11,"source":"test","evidence":"PUBLIC_SYNTHETIC fixture only"}
+    ledger.append(event, ledger.revision)
+    return ledger
+
+class PhenotypeAuditTests(unittest.TestCase):
+    def audit(self, ledger, phenotype):
+        return audit_phenotype_snapshot(ledger.snapshot(), phenotype, source_classification="PUBLIC_SYNTHETIC")
+    def test_hostile_events_key_is_rejected_before_dictionary_lookup(self):
+        ledger = make_ledger()
+        snapshot = ledger.snapshot()
+        event_values = snapshot.pop("events")
+        snapshot[HostileString("events")] = event_values
+        with self.assertRaises(PhenotypeAuditError):
+            audit_phenotype_snapshot(
+                snapshot, ledger.phenotype(5), source_classification="PUBLIC_SYNTHETIC"
+            )
+
+    def test_event_budget_rejects_before_expensive_ledger_restore(self):
+        ledger = make_ledger()
+        snapshot = ledger.snapshot()
+        snapshot["events"] = [None] * (MAX_AUDIT_EVENTS + 1)
+        with patch("mojum.genesis_phenotype_audit.GenomeLedger.from_snapshot") as restore:
+            with self.assertRaisesRegex(PhenotypeAuditError, "event budget"):
+                audit_phenotype_snapshot(
+                    snapshot, ledger.phenotype(5),
+                    source_classification="PUBLIC_SYNTHETIC"
+                )
+            restore.assert_not_called()
+
+    def test_event_budget_accepts_the_documented_limit(self):
+        ledger = make_ledger()
+        snapshot = ledger.snapshot()
+        self.assertEqual(len(snapshot["events"]), 1)
+        self.assertTrue(self.audit(ledger, ledger.phenotype(5)).accepted)
+        self.assertLessEqual(MAX_AUDIT_EVENTS, 128)
+
+    def test_exact_recomputation_is_accepted(self):
+        ledger=make_ledger(); result=self.audit(ledger, ledger.phenotype(5))
+        self.assertTrue(result.accepted); self.assertEqual(result.mismatch_fields, ()); self.assertEqual(result.event_count,1)
+    def test_tampered_parameter_is_rejected_and_redacted(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5); expected["parameters"]["heartbeat_bpm"]+=1
+        result=self.audit(ledger, expected)
+        self.assertFalse(result.accepted); self.assertEqual(result.mismatch_fields,("parameters",))
+        self.assertNotIn("event-1",repr(result.to_dict())); self.assertNotIn("heartbeat_bpm",repr(result.to_dict()))
+    def test_json_number_type_spoof_is_rejected(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        expected["parameters"]["heartbeat_bpm"] = float(expected["parameters"]["heartbeat_bpm"])
+        result=self.audit(ledger, expected)
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.mismatch_fields, ("parameters",))
+        self.assertNotEqual(result.computed_sha256, result.supplied_sha256)
+    def test_missing_and_extra_fields_are_rejected(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5); expected.pop("ledger_revision"); expected["extra"]="x"
+        self.assertEqual(self.audit(ledger,expected).mismatch_fields,("extra","ledger_revision"))
+    def test_supplied_tick_is_used_for_recomputation(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5); expected["at_tick"]=4
+        result = self.audit(ledger, expected)
+        self.assertEqual(result.at_tick, 4)
+        self.assertFalse(result.accepted)
+        self.assertIn("applied_acquisition_ids", result.mismatch_fields)
+    def test_tampered_ledger_rejected(self):
+        ledger=make_ledger(); snapshot=ledger.snapshot(); snapshot["events"][0]["delta"]+=1
+        with self.assertRaises(PhenotypeAuditError):
+            audit_phenotype_snapshot(snapshot,ledger.phenotype(5),source_classification="PUBLIC_SYNTHETIC")
+    def test_wrong_classification_fails_closed(self):
+        ledger=make_ledger()
+        with self.assertRaises(PhenotypeAuditError):
+            audit_phenotype_snapshot(ledger.snapshot(),ledger.phenotype(5),source_classification="PRIVATE")
+    def test_subclass_containers_rejected(self):
+        class D(dict): pass
+        ledger=make_ledger()
+        with self.assertRaises(PhenotypeAuditError):
+            audit_phenotype_snapshot(D(ledger.snapshot()),ledger.phenotype(5),source_classification="PUBLIC_SYNTHETIC")
+    def test_non_string_keys_rejected(self):
+        ledger=make_ledger(); snapshot=ledger.snapshot(); snapshot[object()]="x"
+        with self.assertRaises(PhenotypeAuditError):
+            audit_phenotype_snapshot(snapshot,ledger.phenotype(5),source_classification="PUBLIC_SYNTHETIC")
+    def test_nonfinite_and_surrogate_rejected(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5); expected["bad"]=float("nan")
+        with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
+        expected=ledger.phenotype(5); expected["bad"]=chr(0xD800)
+        with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
+    def test_depth_and_byte_budgets(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5); cursor=expected
+        for _ in range(30): cursor["nested"]={}; cursor=cursor["nested"]
+        with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
+        expected=ledger.phenotype(5); expected["padding"]="x"*MAX_INPUT_BYTES
+        with self.assertRaises(PhenotypeAuditError): self.audit(ledger,expected)
+    def test_aggregate_utf8_budget_is_rejected_during_admission(self):
+        ledger=make_ledger(); expected=ledger.phenotype(5)
+        for index in range(MAX_INPUT_BYTES // 16_384 + 1):
+            expected[f"padding_{index}"]="x"*16_384
+        with self.assertRaisesRegex(PhenotypeAuditError,"byte budget"):
+            self.audit(ledger,expected)
+
+    def test_json_escape_expansion_is_bounded_before_serialization(self):
+        ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
+        control = "\x01" * 16_384
+        for index in range(11):
+            expected[f"control_{index}"] = control
+        with patch(
+            "mojum.genesis_phenotype_audit.json.dumps",
+            wraps=json.dumps,
+        ) as serializer:
+            with self.assertRaisesRegex(PhenotypeAuditError, "JSON byte budget"):
+                audit_phenotype_snapshot(snapshot, expected, source_classification="PUBLIC_SYNTHETIC")
+            # Only the bounded ledger snapshot may be serialized. Escaping
+            # the untrusted phenotype would exceed 1 MiB, so reject preflight.
+            self.assertEqual(serializer.call_count, 1)
+
+    def test_oversized_integer_is_rejected_before_serialization(self):
+        ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
+        expected["oversized_integer"] = 10 ** 10_000
+        with patch(
+            "mojum.genesis_phenotype_audit.json.dumps",
+            wraps=json.dumps,
+        ) as serializer:
+            with self.assertRaisesRegex(PhenotypeAuditError, "integer is out of range"):
+                audit_phenotype_snapshot(snapshot, expected, source_classification="PUBLIC_SYNTHETIC")
+            self.assertEqual(serializer.call_count, 1)
+    def test_aggregate_object_key_budget_is_rejected_before_serialization(self):
+        ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
+        for index in range(66):
+            expected[("k" * 16_000) + str(index)] = index
+        with patch(
+            "mojum.genesis_phenotype_audit.json.dumps",
+            wraps=json.dumps,
+        ) as serializer:
+            with self.assertRaisesRegex(PhenotypeAuditError, "JSON byte budget"):
+                audit_phenotype_snapshot(snapshot, expected, source_classification="PUBLIC_SYNTHETIC")
+            # Only the bounded ledger may be serialized; long aggregate keys
+            # in the supplied phenotype must fail during preflight.
+            self.assertEqual(serializer.call_count, 1)
+
+    def test_result_detached_from_caller_mutations(self):
+        ledger=make_ledger(); snapshot=ledger.snapshot(); expected=ledger.phenotype(5)
+        result=audit_phenotype_snapshot(snapshot,expected,source_classification="PUBLIC_SYNTHETIC")
+        snapshot["events"][0]["delta"]=999; expected["parameters"]["heartbeat_bpm"]=999
+        self.assertTrue(result.accepted); self.assertEqual(result.at_tick,5)
+    def test_digest_is_deterministic(self):
+        ledger=make_ledger(); first=self.audit(ledger,ledger.phenotype(5))
+        second=audit_phenotype_snapshot(copy.deepcopy(ledger.snapshot()),copy.deepcopy(ledger.phenotype(5)),source_classification="PUBLIC_SYNTHETIC")
+        self.assertEqual(first.to_dict(),second.to_dict())
+
+if __name__ == "__main__": unittest.main()
