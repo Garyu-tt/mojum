@@ -1,0 +1,41 @@
+name: Rig joint map QA
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/rig_joint_map.py"
+      - "tests/test_rig_joint_map.py"
+      - "docs/RIG_JOINT_MAP_R01.md"
+      - ".github/workflows/rig-joint-map.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact pull request revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checked-out commit
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile implementation and tests
+        run: python -m py_compile src/mojum/rig_joint_map.py tests/test_rig_joint_map.py
+      - name: Run focused rig joint map regressions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_rig_joint_map.py" -v
