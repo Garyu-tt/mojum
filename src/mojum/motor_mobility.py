@@ -143,7 +143,7 @@ def _verified_motion(frame, schema, previous):
     if previous is not None:
         expected = previous if blocked else (previous[0] + dx, previous[1] + dy)
         if position != expected:
-            raise MobilityAuditError("committed world position disagrees with motor action")
+            raise MobilityAuditError("measured position: committed world position disagrees with motor action")
     return kind, blocked, position
 
 
@@ -169,7 +169,7 @@ def summarize(manifest, frames):
             previous = motion[2]
             yield motion
 
-    return _summarize_motion(policy, None, motion_records())
+    return _summarize_motion(policy, previous, motion_records())
 
 
 def _summarize_motion(policy, previous, records):
