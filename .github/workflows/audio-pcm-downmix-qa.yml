@@ -1,0 +1,40 @@
+name: Mojum offline PCM16 stereo downmix exact-head QA
+
+on:
+  pull_request:
+    paths:
+      - 'src/mojum/audio_pcm_downmix.py'
+      - 'tests/test_audio_pcm_downmix.py'
+      - '.github/workflows/audio-pcm-downmix-qa.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  pcm16-downmix-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert actual PR head checkout
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+      - name: Run standalone PCM16 downmix regression
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_audio_pcm_downmix.py' -v
