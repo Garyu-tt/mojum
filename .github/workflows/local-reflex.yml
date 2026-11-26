@@ -1,0 +1,50 @@
+name: Local reflex CPU fixture
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/local_reflex.py"
+      - "src/mojum/motor_gate.py"
+      - "src/mojum/physics_observation.py"
+      - "tests/test_local_reflex.py"
+      - "tests/test_motor_gate.py"
+      - "tests/test_physics_observation.py"
+      - "examples/local_reflex_demo.py"
+      - "docs/LOCAL_REFLEX_R01.md"
+      - ".github/workflows/local-reflex.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-reflex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact tested revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Local reflex and shared safety contracts
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p 'test_local_reflex.py' -v
+          python -m unittest discover -s tests -p 'test_motor_gate.py' -v
+          python -m unittest discover -s tests -p 'test_physics_observation.py' -v
+      - name: Executable scenarios and bounded 64-joint benchmark
+        env:
+          PYTHONPATH: src
+        run: python examples/local_reflex_demo.py --ticks 100 --joints 64
