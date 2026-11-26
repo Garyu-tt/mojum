@@ -14,6 +14,7 @@ MAX_ID = 96
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 _HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _SLOTS = frozenset({"head", "torso", "legs", "feet", "hands", "accessory", "outerwear"})
+_ACTIONS = frozenset({"equip", "unequip", "replace", "drop"})
 
 
 class WardrobeError(ValueError):
@@ -78,7 +79,7 @@ def _valid_equipped(equipped):
         if type(pair) is not tuple or len(pair) != 2:
             raise WardrobeError("invalid equipped entry")
         slot, garment = pair
-        if type(slot) is not str or slot not in _SLOTS:
+        if type(slot) is not str or len(slot) > 9 or slot not in _SLOTS:
             raise WardrobeError("unsupported slot")
         _identifier(garment, "garment id")
         if slot in seen_slots or garment in seen_garments:
@@ -103,7 +104,7 @@ def initial_state(body_revision):
 
 def _verify_state(state):
     if (type(state) is not WardrobeState or type(state.schema) is not str
-            or state.schema != SCHEMA):
+            or len(state.schema) != len(SCHEMA) or state.schema != SCHEMA):
         raise WardrobeError("unsupported state schema")
     _identifier(state.body_revision, "body revision")
     if type(state.sequence) is not int or not 0 <= state.sequence <= 2**63 - 2:
@@ -138,8 +139,10 @@ def transition(state, *, action, slot, garment_id, operation_id,
     _verify_state(state)
     operation_id = _identifier(operation_id, "operation id")
     body_revision = _identifier(body_revision, "body revision")
-    if type(expected_revision) is not str or expected_revision != state.revision:
-        raise WardrobeError("stale expected revision")
+    if (type(expected_revision) is not str
+            or _HEX_SHA256.fullmatch(expected_revision) is None
+            or expected_revision != state.revision):
+        raise WardrobeError("stale or invalid expected revision")
     if body_revision != state.body_revision:
         raise WardrobeError("body revision mismatch")
     if operation_id in state.recent_operations:
@@ -147,9 +150,9 @@ def transition(state, *, action, slot, garment_id, operation_id,
     # Keep every emitted state valid for at least one subsequent verification.
     if state.sequence >= 2**63 - 2:
         raise WardrobeError("sequence limit reached")
-    if type(action) is not str or action not in {"equip", "unequip", "replace", "drop"}:
+    if type(action) is not str or len(action) > 7 or action not in _ACTIONS:
         raise WardrobeError("unsupported action")
-    if type(slot) is not str or slot not in _SLOTS:
+    if type(slot) is not str or len(slot) > 9 or slot not in _SLOTS:
         raise WardrobeError("unsupported slot")
     if garment_id is not None:
         _identifier(garment_id, "garment id")
