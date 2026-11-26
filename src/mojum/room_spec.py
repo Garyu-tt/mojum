@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Context, Decimal, InvalidOperation, localcontext
 import json
 import math
 import os
@@ -28,6 +28,12 @@ MAX_INPUT_BYTES = 256 * 1024
 MAX_OBSTACLES = 4096
 # Keep exact wire spelling, but bound Decimal parsing and arithmetic on hostile inputs.
 MAX_NUMBER_TOKEN_CHARS = 128
+# Every admitted nonzero coordinate converts to a finite nonzero binary64:
+# its leading decimal digit is between 10**-324 and 10**308. Allow the full
+# token length below that digit, twice the span for products, and carry digits
+# for the sum of all obstacle areas.
+_GEOMETRY_PRECISION = 2 * (309 + 324 + MAX_NUMBER_TOKEN_CHARS) + len(str(MAX_OBSTACLES))
+_GEOMETRY_CONTEXT = Context(prec=_GEOMETRY_PRECISION, Emin=-2000, Emax=2000)
 # Pairwise overlap analysis is bounded so a huge but legal document cannot
 # turn validation into quadratic work on a CPU-first fixture.
 MAX_OVERLAP_ANALYSIS_OBSTACLES = 256
@@ -107,6 +113,10 @@ def _as_number(value, label, errors):
     if not number.is_finite():
         errors.append("%s is not a finite decimal" % (label,))
         return None
+    # Zero tokens can carry arbitrary exponents. Use plain zero in geometry;
+    # the report retains the authored spelling directly from the document.
+    if number.is_zero():
+        return Decimal(0)
     # Point-room runtime coordinates are Python numeric scalars. Reject JSON
     # values whose magnitude would become infinity or a nonzero underflow on
     # conversion, rather than validating an unusable room or overflowing when
@@ -115,7 +125,7 @@ def _as_number(value, label, errors):
         as_float = float(number)
     except (OverflowError, ValueError):
         as_float = math.inf
-    if not math.isfinite(as_float) or (number != 0 and as_float == 0):
+    if not math.isfinite(as_float) or as_float == 0:
         errors.append("%s is not representable as a finite room coordinate" % (label,))
         return None
     return number
@@ -199,6 +209,11 @@ def _runtime_geometry_errors(document, start):
 
 def validate_room_document(document):
     """Validate a parsed room document. Returns a :class:`RoomReport`."""
+    with localcontext(_GEOMETRY_CONTEXT):
+        return _validate_geometry(document)
+
+
+def _validate_geometry(document):
     errors = []
     warnings = []
 

@@ -142,6 +142,15 @@ class RoomDraftRuntimeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(db.exists())
 
+    def test_exact_obstacle_overrun_prevents_journal_creation(self):
+        db = self.dir / "outside.sqlite3"
+        self.path.write_text(VALID.replace("0.1,2", "2.0000000000000000000000000000001,2"),
+                             encoding="utf-8")
+        result = self._cli(db)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("outside the room", result.stderr)
+        self.assertFalse(db.exists())
+
 
     def test_valid_draft_over_noosphere_event_cap_fails_before_sqlite_birth(self):
         # A 256 KiB-valid room can produce a bootstrap event beyond the
