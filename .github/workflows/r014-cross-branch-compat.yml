@@ -1,0 +1,89 @@
+name: Mojum R0.14 cross-policy SQLite ABI acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/r014-cross-branch-compat.yml"
+      - "tests/qa_r014_cross_branch_journal.py"
+      - "tests/test_r014_cross_branch_provenance.py"
+      - "docs/R014_CROSS_BRANCH_ABI_GATE.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  characterize:
+    name: legacy replay and v2 fail-closed (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout QA harness only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact #112 source SHA
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 8d2eaf234c09177ae0b92dfef4bb41950529c912
+          path: sources/policy112
+          persist-credentials: false
+      - name: Checkout exact #115 source SHA
+        uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: b755da530634c0d6b8866107e7b4e9e325839175
+          path: sources/policy115
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Reject mis-pinned local checkout in provenance unit test
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -B -m unittest discover -s tests -p 'test_r014_cross_branch_provenance.py' -v
+      - name: Characterize real synthetic SQLite history in both directions
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -B tests/qa_r014_cross_branch_journal.py \
+            --source-a sources/policy112 \
+            --source-b sources/policy115
+
+  release-abi-gate:
+    name: BLOCK release until both v2 SQLite wire schemas interoperate
+    needs: characterize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: 8d2eaf234c09177ae0b92dfef4bb41950529c912
+          path: sources/policy112
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Garyu-tt/mojum
+          ref: b755da530634c0d6b8866107e7b4e9e325839175
+          path: sources/policy115
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Enforce real two-way v2 replay and identical wire contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -B tests/qa_r014_cross_branch_journal.py \
+            --source-a sources/policy112 \
+            --source-b sources/policy115 \
+            --require-compatible
