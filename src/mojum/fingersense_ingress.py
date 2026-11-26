@@ -82,7 +82,13 @@ def _identifier(value: object, name: str, maximum: int) -> str:
 
 
 def _exact_dict(value: object, keys: frozenset[str], name: str) -> dict:
-    if type(value) is not dict or any(type(key) is not str for key in value):
+    if type(value) is not dict:
+        _fail(f"{name} must be a native dict with string keys")
+    # Reject oversized/undersized mappings before scanning caller-controlled
+    # keys or invoking hashing/equality through set construction.
+    if len(value) != len(keys):
+        _fail(f"{name} must contain exactly {sorted(keys)}")
+    if any(type(key) is not str for key in value):
         _fail(f"{name} must be a native dict with string keys")
     if set(value) != keys:
         _fail(f"{name} must contain exactly {sorted(keys)}")
