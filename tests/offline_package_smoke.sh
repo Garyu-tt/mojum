@@ -37,7 +37,9 @@ runtime/bin/python -I -m pip --isolated --disable-pip-version-check install \
     --no-index --no-cache-dir wheels/mojum-*.whl
 
 runtime/bin/python -I - "$repo/LICENSE" "$release_tag" <<'PY'
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import sysconfig
@@ -48,9 +50,9 @@ from pathlib import Path
 import mojum
 
 
-def run(script, *args):
+def run(script, *args, env=None):
     command = [Path(sys.executable).with_name(script), *args]
-    return json.loads(subprocess.check_output(command, text=True))
+    return json.loads(subprocess.check_output(command, text=True, env=env))
 
 
 def run_module(module, *args):
@@ -68,6 +70,20 @@ assert installed.metadata.get_all("License-File") == ["LICENSE"]
 licenses = [path for path in installed.files or () if path.parts[-2:] == ("licenses", "LICENSE")]
 assert len(licenses) == 1
 assert installed.locate_file(licenses[0]).read_bytes() == Path(sys.argv[1]).read_bytes()
+
+# The wheel supplies the standalone observer without a source checkout.
+viewer = run_module("mojum.trace_viewer", "--output", "viewer.html")
+viewer_bytes = Path("viewer.html").read_bytes()
+assert viewer_bytes == files("mojum").joinpath("data", "aquarium_trace_viewer.html").read_bytes()
+assert viewer_bytes == (Path(sys.argv[1]).parent / "examples" / "aquarium_trace_viewer.html").read_bytes()
+assert viewer == {"schema": "mojum.trace-viewer.export/1", "bytes": len(viewer_bytes),
+                  "sha256": hashlib.sha256(viewer_bytes).hexdigest()}
+occupied_viewer = subprocess.run(
+    [sys.executable, "-I", "-m", "mojum.trace_viewer", "--output", "viewer.html"],
+    capture_output=True, text=True, timeout=20,
+)
+assert occupied_viewer.returncode == 2 and occupied_viewer.stdout == ""
+assert Path("viewer.html").read_bytes() == viewer_bytes
 
 first = run("mojum-aquarium", "--db", "resumed.sqlite3", "--ticks", "120")
 assert (first["tick"], first["stored_events"], first["neural_mode"]) == (120, 121, "shadow")
@@ -139,11 +155,23 @@ fixture = run("mojum-fixture", "--ticks", "2")
 assert fixture["tick"] == 2 and fixture["last_episode"]["brain_observation"]["world_light"] == "dim"
 graph = json.loads(files("mojum").joinpath("data", "first_loop.json").read_text(encoding="utf-8"))
 room = next(node for node in graph["nodes"] if node["kind"] == "world.room")
+room_id = room["id"]
+unicode_room_id = "room-\u661f"
+room["id"] = unicode_room_id
 room["config"]["light"] = "bright"
+for edge in graph["edges"]:
+    for endpoint in edge.values():
+        if endpoint["node"] == room_id:
+            endpoint["node"] = unicode_room_id
 Path("bright.json").write_text(json.dumps(graph), encoding="utf-8")
 custom = run("mojum-fixture", "bright.json", "--ticks", "2")
 assert custom["last_episode"]["brain_observation"]["world_light"] == "bright"
 assert custom["graph_sha256"] != fixture["graph_sha256"]
+assert custom["last_frame"][unicode_room_id]["world"]["light"] == "bright"
+assert custom == run(
+    "mojum-fixture", "bright.json", "--ticks", "2",
+    env={**os.environ, "PYTHONIOENCODING": "ascii:strict"},
+)
 
 # Experimental labs are distributed in the same wheel. They must read the
 # packaged defaults without a source checkout, including on cold restart.
@@ -182,6 +210,37 @@ untouched_twin = run_module(
 )
 assert (untouched_twin["twin"]["tick"], untouched_twin["twin"]["stored_events"]) == (0, 1)
 
+# Wheel-only room authoring supplies the complete editor with no sibling JS.
+designer = run_module("mojum.room_designer", "--output", "room-designer.html")
+designer_bytes = Path("room-designer.html").read_bytes()
+assert designer_bytes == files("mojum").joinpath("data", "room_designer.html").read_bytes()
+assert designer["schema"] == "mojum.room-designer.export/1"
+assert designer["bytes"] == len(designer_bytes)
+from hashlib import sha256
+assert designer["sha256"] == sha256(designer_bytes).hexdigest()
+occupied_designer = subprocess.run(
+    [sys.executable, "-I", "-m", "mojum.room_designer", "--output", "room-designer.html"],
+    capture_output=True, text=True, timeout=20,
+)
+assert occupied_designer.returncode == 2 and occupied_designer.stdout == ""
+assert Path("room-designer.html").read_bytes() == designer_bytes
+# This exact default draft is covered by the real editor-core JSON tests.
+Path("authored-room.json").write_bytes(
+    (Path(sys.argv[1]).parent / "examples" / "room_simple_mixed.json").read_bytes()
+)
+assert run("mojum-room-check", "authored-room.json", "--format", "json")["valid"]
+room_options = ("--room-file", "authored-room.json", "--neural-mode", "disabled")
+room_start = run("mojum-aquarium", "--db", "authored.sqlite3", "--ticks", "2", *room_options)
+room_resume = run("mojum-aquarium", "--db", "authored.sqlite3", "--ticks", "1", *room_options,
+                  "--expected-head", room_start["journal_head"])
+assert (room_resume["tick"], room_resume["stored_events"]) == (3, 4)
+assert room_resume == run("mojum-aquarium", "--db", "authored-control.sqlite3",
+                          "--ticks", "3", *room_options)
+
 print(f'Offline wheel verified: {resumed["tick"]} ticks, {resumed["stored_events"]} events, '
       f'journal head {resumed["journal_head"]}')
 PY
+
+# Exercise the authored-room host, journaled development and both export CLIs
+# through the installed package; -I also isolates each test's CLI subprocess.
+runtime/bin/python -I "$repo/tests/test_installed_aquarium_workflow.py" -v

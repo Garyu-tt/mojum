@@ -237,11 +237,16 @@ def select_bassy_asset(body, manifest):
     if body.get("genome_id") != verified["genome_id"]:
         raise BodyContractError("Asset genome mismatch")
     age = _int(body.get("age_years"), "body age", AGE_MIN, AGE_MAX)
+    age_months = age * 12
+    if "age_months" in body:
+        age_months = _int(body["age_months"], "body age_months", AGE_MIN * 12, AGE_MAX * 12)
+        if age_months // 12 != age:
+            raise BodyContractError("Body age_months must agree with age_years")
     dimensions = body.get("dimensions")
     if not isinstance(dimensions, Mapping):
         raise BodyContractError("Missing body dimensions")
     height = _int(dimensions.get("height_mm"), "height_mm", 400, 3500)
-    stage = min(verified["stages"], key=lambda item: (abs(item["age_years"] - age),
+    stage = min(verified["stages"], key=lambda item: (abs(item["age_years"] * 12 - age_months),
                                                      item["age_years"]))
     return {
         "schema": SELECTION_SCHEMA,

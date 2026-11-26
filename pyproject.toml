@@ -31,4 +31,4 @@ where = ["src"]
 include = ["mojum*"]
 
 [tool.setuptools.package-data]
-mojum = ["data/*.json"]
+mojum = ["data/*.json", "data/*.html"]

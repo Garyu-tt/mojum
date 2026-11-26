@@ -57,9 +57,10 @@ checked on input, but the stored Aquarium manifest pins converted Python
 float geometry, **not a hash of the original draft bytes**. This remains a
 synthetic 2D point-room, not MuJoCo or physical contact. The legacy
 fixed-room `local_cell_*` modes intentionally refuse custom rooms. The
-portable foreground host has not yet gained `--room-file` support.
+portable foreground host also accepts `--room-file` with its developmental
+profile; see [paced custom-room startup and replay](docs/PORTABLE_HOST_ROOM_DRAFT_R01.md).
 
-For a journal created with a room draft, pass the same `--room-file` and
+For an Aquarium CLI journal created with a room draft, pass the same `--room-file` and
 runtime modes to `python -m mojum.aquarium_trace_export` and both
 `python -m mojum.aquarium_cold_copy` subcommands (`export` and `verify`).
 Replay checks the room geometry and start position against the journal.
@@ -330,6 +331,13 @@ To continue earlier v2B experience as v3, use the same transfer flags
 with `python -m mojum.migration_v2b_v3`. The command opens v2B read-only
 and publishes a new v3 file only if every historical frame and retained
 observation matches, with zero evictions during the transfer.
+
+Both transfer commands require an unused destination basename, including its
+SQLite `-wal`, `-shm` and `-journal` paths. Existing sidecar files, directories
+and symlinks are rejected before conversion and checked again immediately
+before publication. They are preserved for recovery; choose another pathname
+when these artifacts exist. Use a trusted local destination directory: these
+checks do not lock pathnames against concurrent replacement.
 
 ### Local Cell/3-escape (isolated, library-only)
 

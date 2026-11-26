@@ -38,6 +38,14 @@ This protects against other-UID filesystem substitution, not a hostile root
 or a second worker already using the same UID. Secure SQLite is still not
 a provider-side spend guarantee.
 
+The focused test suite preserves that production boundary. On non-POSIX
+hosts it checks the real connector and subprocess CLI fail closed with no DB,
+WAL, SHM or rollback-journal side effects. A test-local substitution of the
+module-private path gate is used only to exercise platform-independent ledger
+and in-process CLI state transitions; it is not exported and cannot enable
+production storage. Dedicated CI runs these contracts on Ubuntu and Windows
+with `ResourceWarning` treated as an error.
+
 All operations run with SQLite WAL and BEGIN IMMEDIATE transactional locking.
 The cap is immutable once initialized, even if the ledger is reopened.
 Reserve returns dispatch_allowed=true only on the first successful call,
