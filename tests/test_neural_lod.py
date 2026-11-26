@@ -55,8 +55,8 @@ class NeuralLODTests(unittest.TestCase):
         self.assertEqual(result.upgrades, 2)
 
     def test_tie_break_is_population_id_not_input_order(self):
-        first = plan([row("z"), row("a")], 3)
-        second = plan([row("a"), row("z")], 3)
+        first = plan([row("z"), row("a")], 4)
+        second = plan([row("a"), row("z")], 4)
         self.assertEqual(first, second)
         self.assertEqual(
             [(item.population_id, item.level) for item in first.populations],
