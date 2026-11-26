@@ -108,6 +108,23 @@ class WardrobeStateTests(unittest.TestCase):
                 with self.assertRaisesRegex(WardrobeError, "bounded lowercase SHA-256"):
                     _verify_state(replace(self.state, revision=malformed))
 
+    def test_caller_revision_and_enum_inputs_are_bounded(self):
+        huge = "x" * 100_000
+        with self.assertRaisesRegex(WardrobeError, "expected revision"):
+            transition(self.state, action="equip", slot="torso", garment_id="shirt",
+                       operation_id="op-1", expected_revision=huge,
+                       body_revision="rig-r1")
+        with self.assertRaisesRegex(WardrobeError, "action"):
+            transition(self.state, action=huge, slot="torso", garment_id="shirt",
+                       operation_id="op-1", expected_revision=self.state.revision,
+                       body_revision="rig-r1")
+        with self.assertRaisesRegex(WardrobeError, "slot"):
+            transition(self.state, action="equip", slot=huge, garment_id="shirt",
+                       operation_id="op-1", expected_revision=self.state.revision,
+                       body_revision="rig-r1")
+        with self.assertRaisesRegex(WardrobeError, "schema"):
+            _verify_state(replace(self.state, schema=huge))
+
     def test_sequence_limit_fails_closed_before_emitting_invalid_state(self):
         terminal = _make_state("rig-r1", 2**63 - 2, (), ())
         with self.assertRaisesRegex(WardrobeError, "sequence limit"):
