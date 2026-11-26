@@ -92,6 +92,28 @@ class PortableHostTests(unittest.TestCase):
             motor_mode=V4_MODE, neural_mode="shadow", sensory_mode=sensory_mode,
         )
 
+    def test_locked_journal_reports_storage_failure_and_resumes_from_same_head(self):
+        started = self.invoke("--ticks", "1")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        head = json.loads(started.stdout)["journal_head"]
+
+        for mode, transaction in (("NORMAL", "IMMEDIATE"), ("EXCLUSIVE", "EXCLUSIVE")):
+            with self.subTest(mode=mode):
+                with closing(sqlite3.connect(self.db)) as writer:
+                    writer.execute(f"PRAGMA locking_mode={mode}")
+                    writer.execute(f"BEGIN {transaction}")
+                    blocked = self.invoke("--ticks", "1", "--expected-head", head)
+                self.assertEqual(blocked.returncode, 1, blocked.stderr)
+                self.assertEqual(blocked.stdout, "")
+                self.assertIn("cannot access --db SQLite journal: database is locked", blocked.stderr)
+                self.assertNotIn("Traceback", blocked.stderr)
+
+        resumed = self.invoke("--ticks", "1", "--expected-head", head)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        receipt = json.loads(resumed.stdout)
+        self.assertEqual((receipt["start_tick"], receipt["end_tick"], receipt["journal_events"]),
+                         (1, 2, 3))
+
     def test_clock_paces_without_backlog_or_busy_loop(self):
         fake = Clock()
         runner = SyntheticRunner(fake)
