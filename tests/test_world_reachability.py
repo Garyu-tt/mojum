@@ -76,6 +76,32 @@ class SampledPathTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 verify_witness(room, forged)
 
+    def test_forged_mapping_keys_rejected_before_comparison(self):
+        room = Room(4, 4)
+        report = find_sampled_path(room, (0, 0), (4, 4))
+
+        class Alias(str):
+            pass
+
+        class ExplodingKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key comparison executed")
+
+        for location, name in (("report", "schema"), ("grid", "columns"),
+                               ("frame", "tick")):
+            for key_type in (Alias, ExplodingKey):
+                with self.subTest(location=location, key_type=key_type.__name__):
+                    forged = copy.deepcopy(report)
+                    mapping = (forged if location == "report" else
+                               forged["grid"] if location == "grid" else
+                               forged["path"][0])
+                    value = mapping.pop(name)
+                    mapping[key_type(name)] = value
+                    with self.assertRaises(ValueError):
+                        verify_witness(room, forged)
+
     def test_invalid_inputs_rejected_without_mutating_geometry(self):
         room = Room(3, 3, ((1, 1, .5, .5),))
         baseline = room.obstacles
