@@ -24,7 +24,8 @@ def make_frame():
         maximum_phase_correction=100,
     )
     cpg = BilateralCPG(profile)
-    return cpg.step(SensoryFeedback(tick=1, profile_revision=3))
+    frame = cpg.step(SensoryFeedback(tick=1, profile_revision=3))
+    return frame, profile, cpg.snapshot()
 
 
 class CPGBridgeTests(unittest.TestCase):
@@ -33,14 +34,23 @@ class CPGBridgeTests(unittest.TestCase):
             {"left_hip": (-1.0, 1.0), "right_hip": (-1.0, 1.0)},
             revision=3,
         )
-        self.frame = make_frame()
+        self.frame, self.profile, self.snapshot = make_frame()
         self.channels = (
             JointChannel("left_hip", "left", 0, 500),
             JointChannel("right_hip", "right", 0, 500),
         )
 
+    def convert(self, frame=None, profile=None, snapshot=None, channels=None):
+        return intents_from_frame(
+            self.frame if frame is None else frame,
+            self.channels if channels is None else channels,
+            self.gate,
+            profile=self.profile if profile is None else profile,
+            snapshot=self.snapshot if snapshot is None else snapshot,
+        )
+
     def test_maps_bilateral_waveform_to_gate_validated_virtual_intents(self):
-        intents = intents_from_frame(self.frame, self.channels, self.gate)
+        intents = self.convert()
         self.assertEqual([intent.joint for intent in intents], ["left_hip", "right_hip"])
         self.assertEqual([intent.revision for intent in intents], [3, 3])
         for intent in intents:
@@ -48,47 +58,52 @@ class CPGBridgeTests(unittest.TestCase):
 
     def test_rejects_stale_frame_revision(self):
         with self.assertRaisesRegex(CPGBridgeError, "revision"):
-            intents_from_frame(
-                replace(self.frame, profile_revision=2),
-                self.channels,
-                self.gate,
-            )
+            self.convert(frame=replace(self.frame, profile_revision=2))
 
     def test_rejects_non_synthetic_or_actuation_frame(self):
         with self.assertRaises(CPGBridgeError):
-            intents_from_frame(
-                replace(self.frame, physical_actuation=True),
-                self.channels,
-                self.gate,
-            )
+            self.convert(frame=replace(self.frame, physical_actuation=True))
 
     def test_rejects_bool_waveform_values(self):
         with self.assertRaisesRegex(CPGBridgeError, "left_output"):
-            intents_from_frame(
-                replace(self.frame, left_output_milli=True),
-                self.channels,
-                self.gate,
-            )
+            self.convert(frame=replace(self.frame, left_output_milli=True))
+
+    def test_rejects_altered_in_range_output_even_with_original_digest(self):
+        altered = replace(self.frame, left_output_milli=0)
+        with self.assertRaisesRegex(CPGBridgeError, "outputs do not match"):
+            self.convert(frame=altered)
+
+    def test_rejects_frame_phase_not_bound_to_snapshot(self):
+        altered = replace(
+            self.frame,
+            left_phase_microturns=(self.frame.left_phase_microturns + 1) % 1_000_000,
+        )
+        with self.assertRaisesRegex(CPGBridgeError, "verified CPG snapshot"):
+            self.convert(frame=altered)
+
+    def test_rejects_snapshot_with_invalid_state_digest(self):
+        altered = replace(self.snapshot, left_phase_microturns=1)
+        with self.assertRaisesRegex(CPGBridgeError, "snapshot"):
+            self.convert(snapshot=altered)
+
+    def test_rejects_mismatched_profile(self):
+        other = replace(self.profile, amplitude_milli=900)
+        with self.assertRaisesRegex(CPGBridgeError, "profile digest"):
+            self.convert(profile=other)
 
     def test_rejects_duplicate_joint_mapping(self):
         with self.assertRaisesRegex(CPGBridgeError, "duplicate"):
-            intents_from_frame(
-                self.frame,
-                (self.channels[0], self.channels[0]),
-                self.gate,
-            )
+            self.convert(channels=(self.channels[0], self.channels[0]))
 
     def test_motor_gate_is_authoritative_for_joint_limits(self):
-        channels = (
-            JointChannel("left_hip", "left", 2_000, 0),
-        )
+        channels = (JointChannel("left_hip", "left", 2_000, 0),)
         with self.assertRaisesRegex(CPGBridgeError, "MotorGate rejected"):
-            intents_from_frame(self.frame, channels, self.gate)
+            self.convert(channels=channels)
 
     def test_estop_remains_latched_and_blocks_conversion(self):
         self.gate.trip_estop()
         with self.assertRaisesRegex(CPGBridgeError, "MotorGate rejected"):
-            intents_from_frame(self.frame, self.channels, self.gate)
+            self.convert()
         self.assertTrue(self.gate.estop_latched)
 
     def test_feedback_builder_is_bounded_and_explicitly_synthetic(self):
