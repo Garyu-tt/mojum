@@ -22,6 +22,7 @@ import tempfile
 
 from .aquarium import Aquarium, AquariumError, MAX_REPLAY_EVENTS, SCHEMA as FRAME_SCHEMA, MOTOR_MODES
 from .aquarium import load_cli_room
+from .cli_sensory_scene import SENSORY_SCENE_CHOICES, resolve_sensory_scene
 from .genesis import validate_seed
 from .graph import load_graph
 
@@ -286,6 +287,8 @@ def main():
                         default="scripted")
     parser.add_argument("--sensory-mode", choices=("none", "toy_probe", "toy_probe_v2"),
                         default="none")
+    parser.add_argument("--sensory-scene", choices=SENSORY_SCENE_CHOICES, default="default",
+                        help="scene used to create the journal; empty uses the selected room dimensions")
     parser.add_argument("--temporal-mode", choices=("none", "range_guided"), default="none")
     parser.add_argument("--expected-head", default=None)
     parser.add_argument("--start-tick", type=int)
@@ -297,18 +300,24 @@ def main():
         seed = validate_seed(json.loads(args.genome.read_text(encoding="utf-8")))
         graph = load_graph(args.graph)
         room, start = load_cli_room(args.room_file, args.motor_mode)
+        sensory_scene = resolve_sensory_scene(
+            args.sensory_scene, sensory_mode=args.sensory_mode, room=room,
+        )
         meta = export_private_trace(
             args.db, args.output, seed, graph, room=room, start=start,
             agent_id=seed["genome_id"] if args.agent_id is None else args.agent_id,
             neural_mode=args.neural_mode, motor_mode=args.motor_mode, brain_mode=args.brain_mode,
             sensory_mode=args.sensory_mode, temporal_mode=args.temporal_mode,
+            sensory_scene=sensory_scene,
             expected_journal_head=args.expected_head,
             allow_private_export=args.allow_private_export,
             start_tick=args.start_tick, frame_limit=args.frame_limit,
         )
     except (ValueError, OSError, sqlite3.Error) as exc:
         parser.error(str(exc))
-    print(json.dumps(meta, sort_keys=True, ensure_ascii=False, allow_nan=False))
+    # Publication has already succeeded; keep its receipt encodable on legacy
+    # stdout streams without changing the Unicode values or UTF-8 trace bytes.
+    print(json.dumps(meta, sort_keys=True, ensure_ascii=True, allow_nan=False))
 
 
 if __name__ == "__main__":

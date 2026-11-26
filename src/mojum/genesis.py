@@ -155,12 +155,15 @@ class GenomeLedger:
     def _check_all_effective_prefixes(self, events):
         # At every recorded valid_from_tick boundary, all simultaneously active
         # deltas must produce valid parameters. This prevents future overflow.
-        ticks = sorted({0, *(event["valid_from_tick"] for event in events)})
-        for tick in ticks:
-            values = dict(self._seed["inherited"])
-            for event in events:
-                if event["valid_from_tick"] <= tick:
-                    values[event["gene"]] += event["delta"]
+        # Group only temporary references: acquisition order still defines the
+        # ledger revision. Apply a whole boundary before testing its bounds.
+        at_tick = {0: []}
+        for event in events:
+            at_tick.setdefault(event["valid_from_tick"], []).append(event)
+        values = dict(self._seed["inherited"])
+        for tick in sorted(at_tick):
+            for event in at_tick[tick]:
+                values[event["gene"]] += event["delta"]
             for name, (lo, hi) in GENES.items():
                 if not lo <= values[name] <= hi:
                     raise GenesisError(f"Acquired genome exceeds {name} bounds at tick {tick}")

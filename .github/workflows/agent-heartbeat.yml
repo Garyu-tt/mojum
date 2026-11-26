@@ -1,0 +1,42 @@
+name: Agent heartbeat admission contract
+
+on:
+  pull_request:
+    paths:
+      - "src/mojum/agent_heartbeat.py"
+      - "tests/test_agent_heartbeat.py"
+      - "docs/AGENT_HEARTBEAT_R01.md"
+      - ".github/workflows/agent-heartbeat.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Assert exact checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile module
+        env:
+          PYTHONPATH: src
+        run: python -m py_compile src/mojum/agent_heartbeat.py
+      - name: Run focused adversarial suite
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_agent_heartbeat.py" -v
