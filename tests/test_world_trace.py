@@ -67,6 +67,30 @@ class TraceTests(unittest.TestCase):
         with self.assertRaises(TraceError):
             verify_trace(t)
 
+    def test_direct_api_rejects_forged_mapping_keys(self):
+        class Alias(str):
+            pass
+
+        class ExplodingKey(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise AssertionError("untrusted key comparison executed")
+
+        for level, name in (("trace", "schema"), ("room", "width"),
+                            ("frame", "tick"), ("observation", "tick")):
+            for key_type in (Alias, ExplodingKey):
+                with self.subTest(level=level, key_type=key_type.__name__):
+                    trace = make_trace(Room(4, 4), (0, 0), [(1, 1)])
+                    mapping = (trace if level == "trace" else
+                               trace["room"] if level == "room" else
+                               trace["frames"][0] if level == "frame" else
+                               trace["frames"][0]["observation"])
+                    value = mapping.pop(name)
+                    mapping[key_type(name)] = value
+                    with self.assertRaises(TraceError):
+                        verify_trace(trace)
+
     def test_direct_api_rejects_non_string_schema_before_comparison(self):
         class ForgedSchema:
             def __eq__(self, other):

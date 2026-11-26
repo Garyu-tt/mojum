@@ -40,7 +40,8 @@ def _number(value):
 
 
 def _mapping(value, fields, label):
-    if type(value) is not dict or set(value) != fields:
+    if (type(value) is not dict or len(value) != len(fields)
+            or any(type(key) is not str or key not in fields for key in value)):
         raise TraceError(f"{label} must contain exactly {', '.join(sorted(fields))}")
 
 
