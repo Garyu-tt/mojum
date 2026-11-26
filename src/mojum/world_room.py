@@ -1,5 +1,6 @@
 """Deterministic point-room fixture; NOT MuJoCo physics."""
 from dataclasses import dataclass
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -96,6 +97,22 @@ def initial_state(room: Room, x: float, y: float) -> RoomState:
         raise ValueError("invalid initial position")
     return RoomState(0, x, y, _revision(room, 0, x, y))
 
+
+def _rounded_outward_boundary_crossing(start, delta, rounded_end, upper):
+    """Detect outward travel lost when binary float addition rounds to an edge.
+
+    A caller can stand at x=width and request dx=1e-16: for width=1.0,
+    ordinary `x + dx` is still 1.0. We only perform exact binary-rational
+    comparison when the *rounded* endpoint lies exactly on a room boundary.
+    Ordinary in-room moves do not pay the Fraction conversion cost.
+    """
+    if delta > 0 and rounded_end == upper:
+        return Fraction(start) + Fraction(delta) > Fraction(upper)
+    if delta < 0 and rounded_end == 0:
+        return Fraction(start) + Fraction(delta) < 0
+    return False
+
+
 def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
             expected_revision: str) -> tuple[RoomState, dict]:
     """One logical tick; exact segment-vs-AABB test prevents tunneling."""
@@ -113,7 +130,15 @@ def advance(room: Room, state: RoomState, *, tick: int, dx: float, dy: float,
     if not displacement_within_budget(dx, dy):
         raise ValueError("displacement exceeds fixture budget")
     tx, ty = state.x + dx, state.y + dy
-    blocked = (not _valid(room, tx, ty) or
+    # At an outer wall, an outward sub-ULP step can round to the same
+    # boundary coordinate. Exact rationals from already-admitted finite
+    # int/float inputs prevent false "unblocked" observations in that case.
+    # This is a narrow fail-closed correction; no global epsilon tolerance.
+    rounded_wall_crossing = (
+        _rounded_outward_boundary_crossing(state.x, dx, tx, room.width)
+        or _rounded_outward_boundary_crossing(state.y, dy, ty, room.height)
+    )
+    blocked = (rounded_wall_crossing or not _valid(room, tx, ty) or
                any(_segment_hits_rect(state.x, state.y, tx, ty, rect)
                    for rect in room.obstacles))
     x, y = (state.x, state.y) if blocked else (tx, ty)
