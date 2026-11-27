@@ -13,16 +13,19 @@ def analyze(root):
         if bits[-1] == "__init__":
             bits.pop()
         return ".".join(bits)
-    modules, errors = {}, []
+    modules, errors, ambiguous = {}, [], set()
     for p in paths:
         m = module(p)
         if m in modules:
+            ambiguous.add(m)
             errors.append({"module":m,"error":"ambiguous module paths: " + str(modules[m].relative_to(root)) + ", " + str(p.relative_to(root))})
             continue
         modules[m] = p
     graph = {m: set() for m in modules}
     details = {}
     for m, p in modules.items():
+        if m in ambiguous:
+            continue
         private, dynamic, contracts, external, unresolved = [], [], set(), set(), set()
         try:
             tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
