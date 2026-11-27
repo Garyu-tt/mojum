@@ -1,5 +1,6 @@
 import copy
 import unittest
+from functools import partial
 from threading import Barrier, Thread
 from unittest.mock import patch
 from mojum_core.sdk import Registry
@@ -118,3 +119,29 @@ class SDKTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             r.register(SOURCE,{"source.emit":emit,**{str(i):emit for i in range(50001)}},revision=REV)
         self.assertEqual(r.inventory(),[])
+
+    def test_partial_callable_classification(self):
+        class AsyncCallable:
+            async def __call__(self, *args): return {},[]
+        class AsyncGenerator:
+            async def __call__(self, *args): yield 1
+        class Generator:
+            def __call__(self, *args): yield 1
+        class SyncCallable:
+            def __call__(self, *args): return {"x": args[2]},[]
+        async def async_handler(*args): return {},[]
+        def generator(*args): yield 1
+        r=Registry()
+        for fn in (partial(AsyncCallable()), partial(AsyncGenerator()),
+                   partial(Generator()), partial(partial(AsyncCallable()), 1),
+                   partial(async_handler), partial(generator)):
+            with self.subTest(handler=fn):
+                with self.assertRaisesRegex(GraphError, "synchronous"):
+                    r.register(SOURCE, {"source.emit": fn}, revision=REV)
+                self.assertEqual(r.inventory(), [])
+        for fn in (partial(SyncCallable()), partial(emit)):
+            with self.subTest(handler=fn):
+                r=Registry()
+                r.register(SOURCE, {"source.emit": fn}, revision=REV)
+                r.register(SINK, {"sink.read": read}, revision=REV)
+                self.assertEqual(r.executor(graph()).step()["effects"], [{"value": 0}])

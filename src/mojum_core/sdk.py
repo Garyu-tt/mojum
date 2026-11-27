@@ -5,6 +5,7 @@ No discovery, import, network access or durable side effects occur here.
 """
 import re
 import inspect
+from functools import partial
 from threading import Lock
 from .executor import Executor
 from .graph import GraphError, _freeze_ports
@@ -23,6 +24,9 @@ def _matches(pattern, value):
     return type(value) is str and len(value) <= 256 and pattern.fullmatch(value) is not None
 
 def _sync_handler(fn):
+    # inspect unwraps partial functions, but not partial callable instances.
+    while type(fn) is partial:
+        fn = fn.func
     return (callable(fn) and not inspect.iscoroutinefunction(fn)
             and not inspect.isasyncgenfunction(fn)
             and not inspect.isgeneratorfunction(fn)
