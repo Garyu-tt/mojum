@@ -32,10 +32,10 @@ jobs:
         working-directory: plugin-candidate
         env:
           PYTHONPATH: src
-        run: python -m unittest discover -s tests -v
+        run: python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2] if len(sys.argv)>2 else 'test*.py'); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" tests
       - name: Core integration and regression
         env:
           PYTHONPATH: src:legacy/src
         run: |
-          python -m unittest discover -s tests -v
-          python -m unittest discover -s integration_tests -p test_genesis_integration.py -v
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2] if len(sys.argv)>2 else 'test*.py'); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" tests
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2] if len(sys.argv)>2 else 'test*.py'); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" integration_tests test_genesis_integration.py
