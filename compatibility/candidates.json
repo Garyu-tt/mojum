@@ -9,6 +9,12 @@
       "version": "0.1.0",
       "revision": "5b1ba837969eb8bbafd9714ed46701d23bfec130",
       "state": "candidate-not-released"
+    },
+    {
+      "id": "genesis-ledger",
+      "version": "0.1.0",
+      "revision": "32db9baef692abad68b641f1f70f7bef98897807",
+      "state": "updated-candidate-not-released"
     }
   ],
   "python": [
@@ -16,5 +22,6 @@
     "3.12",
     "3.13"
   ],
-  "status": "proposed-not-required"
+  "status": "proposed-not-required",
+  "updated_harness": "integration_tests/test_genesis_updated.py (candidate merge checkout)"
 }
