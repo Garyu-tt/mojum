@@ -1,6 +1,9 @@
 import copy
 import json
 import unittest
+from collections import UserDict
+from threading import Barrier, Thread
+from unittest.mock import patch
 from pathlib import Path
 from mojum.genesis import GenesisError, GenomeLedger, ACQUISITION_SCHEMA
 
@@ -197,6 +200,51 @@ class GenesisContractTests(unittest.TestCase):
         expected = json.dumps(valid, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         self.assertEqual(canonical(valid), expected)
         self.assertEqual(sha256(valid), hashlib.sha256(expected.encode("utf-8")).hexdigest())
+
+    def test_concurrent_cas_has_one_winner(self):
+        ledger = GenomeLedger(SEED)
+        revision = ledger.revision
+        start = Barrier(3)
+        outcomes = []
+        def writer(eid):
+            start.wait(3)
+            try:
+                ledger.append(event(eid), revision)
+                outcomes.append("committed")
+            except GenesisError as exc:
+                outcomes.append(str(exc))
+        threads = [Thread(target=writer,args=(eid,)) for eid in ("a","b")]
+        for thread in threads: thread.start()
+        start.wait(3)
+        for thread in threads: thread.join(4)
+        self.assertTrue(all(not t.is_alive() for t in threads))
+        self.assertEqual(outcomes.count("committed"),1)
+        self.assertEqual(sum("CAS failed" in s for s in outcomes),1)
+        snap=ledger.snapshot()
+        self.assertEqual(len(snap["events"]),1)
+        self.assertEqual(GenomeLedger.from_snapshot(snap).snapshot(),snap)
+        self.assertEqual(ledger.phenotype(10)["ledger_revision"],snap["revision"])
+
+    def test_failed_revision_calculation_preserves_all_state(self):
+        ledger = GenomeLedger(SEED)
+        before = ledger.snapshot()
+        for failure in (MemoryError("allocation"), KeyboardInterrupt()):
+            with patch("mojum.genesis.sha256",side_effect=failure):
+                with self.assertRaises(type(failure)):
+                    ledger.append(event(),before["revision"])
+            self.assertEqual(ledger.snapshot(),before)
+        ledger.append(event(),before["revision"])
+        with self.assertRaisesRegex(GenesisError,"Duplicate"):
+            ledger.append(event(),ledger.revision)
+
+    def test_nested_mapping_is_normalized(self):
+        seed=copy.deepcopy(SEED)
+        seed["inherited"]=UserDict(seed["inherited"])
+        ledger=GenomeLedger(seed)
+        self.assertEqual(ledger.snapshot(),GenomeLedger(SEED).snapshot())
+        self.assertIs(type(ledger.snapshot()["seed"]["inherited"]),dict)
+        seed["inherited"]["heartbeat_bpm"]=120
+        self.assertEqual(ledger.phenotype(0)["parameters"]["heartbeat_bpm"],60)
 
 
 if __name__ == "__main__":

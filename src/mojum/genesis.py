@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 from collections.abc import Mapping
+from threading import Lock
 
 GENOTYPE_SCHEMA = "mojum.genesis.genotype/1"
 PHENOTYPE_SCHEMA = "mojum.genesis.phenotype/1"
@@ -80,7 +81,10 @@ def validate_seed(seed):
     _keys(seed["inherited"], GENES, "inherited")
     for name, (lo, hi) in GENES.items():
         _int(seed["inherited"][name], f"inherited.{name}", lo, hi)
-    return copy.deepcopy(dict(seed))
+    result = copy.deepcopy(dict(seed))
+    result["inherited"] = dict(result["inherited"])
+    canonical(result)
+    return result
 
 
 def validate_acquisition(acquisition, genome_id):
@@ -105,7 +109,9 @@ def validate_acquisition(acquisition, genome_id):
         raise GenesisError("recorded_at_ns predates observed_at_ns")
     _str(acquisition["source"], "source", 256)
     _str(acquisition["evidence"], "evidence", 512)
-    return copy.deepcopy(dict(acquisition))
+    result = copy.deepcopy(dict(acquisition))
+    canonical(result)
+    return result
 
 
 class GenomeLedger:
@@ -119,38 +125,46 @@ class GenomeLedger:
 
     def __init__(self, seed):
         self._seed = validate_seed(seed)
-        self._events = []
-        self._event_ids = set()
+        self._lock = Lock()
+        self._state = ((), frozenset(), sha256({"seed": self._seed, "events": []}))
 
     @property
     def revision(self):
-        return sha256({"seed": self._seed, "events": self._events})
+        with self._lock:
+            return self._state[2]
 
     def snapshot(self):
-        value = {
+        with self._lock:
+            events, _, revision = self._state
+        return {
             "schema": "mojum.genesis.ledger/1",
             "seed": copy.deepcopy(self._seed),
-            "events": copy.deepcopy(self._events),
-            "revision": self.revision,
+            "events": copy.deepcopy(list(events)),
+            "revision": revision,
         }
-        return value
 
     def append(self, event, expected_revision):
-        if type(expected_revision) is not str or expected_revision != self.revision:
+        # Validate caller data before acquiring the internal publication lock.
+        # Callers must not mutate the supplied Mapping during validation.
+        if type(expected_revision) is not str:
             raise GenesisError("Stale or absent ledger revision (CAS failed)")
         checked = validate_acquisition(event, self._seed["genome_id"])
-        if len(self._events) >= self.MAX_EVENTS:
-            raise GenesisError("Ledger event count limit exceeded")
-        if checked["event_id"] in self._event_ids:
-            raise GenesisError("Duplicate acquisition event ID")
-        if self._events and checked["recorded_at_ns"] < self._events[-1]["recorded_at_ns"]:
-            raise GenesisError("recorded_at_ns must be monotonic")
-        # Reject out-of-range projections before accepting an append-only event.
-        next_events = self._events + [checked]
-        self._check_all_effective_prefixes(next_events)
-        self._events.append(checked)
-        self._event_ids.add(checked["event_id"])
-        return self.revision
+        with self._lock:
+            events, event_ids, revision = self._state
+            if expected_revision != revision:
+                raise GenesisError("Stale or absent ledger revision (CAS failed)")
+            if len(events) >= self.MAX_EVENTS:
+                raise GenesisError("Ledger event count limit exceeded")
+            if checked["event_id"] in event_ids:
+                raise GenesisError("Duplicate acquisition event ID")
+            if events and checked["recorded_at_ns"] < events[-1]["recorded_at_ns"]:
+                raise GenesisError("recorded_at_ns must be monotonic")
+            next_events = events + (checked,)
+            self._check_all_effective_prefixes(next_events)
+            next_ids = event_ids | {checked["event_id"]}
+            next_revision = sha256({"seed": self._seed, "events": list(next_events)})
+            self._state = (next_events, next_ids, next_revision)
+            return next_revision
 
     def _check_all_effective_prefixes(self, events):
         # At every recorded valid_from_tick boundary, all simultaneously active
@@ -171,7 +185,9 @@ class GenomeLedger:
     def phenotype(self, tick):
         _int(tick, "tick")
         params = dict(self._seed["inherited"])
-        selected = [event for event in self._events if event["valid_from_tick"] <= tick]
+        with self._lock:
+            events, _, revision = self._state
+        selected = [event for event in events if event["valid_from_tick"] <= tick]
         for event in selected:
             params[event["gene"]] += event["delta"]
         # Deterministic by append order; provenance remains per event.
@@ -180,7 +196,7 @@ class GenomeLedger:
             "genome_id": self._seed["genome_id"],
             "at_tick": tick,
             "inherited_seed_sha256": sha256(self._seed),
-            "ledger_revision": self.revision,
+            "ledger_revision": revision,
             "parameters": params,
             "applied_acquisition_ids": [event["event_id"] for event in selected],
             "source_classification": "synthetic_fixture_not_anatomy_or_neural_model",

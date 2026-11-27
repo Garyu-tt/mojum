@@ -1,6 +1,7 @@
 """Acceptance QA: GENESIS provenance hashes must not describe lossy JSON."""
 
 import unittest
+import hashlib
 
 from mojum.genesis import GenesisError, canonical, sha256
 
@@ -30,7 +31,9 @@ class CanonicalGenomeTests(unittest.TestCase):
         value = {"schema": "mojum.genesis.genotype/1",
                  "inherited": {"heartbeat_bpm": 60},
                  "evidence": [{"tick": 1, "ok": True}, None]}
-        self.assertEqual(sha256(value), sha256(value))
+        wire = '{"evidence":[{"ok":true,"tick":1},null],"inherited":{"heartbeat_bpm":60},"schema":"mojum.genesis.genotype/1"}'
+        self.assertEqual(canonical(value),wire)
+        self.assertEqual(sha256(value),hashlib.sha256(wire.encode("utf-8")).hexdigest())
         self.assertEqual(canonical({"x": [1, 2, 3]}), '{"x":[1,2,3]}')
 
 
