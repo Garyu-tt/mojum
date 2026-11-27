@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import unittest
+import sys
 from mojum_core.loader import load_registry
 from mojum_core.graph import GraphError
 
@@ -31,7 +32,10 @@ class LoaderTests(unittest.TestCase):
         r2=load_registry(lock(new),{"one":b})
         self.assertEqual(r1.executor(graph("one")).step()["outputs"]["a"]["x"],1)
         self.assertEqual(r2.executor(graph("one")).step()["outputs"]["a"]["x"],2)
-        self.assertEqual(load_registry(lock(old),{"one":a}).inventory(),r1.inventory())
+        rolled_back=load_registry(lock(old),{"one":a})
+        self.assertEqual(rolled_back.inventory(),r1.inventory())
+        self.assertEqual(rolled_back.executor(graph("one")).step()["outputs"]["a"]["x"],1)
+        self.assertEqual(r2.executor(graph("one")).step()["outputs"]["a"]["x"],2)
 
     def test_tampered_code_rejected_before_execution(self):
         e,a=bundle("one",source("one",1))
@@ -58,3 +62,33 @@ class LoaderTests(unittest.TestCase):
         e,a=bundle("one","raise AssertionError('must not execute')")
         f,b=bundle("two","def (")
         with self.assertRaises(GraphError): load_registry(lock(e,f),{"one":a,"two":b})
+
+    def test_dataclass_provider_definition_and_module_cleanup(self):
+        code = """from __future__ import annotations
+from dataclasses import dataclass
+from typing import ClassVar
+@dataclass
+class Value:
+    constant: ClassVar[int] = 7
+    x: int = 3
+def emit(i,c,t,ns):
+    return {"x": Value().x + Value.constant}, []
+HANDLERS = {"one.emit": emit}
+"""
+        e,a=bundle("one",code)
+        before={k for k in sys.modules if k.startswith("_mojum_provider_")}
+        r=load_registry(lock(e),{"one":a})
+        self.assertEqual(r.executor(graph("one")).step()["outputs"]["a"]["x"],10)
+        self.assertEqual({k for k in sys.modules if k.startswith("_mojum_provider_")},before)
+
+    def test_failed_provider_does_not_leave_module_entry(self):
+        before={k for k in sys.modules if k.startswith("_mojum_provider_")}
+        e,a=bundle("one","raise RuntimeError('provider failure')")
+        with self.assertRaisesRegex(RuntimeError,"provider failure"):
+            load_registry(lock(e),{"one":a})
+        self.assertEqual({k for k in sys.modules if k.startswith("_mojum_provider_")},before)
+
+    def test_artifact_map_size_rejected_before_provider_execution(self):
+        e,a=bundle("one","raise AssertionError('must not execute')")
+        with self.assertRaises(GraphError):
+            load_registry(lock(e),{"one":a,**{str(i):a for i in range(65)}})

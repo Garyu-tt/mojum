@@ -6,6 +6,9 @@ Never call this with a lock supplied by an untrusted plugin.
 import hashlib
 import json
 import re
+import sys
+from types import ModuleType
+from uuid import uuid4
 from .graph import GraphError
 from .sdk import Registry, _exact, _matches, _SHA, _ID, _VERSION
 
@@ -80,7 +83,16 @@ def load_registry(lock, artifacts):
         raise GraphError("Unexpected unpinned artifacts")
     registry = Registry()
     for pid,revision,manifest,code in prepared:
-        namespace = {"__name__":"mojum_provider_"+pid}
-        exec(code,namespace)
-        registry.register(manifest,namespace.get("HANDLERS"),revision=revision)
+        # Dataclass decoration and other definition-time introspection need
+        # a real module identity in sys.modules. Use a unique transient name
+        # so fresh loads cannot replace one another's module during exec.
+        name = "_mojum_provider_" + pid.replace("-", "_") + "_" + uuid4().hex
+        module = ModuleType(name)
+        sys.modules[name] = module
+        try:
+            exec(code,module.__dict__)
+            registry.register(manifest,module.__dict__.get("HANDLERS"),revision=revision)
+        finally:
+            if sys.modules.get(name) is module:
+                del sys.modules[name]
     return registry
