@@ -33,7 +33,7 @@ def _int(value, path, low=0, high=2**63 - 1):
 
 
 def _str(value, path, limit=128):
-    if not isinstance(value, str) or not value.strip() or len(value) > limit:
+    if type(value) is not str or not value.strip() or len(value) > limit:
         raise GenesisError(f"{path} must be a nonempty string (<= {limit})")
     # JSON can spell lone Unicode surrogates, but they are not encodable as
     # UTF-8 for stable revision hashes. Reject at the contract boundary.
@@ -45,7 +45,7 @@ def _str(value, path, limit=128):
 
 
 def _keys(value, required, path):
-    if not isinstance(value, Mapping) or set(value) != set(required):
+    if not isinstance(value, Mapping) or any(type(key) is not str for key in value) or set(value) != set(required):
         raise GenesisError(f"{path} must have exactly {sorted(required)}")
 
 
@@ -74,15 +74,16 @@ def sha256(value):
 
 def validate_seed(seed):
     _keys(seed, {"schema", "genome_id", "revision", "inherited"}, "seed")
-    if seed["schema"] != GENOTYPE_SCHEMA:
+    if type(seed["schema"]) is not str or seed["schema"] != GENOTYPE_SCHEMA:
         raise GenesisError("Unsupported genotype schema")
     _str(seed["genome_id"], "genome_id")
     _str(seed["revision"], "revision")
     _keys(seed["inherited"], GENES, "inherited")
     for name, (lo, hi) in GENES.items():
         _int(seed["inherited"][name], f"inherited.{name}", lo, hi)
-    result = copy.deepcopy(dict(seed))
-    result["inherited"] = dict(result["inherited"])
+    result = dict(seed)
+    result["inherited"] = dict(seed["inherited"])
+    result = copy.deepcopy(result)
     canonical(result)
     return result
 
@@ -94,12 +95,12 @@ def validate_acquisition(acquisition, genome_id):
         "source", "evidence",
     }
     _keys(acquisition, required, "acquisition")
-    if acquisition["schema"] != ACQUISITION_SCHEMA:
+    if type(acquisition["schema"]) is not str or acquisition["schema"] != ACQUISITION_SCHEMA:
         raise GenesisError("Unsupported acquisition schema")
-    if acquisition["genome_id"] != genome_id:
+    if type(acquisition["genome_id"]) is not str or acquisition["genome_id"] != genome_id:
         raise GenesisError("Acquisition belongs to another genome")
     _str(acquisition["event_id"], "event_id")
-    if not isinstance(acquisition["gene"], str) or acquisition["gene"] not in GENES:
+    if type(acquisition["gene"]) is not str or acquisition["gene"] not in GENES:
         raise GenesisError("Unknown gene")
     _int(acquisition["delta"], "delta", -2_000, 2_000)
     _int(acquisition["valid_from_tick"], "valid_from_tick")
@@ -205,10 +206,12 @@ class GenomeLedger:
     @classmethod
     def from_snapshot(cls, snapshot):
         _keys(snapshot, {"schema", "seed", "events", "revision"}, "ledger snapshot")
-        if snapshot["schema"] != "mojum.genesis.ledger/1":
+        if type(snapshot["schema"]) is not str or snapshot["schema"] != "mojum.genesis.ledger/1":
             raise GenesisError("Unsupported ledger snapshot schema")
-        if not isinstance(snapshot["events"], list) or len(snapshot["events"]) > cls.MAX_EVENTS:
+        if type(snapshot["events"]) is not list or len(snapshot["events"]) > cls.MAX_EVENTS:
             raise GenesisError("Snapshot events must be bounded list")
+        if type(snapshot["revision"]) is not str:
+            raise GenesisError("Ledger content checksum mismatch")
         ledger = cls(snapshot["seed"])
         for event in snapshot["events"]:
             ledger.append(event, ledger.revision)
