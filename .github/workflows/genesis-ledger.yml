@@ -1,0 +1,24 @@
+name: Genesis ledger pilot
+on:
+  pull_request:
+    branches: [plugin/genesis-ledger]
+  push:
+    branches: [plugin/genesis-ledger]
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Standalone legacy contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
