@@ -1,0 +1,54 @@
+name: QA native JSON diagnostic pilot
+on:
+  push:
+    branches: [qa/pr-agent-local-pilot]
+    paths: ['.github/workflows/qa-native-diagnostic.yml']
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: qa-native-diagnostic-pilot
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    if: github.repository == 'Garyu-tt/mojum'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRUSTED_SHA: ${{ github.sha }}
+    steps:
+      - name: Test trusted diagnostic helper
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          gh api "repos/Garyu-tt/mojum/contents/tools/qa_native_diagnostic.py?ref=$TRUSTED_SHA" --jq .content | base64 -d > qa_native_diagnostic.py
+          python - <<'PY'
+          import json
+          from qa_native_diagnostic import preflight, validate_response
+          assert preflight("def f(a=[]):\n    return a")[1][0]["line"] == 1
+          assert preflight("def f(a=None):\n    return a")[1] == []
+          good = {"done":True,"done_reason":"stop","message":{"content":json.dumps({"findings":[{"line":1,"reason":"Example"}]})}}
+          assert validate_response(good, 2)[0]["line"] == 1
+          for bad in (dict(good,done_reason="length"),dict(good,message={"content":'{"findings":[{"line":3,"reason":"Bad"}]}'}),dict(good,message={"content":'{"findings":[{"line":true,"reason":"Bad"}]}'})):
+              try:
+                  validate_response(bad,2)
+              except ValueError:
+                  continue
+              raise AssertionError("accepted invalid response")
+          print("Native diagnostic preflight PASS")
+          PY
+      - name: Start bounded local CPU model
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh -o "$RUNNER_TEMP/ollama-install.sh"
+          sh "$RUNNER_TEMP/ollama-install.sh"
+          OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NUM_PARALLEL=1 OLLAMA_CONTEXT_LENGTH=8192 ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          ollama pull qwen2.5-coder:7b
+      - name: Inspect two exact-head Python files without executing them
+        run: |
+          python "$RUNNER_TEMP/qa_native_diagnostic.py"

@@ -1,0 +1,157 @@
+name: QA PR-Agent batch dry-run
+on:
+  push:
+    branches: [qa/pr-agent-local-pilot]
+    paths: ['.github/workflows/qa-pr-agent-batch-dry-run.yml']
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  dry-run:
+    if: github.repository == 'Garyu-tt/mojum'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRUSTED_SHA: ${{ github.sha }}
+    steps:
+      - name: Load batch helper from trusted workflow revision
+        run: |
+          set -euo pipefail
+          gh api "repos/Garyu-tt/mojum/contents/tools/qa_pr_agent_batch.py?ref=$TRUSTED_SHA" --jq .content | base64 -d > "$RUNNER_TEMP/qa_pr_agent_batch.py"
+          python -m py_compile "$RUNNER_TEMP/qa_pr_agent_batch.py"
+      - name: Test validation and immutable head gate
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          python - <<'PY'
+          import qa_pr_agent_batch as q
+          sha = "a" * 40
+          assert q.parse_pairs(["42:" + sha]) == {42: sha}
+          for args in ([], ["x:" + sha], ["42:bad"], ["42:" + sha] * 2, [f"{i}:{sha}" for i in range(1, 7)]):
+              try:
+                  q.parse_pairs(args)
+              except ValueError:
+                  continue
+              raise AssertionError("accepted invalid batch")
+          pr = {"state":"open","draft":False,"base":{"ref":"main","repo":{"full_name":q.REPO}},"head":{"sha":sha}}
+          assert q.eligible(pr, sha)
+          assert not q.eligible(pr, "b"*40)
+          pr["draft"] = True
+          assert not q.eligible(pr, sha)
+          pr["draft"] = False
+          pr["user"] = {"login": "author"}
+          approve = {"user":{"login":"peer"},"state":"APPROVED","commit_id":sha}
+          assert q.review_route(pr, [approve], sha) == "ROUTE_EXISTING_APPROVAL_TO_QA"
+          assert q.review_route(pr, [approve], "b"*40) is None
+          assert q.review_route(pr, [approve, dict(approve,state="DISMISSED")], sha) is None
+          assert q.review_route(pr, [dict(approve,user={"login":"author"})], sha) is None
+          assert q.review_route(pr, [approve, dict(approve,state="CHANGES_REQUESTED")], sha) == "ROUTE_EXISTING_CHANGES_REQUESTED"
+          from unittest.mock import patch
+          import json
+          def candidate(n, draft=False):
+              return {"number":n,"state":"open","draft":draft,"base":{"ref":"main","repo":{"full_name":q.REPO}},"head":{"sha":sha}}
+          pages = [[candidate(i, True) for i in range(1, 30)] + [candidate(30)],
+                   [candidate(31), candidate(32)]]
+          with patch.object(q.subprocess, "check_output", side_effect=[json.dumps(p) for p in pages]):
+              found, meta = q.discover(3)
+          assert found == [(30,sha),(31,sha),(32,sha)]
+          assert meta["scanned"] == 32 and meta["skipped"] == 29
+          with patch.object(q.subprocess, "check_output", return_value=json.dumps([candidate(1,True)])):
+              found, meta = q.discover(3)
+          assert found == [] and meta["exhausted"]
+          assert q.integration_hint({"mergeable":True,"mergeable_state":"behind"}) == "REFRESH_REQUIRED"
+          assert q.integration_hint({"mergeable":False,"mergeable_state":"dirty"}) == "CONFLICT_OR_NOT_MERGEABLE"
+          assert q.integration_hint({"mergeable":None,"mergeable_state":"unknown"}) == "MERGEABILITY_UNKNOWN"
+          assert q.integration_hint({"mergeable":True,"mergeable_state":"clean"}) == "VERIFY_REQUIRED_CHECKS"
+          assert q.integration_hint({"mergeable":True,"mergeable_state":"blocked"}) == "VERIFY_REQUIRED_CHECKS"
+          from subprocess import CompletedProcess
+          for warning in ("Review output failed schema validation", "Review finding data is invalid", "Error during LLM inference", "Failed to process the command", "Review finding state is blocked"):
+              assert q.classify_review_process(CompletedProcess([],0,"",warning)) == "REVIEW_QUALITY_GATE_FAILED"
+          assert q.classify_review_process(CompletedProcess([],1,"","")) == "REVIEW_COMMAND_FAILED"
+          assert q.classify_review_process(CompletedProcess([],0,"","")) == "COMMAND_OK_REVIEW_UNVERIFIED"
+          def run(n, status="completed", conclusion="success", **kw):
+              return dict({"id":n,"workflow_id":1,"run_number":n,"run_attempt":1,"event":"pull_request","head_branch":"example","head_sha":sha,"status":status,"conclusion":conclusion},**kw)
+          def hint(items, total=None):
+              return q.ci_hint({"workflow_runs":items,"total_count":len(items) if total is None else total},sha)
+          assert hint([])["ci_hint"] == "CI_NO_EVIDENCE"
+          assert hint([run(1,head_sha="b"*40)])["ci_hint"] == "CI_NO_EVIDENCE"
+          assert hint([run(1,conclusion="failure"),run(2)])["ci_hint"] == "CI_OBSERVED_SUCCESS"
+          assert hint([run(1,conclusion="failure")])["ci_hint"] == "CI_FAILURE_OBSERVED"
+          assert hint([run(1,status="in_progress",conclusion=None)])["ci_hint"] == "CI_PENDING_OBSERVED"
+          assert hint([run(1,conclusion="cancelled")])["ci_hint"] == "CI_NON_SUCCESS_OBSERVED"
+          assert hint([run(1)],2)["ci_hint"] == "CI_PARTIAL_EVIDENCE"
+          assert hint([run(1)])["required_checks_verified"] is False
+          assert hint([run(1)])["merge_authorized"] is False
+          print("validation PASS")
+          PY
+      - name: Inspect three real PRs without writes or inference
+        run: |
+          python "$RUNNER_TEMP/qa_pr_agent_batch.py" \
+            1423:b70d736038587ea335cfd0b5050c9dc26f911054 \
+            1243:df9bdd7e4ef886a3020898141dde4184c7942e6a \
+            1296:5adce516013412ba35d2ae750015484b91ea1ba7
+      - name: Discover oldest open PRs and route without inference
+        run: |
+          python "$RUNNER_TEMP/qa_pr_agent_batch.py" --scan 20
+      - name: Verify shadow adapter against canonical queue in temporary database
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          gh api "repos/Garyu-tt/mojum/contents/tools/qa_pr_agent_shadow_adapter.py?ref=$TRUSTED_SHA" --jq .content | base64 -d > qa_pr_agent_shadow_adapter.py
+          gh api "repos/Garyu-tt/mojum/contents/src/mojum/qa_work_queue.py?ref=074b14c152c8c5e3291e6e56595255386a751af9" --jq .content | base64 -d > qa_work_queue.py
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from qa_work_queue import QAWorkQueue
+          from qa_pr_agent_shadow_adapter import job_spec, shadow_dispatch, advisory_receipt, run_provenance, REPO
+          head, base = "a"*40, "b"*40
+          p = {"pr":42,"head":head,"base":base}
+          snapshot = {"number":42,"state":"open","draft":False,"head":{"sha":head},"base":{"sha":base,"ref":"main","repo":{"full_name":REPO}}}
+          spec = job_spec(p)
+          assert spec["idempotency_key"] == job_spec(p)["idempotency_key"]
+          assert spec["idempotency_key"] != job_spec(dict(p,base="c"*40))["idempotency_key"]
+          with tempfile.TemporaryDirectory() as d, QAWorkQueue(str(Path(d)/"qa.db")) as q:
+              job, created = q.enqueue(**spec,now=100)
+              assert created
+              again, created = q.enqueue(**spec,now=100)
+              assert not created and again.id == job.id
+              lease = q.claim("test-supervisor",lease_seconds=10,now=100)
+              out = shadow_dispatch(lease,snapshot,base,101)
+              assert out["status"] == "SHADOW_ELIGIBLE" and out["merge_authorized"] is False
+              assert lease.token not in str(out)
+              assert shadow_dispatch(lease,snapshot,"c"*40,101)["status"] == "STALE_BASE"
+              assert shadow_dispatch(lease,dict(snapshot,head={"sha":"c"*40}),base,101)["status"] == "STALE_HEAD_OR_INELIGIBLE"
+              assert shadow_dispatch(lease,snapshot,base,111)["status"] == "LEASE_EXPIRED"
+              result = {"review":{"key_issues_to_review":[]},"coverage":{"files_not_reviewed":[],"files_partially_reviewed":[]},"usage":{}}
+              receipt = advisory_receipt(lease,snapshot,base,101,result,123)
+              assert receipt["status"] == "ADVISORY_UNVERIFIED" and receipt["merge_authorized"] is False
+              assert receipt["run_id"] == 123 and receipt["head"] == head and receipt["base"] == base
+              assert len(receipt["review_sha256"]) == 64 and lease.token not in str(receipt)
+              assert advisory_receipt(lease,snapshot,base,101,result,123) == receipt
+              result["coverage"]["files_not_reviewed"].append("docs/example.md")
+              assert receipt["result"]["coverage"]["files_not_reviewed"] == []
+              incomplete = advisory_receipt(lease,snapshot,base,101,result,123)
+              assert incomplete["status"] == "ADVISORY_INCOMPLETE"
+              assert incomplete["review_sha256"] != receipt["review_sha256"]
+              assert advisory_receipt(lease,snapshot,base,111,result,123)["status"] == "LEASE_EXPIRED"
+              for bad in ({},dict(result,coverage={}),dict(result,review={"x":"a"*66000})):
+                  try:
+                      advisory_receipt(lease,snapshot,base,101,bad,123)
+                  except ValueError:
+                      continue
+                  raise AssertionError("accepted invalid evidence")
+              assert q.get(job.id).status == "leased"
+          meta = {"repository":{"full_name":REPO},"head_repository":{"full_name":REPO},"id":123,"run_attempt":1,"workflow_id":433060184,"head_branch":"qa/pr-agent-local-pilot","head_sha":head,"event":"push","path":".github/workflows/qa-pr-agent-local-pilot.yml","status":"completed","conclusion":"success"}
+          assert run_provenance(meta,123,1,head) == "RUN_METADATA_MATCH"
+          assert run_provenance(dict(meta,status="in_progress"),123,1,head) == "RUN_PENDING"
+          assert run_provenance(dict(meta,conclusion="failure"),123,1,head) == "RUN_FAILED"
+          assert run_provenance(meta,123,2,head) == "RUN_UNTRUSTED"
+          assert run_provenance(meta,123,1,base) == "RUN_UNTRUSTED"
+          assert run_provenance(dict(meta,head_repository={"full_name":"other/repo"}),123,1,head) == "RUN_UNTRUSTED"
+          assert run_provenance(dict(meta,event="pull_request"),123,1,head) == "RUN_UNTRUSTED"
+          print("canonical queue shadow contract PASS")
+          PY
+      - name: Inspect exact-head CI evidence on one real PR
+        run: |
+          python "$RUNNER_TEMP/qa_pr_agent_batch.py" --ci 721:9d51a7089e26f132461be54b43810dff7b0df079
