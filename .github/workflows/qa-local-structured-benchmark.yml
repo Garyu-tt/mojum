@@ -24,12 +24,12 @@ jobs:
             if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
             sleep 2
           done
-          ollama pull qwen2.5-coder:3b
-      - name: Score small model against known review outcomes
+          ollama pull qwen2.5-coder:7b
+      - name: Score 7B against the identical four review cases
         run: |
           python - <<'PY'
           import json, time, urllib.request
-          model = "qwen2.5-coder:3b"
+          model = "qwen2.5-coder:7b"
           cases = [
               ("off_by_one", "Return the sum of every element in values.", "1 def total(values):\n2     return sum(values[:-1])", "defect", 2),
               ("mutable_default", "Return a fresh list for each call when no list is supplied.", "1 def add(value, items=[]):\n2     items.append(value)\n3     return items", "defect", 1),
