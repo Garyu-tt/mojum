@@ -59,16 +59,16 @@ class AcceptanceTest(unittest.TestCase):
         v["required_status_checks"]["strict"]=False
         self.assertFalse(pfd.check_protection(v,CHECKS))
 
-    def test_dry_run_and_head_guard(self):
+    def test_read_only_and_apply_disabled(self):
         with patch.object(pfd,"gh",return_value=protection()), patch.object(pfd.subprocess,"run") as run:
-            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),False),"eligible")
+            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),False),"candidate-only-not-authorized")
             run.assert_not_called()
-            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),True),"merge-request-succeeded")
-            self.assertEqual(run.call_args.args[0][-2:],["--match-head-commit","a"*40])
+            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),True),"apply-disabled")
+            run.assert_not_called()
 
     def test_no_merge_without_protection(self):
         with patch.object(pfd,"gh",return_value={}), patch.object(pfd.subprocess,"run") as run:
-            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),True),"branch-protection-not-verified")
+            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),False),"branch-protection-not-verified")
             run.assert_not_called()
 
     def test_config(self):
