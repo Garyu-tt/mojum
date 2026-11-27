@@ -64,6 +64,17 @@ def review_route(pr, reviews, sha):
     return None
 
 
+def integration_hint(pr):
+    """Read-only hint; branch protection and CI remain authoritative."""
+    if pr.get("mergeable") is False:
+        return "CONFLICT_OR_NOT_MERGEABLE"
+    if pr.get("mergeable_state") == "behind":
+        return "REFRESH_REQUIRED"
+    if pr.get("mergeable") is not True or pr.get("mergeable_state") in {None, "unknown"}:
+        return "MERGEABILITY_UNKNOWN"
+    return "VERIFY_REQUIRED_CHECKS"
+
+
 def fetch_reviews(number):
     raw = subprocess.check_output(
         ["gh", "api", "--paginate", "--slurp", f"repos/{REPO}/pulls/{number}/reviews?per_page=100"],
@@ -165,7 +176,14 @@ def scan(limit):
         except (subprocess.SubprocessError, OSError, ValueError, RuntimeError) as exc:
             status = "ERROR_" + type(exc).__name__
         totals[status] = totals.get(status, 0) + 1
-        print(json.dumps({"pr": number, "head": sha, "status": status}), flush=True)
+        row = {"pr": number, "head": sha, "status": status}
+        if status == "ROUTE_EXISTING_APPROVAL_TO_QA":
+            try:
+                current = fetch(number)
+                row["integration_hint"] = integration_hint(current) if eligible(current, sha) else "HEAD_CHANGED"
+            except (subprocess.SubprocessError, OSError, ValueError, RuntimeError):
+                row["integration_hint"] = "UNKNOWN_READ_ERROR"
+        print(json.dumps(row), flush=True)
     print(json.dumps({"scan_summary": totals, "scan_meta": meta, "requested": limit}), flush=True)
     return int(any(key.startswith("ERROR_") for key in totals))
 
