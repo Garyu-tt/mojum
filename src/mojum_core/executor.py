@@ -1,38 +1,82 @@
 """Domain-neutral extraction of one deterministic, staged graph step."""
 import json
-from .graph import GraphError, validate, _freeze_ports
+import math
+from threading import Lock
+from .graph import GraphError, validate, _freeze_ports, _json_string_wire_size
 
-def detached(value):
-    """Detach exact JSON-native data; do not accept Python-only coercions."""
-    # Round-trip only after rejecting custom containers and non-string keys.
-    stack = [(value, 0)]
-    count = 0
-    while stack:
-        item, depth = stack.pop()
+MAX_STEP_BYTES = 256 * 1024
+MAX_STEP_NODES = 50_000
+
+def _measure(value):
+    """Count compact JSON bytes and nodes before allocating a wire buffer.
+
+    Shared references count once per occurrence on the wire. Inputs must not
+    be mutated concurrently by their owner.
+    """
+    pending = [(value, 0)]
+    count = size = 0
+    while pending:
+        item, depth = pending.pop()
         count += 1
-        if count > 50000 or depth > 128:
+        if count > MAX_STEP_NODES or depth > 128:
             raise GraphError("Step value exceeds structural budget")
         kind = type(item)
-        if kind is dict:
-            for k, v in item.items():
-                if type(k) is not str:
-                    raise GraphError("Step values require string keys")
-                stack.append((v, depth + 1))
-        elif kind is list:
-            stack.extend((v, depth + 1) for v in item)
-        elif kind not in (str, int, float, bool, type(None)):
+        if kind in (dict, list):
+            n = len(item)
+            if count + len(pending) + n * (2 if kind is dict else 1) > MAX_STEP_NODES:
+                raise GraphError("Step value exceeds structural budget")
+            size += 2 + max(0, n - 1)
+            if kind is dict:
+                size += n
+                count += n
+                for k, v in item.items():
+                    if type(k) is not str:
+                        raise GraphError("Step values require string keys")
+                    size += _json_string_wire_size(k)
+                    if size > MAX_STEP_BYTES:
+                        raise GraphError("Step value exceeds wire budget")
+                    pending.append((v, depth + 1))
+            else:
+                pending.extend((v, depth + 1) for v in item)
+        elif kind is str:
+            size += _json_string_wire_size(item)
+        elif kind is int:
+            if item.bit_length() > MAX_STEP_BYTES * 3:
+                raise GraphError("Step integer exceeds wire budget")
+            try:
+                size += len(str(item))
+            except ValueError as exc:
+                raise GraphError("Step integer exceeds wire budget") from exc
+        elif kind is float:
+            if not math.isfinite(item):
+                raise GraphError("Step values require finite numbers")
+            size += len(repr(item))
+        elif kind is bool:
+            size += 4 if item else 5
+        elif item is None:
+            size += 4
+        else:
             raise GraphError("Step values require native JSON")
+        if size > MAX_STEP_BYTES:
+            raise GraphError("Step value exceeds wire budget")
+    return size, count
+
+def detached(value):
+    """Preflight native JSON budgets before serializing a bounded snapshot."""
     try:
+        _measure(value)
         wire = json.dumps(value, ensure_ascii=False, allow_nan=False,
                           sort_keys=True, separators=(",", ":"))
-        if len(wire.encode("utf-8")) > 262144:
+        if len(wire.encode("utf-8")) > MAX_STEP_BYTES:
             raise GraphError("Step value exceeds wire budget")
         return json.loads(wire)
-    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError) as exc:
+    except GraphError:
+        raise
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError, RuntimeError) as exc:
         raise GraphError("Invalid step JSON") from exc
 
 class Executor:
-    """Trusted, pure handlers only. No external side effects or concurrent calls.
+    """Trusted, pure handlers only. No external side effects. Concurrent/reentrant steps fail closed.
 
     A handler receives detached inputs/config and integer tick/time_ns, and
     returns (output mapping, list of staged JSON effects). The core never
@@ -53,14 +97,25 @@ class Executor:
         self._handlers = {k: handlers[k] for k in required}
         self._dt_ns = dt_ns
         self._tick = 0
+        self._step_lock = Lock()
 
     @property
     def tick(self):
         return self._tick
 
     def step(self):
+        if not self._step_lock.acquire(blocking=False):
+            raise GraphError("Executor step already in progress")
+        try:
+            return self._step()
+        finally:
+            self._step_lock.release()
+
+    def _step(self):
         results, effects = {}, []
         tick = self._tick
+        # Check the complete accumulated response before retaining each result.
+        # Per-handler output is already owned by the handler; we bound core copies.
         for nid in self._order:
             spec = self._nodes[nid]
             kind = spec["kind"]
@@ -74,6 +129,10 @@ class Executor:
                 raise GraphError("Handler output ports mismatch")
             if type(staged) is not list:
                 raise GraphError("Effects must be a list")
+            _measure(out)
+            _measure(staged)
+            candidate = {"outputs": {**results, nid: out}, "effects": effects + staged}
+            _measure(candidate)
             results[nid] = detached(out)
             effects.extend(detached(staged))
         response = detached({"outputs": results, "effects": effects})

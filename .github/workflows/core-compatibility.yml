@@ -54,3 +54,10 @@ jobs:
         env:
           PYTHONPATH: runtime/src:legacy/src
         run: python -m unittest discover -s harness/tests -p test_genesis_integration.py -v
+      - name: Candidate core unit regressions
+        if: matrix.core == 'candidate'
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: |
+          cp -a legacy runtime/legacy
+          python -m unittest discover -s runtime/tests -v

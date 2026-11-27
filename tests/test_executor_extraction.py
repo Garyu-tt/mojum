@@ -1,7 +1,9 @@
 import json
 import unittest
 from pathlib import Path
-from mojum_core.executor import Executor
+from mojum_core.executor import Executor, detached
+from unittest.mock import patch
+from threading import Event, Thread
 from mojum_core.graph import GraphError
 from mojum.graph import PORTS
 from mojum.sim import Simulation
@@ -74,3 +76,49 @@ class ExecutorTests(unittest.TestCase):
         ex=Executor(generic(),ports=GENERIC_PORTS,handlers={"demo.source":lambda *a:({},[]),"demo.sink":lambda *a:({},[])})
         with self.assertRaises(GraphError): ex.step()
         self.assertEqual(ex.tick,0)
+
+    def test_oversized_rejected_before_serialization(self):
+        for value in (["x"]*50001, {"x":"a"*262145}, {"x":"é"*140000},
+                      [0]*25000+[1]*25001, 1 << 900000):
+            with patch("mojum_core.executor.json.dumps") as dumps:
+                with self.assertRaises(GraphError):
+                    detached(value)
+                dumps.assert_not_called()
+
+    def test_accumulated_response_budget_and_retry(self):
+        big=[True]
+        def source(i,c,t,ns):
+            return {"x":"a"*140000 if big[0] else "a"}, []
+        def sink(i,c,t,ns):
+            return {}, [{"data":"b"*140000 if big[0] else "b"}]
+        ex=Executor(generic(),ports=GENERIC_PORTS,handlers={"demo.source":source,"demo.sink":sink})
+        with self.assertRaises(GraphError): ex.step()
+        self.assertEqual(ex.tick,0)
+        big[0]=False
+        self.assertEqual(ex.step()["effects"],[{"data":"b"}])
+        self.assertEqual(ex.tick,1)
+
+    def test_concurrent_step_rejected(self):
+        entered, release = Event(), Event()
+        errors=[]
+        def source(i,c,t,ns):
+            entered.set()
+            if not release.wait(3): raise RuntimeError("test timeout")
+            return {"x":t},[]
+        ex=Executor(generic(),ports=GENERIC_PORTS,handlers={"demo.source":source,"demo.sink":lambda *a:({},[])})
+        def worker():
+            try: ex.step()
+            except Exception as exc: errors.append(exc)
+        thread=Thread(target=worker)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(3))
+            with self.assertRaisesRegex(GraphError,"already in progress"):
+                ex.step()
+            self.assertEqual(ex.tick,0)
+        finally:
+            release.set()
+            thread.join(4)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors,[])
+        self.assertEqual(ex.tick,1)
