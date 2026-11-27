@@ -4,7 +4,7 @@ R01 is a sparse linear policy trained by terminal rewards on a bounded arithmeti
 
 ## Reproduce
 `python experiments/connectome_coder_r01.py --episodes 30000 --seed 42`
-Repeat with seeds 43 and 44. Local CPU runs: trained beam-8 12/17, 13/17, 10/17; untrained beam-8 3/17, 4/17, 3/17. Beam-1 trained 6,4,2; untrained 0,1,0. These are small synthetic experiments, not generalization to arbitrary programming.
+Repeat with seeds 43 and 44. Prior numeric results were not backed by execution logs and are withdrawn; run the commands above before reporting any scores.
 
 ## Acceptance ladder
 1. Reproduce results on CPU and add unit/property tests. Add matched-budget random search and exhaustive oracle; disjoint semantic families, hidden tests, independently generated holdout. Measure training, inference, memory and actual active cells.
@@ -15,4 +15,7 @@ Repeat with seeds 43 and 44. Local CPU runs: trained beam-8 12/17, 13/17, 10/17;
 6. 10B target means neurons (assumption), not parameters. 4 bytes per neuron alone = 40 GB decimal, before edges. 8 explicit outgoing edges per neuron at 8 bytes each = 640 GB decimal. Benchmark memory bandwidth and use sparse active populations, implicit topology and compact plastic state; do not claim 10B runs on 128 GB until measured.
 7. Final acceptance: from novel written specification to a complete runnable repository, with tests, documentation, build and iterative repair; independent heldout evaluator. No access to solutions. Test on progressively larger unseen projects. Retain no unsupported capability claims.
 
-R01 was run in an isolated CPU environment, not deployed on Mikoshi.
+R01 source is published; execution and deployment on Mikoshi are unverified.
+
+## GitHub curriculum
+Run `python experiments/github_coder_corpus.py Garyu-tt/mojum --out corpus/mojum --limit 100` in an approved environment. Use owned or explicitly licensed repositories; no private repos by default. Student records contain base SHA and title, teacher records contain patches and notes; titles still need leakage review. Merged does not mean tested. Next: checkout exact base in an isolated environment, reconstruct held-out tests, attach CI and review traces, verify independently, split by repository/time and near-duplicate families, then train the neural policy on actual edit actions and test feedback. Do not execute downloaded workflows or expose repository credentials to the learner.
