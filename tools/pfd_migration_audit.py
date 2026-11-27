@@ -185,7 +185,7 @@ def main():
     for lane in cfg["lanes"]:
         try:
             print(json.dumps(audit(cfg["repository"],lane),sort_keys=True))
-        except (ValueError, KeyError, TypeError, OSError) as exc:
+        except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
             errors+=1
             print(json.dumps({"pr":lane["pr"],"decision":"HOLD","error":str(exc)}))
     return int(bool(errors))

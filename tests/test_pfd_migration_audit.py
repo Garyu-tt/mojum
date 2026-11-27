@@ -128,3 +128,17 @@ class MigrationAuditTests(unittest.TestCase):
         self.assertFalse(result["metadata_consistent"])
         self.assertIn("job-metadata-mismatch:contract",result["reasons"])
         self.assertFalse(result["trust_verified"])
+
+    def test_malformed_api_response_does_not_abort_remaining_lanes(self):
+        import io
+        import json
+        import sys
+        from contextlib import redirect_stdout
+        cfg={"repository":"owner/repo","lanes":[{"pr":1},{"pr":2}]}
+        stream=io.StringIO()
+        with patch.object(sys,"argv",["audit"]), patch.object(Path,"read_text",return_value=json.dumps(cfg)), patch.object(audit,"audit",side_effect=[AttributeError("malformed API object"),{"pr":2,"decision":"HOLD"}]) as inspect, redirect_stdout(stream):
+            self.assertEqual(audit.main(),1)
+        self.assertEqual(inspect.call_count,2)
+        rows=[json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual([(row["pr"],row["decision"]) for row in rows],[(1,"HOLD"),(2,"HOLD")])
+        self.assertIn("error",rows[0])
