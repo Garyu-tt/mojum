@@ -1,9 +1,0 @@
-{
-  "schema": "mojum.world.point-room-draft/1",
-  "width": 4.5,
-  "height": 4,
-  "obstacles": [
-    [2.0, 1, 0.125, 2.0]
-  ],
-  "start": [1.25, 2.5]
-}
