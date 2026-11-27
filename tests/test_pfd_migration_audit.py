@@ -14,7 +14,7 @@ def fixture():
     pr={"number":1,"state":"open","draft":False,"head":head,"base":base,"mergeable":True,"changed_files":1,"user":{"login":"author"}}
     lane={"pr":1,"repo":repo,"base":base["ref"],"head":head["ref"],"candidate_sha":head["sha"],"base_sha":base["sha"],"allowed_files":["plugin.py"],"checks":["contract"]}
     files=[{"filename":"plugin.py"}]
-    runs=[{"name":"contract","app":{"id":15368},"status":"completed","conclusion":"success"}]
+    runs=[{"id":1,"name":"contract","app":{"id":15368},"status":"completed","conclusion":"success"}]
     reviews=[{"state":"APPROVED","commit_id":head["sha"],"user":{"login":"reviewer"}}]
     return pr,lane,files,runs,reviews
 
@@ -162,7 +162,7 @@ class MigrationAuditTests(unittest.TestCase):
                     for part in path[:-1]:
                         node=node[part]
                     node[path[-1]]=value
-                responses=[pr,[files],[reviews],[{"check_runs":runs}],
+                responses=[pr,[files],[reviews],[{"total_count":len(runs),"check_runs":runs}],
                            [[{"name":lane["base"]}]],latest]
                 with patch.object(audit,"api",side_effect=responses) as fetch:
                     if path not in (None,("updated_at",)):
@@ -200,8 +200,8 @@ class MigrationAuditTests(unittest.TestCase):
                 latest=deepcopy(pr)
                 if drift:
                     latest["merge_commit_sha"]="e"*40
-                responses=[pr,[files],[reviews],[{"check_runs":runs}],
-                           [[{"name":lane["base"]}]],{},[{"jobs":[]}],{},latest]
+                responses=[pr,[files],[reviews],[{"total_count":len(runs),"check_runs":runs}],
+                           [[{"name":lane["base"]}]],{},[{"total_count":0,"jobs":[]}],{},latest]
                 with patch.object(audit,"api",side_effect=responses) as fetch, patch.object(audit,"observe_run",return_value={"metadata_consistent":True}) as observe:
                     if drift:
                         with self.assertRaisesRegex(ValueError,"PR identity changed"):
@@ -214,3 +214,37 @@ class MigrationAuditTests(unittest.TestCase):
                     self.assertEqual(fetch.call_count,9)
                     self.assertEqual(fetch.call_args_list[-2].args,(lane["repo"],"git/commits/"+"d"*40))
                     self.assertEqual(fetch.call_args_list[-1].args,(lane["repo"],"pulls/1"))
+
+    def test_counted_pages_require_complete_unique_native_ids(self):
+        for key in ("jobs", "check_runs"):
+            def page(n, ids):
+                return {"total_count": n, key: [{"id": i} for i in ids]}
+            for pages in ([page(0, [])], [page(2, [1]), page(2, [2])]):
+                self.assertEqual(audit.counted_rows(pages, key),
+                                 [row for p in pages for row in p[key]])
+            bad = ([page(2, [1])], [page(2, [1]), page(3, [2])],
+                   [page(2, [1]), page(2, [1])], [page(1, [True])],
+                   [page(1, [0])], [{key: [{"id": 1}]}],
+                   [page(True, [1])], [], [page(0, [1])],
+                   [{"total_count": 0, key: {}}])
+            for pages in bad:
+                with self.subTest(key=key, pages=pages):
+                    with self.assertRaises(ValueError):
+                        audit.counted_rows(pages, key)
+
+    def test_audit_refuses_truncated_check_or_job_pages(self):
+        for key in ("check_runs", "jobs"):
+            with self.subTest(key=key):
+                pr,lane,files,runs,reviews=fixture()
+                check_pages=[{"total_count":len(runs),"check_runs":runs}]
+                branches=[[{"name":lane["base"]}]]
+                if key == "check_runs":
+                    check_pages[0]["total_count"] += 1
+                    responses=[pr,[files],[reviews],check_pages]
+                else:
+                    lane["observed_run"]={"id":9,"merge_sha":"d"*40}
+                    responses=[pr,[files],[reviews],check_pages,branches,{},
+                               [{"total_count":1,"jobs":[]}]]
+                with patch.object(audit,"api",side_effect=responses):
+                    with self.assertRaisesRegex(ValueError,"incomplete pagination: "+key):
+                        audit.audit(lane["repo"],lane)

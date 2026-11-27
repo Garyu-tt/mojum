@@ -55,6 +55,28 @@ def flatten(pages):
         raise ValueError("invalid paginated response")
     return [item for page in pages for item in page]
 
+def counted_rows(pages, key):
+    if type(pages) is not list or not pages:
+        raise ValueError("invalid counted pagination: "+key)
+    rows=[]
+    total=None
+    seen=set()
+    for page in pages:
+        if type(page) is not dict or type(page.get("total_count")) is not int or page["total_count"] < 0 or type(page.get(key)) is not list:
+            raise ValueError("invalid counted pagination: "+key)
+        if total is None:
+            total=page["total_count"]
+        if total != page["total_count"]:
+            raise ValueError("inconsistent pagination count: "+key)
+        for row in page[key]:
+            if type(row) is not dict or type(row.get("id")) is not int or row["id"] < 1 or row["id"] in seen:
+                raise ValueError("invalid or duplicate pagination ID: "+key)
+            seen.add(row["id"])
+            rows.append(row)
+    if len(rows)!=total:
+        raise ValueError("incomplete pagination: "+key)
+    return rows
+
 def evaluate(pr, lane, files, runs, reviews, protected):
     blockers=[]
     head=pr["head"]["sha"]
@@ -151,9 +173,7 @@ def audit(repo,lane):
     files=flatten(api(repo,f"pulls/{n}/files?per_page=100",True))
     reviews=flatten(api(repo,f"pulls/{n}/reviews?per_page=100",True))
     pages=api(repo,f"commits/{pr['head']['sha']}/check-runs?filter=all&per_page=100",True)
-    if not isinstance(pages,list) or any("check_runs" not in p for p in pages):
-        raise ValueError("invalid check pagination")
-    runs=[r for page in pages for r in page["check_runs"]]
+    runs=counted_rows(pages,"check_runs")
     branches=flatten(api(repo,"branches?protected=true&per_page=100",True))
     observations = lane.get("observed_runs")
     if observations is None:
@@ -167,7 +187,7 @@ def audit(repo,lane):
             raise ValueError("invalid run ID")
         run = api(repo,f"actions/runs/{run_id}")
         job_pages = api(repo,f"actions/runs/{run_id}/jobs?per_page=100",True)
-        jobs = [j for page in job_pages for j in page["jobs"]]
+        jobs = counted_rows(job_pages,"jobs")
         merge = api(repo,f"git/commits/{observed['merge_sha']}")
         reports.append(observe_run(pr,lane,run,jobs,merge,observed=observed))
         expected_names.extend(observed.get("checks",lane["checks"]))
