@@ -3,6 +3,7 @@ import argparse
 import json
 import re
 import os
+from http.client import HTTPException
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from pathlib import Path
 
@@ -27,15 +28,19 @@ def get_page(url):
         headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers, method="GET")
     opener = build_opener(ProxyHandler({}), NoRedirect())
-    with opener.open(request, timeout=30) as response:
-        payload = response.read(MAX_RESPONSE + 1)
-        if len(payload) > MAX_RESPONSE:
-            raise ValueError("GitHub response exceeds budget")
-        try:
-            data = json.loads(payload)
-        except RecursionError as exc:
-            raise ValueError("GitHub response JSON nesting exceeds decoder limit") from exc
-        return data, response.headers.get("Link", "")
+    try:
+        with opener.open(request, timeout=30) as response:
+            payload = response.read(MAX_RESPONSE + 1)
+            if len(payload) > MAX_RESPONSE:
+                raise ValueError("GitHub response exceeds budget")
+            try:
+                data = json.loads(payload)
+            except RecursionError as exc:
+                raise ValueError("GitHub response JSON nesting exceeds decoder limit") from exc
+            return data, response.headers.get("Link", "")
+    except HTTPException as exc:
+        raise ValueError("GitHub HTTP protocol error") from exc
+
 
 def api(repo, suffix, paginate=False):
     if (type(repo) is not str or not REPO.fullmatch(repo)

@@ -78,6 +78,44 @@ class MigrationAuditTests(unittest.TestCase):
         self.assertIn("JSON nesting",rows[0]["error"])
         self.assertEqual(response.read.call_count,2)
 
+    def test_http_protocol_errors_do_not_abort_later_lane(self):
+        import io
+        import json
+        import sys
+        from http.client import HTTPResponse
+        from contextlib import redirect_stdout
+
+        class Socket:
+            def __init__(self, raw):
+                self.raw = raw
+            def makefile(self, *args, **kwargs):
+                return io.BytesIO(self.raw)
+
+        class Opener:
+            def __init__(self, raw):
+                self.responses = iter(raw)
+            def open(self, *args, **kwargs):
+                response = HTTPResponse(Socket(next(self.responses)))
+                response.begin()
+                return response
+
+        cfg = {"repository":"owner/repo","lanes":[{"pr":1},{"pr":2}]}
+        valid = b'{"pr":2,"decision":"HOLD"}'
+        good = b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(valid)).encode() + b"\r\n\r\n" + valid
+        failures = (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n10\r\n{}",
+                    b"private-invalid-status\r\n")
+        def inspect(repo, lane):
+            return audit.get_page("https://api.github.com/repos/owner/repo/pulls/"+str(lane["pr"]))[0]
+        for bad in failures:
+            with self.subTest(response=bad):
+                stream = io.StringIO()
+                opener = Opener([bad, good])
+                with patch.object(sys,"argv",["audit"]), patch.object(Path,"read_text",return_value=json.dumps(cfg)), patch.object(audit,"build_opener",return_value=opener), patch.object(audit,"audit",side_effect=inspect) as inspect_lane, redirect_stdout(stream):
+                    self.assertEqual(audit.main(),1)
+                self.assertEqual(inspect_lane.call_count,2)
+                rows = [json.loads(line) for line in stream.getvalue().splitlines()]
+                self.assertEqual(rows,[{"pr":1,"decision":"HOLD","error":"GitHub HTTP protocol error"},{"pr":2,"decision":"HOLD"}])
+
     def test_redirect_rejected(self):
         with self.assertRaises(ValueError):
             audit.NoRedirect().redirect_request(None,None,302,"",{},"https://evil.invalid")
