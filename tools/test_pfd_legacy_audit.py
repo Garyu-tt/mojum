@@ -57,6 +57,18 @@ class StaticInventoryTest(unittest.TestCase):
             path.write_text('', encoding='utf-8')
         self.assertEqual(analyze(root), baseline)
 
+    def test_inventory_ignores_git_replacement_objects(self):
+        root = self.fixture({'__init__.py': '', 'a.py': 'import mojum.b\n', 'b.py': ''})
+        baseline = analyze(root)
+        def git(*args, input=None):
+            return subprocess.check_output(['git', '-C', str(root), *args], input=input)
+        original = git('rev-parse', 'HEAD:src/mojum/a.py').decode('ascii').strip()
+        replacement = git('hash-object', '-w', '--stdin', input=b'import os\n').decode('ascii').strip()
+        git('replace', original, replacement)
+        # Confirm the replacement is active without the audit's Git guard.
+        self.assertEqual(git('cat-file', 'blob', original), b'import os\n')
+        self.assertEqual(analyze(root), baseline)
+
     def test_symlink_python_blob_fails_closed(self):
         root = self.fixture({'__init__.py': '', 'a.py': ''})
         path = root / 'src/mojum/alias.py'
