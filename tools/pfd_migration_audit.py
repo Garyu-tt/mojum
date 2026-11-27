@@ -2,16 +2,53 @@
 import argparse
 import json
 import re
-import subprocess
+import os
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
 ROOT = Path(__file__).resolve().parents[1]
 
+REPO = re.compile(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+")
+ENDPOINT = re.compile(r"(?:pulls/[1-9][0-9]*(?:/(?:files|reviews)\\?per_page=100)?|commits/[0-9a-f]{40}/check-runs\\?filter=all&per_page=100|branches\\?protected=true&per_page=100)")
+MAX_RESPONSE = 8 * 1024 * 1024
+MAX_PAGES = 100
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("GitHub API redirect rejected")
+
+def get_page(url):
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    headers = {"Accept":"application/vnd.github+json",
+               "X-GitHub-Api-Version":"2022-11-28",
+               "User-Agent":"mojum-pfd-read-only"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    request = Request(url, headers=headers, method="GET")
+    opener = build_opener(ProxyHandler({}), NoRedirect())
+    with opener.open(request, timeout=30) as response:
+        payload = response.read(MAX_RESPONSE + 1)
+        if len(payload) > MAX_RESPONSE:
+            raise ValueError("GitHub response exceeds budget")
+        return json.loads(payload), response.headers.get("Link", "")
+
 def api(repo, suffix, paginate=False):
-    args=["gh","api",f"repos/{repo}/{suffix}"]
-    if paginate: args += ["--paginate","--slurp"]
-    return json.loads(subprocess.check_output(args,text=True,timeout=90))
+    if (type(repo) is not str or not REPO.fullmatch(repo)
+        or repo.split("/")[1] in (".", "..")
+        or type(suffix) is not str or not ENDPOINT.fullmatch(suffix)):
+        raise ValueError("unexpected GitHub API target")
+    url = f"https://api.github.com/repos/{repo}/{suffix}"
+    if not paginate:
+        return get_page(url)[0]
+    pages = []
+    for page in range(1, MAX_PAGES + 1):
+        # Never follow a server-provided URL with credentials.
+        data, link = get_page(url + ("&" if "?" in url else "?") + f"page={page}")
+        pages.append(data)
+        if not re.search(r'rel="next"', link):
+            return pages
+    raise ValueError("GitHub pagination budget exceeded")
 
 def flatten(pages):
     if not isinstance(pages,list) or any(not isinstance(p,list) for p in pages):
@@ -56,6 +93,8 @@ def evaluate(pr, lane, files, runs, reviews, protected):
 
 def audit(repo,lane):
     n=lane["pr"]
+    if type(n) is not int or n < 1:
+        raise ValueError("invalid PR number")
     pr=api(repo,f"pulls/{n}")
     files=flatten(api(repo,f"pulls/{n}/files?per_page=100",True))
     reviews=flatten(api(repo,f"pulls/{n}/reviews?per_page=100",True))
@@ -75,7 +114,7 @@ def main():
     for lane in cfg["lanes"]:
         try:
             print(json.dumps(audit(cfg["repository"],lane),sort_keys=True))
-        except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
+        except (ValueError, KeyError, TypeError, OSError) as exc:
             errors+=1
             print(json.dumps({"pr":lane["pr"],"decision":"HOLD","error":str(exc)}))
     return int(bool(errors))

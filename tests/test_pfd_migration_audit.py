@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location("audit",Path(__file__).resolve().parents[1]/"tools/pfd_migration_audit.py")
 audit=importlib.util.module_from_spec(spec)
@@ -36,3 +37,21 @@ class MigrationAuditTests(unittest.TestCase):
     def test_paginated_shape(self):
         self.assertEqual(audit.flatten([[1],[2]]),[1,2])
         with self.assertRaises(ValueError): audit.flatten({"items":[]})
+
+    def test_reject_unexpected_api_target(self):
+        with patch.object(audit,"get_page") as fetch:
+            for repo,suffix in (("x/..","pulls/1"),("x/y","../secrets"),("x/y","pulls/1?redirect=https://evil.invalid"),("x/y","https://evil.invalid")):
+                with self.assertRaises(ValueError):
+                    audit.api(repo,suffix)
+            fetch.assert_not_called()
+    def test_pagination_does_not_follow_foreign_link(self):
+        with patch.object(audit,"get_page",side_effect=[([1],'<https://evil.invalid>; rel="next"'),([2],"")]) as fetch:
+            self.assertEqual(audit.api("x/y","pulls/1/files?per_page=100",True),[[1],[2]])
+            self.assertEqual(fetch.call_args_list[1].args[0],"https://api.github.com/repos/x/y/pulls/1/files?per_page=100&page=2")
+    def test_redirect_rejected(self):
+        with self.assertRaises(ValueError):
+            audit.NoRedirect().redirect_request(None,None,302,"",{},"https://evil.invalid")
+    def test_pagination_budget(self):
+        with patch.object(audit,"MAX_PAGES",2), patch.object(audit,"get_page",return_value=([],'rel="next"')):
+            with self.assertRaisesRegex(ValueError,"pagination budget"):
+                audit.api("x/y","branches?protected=true&per_page=100",True)
