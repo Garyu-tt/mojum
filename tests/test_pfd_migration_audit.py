@@ -65,7 +65,8 @@ class MigrationAuditTests(unittest.TestCase):
         stream=io.StringIO()
         opener=MagicMock()
         response=opener.open.return_value.__enter__.return_value
-        depth=sys.getrecursionlimit()+100
+        # CPython 3.13's C decoder may exceed the Python recursion limit.
+        depth=max(20000,sys.getrecursionlimit()+100)
         response.read.side_effect=[b"["*depth+b"0"+b"]"*depth,b'{"pr":2,"decision":"HOLD"}']
         response.headers={}
         def inspect(repo,lane):
