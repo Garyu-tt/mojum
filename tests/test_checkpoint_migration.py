@@ -192,3 +192,28 @@ class CheckpointCompatibility(unittest.TestCase):
         sim.episodes[0]["brain_observation"]["action"]={"changed":2}
         sim.snapshot()["state"]["episodes"][0]["brain_observation"]["action"]={"changed":3}
         self.assertEqual(sim.snapshot(),expected)
+
+    def test_step_outputs_do_not_alias_committed_history(self):
+        for sinks in (0,1,2):
+            with self.subTest(sinks=sinks):
+                g=graph_sinks(sinks)
+                sim=LegacySimulation(g)
+                control=LegacySimulation(g)
+                outputs=sim.step()
+                self.assertEqual(outputs,control.step())
+                expected=control.snapshot()
+                outputs["sense"]["sensory"]["heartbeat"]["beat_index"]=-1
+                outputs["brain"]["observation"]["action"]={"mutated":True}
+                for node in ("episode","episode_copy")[:sinks]:
+                    outputs[node]["episode"]["brain_observation"]["action"]={"mutated":True}
+                    outputs[node]["episode"]["sensory"]["heartbeat"]["beat_index"]=-2
+                outputs.clear()
+                self.assertEqual(sim.snapshot(),expected)
+                self.assertEqual(sim.episodes,expected["state"]["episodes"])
+                restored=LegacySimulation(g)
+                restored.restore(sim.snapshot())
+                next_expected=control.step()
+                self.assertEqual(sim.step(),next_expected)
+                self.assertEqual(restored.step(),next_expected)
+                self.assertEqual(sim.snapshot(),control.snapshot())
+                self.assertEqual(restored.snapshot(),control.snapshot())
