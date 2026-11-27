@@ -149,7 +149,8 @@ def observe_run(pr, lane, run, jobs, merge, *, observed=None):
             j.get("run_id") == expected["id"] and j.get("head_sha") == head
             and j.get("status") == "completed" and j.get("conclusion") == "success"
             and all(sum(step.get("name") == required for step in j.get("steps", [])) == 1
-                    and any(step.get("name") == required and step.get("conclusion") == "success"
+                    and any(step.get("name") == required and step.get("status") == "completed"
+                            and step.get("conclusion") == "success"
                             for step in j.get("steps", []))
                     for required in required_steps)
             for j in matches):

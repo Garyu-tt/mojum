@@ -72,11 +72,22 @@ class MigrationAuditTests(unittest.TestCase):
              "status":"completed","conclusion":"success","pull_requests":[{"number":1,
              "head":{"sha":"a"*40},"base":{"sha":"b"*40}}]}
         jobs=[{"name":"contract","run_id":9,"head_sha":"a"*40,"status":"completed",
-               "conclusion":"success","steps":[{"name":"Tests","conclusion":"success"}]}]
+               "conclusion":"success","steps":[{"name":"Tests","status":"completed","conclusion":"success"}]}]
         merge={"sha":sha,"parents":[{"sha":"b"*40},{"sha":"a"*40}]}
         good=audit.observe_run(pr,lane,run,jobs,merge)
         self.assertTrue(good["metadata_consistent"])
         self.assertFalse(good["trust_verified"])
+        for status in ("queued", "in_progress", "pending", None, "unknown"):
+            with self.subTest(step_status=status):
+                step = dict(jobs[0]["steps"][0])
+                if status is None:
+                    step.pop("status")
+                else:
+                    step["status"] = status
+                report = audit.observe_run(pr,lane,run,[dict(jobs[0],steps=[step])],merge)
+                self.assertFalse(report["metadata_consistent"])
+                self.assertIn("job-metadata-mismatch:contract",report["reasons"])
+                self.assertFalse(report["trust_verified"])
         for bad in (dict(run,event="push"),dict(run,head_sha="e"*40),dict(run,path="other.yml")):
             self.assertFalse(audit.observe_run(pr,lane,bad,jobs,merge)["metadata_consistent"])
         self.assertFalse(audit.observe_run(pr,lane,run,jobs+jobs,merge)["metadata_consistent"])
@@ -85,7 +96,7 @@ class MigrationAuditTests(unittest.TestCase):
 
         lane["observed_run"]["job_steps"]={"contract":["Tests","Unit regressions"]}
         self.assertFalse(audit.observe_run(pr,lane,run,jobs,merge)["metadata_consistent"])
-        jobs[0]["steps"].append({"name":"Unit regressions","conclusion":"success"})
+        jobs[0]["steps"].append({"name":"Unit regressions","status":"completed","conclusion":"success"})
         self.assertTrue(audit.observe_run(pr,lane,run,jobs,merge)["metadata_consistent"])
         jobs[0]["steps"][1]["conclusion"]="skipped"
         self.assertFalse(audit.observe_run(pr,lane,run,jobs,merge)["metadata_consistent"])
@@ -121,8 +132,8 @@ class MigrationAuditTests(unittest.TestCase):
              "status":"completed","conclusion":"success","pull_requests":[{"number":1,
              "head":{"sha":"a"*40},"base":{"sha":"b"*40}}]}
         jobs=[{"name":"contract","run_id":9,"head_sha":"a"*40,"status":"completed",
-               "conclusion":"success","steps":[{"name":"Tests","conclusion":"success"},
-               {"name":"Tests","conclusion":"skipped"}]}]
+               "conclusion":"success","steps":[{"name":"Tests","status":"completed","conclusion":"success"},
+               {"name":"Tests","status":"completed","conclusion":"skipped"}]}]
         merge={"sha":sha,"parents":[{"sha":"b"*40},{"sha":"a"*40}]}
         result=audit.observe_run(pr,lane,run,jobs,merge)
         self.assertFalse(result["metadata_consistent"])
