@@ -98,20 +98,29 @@ class Executor:
         self._dt_ns = dt_ns
         self._tick = 0
         self._step_lock = Lock()
+        self._active_step = None
 
     @property
     def tick(self):
         return self._tick
 
     def step(self):
-        if not self._step_lock.acquire(blocking=False):
-            raise GraphError("Executor step already in progress")
+        # Serialize only admission/publication of the ownership token, never
+        # handler execution. The outer finally covers interruption during
+        # admission as well as evaluation, without releasing another step.
+        token = object()
         try:
+            with self._step_lock:
+                if self._active_step is not None:
+                    raise GraphError("Executor step already in progress")
+                self._active_step = token
             response = self._evaluate(self._tick)
             self._tick += 1
             return response
         finally:
-            self._step_lock.release()
+            with self._step_lock:
+                if self._active_step is token:
+                    self._active_step = None
 
     def _evaluate(self, tick):
         """Evaluate pure handlers at an explicit tick without committing state.

@@ -122,3 +122,41 @@ class ExecutorTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors,[])
         self.assertEqual(ex.tick,1)
+
+    def test_interrupted_admission_allows_retry(self):
+        import sys
+        ex = Executor(generic(), ports=GENERIC_PORTS, handlers={
+            "demo.source": lambda i,c,t,ns: ({"x":t}, []),
+            "demo.sink": lambda *a: ({}, [])})
+        for phase in ("lock_acquired", "token_published"):
+            with self.subTest(phase=phase):
+                before = ex.tick
+                def trace(frame, event, arg):
+                    if frame.f_code is Executor.step.__code__ and event == "line":
+                        locked = ex._step_lock.locked()
+                        published = getattr(ex, "_active_step", None) is not None
+                        if ((phase == "lock_acquired" and locked) or
+                                (phase == "token_published" and published and not locked)):
+                            raise KeyboardInterrupt("synthetic admission interruption")
+                    return trace
+                previous_trace = sys.gettrace()
+                sys.settrace(trace)
+                try:
+                    with self.assertRaises(KeyboardInterrupt):
+                        ex.step()
+                finally:
+                    sys.settrace(previous_trace)
+                self.assertEqual(ex.tick, before)
+                self.assertFalse(ex._step_lock.locked())
+                self.assertIsNone(ex._active_step)
+                self.assertEqual(ex.step()["outputs"]["a"]["x"], before)
+
+    def test_reentrant_rejection_preserves_outer_step(self):
+        def source(i,c,t,ns):
+            with self.assertRaisesRegex(GraphError, "already in progress"):
+                ex.step()
+            return {"x":t}, []
+        ex = Executor(generic(), ports=GENERIC_PORTS, handlers={
+            "demo.source": source, "demo.sink": lambda *a: ({}, [])})
+        self.assertEqual(ex.step()["outputs"]["a"]["x"], 0)
+        self.assertEqual(ex.step()["outputs"]["a"]["x"], 1)
