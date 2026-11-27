@@ -122,12 +122,42 @@ def review(number, sha, agent, execute):
     return "COMMAND_OK_REVIEW_UNVERIFIED"
 
 
+def discover(limit):
+    """Bounded read-only scan, oldest first, preserving exact head identity."""
+    raw = subprocess.check_output(
+        ["gh", "api", f"repos/{REPO}/pulls?state=open&base=main&sort=created&direction=asc&per_page={limit}"],
+        text=True, timeout=30
+    )
+    items = json.loads(raw)
+    if not isinstance(items, list):
+        raise ValueError("unexpected pull list response")
+    return [(p["number"], p["head"]["sha"]) for p in items[:limit]
+            if eligible(p, p.get("head", {}).get("sha"))
+            and isinstance(p.get("number"), int)
+            and PAIR.fullmatch(f'{p["number"]}:{p["head"]["sha"]}')]
+
+
+def scan(limit):
+    totals = {}
+    for number, sha in discover(limit):
+        status = review(number, sha, "pr-agent", False)
+        totals[status] = totals.get(status, 0) + 1
+        print(json.dumps({"pr": number, "head": sha, "status": status}), flush=True)
+    print(json.dumps({"scan_summary": totals}), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("pairs", nargs="+")
+    parser.add_argument("pairs", nargs="*")
+    parser.add_argument("--scan", type=int, choices=range(1, 31), help="read-only queue scan (max 30 PRs)")
     parser.add_argument("--agent", default="pr-agent")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    if args.scan is not None:
+        if args.pairs or args.execute:
+            parser.error("scan is read-only and cannot be combined with pairs or execute")
+        scan(args.scan)
+        return 0
     try:
         pairs = parse_pairs(args.pairs)
     except ValueError as exc:
