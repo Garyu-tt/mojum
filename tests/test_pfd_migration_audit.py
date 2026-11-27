@@ -105,6 +105,30 @@ class MigrationAuditTests(unittest.TestCase):
         jobs[0]["steps"][1]["conclusion"]="success"
         self.assertTrue(audit.observe_run(pr,lane,run,jobs,merge,observed=selected)["metadata_consistent"])
 
+    def test_required_step_policy_requires_native_nonempty_names(self):
+        pr,lane,files,runs,reviews=fixture()
+        sha="d"*40
+        pr["merge_commit_sha"]=sha
+        expected={"id":9,"workflow":"test.yml","merge_sha":sha,"test_step":"T"}
+        run={"id":9,"path":"test.yml","event":"pull_request","head_sha":"a"*40,
+             "status":"completed","conclusion":"success","pull_requests":[{"number":1,
+             "head":{"sha":"a"*40},"base":{"sha":"b"*40}}]}
+        jobs=[{"name":"contract","run_id":9,"head_sha":"a"*40,"status":"completed",
+               "conclusion":"success","steps":[{"name":"T","status":"completed","conclusion":"success"}]}]
+        merge={"sha":sha,"parents":[{"sha":"b"*40},{"sha":"a"*40}]}
+        for policy in (expected,dict(expected,job_steps={"contract":["T"]})):
+            self.assertTrue(audit.observe_run(pr,lane,run,jobs,merge,observed=policy)["metadata_consistent"])
+        malformed=[dict(expected,job_steps={"contract":v}) for v in
+                   ("T",{"T":True},None,[],[""],[" "],[1],[True],[["T"]],["T","T"])]
+        malformed.extend(dict(expected,job_steps=v) for v in (None,[],True))
+        malformed.extend(dict(expected,test_step=v) for v in (None,1,""," "))
+        for policy in malformed:
+            with self.subTest(policy=policy):
+                report=audit.observe_run(pr,lane,run,jobs,merge,observed=policy)
+                self.assertFalse(report["metadata_consistent"])
+                self.assertIn("invalid-job-step-policy:contract",report["reasons"])
+                self.assertFalse(report["trust_verified"])
+
     def test_missing_reviewer_identity(self):
         for user in (None, {}, {"login": ""}, {"login": 7}):
             pr,lane,files,runs,reviews=fixture()

@@ -139,10 +139,12 @@ def observe_run(pr, lane, run, jobs, merge, *, observed=None):
         reasons.append("workflow-run-mismatch")
     for name in expected.get("checks", lane["checks"]):
         matches = [j for j in jobs if j.get("name") == name]
-        required_steps = expected.get("job_steps", {}).get(name)
-        if required_steps is None:
-            required_steps = [expected["test_step"]]
-        if not required_steps or len(set(required_steps)) != len(required_steps):
+        step_policy = expected.get("job_steps", {})
+        required_steps = (step_policy.get(name, [expected.get("test_step")])
+                          if type(step_policy) is dict else None)
+        if (type(required_steps) is not list or not required_steps
+            or any(type(step) is not str or not step.strip() for step in required_steps)
+            or len(set(required_steps)) != len(required_steps)):
             reasons.append("invalid-job-step-policy:"+name)
             continue
         if len(matches) != 1 or not all(
