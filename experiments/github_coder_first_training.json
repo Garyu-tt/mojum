@@ -1,0 +1,78 @@
+{
+  "source": "Garyu-tt/mojum",
+  "train_prs": [
+    1478,
+    1461,
+    1447,
+    1278,
+    1518
+  ],
+  "heldout_prs": [
+    1416,
+    1511
+  ],
+  "files": [
+    {
+      "pr": 1478,
+      "paths": [
+        "src/mojum/aquarium.py"
+      ],
+      "lines": 19
+    },
+    {
+      "pr": 1461,
+      "paths": [
+        "src/mojum/aquarium.py",
+        "src/mojum/aquarium_identity.py",
+        "src/mojum/sensory_curiosity_lab.py",
+        "src/mojum/twin_lab.py"
+      ],
+      "lines": 238
+    },
+    {
+      "pr": 1447,
+      "paths": [
+        "src/mojum/sensory_curiosity_lab.py"
+      ],
+      "lines": 6
+    },
+    {
+      "pr": 1278,
+      "paths": [
+        "src/mojum/aquarium.py",
+        "src/mojum/cell_policy_v3_escape.py"
+      ],
+      "lines": 119
+    },
+    {
+      "pr": 1416,
+      "paths": [
+        "src/mojum/twin_lab.py"
+      ],
+      "lines": 24
+    },
+    {
+      "pr": 1518,
+      "paths": [
+        "src/mojum/spinal_cpg_bridge.py"
+      ],
+      "lines": 175
+    },
+    {
+      "pr": 1511,
+      "paths": [
+        "src/mojum/archive_path_admission.py",
+        "src/mojum/pettingzoo_episode.py"
+      ],
+      "lines": 140
+    }
+  ],
+  "unique_train_lines": 462,
+  "unique_heldout_lines": 144,
+  "token_predictions": 1740,
+  "learned_correct": 423,
+  "unigram_correct": 154,
+  "context_nodes": 705,
+  "learned_edges": 2394,
+  "limitations": "teacher-forced next-token prediction; not program synthesis; exact line dedup and file path holdout only; no execution of GitHub code"
+}
