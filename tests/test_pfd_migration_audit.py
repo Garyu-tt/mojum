@@ -93,3 +93,38 @@ class MigrationAuditTests(unittest.TestCase):
         selected=dict(lane["observed_run"],checks=["contract"])
         jobs[0]["steps"][1]["conclusion"]="success"
         self.assertTrue(audit.observe_run(pr,lane,run,jobs,merge,observed=selected)["metadata_consistent"])
+
+    def test_missing_reviewer_identity(self):
+        for user in (None, {}, {"login": ""}, {"login": 7}):
+            pr,lane,files,runs,reviews=fixture()
+            reviews[0]["user"]=user
+            result=audit.evaluate(pr,lane,files,runs,reviews,True)
+            self.assertIn("head-review-missing",result["blockers"])
+            self.assertEqual(result["decision"],"HOLD")
+
+    def test_wrong_pr_number(self):
+        pr,lane,files,runs,reviews=fixture()
+        pr["number"]=2
+        self.assertIn("unexpected-pr-identity",audit.evaluate(pr,lane,files,runs,reviews,True)["blockers"])
+
+    def test_duplicate_file_rows(self):
+        pr,lane,files,runs,reviews=fixture()
+        pr["changed_files"]=2
+        self.assertIn("scope-unverified",audit.evaluate(pr,lane,files+files,runs,reviews,True)["blockers"])
+
+    def test_duplicate_step_name_with_one_success_is_not_consistent(self):
+        pr,lane,files,runs,reviews=fixture()
+        sha="d"*40
+        pr["merge_commit_sha"]=sha
+        lane["observed_run"]={"id":9,"workflow":"test.yml","merge_sha":sha,"test_step":"Tests"}
+        run={"id":9,"path":"test.yml","event":"pull_request","head_sha":"a"*40,
+             "status":"completed","conclusion":"success","pull_requests":[{"number":1,
+             "head":{"sha":"a"*40},"base":{"sha":"b"*40}}]}
+        jobs=[{"name":"contract","run_id":9,"head_sha":"a"*40,"status":"completed",
+               "conclusion":"success","steps":[{"name":"Tests","conclusion":"success"},
+               {"name":"Tests","conclusion":"skipped"}]}]
+        merge={"sha":sha,"parents":[{"sha":"b"*40},{"sha":"a"*40}]}
+        result=audit.observe_run(pr,lane,run,jobs,merge)
+        self.assertFalse(result["metadata_consistent"])
+        self.assertIn("job-metadata-mismatch:contract",result["reasons"])
+        self.assertFalse(result["trust_verified"])

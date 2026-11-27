@@ -59,7 +59,8 @@ def evaluate(pr, lane, files, runs, reviews, protected):
     blockers=[]
     head=pr["head"]["sha"]
     base=pr["base"]["sha"]
-    if (pr["state"]!="open" or
+    if (type(pr["number"]) is not int or pr["number"] != lane["pr"] or
+        pr["state"]!="open" or
         pr["base"]["ref"]!=lane["base"] or pr["head"]["ref"]!=lane["head"] or
         pr["head"]["repo"]["full_name"]!=lane["repo"] or
         pr["base"]["repo"]["full_name"]!=lane["repo"] or
@@ -71,7 +72,7 @@ def evaluate(pr, lane, files, runs, reviews, protected):
         blockers.append("pin-changed-reapproval-required")
     if pr.get("mergeable") is not True:
         blockers.append("mergeability-unconfirmed")
-    if not files or len(files)!=pr["changed_files"] or any(
+    if not files or len(files)!=pr["changed_files"] or len({f["filename"] for f in files}) != len(files) or any(
         f["filename"] not in lane["allowed_files"] or
         (f.get("previous_filename") and f["previous_filename"] not in lane["allowed_files"])
         for f in files):
@@ -84,6 +85,8 @@ def evaluate(pr, lane, files, runs, reviews, protected):
     # Positive reviews are advisory only; no author/committer/pusher
     # independence or trusted workflow provenance is established here.
     if not any(r.get("state")=="APPROVED" and r.get("commit_id")==head and
+               type((r.get("user") or {}).get("login")) is str and
+               bool((r.get("user") or {}).get("login")) and
                (r.get("user") or {}).get("login")!=pr["user"]["login"]
                for r in reviews):
         blockers.append("head-review-missing")
@@ -123,8 +126,9 @@ def observe_run(pr, lane, run, jobs, merge, *, observed=None):
         if len(matches) != 1 or not all(
             j.get("run_id") == expected["id"] and j.get("head_sha") == head
             and j.get("status") == "completed" and j.get("conclusion") == "success"
-            and all(sum(step.get("name") == required and
-                        step.get("conclusion") == "success" for step in j.get("steps", [])) == 1
+            and all(sum(step.get("name") == required for step in j.get("steps", [])) == 1
+                    and any(step.get("name") == required and step.get("conclusion") == "success"
+                            for step in j.get("steps", []))
                     for required in required_steps)
             for j in matches):
             reasons.append("job-metadata-mismatch:"+name)
