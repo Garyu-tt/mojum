@@ -1,0 +1,16 @@
+{
+  "schema": "mojum.plugin-candidate/1",
+  "id": "genesis-ledger",
+  "version": "0.1.0",
+  "legacy_commit": "074b14c152c8c5e3291e6e56595255386a751af9",
+  "entrypoint": "mojum.genesis",
+  "core_api": null,
+  "dependencies": [],
+  "wire_contracts": [
+    "mojum.genesis.genotype/1",
+    "mojum.genesis.phenotype/1",
+    "mojum.genesis.acquisition/1",
+    "mojum.genesis.ledger/1"
+  ],
+  "status": "extraction-candidate-not-core-compatible"
+}

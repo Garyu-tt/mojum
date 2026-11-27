@@ -1,0 +1,15 @@
+{
+  "schema": "mojum.plugin/1",
+  "id": "genesis-ledger",
+  "version": "0.1.0",
+  "api_major": 1,
+  "nodes": {
+    "genesis-ledger.project": {
+      "inputs": {},
+      "outputs": {
+        "phenotype": "mojum.genesis.phenotype/1",
+        "ledger": "mojum.genesis.ledger/1"
+      }
+    }
+  }
+}
