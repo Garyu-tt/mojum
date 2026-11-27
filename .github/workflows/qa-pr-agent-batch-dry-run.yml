@@ -55,3 +55,6 @@ jobs:
             1423:b70d736038587ea335cfd0b5050c9dc26f911054 \
             1243:df9bdd7e4ef886a3020898141dde4184c7942e6a \
             1296:5adce516013412ba35d2ae750015484b91ea1ba7
+      - name: Discover oldest open PRs and route without inference
+        run: |
+          python "$RUNNER_TEMP/qa_pr_agent_batch.py" --scan 20
