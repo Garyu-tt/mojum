@@ -98,11 +98,11 @@ class CheckpointCompatibility(unittest.TestCase):
     def test_snapshot_waits_for_complete_step(self):
         sim=LegacySimulation(graph_sinks(1))
         entered,release,started,finished=Event(),Event(),Event(),Event()
-        original=sim._executor.step
+        original=sim._executor._evaluate
         result=[]
         errors=[]
-        def delayed():
-            out=original()
+        def delayed(tick):
+            out=original(tick)
             entered.set()
             if not release.wait(3): raise RuntimeError("test timeout")
             return out
@@ -114,7 +114,7 @@ class CheckpointCompatibility(unittest.TestCase):
             try: result.append(sim.snapshot())
             except Exception as exc: errors.append(exc)
             finally: finished.set()
-        with patch.object(sim._executor,"step",side_effect=delayed):
+        with patch.object(sim._executor,"_evaluate",side_effect=delayed):
             worker=Thread(target=stepping)
             reader=Thread(target=capture)
             worker.start()
@@ -136,3 +136,17 @@ class CheckpointCompatibility(unittest.TestCase):
         restored=LegacySimulation(graph_sinks(1))
         restored.restore(result[0])
         self.assertEqual(restored.snapshot(),result[0])
+
+    def test_history_allocation_failure_keeps_tick_and_history(self):
+        sim=LegacySimulation(graph_sinks(2))
+        sim.step()
+        before=sim.snapshot()
+        for failure in (MemoryError("allocation"), KeyboardInterrupt()):
+            with patch.object(sim,"_append_effects",side_effect=failure):
+                with self.assertRaises(type(failure)):
+                    sim.step()
+            self.assertEqual(sim.snapshot(),before)
+        old=Simulation(graph_sinks(2))
+        old.restore(before)
+        self.assertEqual(sim.step(),old.step())
+        self.assertEqual(sim.snapshot(),old.snapshot())

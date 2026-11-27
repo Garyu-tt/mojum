@@ -107,13 +107,18 @@ class Executor:
         if not self._step_lock.acquire(blocking=False):
             raise GraphError("Executor step already in progress")
         try:
-            return self._step()
+            response = self._evaluate(self._tick)
+            self._tick += 1
+            return response
         finally:
             self._step_lock.release()
 
-    def _step(self):
+    def _evaluate(self, tick):
+        """Evaluate pure handlers at an explicit tick without committing state.
+
+        Private compatibility boundary; callers own serialization and publication.
+        """
         results, effects = {}, []
-        tick = self._tick
         # Check the complete accumulated response before retaining each result.
         # Per-handler output is already owned by the handler; we bound core copies.
         for nid in self._order:
@@ -135,6 +140,4 @@ class Executor:
             _measure(candidate)
             results[nid] = detached(out)
             effects.extend(detached(staged))
-        response = detached({"outputs": results, "effects": effects})
-        self._tick += 1
-        return response
+        return detached({"outputs": results, "effects": effects})

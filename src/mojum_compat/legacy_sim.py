@@ -57,7 +57,7 @@ class LegacySimulation:
         self._graph = detached(graph)
         self._dt_ns = dt_ns
         self._executor = self._new_executor()
-        self._episodes = []
+        self._state = (0, ())
         self._state_lock = Lock()
         self._graph_hash = digest(self._graph)
         self._sinks = sum(n["kind"] == "memory.episode" for n in self._graph["nodes"])
@@ -68,28 +68,37 @@ class LegacySimulation:
     @property
     def tick(self):
         with self._state_lock:
-            return self._executor.tick
+            return self._state[0]
 
     @property
     def episodes(self):
         with self._state_lock:
-            return copy.deepcopy(self._episodes)
+            return copy.deepcopy(list(self._state[1]))
 
     def step(self):
         with self._state_lock:
             # Every successful step must remain inside the existing restore
             # replay budget, including graphs without any episode sinks.
-            if self._executor.tick >= MAX_REPLAY_TICKS:
+            tick, episodes = self._state
+            if tick >= MAX_REPLAY_TICKS:
                 raise GraphError("Checkpoint replay budget exhausted")
-            result = self._executor.step()
-            self._episodes.extend(result["effects"])
+            result = self._executor._evaluate(tick)
+            # Allocate before publishing; a single state reference contains
+            # both tick and history. Executor is a stateless evaluator here.
+            next_state = (tick + 1, self._append_effects(episodes,result["effects"]))
+            self._state = next_state
             return result["outputs"]
+
+    @staticmethod
+    def _append_effects(episodes, effects):
+        return episodes + tuple(effects)
 
     def snapshot(self):
         with self._state_lock:
+            tick, episodes = self._state
             state = {"schema":"mojum.sim-checkpoint/0.1","graph_sha256":self._graph_hash,
-                     "tick":self._executor.tick,"dt_ns":self._dt_ns,
-                     "episodes":copy.deepcopy(self._episodes)}
+                     "tick":tick,"dt_ns":self._dt_ns,
+                     "episodes":copy.deepcopy(list(episodes))}
         return {"state":state,"sha256":digest(state)}
 
     def restore(self,snapshot):
@@ -132,5 +141,4 @@ class LegacySimulation:
             expected = safe_episodes[i*self._sinks:(i+1)*self._sinks]
             if canonical(effects) != canonical(expected):
                 raise GraphError("Snapshot episode differs from deterministic replay")
-        self._executor = replay
-        self._episodes = safe_episodes
+        self._state = (tick, tuple(safe_episodes))
