@@ -117,3 +117,59 @@ jobs:
         env:
           PYTHONPATH: runtime/src:legacy/src
         run: python -m unittest discover -s harness/integration_tests -p test_genesis_updated.py -v
+  atomic-plugin:
+    name: atomic-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [reference, candidate]
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: matrix.core == 'candidate'
+        with:
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: matrix.core == 'reference'
+        with:
+          ref: bd91fa15da9a3399c6ba5752a0dc30cf3755caa3
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ebfb2410eda297cecd9805b2a01ed4da0784dd41
+          path: harness/plugin-candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record actual core and pinned inputs
+        env:
+          CORE_KIND: ${{ matrix.core }}
+        run: |
+          git -C runtime rev-parse HEAD
+          git -C harness rev-parse HEAD
+          test "$(git -C harness rev-parse HEAD)" = "$GITHUB_SHA"
+          if [ "$CORE_KIND" = candidate ]; then
+            test "$(git -C runtime rev-parse HEAD)" = "$GITHUB_SHA"
+          else
+            test "$(git -C runtime rev-parse HEAD)" = "bd91fa15da9a3399c6ba5752a0dc30cf3755caa3"
+          fi
+          test "$(git -C harness/plugin-candidate rev-parse HEAD)" = "ebfb2410eda297cecd9805b2a01ed4da0784dd41"
+          test "$(git -C legacy rev-parse HEAD)" = "074b14c152c8c5e3291e6e56595255386a751af9"
+      - name: Run atomic plugin compatibility harness
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: python -m unittest discover -s harness/integration_tests -p test_genesis_atomic.py -v
