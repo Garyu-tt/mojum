@@ -14,16 +14,25 @@ class GraphExtractionTests(unittest.TestCase):
 
     def test_registry_independent_of_domain(self):
         graph = {"schema":"mechanicus.universal-graph/1","id":"demo","revision":"1",
-                 "nodes":[{"id":"a","kind":"custom.source","config":{},"notes":{"purpose":"source"}},
+                 "nodes":[{"id":"z","kind":"custom.source","config":{},"notes":{"purpose":"source"}},
                           {"id":"b","kind":"custom.sink","config":{},"notes":{"purpose":"sink"}}],
-                 "edges":[{"from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}}]}
+                 "edges":[{"from":{"node":"z","port":"out"},"to":{"node":"b","port":"in"}}]}
         registry = {"custom.source":({},{"out":"sample/1"}),"custom.sink":({"in":"sample/1"},{})}
-        self.assertEqual(validate(graph,ports=registry)[2],["a","b"])
+        self.assertEqual(validate(graph,ports=registry)[2],["z","b"])
         with self.assertRaises(GraphError):
             validate(graph,ports={})
         registry["custom.sink"][0]["in"]="wrong/1"
         with self.assertRaises(GraphError):
             validate(graph,ports=registry)
+
+    def test_validated_nodes_are_detached(self):
+        graph=copy.deepcopy(FIXTURE)
+        nodes, incoming, order=validate(graph,ports=PORTS)
+        before=copy.deepcopy(nodes)
+        graph["nodes"][0]["config"]["later"]=True
+        graph["edges"].clear()
+        self.assertEqual(nodes,before)
+        self.assertEqual(len(order),len(nodes))
 
     def test_legacy_rejections(self):
         cases=[]
@@ -39,8 +48,11 @@ class GraphExtractionTests(unittest.TestCase):
                 validate(graph,ports=PORTS)
 
     def test_malformed_registry(self):
-        for registry in (None,[],{"x":None},{"x":({},{"p":5})},{"x":({},{"p":"\ud800"})}):
-            with self.assertRaises(GraphError):
+        for registry, message in ((None,"Invalid node registry"),([],"Invalid node registry"),
+                                  ({"x":None},"Invalid registry port pair"),
+                                  ({"x":({},{"p":5})},"Invalid registry port declaration"),
+                                  ({"x":({},{"p":"\ud800"})},"Invalid registry UTF-8")):
+            with self.assertRaisesRegex(GraphError,message):
                 validate(FIXTURE,ports=registry)
 
 if __name__ == "__main__":

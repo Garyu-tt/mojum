@@ -219,7 +219,11 @@ def load_graph(path):
 
 
 def _freeze_ports(ports):
-    """Snapshot declarative type information; no plugin code executes here."""
+    """Copy declarations from a stable caller-owned registry snapshot.
+
+    The caller must synchronize external writes during copying. Registry
+    publishes immutable-by-ownership snapshots rather than editing in place.
+    """
     if type(ports) is not dict or len(ports) > 1024:
         raise GraphError("Invalid node registry")
     result = {}
@@ -252,6 +256,11 @@ def _freeze_ports(ports):
 
 
 def validate(graph, *, ports):
+    """Validate a detached graph snapshot and return its topology.
+
+    Caller must prevent concurrent mutation of graph/ports during admission
+    and snapshot capture. After capture, returned nodes do not alias inputs.
+    """
     ports = _freeze_ports(ports)
     # Check exact root keys and identity fields with native dict operations
     # before the general JSON walk, so a malformed surrogate can be attributed
@@ -296,6 +305,11 @@ def validate(graph, *, ports):
     # Schema values and all nested data are now preflighted before comparisons,
     # hash lookups, or graph topology processing.
     _require_native_json_tree(graph)
+    try:
+        graph = json.loads(json.dumps(graph, sort_keys=True, ensure_ascii=False,
+                                      separators=(",", ":"), allow_nan=False))
+    except (ValueError, TypeError, UnicodeError, RuntimeError, RecursionError, OverflowError) as exc:
+        raise GraphError("Invalid graph snapshot") from exc
     if dict.get(graph, "schema") != SCHEMA:
         raise GraphError("Unsupported or absent graph schema")
 
