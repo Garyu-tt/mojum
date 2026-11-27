@@ -1,6 +1,8 @@
 import copy
 import json
 import unittest
+from threading import Event, Thread
+from unittest.mock import patch
 from pathlib import Path
 from mojum_compat.legacy_sim import LegacySimulation, digest, MAX_REPLAY_TICKS
 from mojum_core.graph import GraphError
@@ -77,3 +79,60 @@ class CheckpointCompatibility(unittest.TestCase):
         before=sim.snapshot()
         with self.assertRaises(GraphError): sim.step()
         self.assertEqual(sim.snapshot(),before)
+
+    def test_step_cannot_create_unrestorable_tick(self):
+        with patch("mojum_compat.legacy_sim.MAX_REPLAY_TICKS",3):
+            for sinks in (0,1,2):
+                with self.subTest(sinks=sinks):
+                    g=graph_sinks(sinks)
+                    sim=LegacySimulation(g)
+                    for _ in range(3): sim.step()
+                    before=sim.snapshot()
+                    with self.assertRaisesRegex(GraphError,"replay budget exhausted"):
+                        sim.step()
+                    self.assertEqual(sim.snapshot(),before)
+                    restored=LegacySimulation(g)
+                    restored.restore(before)
+                    self.assertEqual(restored.snapshot(),before)
+
+    def test_snapshot_waits_for_complete_step(self):
+        sim=LegacySimulation(graph_sinks(1))
+        entered,release,started,finished=Event(),Event(),Event(),Event()
+        original=sim._executor.step
+        result=[]
+        errors=[]
+        def delayed():
+            out=original()
+            entered.set()
+            if not release.wait(3): raise RuntimeError("test timeout")
+            return out
+        def stepping():
+            try: sim.step()
+            except Exception as exc: errors.append(exc)
+        def capture():
+            started.set()
+            try: result.append(sim.snapshot())
+            except Exception as exc: errors.append(exc)
+            finally: finished.set()
+        with patch.object(sim._executor,"step",side_effect=delayed):
+            worker=Thread(target=stepping)
+            reader=Thread(target=capture)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                reader.start()
+                self.assertTrue(started.wait(3))
+                self.assertFalse(finished.wait(.05))
+            finally:
+                release.set()
+                worker.join(4)
+                if reader.ident is not None: reader.join(4)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(errors,[])
+        self.assertEqual(result,[sim.snapshot()])
+        self.assertEqual(result[0]["state"]["tick"],1)
+        self.assertEqual(len(result[0]["state"]["episodes"]),1)
+        restored=LegacySimulation(graph_sinks(1))
+        restored.restore(result[0])
+        self.assertEqual(restored.snapshot(),result[0])

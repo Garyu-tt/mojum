@@ -6,6 +6,7 @@ Aquarium/Noosphere migration or generic plugin persistence protocol.
 import copy
 import hashlib
 import json
+from threading import Lock
 from mojum_core.executor import Executor, detached
 from mojum_core.graph import GraphError, validate
 
@@ -57,6 +58,7 @@ class LegacySimulation:
         self._dt_ns = dt_ns
         self._executor = self._new_executor()
         self._episodes = []
+        self._state_lock = Lock()
         self._graph_hash = digest(self._graph)
         self._sinks = sum(n["kind"] == "memory.episode" for n in self._graph["nodes"])
 
@@ -65,23 +67,40 @@ class LegacySimulation:
 
     @property
     def tick(self):
-        return self._executor.tick
+        with self._state_lock:
+            return self._executor.tick
 
     @property
     def episodes(self):
-        return copy.deepcopy(self._episodes)
+        with self._state_lock:
+            return copy.deepcopy(self._episodes)
 
     def step(self):
-        result = self._executor.step()
-        self._episodes.extend(result["effects"])
-        return result["outputs"]
+        with self._state_lock:
+            # Every successful step must remain inside the existing restore
+            # replay budget, including graphs without any episode sinks.
+            if self._executor.tick >= MAX_REPLAY_TICKS:
+                raise GraphError("Checkpoint replay budget exhausted")
+            result = self._executor.step()
+            self._episodes.extend(result["effects"])
+            return result["outputs"]
 
     def snapshot(self):
-        state = {"schema":"mojum.sim-checkpoint/0.1","graph_sha256":self._graph_hash,
-                 "tick":self.tick,"dt_ns":self._dt_ns,"episodes":self.episodes}
+        with self._state_lock:
+            state = {"schema":"mojum.sim-checkpoint/0.1","graph_sha256":self._graph_hash,
+                     "tick":self._executor.tick,"dt_ns":self._dt_ns,
+                     "episodes":copy.deepcopy(self._episodes)}
         return {"state":state,"sha256":digest(state)}
 
     def restore(self,snapshot):
+        """Serialize restore with steps and snapshot capture.
+
+        Caller must not mutate the supplied snapshot during restoration.
+        """
+        with self._state_lock:
+            self._restore(snapshot)
+
+    def _restore(self,snapshot):
         # Validate native shape before hashing and never mutate live state until
         # independently reproduced history is complete. Caller owns input bounds
         # for the complete Python snapshot; replay budget is explicit.
