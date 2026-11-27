@@ -1,0 +1,49 @@
+name: QA PR-Agent batch dry-run
+on:
+  push:
+    branches: [qa/pr-agent-local-pilot]
+    paths: ['.github/workflows/qa-pr-agent-batch-dry-run.yml']
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  dry-run:
+    if: github.repository == 'Garyu-tt/mojum'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRUSTED_SHA: ${{ github.sha }}
+    steps:
+      - name: Load batch helper from trusted workflow revision
+        run: |
+          set -euo pipefail
+          gh api "repos/Garyu-tt/mojum/contents/tools/qa_pr_agent_batch.py?ref=$TRUSTED_SHA" --jq .content | base64 -d > "$RUNNER_TEMP/qa_pr_agent_batch.py"
+          python -m py_compile "$RUNNER_TEMP/qa_pr_agent_batch.py"
+      - name: Test validation and immutable head gate
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          python - <<'PY'
+          import qa_pr_agent_batch as q
+          sha = "a" * 40
+          assert q.parse_pairs(["42:" + sha]) == {42: sha}
+          for args in ([], ["x:" + sha], ["42:bad"], ["42:" + sha] * 2, [f"{i}:{sha}" for i in range(1, 7)]):
+              try:
+                  q.parse_pairs(args)
+              except ValueError:
+                  continue
+              raise AssertionError("accepted invalid batch")
+          pr = {"state":"open","draft":False,"base":{"ref":"main","repo":{"full_name":q.REPO}},"head":{"sha":sha}}
+          assert q.eligible(pr, sha)
+          assert not q.eligible(pr, "b"*40)
+          pr["draft"] = True
+          assert not q.eligible(pr, sha)
+          print("validation PASS")
+          PY
+      - name: Inspect three real PRs without writes or inference
+        run: |
+          python "$RUNNER_TEMP/qa_pr_agent_batch.py" \
+            1423:b70d736038587ea335cfd0b5050c9dc26f911054 \
+            1243:df9bdd7e4ef886a3020898141dde4184c7942e6a \
+            1296:5adce516013412ba35d2ae750015484b91ea1ba7
