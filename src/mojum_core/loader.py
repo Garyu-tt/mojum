@@ -44,7 +44,9 @@ def load_registry(lock, artifacts):
     if (not _exact(lock, {"schema", "plugins"})
         or type(lock["schema"]) is not str or lock["schema"] != "mojum.release-lock/1"
         or type(lock["plugins"]) is not list or len(lock["plugins"]) > MAX_PLUGINS
-        or type(artifacts) is not dict or any(type(k) is not str for k in artifacts)):
+        or type(artifacts) is not dict or len(artifacts) > MAX_PLUGINS
+        or len(artifacts) != len(lock["plugins"])
+        or any(type(k) is not str for k in artifacts)):
         raise GraphError("Invalid release lock")
     probe, prepared, ids = Registry(), [], set()
     for entry in lock["plugins"]:

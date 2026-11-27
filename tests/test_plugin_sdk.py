@@ -1,5 +1,7 @@
 import copy
 import unittest
+from threading import Barrier, Thread
+from unittest.mock import patch
 from mojum_core.sdk import Registry
 from mojum_core.graph import GraphError
 
@@ -65,3 +67,54 @@ class SDKTests(unittest.TestCase):
         m["nodes"]["sink.read"]["inputs"]["x"]="value/2"
         r.register(m,{"sink.read":read},revision=REV)
         with self.assertRaises(GraphError): r.executor(graph())
+
+    def test_parallel_registration_one_winner(self):
+        r=Registry()
+        barrier=Barrier(3)
+        results=[]
+        def worker():
+            barrier.wait(3)
+            try:
+                r.register(SOURCE,{"source.emit":emit},revision=REV)
+                results.append("ok")
+            except GraphError:
+                results.append("rejected")
+        threads=[Thread(target=worker) for _ in range(2)]
+        for t in threads: t.start()
+        barrier.wait(3)
+        for t in threads: t.join(4)
+        self.assertTrue(all(not t.is_alive() for t in threads))
+        self.assertCountEqual(results,["ok","rejected"])
+        self.assertEqual(len(r.inventory()),1)
+        r.register(SINK,{"sink.read":read},revision=REV)
+        self.assertEqual(r.executor(graph()).step()["effects"],[{"value":0}])
+
+    def test_async_and_generator_handlers_rejected(self):
+        async def async_handler(*args): return {},[]
+        def generator(*args): yield 1
+        class AsyncCallable:
+            async def __call__(self,*args): return {},[]
+        r=Registry()
+        for fn in (async_handler,generator,AsyncCallable()):
+            with self.assertRaisesRegex(GraphError,"synchronous"):
+                r.register(SOURCE,{"source.emit":fn},revision=REV)
+            self.assertEqual(r.inventory(),[])
+
+    def test_publication_failure_preserves_previous_snapshot(self):
+        r=Registry()
+        r.register(SOURCE,{"source.emit":emit},revision=REV)
+        before=r.inventory()
+        with patch("mojum_core.sdk._freeze_ports",side_effect=MemoryError):
+            with self.assertRaises(MemoryError):
+                r.register(SINK,{"sink.read":read},revision=REV)
+        self.assertEqual(r.inventory(),before)
+        r.register(SINK,{"sink.read":read},revision=REV)
+        self.assertEqual(r.executor(graph()).step()["effects"],[{"value":0}])
+
+    def test_oversized_manifest_rejected(self):
+        r=Registry()
+        with self.assertRaises(GraphError):
+            r.register(dict(SOURCE,version="1"*1000000),{"source.emit":emit},revision=REV)
+        with self.assertRaises(GraphError):
+            r.register(SOURCE,{"source.emit":emit,**{str(i):emit for i in range(50001)}},revision=REV)
+        self.assertEqual(r.inventory(),[])
