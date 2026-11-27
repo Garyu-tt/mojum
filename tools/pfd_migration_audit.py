@@ -112,11 +112,18 @@ def observe_run(pr, lane, run, jobs, merge):
         reasons.append("workflow-run-mismatch")
     for name in lane["checks"]:
         matches = [j for j in jobs if j.get("name") == name]
+        required_steps = expected.get("job_steps", {}).get(name)
+        if required_steps is None:
+            required_steps = [expected["test_step"]]
+        if not required_steps or len(set(required_steps)) != len(required_steps):
+            reasons.append("invalid-job-step-policy:"+name)
+            continue
         if len(matches) != 1 or not all(
             j.get("run_id") == expected["id"] and j.get("head_sha") == head
             and j.get("status") == "completed" and j.get("conclusion") == "success"
-            and sum(step.get("name") == expected["test_step"] and
-                    step.get("conclusion") == "success" for step in j.get("steps", [])) == 1
+            and all(sum(step.get("name") == required and
+                        step.get("conclusion") == "success" for step in j.get("steps", [])) == 1
+                    for required in required_steps)
             for j in matches):
             reasons.append("job-metadata-mismatch:"+name)
     return {"run_id":expected["id"],"merge_sha":expected["merge_sha"],
