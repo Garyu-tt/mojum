@@ -70,6 +70,19 @@ jobs:
               assert q.classify_review_process(CompletedProcess([],0,"",warning)) == "REVIEW_QUALITY_GATE_FAILED"
           assert q.classify_review_process(CompletedProcess([],1,"","")) == "REVIEW_COMMAND_FAILED"
           assert q.classify_review_process(CompletedProcess([],0,"","")) == "COMMAND_OK_REVIEW_UNVERIFIED"
+          def run(n, status="completed", conclusion="success", **kw):
+              return dict({"id":n,"workflow_id":1,"run_number":n,"run_attempt":1,"event":"pull_request","head_branch":"example","head_sha":sha,"status":status,"conclusion":conclusion},**kw)
+          def hint(items, total=None):
+              return q.ci_hint({"workflow_runs":items,"total_count":len(items) if total is None else total},sha)
+          assert hint([])["ci_hint"] == "CI_NO_EVIDENCE"
+          assert hint([run(1,head_sha="b"*40)])["ci_hint"] == "CI_NO_EVIDENCE"
+          assert hint([run(1,conclusion="failure"),run(2)])["ci_hint"] == "CI_OBSERVED_SUCCESS"
+          assert hint([run(1,conclusion="failure")])["ci_hint"] == "CI_FAILURE_OBSERVED"
+          assert hint([run(1,status="in_progress",conclusion=None)])["ci_hint"] == "CI_PENDING_OBSERVED"
+          assert hint([run(1,conclusion="cancelled")])["ci_hint"] == "CI_NON_SUCCESS_OBSERVED"
+          assert hint([run(1)],2)["ci_hint"] == "CI_PARTIAL_EVIDENCE"
+          assert hint([run(1)])["required_checks_verified"] is False
+          assert hint([run(1)])["merge_authorized"] is False
           print("validation PASS")
           PY
       - name: Inspect three real PRs without writes or inference
@@ -139,3 +152,6 @@ jobs:
           assert run_provenance(dict(meta,event="pull_request"),123,1,head) == "RUN_UNTRUSTED"
           print("canonical queue shadow contract PASS")
           PY
+      - name: Inspect exact-head CI evidence on one real PR
+        run: |
+          python "$RUNNER_TEMP/qa_pr_agent_batch.py" --ci 721:9d51a7089e26f132461be54b43810dff7b0df079
