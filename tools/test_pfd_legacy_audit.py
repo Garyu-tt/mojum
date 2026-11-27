@@ -18,6 +18,7 @@ class StaticInventoryTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source, encoding='utf-8')
         subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
         subprocess.run(['git', '-C', str(root), '-c', 'user.name=Audit', '-c', 'user.email=audit@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'], check=True)
         return root
 
@@ -41,6 +42,18 @@ class StaticInventoryTest(unittest.TestCase):
         self.assertEqual(report['edge_count'], 2)
         self.assertEqual(report['cycles'], [['mojum.a', 'mojum.b']])
         self.assertIn('mojum.c', report['standalone_candidates'])
+
+    def test_inventory_uses_committed_tree_not_worktree(self):
+        root = self.fixture({'__init__.py': '', 'a.py': 'import mojum.b\n', 'b.py': ''})
+        baseline = analyze(root)
+        (root / 'src/mojum/a.py').write_text('import os\n', encoding='utf-8')
+        (root / 'src/mojum/b.py').unlink()
+        (root / 'src/mojum/untracked.py').write_text('def :\n', encoding='utf-8')
+        for name in ('tests/test_untracked.py', '.github/workflows/untracked.yml'):
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('', encoding='utf-8')
+        self.assertEqual(analyze(root), baseline)
 
     def test_syntax_error_remains_fail_closed(self):
         root = self.fixture({'__init__.py': '', 'broken.py': 'def :\n'})

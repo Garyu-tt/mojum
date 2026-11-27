@@ -7,7 +7,17 @@ from pathlib import Path
 import subprocess
 
 def analyze(root):
-    paths = sorted((root / "src/mojum").rglob("*.py"))
+    def git(*args):
+        return subprocess.check_output(["git", "--no-replace-objects", "-C", str(root), *args])
+    baseline = git("rev-parse", "HEAD").decode("ascii").strip()
+    entries = {}
+    for entry in git("ls-tree", "-r", "-z", baseline, "--", "src/mojum", "tests", ".github/workflows").split(b"\0"):
+        if not entry:
+            continue
+        meta, name = entry.split(b"\t", 1)
+        mode, kind, oid = meta.decode("ascii").split()
+        entries[Path(name.decode("utf-8"))] = (mode, kind, oid)
+    paths = sorted(root / p for p in entries if p.is_relative_to("src/mojum") and p.suffix == ".py")
     def module(p):
         bits = list(p.relative_to(root / "src").with_suffix("").parts)
         if bits[-1] == "__init__":
@@ -28,8 +38,11 @@ def analyze(root):
             continue
         private, dynamic, contracts, external, unresolved = [], [], set(), set(), set()
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
-        except (SyntaxError, UnicodeError, OSError) as exc:
+            mode, kind, oid = entries[p.relative_to(root)]
+            if mode not in {"100644", "100755"} or kind != "blob":
+                raise ValueError("not a regular committed Python file")
+            tree = ast.parse(git("cat-file", "blob", oid).decode("utf-8"), filename=str(p))
+        except (SyntaxError, UnicodeError, OSError, ValueError, subprocess.CalledProcessError) as exc:
             errors.append({"module":m,"error":str(exc)})
             continue
         package = m.split(".") if p.name == "__init__.py" else m.split(".")[:-1]
@@ -106,10 +119,11 @@ def analyze(root):
     incoming = collections.Counter(w for deps in graph.values() for w in deps)
     for m, detail in details.items():
         detail.update(imports=sorted(graph[m]), fan_in=incoming[m], fan_out=len(graph[m]))
-    tests = sorted(str(p.relative_to(root)) for p in (root / "tests").rglob("*.py"))
-    workflows = sorted(str(p.relative_to(root)) for p in (root / ".github/workflows").glob("*") if p.is_file())
+    tests = sorted(str(p) for p in entries if p.is_relative_to("tests") and p.suffix == ".py")
+    workflows = sorted(str(p) for p, (mode, kind, oid) in entries.items()
+                       if p.parent == Path(".github/workflows") and kind == "blob" and mode in {"100644", "100755"})
     return {"schema":"mojum.migration.static-audit/1",
-            "baseline":subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip(),
+            "baseline":baseline,
             "modules":details,"module_count":len(modules),"edge_count":sum(map(len,graph.values())),
             "cycles":sorted(cycles),"parse_errors":errors,
             "test_files":tests,"workflow_files":workflows,
