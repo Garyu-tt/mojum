@@ -142,3 +142,34 @@ class MigrationAuditTests(unittest.TestCase):
         rows=[json.loads(line) for line in stream.getvalue().splitlines()]
         self.assertEqual([(row["pr"],row["decision"]) for row in rows],[(1,"HOLD"),(2,"HOLD")])
         self.assertIn("error",rows[0])
+
+    def test_final_pr_read_refuses_identity_drift(self):
+        from copy import deepcopy
+        cases = [(None,None), (("updated_at",),"new"),
+                 (("head","sha"),"e"*40), (("base","sha"),"e"*40),
+                 (("merge_commit_sha",),"e"*40), (("base","ref"),"other"),
+                 (("head","repo","full_name"),"other/repo"),
+                 (("state",),"closed"), (("draft",),True),
+                 (("changed_files",),2), (("mergeable",),False),
+                 (("number",),2), (("user","login"),"other")]
+        for path,value in cases:
+            with self.subTest(path=path):
+                pr,lane,files,runs,reviews=fixture()
+                pr["merge_commit_sha"]="d"*40
+                latest=deepcopy(pr)
+                if path:
+                    node=latest
+                    for part in path[:-1]:
+                        node=node[part]
+                    node[path[-1]]=value
+                responses=[pr,[files],[reviews],[{"check_runs":runs}],
+                           [[{"name":lane["base"]}]],latest]
+                with patch.object(audit,"api",side_effect=responses) as fetch:
+                    if path not in (None,("updated_at",)):
+                        with self.assertRaisesRegex(ValueError,"PR identity changed"):
+                            audit.audit(lane["repo"],lane)
+                    else:
+                        result=audit.audit(lane["repo"],lane)
+                        self.assertEqual(result["decision"],"HOLD")
+                    self.assertEqual(fetch.call_count,6)
+                    self.assertEqual(fetch.call_args_list[-1].args,(lane["repo"],"pulls/1"))

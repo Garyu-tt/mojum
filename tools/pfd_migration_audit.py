@@ -136,6 +136,13 @@ def observe_run(pr, lane, run, jobs, merge, *, observed=None):
             "metadata_consistent":not reasons,"reasons":reasons,
             "trust_verified":False}
 
+def pr_identity(pr):
+    """Fields on which the collected evidence depends, not mutable PR prose."""
+    return (pr['number'], pr['state'], pr['draft'], pr.get('mergeable'),
+            pr.get('merge_commit_sha'), pr['changed_files'], pr['user']['login'],
+            *((pr[side]['ref'], pr[side]['sha'], pr[side]['repo']['full_name'])
+              for side in ('head', 'base')))
+
 def audit(repo,lane):
     n=lane["pr"]
     if type(n) is not int or n < 1:
@@ -174,6 +181,9 @@ def audit(repo,lane):
             result["blockers"].append("run-coverage-mismatch")
         if not all(r["metadata_consistent"] for r in reports):
             result["blockers"].append("run-metadata-inconsistent")
+    # REST pages are not atomic: discard evidence if PR identity moved.
+    if pr_identity(api(repo,f"pulls/{n}")) != pr_identity(pr):
+        raise ValueError("PR identity changed during audit; retry")
     return result
 
 def main():
