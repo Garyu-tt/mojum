@@ -3,6 +3,8 @@ import hashlib
 import json
 import unittest
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 from mojum_core.loader import load_registry
 from mojum_core.graph import GraphError
 
@@ -92,3 +94,16 @@ HANDLERS = {"one.emit": emit}
         e,a=bundle("one","raise AssertionError('must not execute')")
         with self.assertRaises(GraphError):
             load_registry(lock(e),{"one":a,**{str(i):a for i in range(65)}})
+
+    def test_interrupted_module_publication_cleans_up(self):
+        class InterruptedModules(dict):
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value)
+                raise KeyboardInterrupt("injected after publication")
+
+        modules = InterruptedModules()
+        e,a=bundle("one","raise AssertionError('must not execute')")
+        with patch("mojum_core.loader.sys", SimpleNamespace(modules=modules)):
+            with self.assertRaisesRegex(KeyboardInterrupt, "injected after publication"):
+                load_registry(lock(e),{"one":a})
+        self.assertEqual(modules, {})

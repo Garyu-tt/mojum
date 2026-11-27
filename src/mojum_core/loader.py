@@ -88,8 +88,8 @@ def load_registry(lock, artifacts):
         # so fresh loads cannot replace one another's module during exec.
         name = "_mojum_provider_" + pid.replace("-", "_") + "_" + uuid4().hex
         module = ModuleType(name)
-        sys.modules[name] = module
         try:
+            sys.modules[name] = module
             exec(code,module.__dict__)
             registry.register(manifest,module.__dict__.get("HANDLERS"),revision=revision)
         finally:
