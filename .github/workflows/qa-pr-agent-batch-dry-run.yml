@@ -81,3 +81,35 @@ jobs:
       - name: Discover oldest open PRs and route without inference
         run: |
           python "$RUNNER_TEMP/qa_pr_agent_batch.py" --scan 20
+      - name: Verify shadow adapter against canonical queue in temporary database
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          gh api "repos/Garyu-tt/mojum/contents/tools/qa_pr_agent_shadow_adapter.py?ref=$TRUSTED_SHA" --jq .content | base64 -d > qa_pr_agent_shadow_adapter.py
+          gh api "repos/Garyu-tt/mojum/contents/src/mojum/qa_work_queue.py?ref=074b14c152c8c5e3291e6e56595255386a751af9" --jq .content | base64 -d > qa_work_queue.py
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from qa_work_queue import QAWorkQueue
+          from qa_pr_agent_shadow_adapter import job_spec, shadow_dispatch, REPO
+          head, base = "a"*40, "b"*40
+          p = {"pr":42,"head":head,"base":base}
+          snapshot = {"number":42,"state":"open","draft":False,"head":{"sha":head},"base":{"sha":base,"ref":"main","repo":{"full_name":REPO}}}
+          spec = job_spec(p)
+          assert spec["idempotency_key"] == job_spec(p)["idempotency_key"]
+          assert spec["idempotency_key"] != job_spec(dict(p,base="c"*40))["idempotency_key"]
+          with tempfile.TemporaryDirectory() as d, QAWorkQueue(str(Path(d)/"qa.db")) as q:
+              job, created = q.enqueue(**spec,now=100)
+              assert created
+              again, created = q.enqueue(**spec,now=100)
+              assert not created and again.id == job.id
+              lease = q.claim("test-supervisor",lease_seconds=10,now=100)
+              out = shadow_dispatch(lease,snapshot,base,101)
+              assert out["status"] == "SHADOW_ELIGIBLE" and out["merge_authorized"] is False
+              assert lease.token not in str(out)
+              assert shadow_dispatch(lease,snapshot,"c"*40,101)["status"] == "STALE_BASE"
+              assert shadow_dispatch(lease,dict(snapshot,head={"sha":"c"*40}),base,101)["status"] == "STALE_HEAD_OR_INELIGIBLE"
+              assert shadow_dispatch(lease,snapshot,base,111)["status"] == "LEASE_EXPIRED"
+              assert q.get(job.id).status == "leased"
+          print("canonical queue shadow contract PASS")
+          PY
