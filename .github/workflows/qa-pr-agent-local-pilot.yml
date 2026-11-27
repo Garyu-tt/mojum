@@ -13,7 +13,7 @@ jobs:
   review:
     if: github.repository == 'Garyu-tt/mojum'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Install pinned reviewer and CPU inference
         shell: bash
@@ -31,7 +31,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
-      - name: Benchmark review 721 with structured evidence
+      - name: Benchmark review 721 with bounded chunking
         shell: bash
         env:
           GITHUB__USER_TOKEN: ${{ github.token }}
@@ -44,6 +44,8 @@ jobs:
           PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY: 'false'
           PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT: 'false'
           PR_REVIEWER__REQUIRE_TICKET_ANALYSIS_REVIEW: 'false'
+          PR_REVIEWER__ENABLE_LARGE_PR_CHUNKING: 'true'
+          PR_REVIEWER__MAX_NUMBER_OF_CALLS: '2'
           GITHUB__AGENT_LOGIN: 'github-actions[bot]'
           CONFIG__GIT_PROVIDER: github
           CONFIG__MODEL: 'ollama/qwen2.5-coder:7b'
