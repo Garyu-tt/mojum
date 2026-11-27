@@ -60,6 +60,11 @@ jobs:
           with patch.object(q.subprocess, "check_output", return_value=json.dumps([candidate(1,True)])):
               found, meta = q.discover(3)
           assert found == [] and meta["exhausted"]
+          assert q.integration_hint({"mergeable":True,"mergeable_state":"behind"}) == "REFRESH_REQUIRED"
+          assert q.integration_hint({"mergeable":False,"mergeable_state":"dirty"}) == "CONFLICT_OR_NOT_MERGEABLE"
+          assert q.integration_hint({"mergeable":None,"mergeable_state":"unknown"}) == "MERGEABILITY_UNKNOWN"
+          assert q.integration_hint({"mergeable":True,"mergeable_state":"clean"}) == "VERIFY_REQUIRED_CHECKS"
+          assert q.integration_hint({"mergeable":True,"mergeable_state":"blocked"}) == "VERIFY_REQUIRED_CHECKS"
           print("validation PASS")
           PY
       - name: Inspect three real PRs without writes or inference
