@@ -31,7 +31,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
-      - name: Benchmark review 1423 without publishing
+      - name: Benchmark review 721 with structured evidence
         shell: bash
         env:
           GITHUB__USER_TOKEN: ${{ github.token }}
@@ -57,13 +57,27 @@ jobs:
         run: |
           set -euo pipefail
           export GH_TOKEN="$GITHUB__USER_TOKEN"
-          expected=b70d736038587ea335cfd0b5050c9dc26f911054
-          test "$(gh api repos/Garyu-tt/mojum/pulls/1423 --jq .head.sha)" = "$expected"
+          expected=9d51a7089e26f132461be54b43810dff7b0df079
+          test "$(gh api repos/Garyu-tt/mojum/pulls/721 --jq .head.sha)" = "$expected"
           start=$SECONDS
-          "$RUNNER_TEMP/pr-agent-venv/bin/pr-agent" --pr_url https://github.com/Garyu-tt/mojum/pull/1423 review 2>&1 | tee "$RUNNER_TEMP/review.log"
+          "$RUNNER_TEMP/pr-agent-venv/bin/pr-agent" --pr_url https://github.com/Garyu-tt/mojum/pull/721 --json-output "$RUNNER_TEMP/review.json" review 2>&1 | tee "$RUNNER_TEMP/review.log"
           echo "review_wall_seconds=$((SECONDS-start))"
-          test "$(gh api repos/Garyu-tt/mojum/pulls/1423 --jq .head.sha)" = "$expected"
+          test "$(gh api repos/Garyu-tt/mojum/pulls/721 --jq .head.sha)" = "$expected"
           if grep -Eqi 'failed schema validation|finding data is invalid|Error during LLM inference|Failed to process the command' "$RUNNER_TEMP/review.log"; then
             echo 'Review quality gate failed'; exit 1
           fi
-          echo 'No known error markers; manual output inspection still required'
+          "$RUNNER_TEMP/pr-agent-venv/bin/python" - "$RUNNER_TEMP/review.json" <<'PY'
+          import json, sys
+          from pr_agent.algo.output_models import PRReview
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              data = json.load(stream)
+          PRReview.model_validate({"review": data["review"]})
+          coverage = data["coverage"]
+          for key in ("files_not_reviewed", "files_partially_reviewed"):
+              if not isinstance(coverage.get(key), list):
+                  raise ValueError("missing coverage evidence")
+          print(json.dumps({"pr": 721, "head": "9d51a7089e26f132461be54b43810dff7b0df079", "result": data}, ensure_ascii=True))
+          if coverage["files_not_reviewed"] or coverage["files_partially_reviewed"]:
+              raise SystemExit("Incomplete review coverage; do not accept")
+          PY
+          echo 'Structured evidence validated; manual semantic inspection required'
