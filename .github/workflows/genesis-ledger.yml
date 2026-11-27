@@ -32,7 +32,7 @@ jobs:
       - name: Standalone exact-head contract tests
         env:
           PYTHONPATH: src
-        run: python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" tests
+        run: python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)" tests
       - name: Checkout proposed merge for compatibility
         if: github.event_name == 'pull_request'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -47,4 +47,4 @@ jobs:
         run: |
           set -eu
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" tests
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)" tests
