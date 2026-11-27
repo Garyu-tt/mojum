@@ -82,3 +82,7 @@ class MigrationAuditTests(unittest.TestCase):
         self.assertTrue(audit.observe_run(pr,lane,run,jobs,merge)["metadata_consistent"])
         jobs[0]["steps"][1]["conclusion"]="skipped"
         self.assertFalse(audit.observe_run(pr,lane,run,jobs,merge)["metadata_consistent"])
+
+        selected=dict(lane["observed_run"],checks=["contract"])
+        jobs[0]["steps"][1]["conclusion"]="success"
+        self.assertTrue(audit.observe_run(pr,lane,run,jobs,merge,observed=selected)["metadata_consistent"])

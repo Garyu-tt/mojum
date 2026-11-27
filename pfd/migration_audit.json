@@ -2,68 +2,52 @@
   "repository": "Garyu-tt/mojum",
   "lanes": [
     {
-      "pr": 1544,
+      "pr": 1550,
       "repo": "Garyu-tt/mojum",
       "base": "plugin/genesis-ledger",
-      "head": "dev/genesis-ledger/extract-r01",
+      "head": "dev/genesis-ledger/sdk-r01",
       "base_sha": "f90cea3cc0ceabecca303561660c64a126724492",
-      "candidate_sha": "49f46882c327d6fbd7c2c95b895251194ebd005b",
+      "candidate_sha": "32db9baef692abad68b641f1f70f7bef98897807",
       "allowed_files": [
         ".github/workflows/genesis-ledger.yml",
         "README.md",
+        "build_bundle.py",
         "docs/GENESIS_CONTRACT.md",
         "examples/genesis_seed.json",
         "plugin.json",
+        "sdk_adapter.py",
+        "sdk_manifest.json",
         "src/mojum/__init__.py",
         "src/mojum/genesis.py",
         "tests/test_genesis.py",
-        "tests/test_genesis_canonical_json.py"
+        "tests/test_genesis_canonical_json.py",
+        "tests/test_sdk_adapter.py"
       ],
       "checks": [
         "contract (3.11)",
         "contract (3.12)",
         "contract (3.13)"
       ],
-      "observed_run": {
-        "id": 46058181665,
-        "workflow": ".github/workflows/genesis-ledger.yml",
-        "merge_sha": "8810c60a79f78174195b0988c05744d3af6770ef",
-        "test_step": "Standalone legacy contract tests"
-      }
-    },
-    {
-      "pr": 1545,
-      "repo": "Garyu-tt/mojum",
-      "base": "core/v2",
-      "head": "dev/core/graph-contract-r01",
-      "base_sha": "52fc8402ea9c3056d0bb8410249eb6cd92f25ab3",
-      "candidate_sha": "4ba6626326b66e7af2d6213ad5ddb10a532f42f4",
-      "allowed_files": [
-        ".github/workflows/core-graph-contract.yml",
-        "README.md",
-        "src/mojum_core/__init__.py",
-        "src/mojum_core/_json_nesting.py",
-        "src/mojum_core/graph.py",
-        "tests/test_graph_extraction.py"
-      ],
-      "checks": [
-        "graph-contract (3.11)",
-        "graph-contract (3.12)",
-        "graph-contract (3.13)"
-      ],
-      "observed_run": {
-        "id": 46058747165,
-        "workflow": ".github/workflows/core-graph-contract.yml",
-        "merge_sha": "223a98b797564a772ce16b3bc998ca7ec27fb5b0",
-        "test_step": "Differential extraction tests"
-      }
+      "observed_runs": [
+        {
+          "id": 46065173185,
+          "workflow": ".github/workflows/genesis-ledger.yml",
+          "merge_sha": "1dabd6ece1495eb5884743940c9c39a603817c9b",
+          "test_step": "Standalone legacy contract tests",
+          "checks": [
+            "contract (3.11)",
+            "contract (3.12)",
+            "contract (3.13)"
+          ]
+        }
+      ]
     },
     {
       "pr": 1552,
       "repo": "Garyu-tt/mojum",
-      "base": "dev/core/genesis-integration-r01",
+      "base": "core/v2",
       "head": "dev/core/compatibility-r01",
-      "base_sha": "763030e9dab8ee72c25fb7d8a407fc7bf587db87",
+      "base_sha": "52fc8402ea9c3056d0bb8410249eb6cd92f25ab3",
       "candidate_sha": "b1ee7e2a871ab7026b2109f04917975dae04e9a3",
       "allowed_files": [
         ".github/workflows/core-checkpoint-contract.yml",
@@ -73,14 +57,21 @@
         ".github/workflows/core-graph-contract.yml",
         ".github/workflows/core-plugin-loader.yml",
         ".github/workflows/core-plugin-sdk.yml",
+        "README.md",
         "compatibility/candidates.json",
         "docs/CHECKPOINT_MIGRATION_R01.md",
         "docs/CONSOLIDATED_REVIEW_HARDENING.md",
         "docs/CORE_COMPATIBILITY_R01.md",
+        "docs/EXECUTOR_EXTRACTION_R01.md",
+        "docs/GENESIS_INTEGRATION_R01.md",
         "docs/PLUGIN_LOADER_R01.md",
+        "docs/PLUGIN_SDK_R01.md",
         "integration_tests/test_genesis_integration.py",
         "integration_tests/test_genesis_updated.py",
+        "src/mojum_compat/__init__.py",
         "src/mojum_compat/legacy_sim.py",
+        "src/mojum_core/__init__.py",
+        "src/mojum_core/_json_nesting.py",
         "src/mojum_core/executor.py",
         "src/mojum_core/graph.py",
         "src/mojum_core/loader.py",
@@ -89,8 +80,7 @@
         "tests/test_executor_extraction.py",
         "tests/test_graph_extraction.py",
         "tests/test_plugin_loader.py",
-        "tests/test_plugin_sdk.py",
-        "tests/test_genesis_integration.py"
+        "tests/test_plugin_sdk.py"
       ],
       "checks": [
         "compatibility (reference, Python 3.11)",
@@ -104,93 +94,229 @@
         "updated-plugin (reference, Python 3.13)",
         "updated-plugin (candidate, Python 3.11)",
         "updated-plugin (candidate, Python 3.12)",
-        "updated-plugin (candidate, Python 3.13)"
+        "updated-plugin (candidate, Python 3.13)",
+        "graph-contract (3.11)",
+        "graph-contract (3.12)",
+        "graph-contract (3.13)",
+        "executor-contract (3.11)",
+        "executor-contract (3.12)",
+        "executor-contract (3.13)",
+        "checkpoint-contract (3.11)",
+        "checkpoint-contract (3.12)",
+        "checkpoint-contract (3.13)",
+        "sdk-contract (3.11)",
+        "sdk-contract (3.12)",
+        "sdk-contract (3.13)",
+        "loader-contract (3.11)",
+        "loader-contract (3.12)",
+        "loader-contract (3.13)",
+        "genesis-integration (3.11)",
+        "genesis-integration (3.12)",
+        "genesis-integration (3.13)"
       ],
-      "observed_run": {
-        "id": 46063983713,
-        "workflow": ".github/workflows/core-compatibility.yml",
-        "merge_sha": "7079a9695436971aad5a65e3125c4aeb7afac675",
-        "job_steps": {
-          "compatibility (reference, Python 3.11)": [
-            "Record actual core and pinned inputs",
-            "Run identical pinned compatibility harness"
-          ],
-          "compatibility (reference, Python 3.12)": [
-            "Record actual core and pinned inputs",
-            "Run identical pinned compatibility harness"
-          ],
-          "compatibility (reference, Python 3.13)": [
-            "Record actual core and pinned inputs",
-            "Run identical pinned compatibility harness"
-          ],
-          "compatibility (candidate, Python 3.11)": [
-            "Record actual core and pinned inputs",
-            "Run identical pinned compatibility harness",
-            "Candidate core unit regressions"
-          ],
-          "compatibility (candidate, Python 3.12)": [
-            "Record actual core and pinned inputs",
-            "Run identical pinned compatibility harness",
-            "Candidate core unit regressions"
-          ],
-          "compatibility (candidate, Python 3.13)": [
-            "Record actual core and pinned inputs",
-            "Run identical pinned compatibility harness",
-            "Candidate core unit regressions"
-          ],
-          "updated-plugin (reference, Python 3.11)": [
-            "Record actual core and pinned inputs",
-            "Run updated plugin compatibility harness"
-          ],
-          "updated-plugin (reference, Python 3.12)": [
-            "Record actual core and pinned inputs",
-            "Run updated plugin compatibility harness"
-          ],
-          "updated-plugin (reference, Python 3.13)": [
-            "Record actual core and pinned inputs",
-            "Run updated plugin compatibility harness"
-          ],
-          "updated-plugin (candidate, Python 3.11)": [
-            "Record actual core and pinned inputs",
-            "Run updated plugin compatibility harness"
-          ],
-          "updated-plugin (candidate, Python 3.12)": [
-            "Record actual core and pinned inputs",
-            "Run updated plugin compatibility harness"
-          ],
-          "updated-plugin (candidate, Python 3.13)": [
-            "Record actual core and pinned inputs",
-            "Run updated plugin compatibility harness"
+      "observed_runs": [
+        {
+          "id": 46065182631,
+          "workflow": ".github/workflows/core-compatibility.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "job_steps": {
+            "compatibility (reference, Python 3.11)": [
+              "Record actual core and pinned inputs",
+              "Run identical pinned compatibility harness"
+            ],
+            "compatibility (reference, Python 3.12)": [
+              "Record actual core and pinned inputs",
+              "Run identical pinned compatibility harness"
+            ],
+            "compatibility (reference, Python 3.13)": [
+              "Record actual core and pinned inputs",
+              "Run identical pinned compatibility harness"
+            ],
+            "compatibility (candidate, Python 3.11)": [
+              "Record actual core and pinned inputs",
+              "Run identical pinned compatibility harness",
+              "Candidate core unit regressions"
+            ],
+            "compatibility (candidate, Python 3.12)": [
+              "Record actual core and pinned inputs",
+              "Run identical pinned compatibility harness",
+              "Candidate core unit regressions"
+            ],
+            "compatibility (candidate, Python 3.13)": [
+              "Record actual core and pinned inputs",
+              "Run identical pinned compatibility harness",
+              "Candidate core unit regressions"
+            ],
+            "updated-plugin (reference, Python 3.11)": [
+              "Record actual core and pinned inputs",
+              "Run updated plugin compatibility harness"
+            ],
+            "updated-plugin (reference, Python 3.12)": [
+              "Record actual core and pinned inputs",
+              "Run updated plugin compatibility harness"
+            ],
+            "updated-plugin (reference, Python 3.13)": [
+              "Record actual core and pinned inputs",
+              "Run updated plugin compatibility harness"
+            ],
+            "updated-plugin (candidate, Python 3.11)": [
+              "Record actual core and pinned inputs",
+              "Run updated plugin compatibility harness"
+            ],
+            "updated-plugin (candidate, Python 3.12)": [
+              "Record actual core and pinned inputs",
+              "Run updated plugin compatibility harness"
+            ],
+            "updated-plugin (candidate, Python 3.13)": [
+              "Record actual core and pinned inputs",
+              "Run updated plugin compatibility harness"
+            ]
+          },
+          "checks": [
+            "compatibility (reference, Python 3.11)",
+            "compatibility (reference, Python 3.12)",
+            "compatibility (reference, Python 3.13)",
+            "compatibility (candidate, Python 3.11)",
+            "compatibility (candidate, Python 3.12)",
+            "compatibility (candidate, Python 3.13)",
+            "updated-plugin (reference, Python 3.11)",
+            "updated-plugin (reference, Python 3.12)",
+            "updated-plugin (reference, Python 3.13)",
+            "updated-plugin (candidate, Python 3.11)",
+            "updated-plugin (candidate, Python 3.12)",
+            "updated-plugin (candidate, Python 3.13)"
           ]
+        },
+        {
+          "id": 46065182752,
+          "workflow": ".github/workflows/core-graph-contract.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "checks": [
+            "graph-contract (3.11)",
+            "graph-contract (3.12)",
+            "graph-contract (3.13)"
+          ],
+          "job_steps": {
+            "graph-contract (3.11)": [
+              "Differential extraction tests"
+            ],
+            "graph-contract (3.12)": [
+              "Differential extraction tests"
+            ],
+            "graph-contract (3.13)": [
+              "Differential extraction tests"
+            ]
+          }
+        },
+        {
+          "id": 46065182687,
+          "workflow": ".github/workflows/core-executor-contract.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "checks": [
+            "executor-contract (3.11)",
+            "executor-contract (3.12)",
+            "executor-contract (3.13)"
+          ],
+          "job_steps": {
+            "executor-contract (3.11)": [
+              "Differential graph and executor tests"
+            ],
+            "executor-contract (3.12)": [
+              "Differential graph and executor tests"
+            ],
+            "executor-contract (3.13)": [
+              "Differential graph and executor tests"
+            ]
+          }
+        },
+        {
+          "id": 46065182671,
+          "workflow": ".github/workflows/core-checkpoint-contract.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "checks": [
+            "checkpoint-contract (3.11)",
+            "checkpoint-contract (3.12)",
+            "checkpoint-contract (3.13)"
+          ],
+          "job_steps": {
+            "checkpoint-contract (3.11)": [
+              "Run graph, executor and checkpoint differential tests"
+            ],
+            "checkpoint-contract (3.12)": [
+              "Run graph, executor and checkpoint differential tests"
+            ],
+            "checkpoint-contract (3.13)": [
+              "Run graph, executor and checkpoint differential tests"
+            ]
+          }
+        },
+        {
+          "id": 46065182698,
+          "workflow": ".github/workflows/core-plugin-sdk.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "checks": [
+            "sdk-contract (3.11)",
+            "sdk-contract (3.12)",
+            "sdk-contract (3.13)"
+          ],
+          "job_steps": {
+            "sdk-contract (3.11)": [
+              "Run all migrated contract tests"
+            ],
+            "sdk-contract (3.12)": [
+              "Run all migrated contract tests"
+            ],
+            "sdk-contract (3.13)": [
+              "Run all migrated contract tests"
+            ]
+          }
+        },
+        {
+          "id": 46065182710,
+          "workflow": ".github/workflows/core-plugin-loader.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "checks": [
+            "loader-contract (3.11)",
+            "loader-contract (3.12)",
+            "loader-contract (3.13)"
+          ],
+          "job_steps": {
+            "loader-contract (3.11)": [
+              "Run migrated contract suite"
+            ],
+            "loader-contract (3.12)": [
+              "Run migrated contract suite"
+            ],
+            "loader-contract (3.13)": [
+              "Run migrated contract suite"
+            ]
+          }
+        },
+        {
+          "id": 46065182664,
+          "workflow": ".github/workflows/core-genesis-integration.yml",
+          "merge_sha": "3b06f1f977f7c3bc445e236215dafbd897687c7a",
+          "checks": [
+            "genesis-integration (3.11)",
+            "genesis-integration (3.12)",
+            "genesis-integration (3.13)"
+          ],
+          "job_steps": {
+            "genesis-integration (3.11)": [
+              "Standalone plugin tests",
+              "Core integration and regression"
+            ],
+            "genesis-integration (3.12)": [
+              "Standalone plugin tests",
+              "Core integration and regression"
+            ],
+            "genesis-integration (3.13)": [
+              "Standalone plugin tests",
+              "Core integration and regression"
+            ]
+          }
         }
-      }
-    },
-    {
-      "pr": 1550,
-      "repo": "Garyu-tt/mojum",
-      "base": "dev/genesis-ledger/extract-r01",
-      "head": "dev/genesis-ledger/sdk-r01",
-      "base_sha": "49f46882c327d6fbd7c2c95b895251194ebd005b",
-      "candidate_sha": "32db9baef692abad68b641f1f70f7bef98897807",
-      "allowed_files": [
-        ".github/workflows/genesis-ledger.yml",
-        "README.md",
-        "build_bundle.py",
-        "sdk_adapter.py",
-        "sdk_manifest.json",
-        "tests/test_sdk_adapter.py"
-      ],
-      "checks": [
-        "contract (3.11)",
-        "contract (3.12)",
-        "contract (3.13)"
-      ],
-      "observed_run": {
-        "id": 46063390660,
-        "workflow": ".github/workflows/genesis-ledger.yml",
-        "merge_sha": "ed88ebb1c44a10427960dc39ae48b12c65837f8c",
-        "test_step": "Standalone legacy contract tests"
-      }
+      ]
     }
   ]
 }

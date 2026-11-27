@@ -91,10 +91,10 @@ def evaluate(pr, lane, files, runs, reviews, protected):
     return {"pr":pr["number"],"head":head,"base":base,"decision":"HOLD",
             "blockers":blockers,"checks_seen":len(runs)}
 
-def observe_run(pr, lane, run, jobs, merge):
+def observe_run(pr, lane, run, jobs, merge, *, observed=None):
     """Correlate server metadata, not runner execution or workflow trust."""
     head, base = lane["candidate_sha"], lane["base_sha"]
-    expected = lane["observed_run"]
+    expected = observed if observed is not None else lane["observed_run"]
     reasons = []
     if (pr["head"]["sha"] != head or pr["base"]["sha"] != base
         or pr.get("merge_commit_sha") != expected["merge_sha"]
@@ -110,7 +110,7 @@ def observe_run(pr, lane, run, jobs, merge):
         or run.get("status") != "completed" or run.get("conclusion") != "success"
         or len(links) != 1):
         reasons.append("workflow-run-mismatch")
-    for name in lane["checks"]:
+    for name in expected.get("checks", lane["checks"]):
         matches = [j for j in jobs if j.get("name") == name]
         required_steps = expected.get("job_steps", {}).get(name)
         if required_steps is None:
@@ -142,9 +142,13 @@ def audit(repo,lane):
         raise ValueError("invalid check pagination")
     runs=[r for page in pages for r in page["check_runs"]]
     branches=flatten(api(repo,"branches?protected=true&per_page=100",True))
-    result = evaluate(pr,lane,files,runs,reviews,any(b["name"]==lane["base"] for b in branches))
-    observed = lane.get("observed_run")
-    if observed:
+    observations = lane.get("observed_runs")
+    if observations is None:
+        observations = [lane["observed_run"]] if "observed_run" in lane else []
+    scoped_ids = set()
+    reports = []
+    expected_names = []
+    for observed in observations:
         run_id = observed["id"]
         if type(run_id) is not int or run_id < 1:
             raise ValueError("invalid run ID")
@@ -152,8 +156,17 @@ def audit(repo,lane):
         job_pages = api(repo,f"actions/runs/{run_id}/jobs?per_page=100",True)
         jobs = [j for page in job_pages for j in page["jobs"]]
         merge = api(repo,f"git/commits/{observed['merge_sha']}")
-        result["observed_run"] = observe_run(pr,lane,run,jobs,merge)
-        if not result["observed_run"]["metadata_consistent"]:
+        reports.append(observe_run(pr,lane,run,jobs,merge,observed=observed))
+        expected_names.extend(observed.get("checks",lane["checks"]))
+        scoped_ids.update(j["id"] for j in jobs if j.get("name") in observed.get("checks",lane["checks"]))
+    # Historical jobs on the same head are not evidence for a retargeted PR.
+    current_checks = [r for r in runs if r.get("id") in scoped_ids] if observations else runs
+    result = evaluate(pr,lane,files,current_checks,reviews,any(b["name"]==lane["base"] for b in branches))
+    if observations:
+        result["observed_runs"] = reports
+        if sorted(expected_names) != sorted(lane["checks"]):
+            result["blockers"].append("run-coverage-mismatch")
+        if not all(r["metadata_consistent"] for r in reports):
             result["blockers"].append("run-metadata-inconsistent")
     return result
 
