@@ -1,4 +1,4 @@
-"""Plugin-first acceptance dispatcher. Run only from trusted control checkout."""
+"""Read-only legacy PFD dispatcher. Merge mode is disabled pending trusted gate."""
 from __future__ import annotations
 
 import argparse
@@ -77,6 +77,8 @@ def check_pr(pr, repo, plugin, checks):
     return "candidate"
 
 def inspect(repo, plugin, checks, pr, apply):
+    if apply:
+        return "apply-disabled"
     reason = check_pr(pr, repo, plugin, checks)
     if reason != "candidate":
         return reason
@@ -84,16 +86,7 @@ def inspect(repo, plugin, checks, pr, apply):
     protection = gh("api", f"repos/{repo}/branches/{quote(base, safe='')}/protection")
     if not check_protection(protection, checks):
         return "branch-protection-not-verified"
-    n = pr["number"]
-    sha = pr["headRefOid"]
-    # No code from the PR is executed in the privileged dispatcher.
-    # Scope is enforced by a trusted required CI job, not by PR-authored config.
-    # The branch protection is the authoritative atomic gate at merge time.
-    if apply:
-        subprocess.run(["gh", "pr", "merge", str(n), "-R", repo, "--squash",
-                        "--match-head-commit", sha], check=True, timeout=60)
-        return "merge-request-succeeded"
-    return "eligible"
+    return "candidate-only-not-authorized"
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -101,6 +94,8 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
+    if args.apply:
+        parser.error("apply disabled: trusted CI and independent review not established")
     if not 1 <= args.limit <= 1000:
         parser.error("limit must be 1..1000")
     cfg = validate(json.loads(args.config.read_text(encoding="utf-8")))
