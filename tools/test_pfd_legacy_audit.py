@@ -48,12 +48,24 @@ class StaticInventoryTest(unittest.TestCase):
         baseline = analyze(root)
         (root / 'src/mojum/a.py').write_text('import os\n', encoding='utf-8')
         (root / 'src/mojum/b.py').unlink()
+        (root / 'src/mojum/staged.py').write_text('', encoding='utf-8')
+        subprocess.run(['git', '-C', str(root), 'add', 'src/mojum/staged.py'], check=True)
         (root / 'src/mojum/untracked.py').write_text('def :\n', encoding='utf-8')
         for name in ('tests/test_untracked.py', '.github/workflows/untracked.yml'):
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('', encoding='utf-8')
         self.assertEqual(analyze(root), baseline)
+
+    def test_symlink_python_blob_fails_closed(self):
+        root = self.fixture({'__init__.py': '', 'a.py': ''})
+        path = root / 'src/mojum/alias.py'
+        path.symlink_to('a.py')
+        subprocess.run(['git', '-C', str(root), 'add', 'src/mojum/alias.py'], check=True)
+        subprocess.run(['git', '-C', str(root), '-c', 'user.name=Audit', '-c', 'user.email=audit@example.invalid', 'commit', '-qm', 'symlink'], check=True)
+        report = analyze(root)
+        self.assertTrue(any(e['module'] == 'mojum.alias' for e in report['parse_errors']))
+        self.assertNotIn('mojum.alias', report['standalone_candidates'])
 
     def test_syntax_error_remains_fail_closed(self):
         root = self.fixture({'__init__.py': '', 'broken.py': 'def :\n'})
