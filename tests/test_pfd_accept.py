@@ -1,0 +1,81 @@
+"""Offline regression tests for PFD dispatcher."""
+import importlib.util
+from pathlib import Path
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("pfd_accept", Path(__file__).resolve().parents[1] / "tools" / "pfd_accept.py")
+pfd = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pfd)
+
+REPO = "Garyu-tt/mojum"
+CHECKS = {"Plugin CI / contract": 123, "Plugin CI / scope": 123}
+
+def pr():
+    return dict(number=1, headRefOid="a"*40, headRefName="dev/demo/test",
+                baseRefName="plugin/demo", isDraft=False, isCrossRepository=False,
+                headRepository={"nameWithOwner": REPO}, reviewDecision="APPROVED",
+                mergeStateStatus="CLEAN", statusCheckRollup=[
+                    dict(workflowName="Plugin CI", name=n, status="COMPLETED", conclusion="SUCCESS")
+                    for n in ("contract", "scope")])
+
+def protection():
+    return dict(required_status_checks={"strict":True, "contexts":["contract","scope"],
+                 "checks":[{"context":n,"app_id":123} for n in ("contract","scope")]},
+                required_pull_request_reviews={"required_approving_review_count":1,
+                "dismiss_stale_reviews":True,"require_last_push_approval":True},
+                enforce_admins={"enabled":True})
+
+class AcceptanceTest(unittest.TestCase):
+    def test_candidate(self):
+        self.assertEqual(pfd.check_pr(pr(),REPO,"demo",CHECKS),"candidate")
+
+    def test_blockers(self):
+        for key,value in [("isDraft",True),("isCrossRepository",True),
+                          ("baseRefName","main"),("headRefOid","a"),
+                          ("headRefName","dev/other/x"),("reviewDecision","REVIEW_REQUIRED"),
+                          ("mergeStateStatus","BEHIND"),("headRepository",{"nameWithOwner":"other/repo"})]:
+            with self.subTest(key=key):
+                self.assertNotEqual(pfd.check_pr(dict(pr(),**{key:value}),REPO,"demo",CHECKS),"candidate")
+
+    def test_missing_failed_duplicated_checks(self):
+        for kind in ("missing","failure","skipped","duplicate"):
+            v=pr()
+            if kind=="missing": v["statusCheckRollup"].pop()
+            elif kind=="duplicate": v["statusCheckRollup"].append(v["statusCheckRollup"][0])
+            else: v["statusCheckRollup"][0]["conclusion"]=kind.upper()
+            self.assertNotEqual(pfd.check_pr(v,REPO,"demo",CHECKS),"candidate")
+
+    def test_protection(self):
+        self.assertTrue(pfd.check_protection(protection(),CHECKS))
+        for key in ("required_status_checks","required_pull_request_reviews","enforce_admins"):
+            v=protection()
+            v.pop(key)
+            self.assertFalse(pfd.check_protection(v,CHECKS))
+        v=protection()
+        v["required_status_checks"]["checks"][0]["app_id"]=999
+        self.assertFalse(pfd.check_protection(v,CHECKS))
+        v=protection()
+        v["required_status_checks"]["strict"]=False
+        self.assertFalse(pfd.check_protection(v,CHECKS))
+
+    def test_dry_run_and_head_guard(self):
+        with patch.object(pfd,"gh",return_value=protection()), patch.object(pfd.subprocess,"run") as run:
+            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),False),"eligible")
+            run.assert_not_called()
+            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),True),"merge-request-succeeded")
+            self.assertEqual(run.call_args.args[0][-2:],["--match-head-commit","a"*40])
+
+    def test_no_merge_without_protection(self):
+        with patch.object(pfd,"gh",return_value={}), patch.object(pfd.subprocess,"run") as run:
+            self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),True),"branch-protection-not-verified")
+            run.assert_not_called()
+
+    def test_config(self):
+        self.assertEqual(pfd.validate({"repository":REPO,"plugins":{}})["plugins"],{})
+        for checks in ({},{"Plugin CI / *":123},{"Plugin CI / scope":-1}):
+            with self.assertRaises(ValueError):
+                pfd.validate({"repository":REPO,"plugins":{"demo":{"checks":checks}}})
+
+if __name__=="__main__":
+    unittest.main()
