@@ -1,0 +1,20 @@
+name: PFD acceptance audit
+on:
+  pull_request:
+    branches: [dev/pfd-r01]
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+jobs:
+  acceptance-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -m unittest discover -s tests -p test_pfd_migration_audit.py -v
+      - run: python tools/pfd_migration_audit.py
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,71 @@
+{
+  "repository": "Garyu-tt/mojum",
+  "lanes": [
+    {
+      "pr": 1544,
+      "repo": "Garyu-tt/mojum",
+      "base": "plugin/genesis-ledger",
+      "head": "dev/genesis-ledger/extract-r01",
+      "base_sha": "f90cea3cc0ceabecca303561660c64a126724492",
+      "candidate_sha": "49f46882c327d6fbd7c2c95b895251194ebd005b",
+      "allowed_files": [
+        ".github/workflows/genesis-ledger.yml",
+        "README.md",
+        "docs/GENESIS_CONTRACT.md",
+        "examples/genesis_seed.json",
+        "plugin.json",
+        "src/mojum/__init__.py",
+        "src/mojum/genesis.py",
+        "tests/test_genesis.py",
+        "tests/test_genesis_canonical_json.py"
+      ],
+      "checks": [
+        "contract (3.11)",
+        "contract (3.12)",
+        "contract (3.13)"
+      ]
+    },
+    {
+      "pr": 1545,
+      "repo": "Garyu-tt/mojum",
+      "base": "core/v2",
+      "head": "dev/core/graph-contract-r01",
+      "base_sha": "52fc8402ea9c3056d0bb8410249eb6cd92f25ab3",
+      "candidate_sha": "4ba6626326b66e7af2d6213ad5ddb10a532f42f4",
+      "allowed_files": [
+        ".github/workflows/core-graph-contract.yml",
+        "README.md",
+        "src/mojum_core/__init__.py",
+        "src/mojum_core/_json_nesting.py",
+        "src/mojum_core/graph.py",
+        "tests/test_graph_extraction.py"
+      ],
+      "checks": [
+        "graph-contract (3.11)",
+        "graph-contract (3.12)",
+        "graph-contract (3.13)"
+      ]
+    },
+    {
+      "pr": 1552,
+      "repo": "Garyu-tt/mojum",
+      "base": "dev/core/genesis-integration-r01",
+      "head": "dev/core/compatibility-r01",
+      "base_sha": "763030e9dab8ee72c25fb7d8a407fc7bf587db87",
+      "candidate_sha": "36f6177b4e4c56111926747e7667114923d463c6",
+      "allowed_files": [
+        ".github/workflows/core-compatibility.yml",
+        "compatibility/candidates.json",
+        "docs/CORE_COMPATIBILITY_R01.md"
+      ],
+      "checks": [
+        "compatibility (reference, Python 3.11)",
+        "compatibility (reference, Python 3.12)",
+        "compatibility (reference, Python 3.13)",
+        "compatibility (candidate, Python 3.11)",
+        "compatibility (candidate, Python 3.12)",
+        "compatibility (candidate, Python 3.13)"
+      ]
+    }
+  ]
+}
