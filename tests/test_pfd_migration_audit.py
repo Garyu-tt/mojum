@@ -189,3 +189,28 @@ class MigrationAuditTests(unittest.TestCase):
                 rows=[json.loads(line) for line in stream.getvalue().splitlines()]
                 self.assertEqual([(row["pr"],row["decision"]) for row in rows],[(None,"HOLD"),(2,"HOLD")])
                 self.assertIn("error",rows[0])
+
+    def test_final_read_follows_observed_run_evidence(self):
+        from copy import deepcopy
+        for drift in (False, True):
+            with self.subTest(drift=drift):
+                pr,lane,files,runs,reviews=fixture()
+                pr["merge_commit_sha"]="d"*40
+                lane["observed_run"]={"id":9,"merge_sha":"d"*40}
+                latest=deepcopy(pr)
+                if drift:
+                    latest["merge_commit_sha"]="e"*40
+                responses=[pr,[files],[reviews],[{"check_runs":runs}],
+                           [[{"name":lane["base"]}]],{},[{"jobs":[]}],{},latest]
+                with patch.object(audit,"api",side_effect=responses) as fetch, patch.object(audit,"observe_run",return_value={"metadata_consistent":True}) as observe:
+                    if drift:
+                        with self.assertRaisesRegex(ValueError,"PR identity changed"):
+                            audit.audit(lane["repo"],lane)
+                    else:
+                        result=audit.audit(lane["repo"],lane)
+                        self.assertEqual(result["decision"],"HOLD")
+                        self.assertEqual(result["observed_runs"],[{"metadata_consistent":True}])
+                    observe.assert_called_once()
+                    self.assertEqual(fetch.call_count,9)
+                    self.assertEqual(fetch.call_args_list[-2].args,(lane["repo"],"git/commits/"+"d"*40))
+                    self.assertEqual(fetch.call_args_list[-1].args,(lane["repo"],"pulls/1"))
