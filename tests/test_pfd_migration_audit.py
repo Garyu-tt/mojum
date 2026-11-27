@@ -173,3 +173,19 @@ class MigrationAuditTests(unittest.TestCase):
                         self.assertEqual(result["decision"],"HOLD")
                     self.assertEqual(fetch.call_count,6)
                     self.assertEqual(fetch.call_args_list[-1].args,(lane["repo"],"pulls/1"))
+
+    def test_malformed_policy_lane_does_not_abort_remaining_lanes(self):
+        import io
+        import json
+        import sys
+        from contextlib import redirect_stdout
+        for malformed in ({}, None, [], {"pr":True}, {"pr":0}, {"pr":"1"}, {"pr":-1}):
+            with self.subTest(lane=malformed):
+                cfg={"repository":"owner/repo","lanes":[malformed,{"pr":2}]}
+                stream=io.StringIO()
+                with patch.object(sys,"argv",["audit"]), patch.object(Path,"read_text",return_value=json.dumps(cfg)), patch.object(audit,"audit",return_value={"pr":2,"decision":"HOLD"}) as inspect, redirect_stdout(stream):
+                    self.assertEqual(audit.main(),1)
+                inspect.assert_called_once_with("owner/repo",{"pr":2})
+                rows=[json.loads(line) for line in stream.getvalue().splitlines()]
+                self.assertEqual([(row["pr"],row["decision"]) for row in rows],[(None,"HOLD"),(2,"HOLD")])
+                self.assertIn("error",rows[0])

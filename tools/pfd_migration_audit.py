@@ -193,11 +193,16 @@ def main():
     cfg=json.loads(args.policy.read_text(encoding="utf-8"))
     errors=0
     for lane in cfg["lanes"]:
+        number = lane.get("pr") if type(lane) is dict else None
+        if type(number) is not int or number < 1:
+            errors+=1
+            print(json.dumps({"pr":None,"decision":"HOLD","error":"invalid policy lane PR number"}))
+            continue
         try:
             print(json.dumps(audit(cfg["repository"],lane),sort_keys=True))
         except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
             errors+=1
-            print(json.dumps({"pr":lane["pr"],"decision":"HOLD","error":str(exc)}))
+            print(json.dumps({"pr":number,"decision":"HOLD","error":str(exc)}))
     return int(bool(errors))
 
 if __name__=="__main__":
