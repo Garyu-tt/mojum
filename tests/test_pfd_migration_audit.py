@@ -55,6 +55,28 @@ class MigrationAuditTests(unittest.TestCase):
         with patch.object(audit,"get_page",side_effect=[([1],'<https://evil.invalid>; rel="next"'),([2],"")]) as fetch:
             self.assertEqual(audit.api("x/y","pulls/1/files?per_page=100",True),[[1],[2]])
             self.assertEqual(fetch.call_args_list[1].args[0],"https://api.github.com/repos/x/y/pulls/1/files?per_page=100&page=2")
+    def test_deep_json_response_refused_without_aborting_later_lane(self):
+        import io
+        import json
+        import sys
+        from contextlib import redirect_stdout
+        from unittest.mock import MagicMock
+        cfg={"repository":"owner/repo","lanes":[{"pr":1},{"pr":2}]}
+        stream=io.StringIO()
+        opener=MagicMock()
+        response=opener.open.return_value.__enter__.return_value
+        depth=sys.getrecursionlimit()+100
+        response.read.side_effect=[b"["*depth+b"0"+b"]"*depth,b'{"pr":2,"decision":"HOLD"}']
+        response.headers={}
+        def inspect(repo,lane):
+            return audit.get_page("https://api.github.com/repos/owner/repo/pulls/"+str(lane["pr"]))[0]
+        with patch.object(sys,"argv",["audit"]), patch.object(Path,"read_text",return_value=json.dumps(cfg)), patch.object(audit,"build_opener",return_value=opener), patch.object(audit,"audit",side_effect=inspect), redirect_stdout(stream):
+            self.assertEqual(audit.main(),1)
+        rows=[json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual([(row["pr"],row["decision"]) for row in rows],[(1,"HOLD"),(2,"HOLD")])
+        self.assertIn("JSON nesting",rows[0]["error"])
+        self.assertEqual(response.read.call_count,2)
+
     def test_redirect_rejected(self):
         with self.assertRaises(ValueError):
             audit.NoRedirect().redirect_request(None,None,302,"",{},"https://evil.invalid")

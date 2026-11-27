@@ -31,7 +31,11 @@ def get_page(url):
         payload = response.read(MAX_RESPONSE + 1)
         if len(payload) > MAX_RESPONSE:
             raise ValueError("GitHub response exceeds budget")
-        return json.loads(payload), response.headers.get("Link", "")
+        try:
+            data = json.loads(payload)
+        except RecursionError as exc:
+            raise ValueError("GitHub response JSON nesting exceeds decoder limit") from exc
+        return data, response.headers.get("Link", "")
 
 def api(repo, suffix, paginate=False):
     if (type(repo) is not str or not REPO.fullmatch(repo)
