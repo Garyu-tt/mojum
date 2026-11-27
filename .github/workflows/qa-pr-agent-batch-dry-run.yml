@@ -39,6 +39,14 @@ jobs:
           assert not q.eligible(pr, "b"*40)
           pr["draft"] = True
           assert not q.eligible(pr, sha)
+          pr["draft"] = False
+          pr["user"] = {"login": "author"}
+          approve = {"user":{"login":"peer"},"state":"APPROVED","commit_id":sha}
+          assert q.review_route(pr, [approve], sha) == "ROUTE_EXISTING_APPROVAL_TO_QA"
+          assert q.review_route(pr, [approve], "b"*40) is None
+          assert q.review_route(pr, [approve, dict(approve,state="DISMISSED")], sha) is None
+          assert q.review_route(pr, [dict(approve,user={"login":"author"})], sha) is None
+          assert q.review_route(pr, [approve, dict(approve,state="CHANGES_REQUESTED")], sha) == "ROUTE_EXISTING_CHANGES_REQUESTED"
           print("validation PASS")
           PY
       - name: Inspect three real PRs without writes or inference
