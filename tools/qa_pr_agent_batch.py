@@ -48,9 +48,37 @@ def eligible(pr, sha):
     )
 
 
+def review_route(pr, reviews, sha):
+    """Routing hint only: never infer that branch protection is satisfied."""
+    author = (pr.get("user") or {}).get("login", "").lower()
+    latest = {}
+    for item in reviews:
+        who = (item.get("user") or {}).get("login", "").lower()
+        state = item.get("state")
+        if who and who != author and state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[who] = item
+    if any(x.get("state") == "CHANGES_REQUESTED" for x in latest.values()):
+        return "ROUTE_EXISTING_CHANGES_REQUESTED"
+    if any(x.get("state") == "APPROVED" and x.get("commit_id") == sha for x in latest.values()):
+        return "ROUTE_EXISTING_APPROVAL_TO_QA"
+    return None
+
+
+def fetch_reviews(number):
+    raw = subprocess.check_output(
+        ["gh", "api", "--paginate", "--slurp", f"repos/{REPO}/pulls/{number}/reviews?per_page=100"],
+        text=True, timeout=30
+    )
+    return [item for page in json.loads(raw) for item in page]
+
+
 def review(number, sha, agent, execute):
-    if not eligible(fetch(number), sha):
+    pr = fetch(number)
+    if not eligible(pr, sha):
         return "SKIP_STALE_OR_INELIGIBLE"
+    route = review_route(pr, fetch_reviews(number), sha)
+    if route:
+        return route
     if not execute:
         return "DRY_RUN_ELIGIBLE"
     env = os.environ.copy()
@@ -111,7 +139,7 @@ def main():
         except (subprocess.SubprocessError, OSError, ValueError, RuntimeError) as exc:
             status = "ERROR_" + type(exc).__name__
         print(json.dumps({"pr": number, "head": sha, "status": status}), flush=True)
-        failed |= status not in {"DRY_RUN_ELIGIBLE", "COMMAND_OK_REVIEW_UNVERIFIED"}
+        failed |= status not in {"DRY_RUN_ELIGIBLE", "COMMAND_OK_REVIEW_UNVERIFIED", "ROUTE_EXISTING_APPROVAL_TO_QA", "ROUTE_EXISTING_CHANGES_REQUESTED"}
     return int(failed)
 
 
