@@ -47,6 +47,19 @@ jobs:
           assert q.review_route(pr, [approve, dict(approve,state="DISMISSED")], sha) is None
           assert q.review_route(pr, [dict(approve,user={"login":"author"})], sha) is None
           assert q.review_route(pr, [approve, dict(approve,state="CHANGES_REQUESTED")], sha) == "ROUTE_EXISTING_CHANGES_REQUESTED"
+          from unittest.mock import patch
+          import json
+          def candidate(n, draft=False):
+              return {"number":n,"state":"open","draft":draft,"base":{"ref":"main","repo":{"full_name":q.REPO}},"head":{"sha":sha}}
+          pages = [[candidate(i, True) for i in range(1, 30)] + [candidate(30)],
+                   [candidate(31), candidate(32)]]
+          with patch.object(q.subprocess, "check_output", side_effect=[json.dumps(p) for p in pages]):
+              found, meta = q.discover(3)
+          assert found == [(30,sha),(31,sha),(32,sha)]
+          assert meta["scanned"] == 32 and meta["skipped"] == 29
+          with patch.object(q.subprocess, "check_output", return_value=json.dumps([candidate(1,True)])):
+              found, meta = q.discover(3)
+          assert found == [] and meta["exhausted"]
           print("validation PASS")
           PY
       - name: Inspect three real PRs without writes or inference
