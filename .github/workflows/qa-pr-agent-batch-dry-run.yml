@@ -91,7 +91,7 @@ jobs:
           import tempfile
           from pathlib import Path
           from qa_work_queue import QAWorkQueue
-          from qa_pr_agent_shadow_adapter import job_spec, shadow_dispatch, REPO
+          from qa_pr_agent_shadow_adapter import job_spec, shadow_dispatch, advisory_receipt, REPO
           head, base = "a"*40, "b"*40
           p = {"pr":42,"head":head,"base":base}
           snapshot = {"number":42,"state":"open","draft":False,"head":{"sha":head},"base":{"sha":base,"ref":"main","repo":{"full_name":REPO}}}
@@ -110,6 +110,24 @@ jobs:
               assert shadow_dispatch(lease,snapshot,"c"*40,101)["status"] == "STALE_BASE"
               assert shadow_dispatch(lease,dict(snapshot,head={"sha":"c"*40}),base,101)["status"] == "STALE_HEAD_OR_INELIGIBLE"
               assert shadow_dispatch(lease,snapshot,base,111)["status"] == "LEASE_EXPIRED"
+              result = {"review":{"key_issues_to_review":[]},"coverage":{"files_not_reviewed":[],"files_partially_reviewed":[]},"usage":{}}
+              receipt = advisory_receipt(lease,snapshot,base,101,result,123)
+              assert receipt["status"] == "ADVISORY_UNVERIFIED" and receipt["merge_authorized"] is False
+              assert receipt["run_id"] == 123 and receipt["head"] == head and receipt["base"] == base
+              assert len(receipt["review_sha256"]) == 64 and lease.token not in str(receipt)
+              assert advisory_receipt(lease,snapshot,base,101,result,123) == receipt
+              result["coverage"]["files_not_reviewed"].append("docs/example.md")
+              assert receipt["result"]["coverage"]["files_not_reviewed"] == []
+              incomplete = advisory_receipt(lease,snapshot,base,101,result,123)
+              assert incomplete["status"] == "ADVISORY_INCOMPLETE"
+              assert incomplete["review_sha256"] != receipt["review_sha256"]
+              assert advisory_receipt(lease,snapshot,base,111,result,123)["status"] == "LEASE_EXPIRED"
+              for bad in ({},dict(result,coverage={}),dict(result,review={"x":"a"*66000})):
+                  try:
+                      advisory_receipt(lease,snapshot,base,101,bad,123)
+                  except ValueError:
+                      continue
+                  raise AssertionError("accepted invalid evidence")
               assert q.get(job.id).status == "leased"
           print("canonical queue shadow contract PASS")
           PY
