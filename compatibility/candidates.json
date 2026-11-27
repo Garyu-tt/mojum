@@ -1,0 +1,34 @@
+{
+  "schema": "mojum.compatibility-candidate/1",
+  "reference_core": "bd91fa15da9a3399c6ba5752a0dc30cf3755caa3",
+  "harness": "763030e9dab8ee72c25fb7d8a407fc7bf587db87",
+  "legacy_reference": "074b14c152c8c5e3291e6e56595255386a751af9",
+  "plugins": [
+    {
+      "id": "genesis-ledger",
+      "version": "0.1.0",
+      "revision": "5b1ba837969eb8bbafd9714ed46701d23bfec130",
+      "state": "candidate-not-released"
+    },
+    {
+      "id": "genesis-ledger",
+      "version": "0.1.0",
+      "revision": "32db9baef692abad68b641f1f70f7bef98897807",
+      "state": "updated-candidate-not-released"
+    },
+    {
+      "id": "genesis-ledger",
+      "version": "0.1.0",
+      "revision": "ebfb2410eda297cecd9805b2a01ed4da0784dd41",
+      "state": "atomic-candidate-not-released"
+    }
+  ],
+  "python": [
+    "3.11",
+    "3.12",
+    "3.13"
+  ],
+  "status": "proposed-not-required",
+  "updated_harness": "integration_tests/test_genesis_updated.py (candidate merge checkout)",
+  "atomic_harness": "integration_tests/test_genesis_atomic.py (candidate merge checkout)"
+}

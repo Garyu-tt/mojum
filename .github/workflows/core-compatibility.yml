@@ -1,0 +1,188 @@
+name: Core backward compatibility
+on:
+  pull_request:
+    branches: [dev/core/genesis-integration-r01, core/v2]
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    name: compatibility (${{ matrix.core }}, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [reference, candidate]
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: matrix.core == 'candidate'
+        with:
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: matrix.core == 'reference'
+        with:
+          ref: bd91fa15da9a3399c6ba5752a0dc30cf3755caa3
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 763030e9dab8ee72c25fb7d8a407fc7bf587db87
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 5b1ba837969eb8bbafd9714ed46701d23bfec130
+          path: harness/plugin-candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record actual core and pinned inputs
+        env:
+          CORE_KIND: ${{ matrix.core }}
+        run: |
+          git -C runtime rev-parse HEAD
+          if [ "$CORE_KIND" = candidate ]; then
+            test "$(git -C runtime rev-parse HEAD)" = "$GITHUB_SHA"
+          else
+            test "$(git -C runtime rev-parse HEAD)" = "bd91fa15da9a3399c6ba5752a0dc30cf3755caa3"
+          fi
+          test "$(git -C harness rev-parse HEAD)" = "763030e9dab8ee72c25fb7d8a407fc7bf587db87"
+          test "$(git -C harness/plugin-candidate rev-parse HEAD)" = "5b1ba837969eb8bbafd9714ed46701d23bfec130"
+          test "$(git -C legacy rev-parse HEAD)" = "074b14c152c8c5e3291e6e56595255386a751af9"
+      - name: Run identical pinned compatibility harness
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: >-
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
+          harness/tests test_genesis_integration.py
+      - name: Candidate core unit regressions
+        if: matrix.core == 'candidate'
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: |
+          cp -a legacy runtime/legacy
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)" runtime/tests
+  updated-plugin:
+    name: updated-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [reference, candidate]
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: matrix.core == 'candidate'
+        with:
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: matrix.core == 'reference'
+        with:
+          ref: bd91fa15da9a3399c6ba5752a0dc30cf3755caa3
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 32db9baef692abad68b641f1f70f7bef98897807
+          path: harness/plugin-candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record actual core and pinned inputs
+        env:
+          CORE_KIND: ${{ matrix.core }}
+        run: |
+          git -C runtime rev-parse HEAD
+          git -C harness rev-parse HEAD
+          test "$(git -C harness rev-parse HEAD)" = "$GITHUB_SHA"
+          if [ "$CORE_KIND" = candidate ]; then
+            test "$(git -C runtime rev-parse HEAD)" = "$GITHUB_SHA"
+          else
+            test "$(git -C runtime rev-parse HEAD)" = "bd91fa15da9a3399c6ba5752a0dc30cf3755caa3"
+          fi
+          test "$(git -C harness/plugin-candidate rev-parse HEAD)" = "32db9baef692abad68b641f1f70f7bef98897807"
+          test "$(git -C legacy rev-parse HEAD)" = "074b14c152c8c5e3291e6e56595255386a751af9"
+      - name: Run updated plugin compatibility harness
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: >-
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
+          harness/integration_tests test_genesis_updated.py
+  atomic-plugin:
+    name: atomic-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [reference, candidate]
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: matrix.core == 'candidate'
+        with:
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: matrix.core == 'reference'
+        with:
+          ref: bd91fa15da9a3399c6ba5752a0dc30cf3755caa3
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ebfb2410eda297cecd9805b2a01ed4da0784dd41
+          path: harness/plugin-candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record actual core and pinned inputs
+        env:
+          CORE_KIND: ${{ matrix.core }}
+        run: |
+          git -C runtime rev-parse HEAD
+          git -C harness rev-parse HEAD
+          test "$(git -C harness rev-parse HEAD)" = "$GITHUB_SHA"
+          if [ "$CORE_KIND" = candidate ]; then
+            test "$(git -C runtime rev-parse HEAD)" = "$GITHUB_SHA"
+          else
+            test "$(git -C runtime rev-parse HEAD)" = "bd91fa15da9a3399c6ba5752a0dc30cf3755caa3"
+          fi
+          test "$(git -C harness/plugin-candidate rev-parse HEAD)" = "ebfb2410eda297cecd9805b2a01ed4da0784dd41"
+          test "$(git -C legacy rev-parse HEAD)" = "074b14c152c8c5e3291e6e56595255386a751af9"
+      - name: Run atomic plugin compatibility harness
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: >-
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
+          harness/integration_tests test_genesis_atomic.py
