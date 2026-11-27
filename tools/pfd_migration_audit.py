@@ -10,7 +10,7 @@ SHA = re.compile(r"[0-9a-f]{40}")
 ROOT = Path(__file__).resolve().parents[1]
 
 REPO = re.compile(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+")
-ENDPOINT = re.compile(r"(?:pulls/[1-9][0-9]*(?:/(?:files|reviews)\\?per_page=100)?|commits/[0-9a-f]{40}/check-runs\\?filter=all&per_page=100|branches\\?protected=true&per_page=100)")
+ENDPOINT = re.compile(r"(?:pulls/[1-9][0-9]*(?:/(?:files|reviews)\?per_page=100)?|commits/[0-9a-f]{40}/check-runs\?filter=all&per_page=100|branches\?protected=true&per_page=100)")
 MAX_RESPONSE = 8 * 1024 * 1024
 MAX_PAGES = 100
 
