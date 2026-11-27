@@ -69,7 +69,7 @@ jobs:
           PYTHONPATH: runtime/src:legacy/src
         run: |
           cp -a legacy runtime/legacy
-          python -m unittest discover -s runtime/tests -v
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" runtime/tests
   updated-plugin:
     name: updated-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
