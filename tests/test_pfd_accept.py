@@ -66,6 +66,45 @@ class AcceptanceTest(unittest.TestCase):
             self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),True),"apply-disabled")
             run.assert_not_called()
 
+    def test_apply_rejected_before_config_or_process(self):
+        with patch.object(pfd.sys, "argv", ["pfd_accept.py", "--apply"]), \
+             patch.object(pfd.Path, "read_text") as read, \
+             patch.object(pfd.subprocess, "check_output") as output, \
+             patch.object(pfd.subprocess, "run") as run, \
+             patch.object(pfd.subprocess, "Popen") as popen, \
+             patch.object(pfd.sys, "stderr"):
+            with self.assertRaises(SystemExit) as exc:
+                pfd.main()
+            self.assertEqual(exc.exception.code, 2)
+            for operation in (read, output, run, popen):
+                operation.assert_not_called()
+
+    def test_apply_inspect_short_circuits_before_validation(self):
+        with patch.object(pfd, "check_pr") as check, \
+             patch.object(pfd, "gh") as gh:
+            self.assertEqual(pfd.inspect(None, None, None, None, True), "apply-disabled")
+            check.assert_not_called()
+            gh.assert_not_called()
+
+    def test_cli_candidate_only_uses_read_commands(self):
+        config = {"repository": REPO, "plugins": {"demo": {"checks": CHECKS}}}
+        responses = [pfd.json.dumps([{"number": 1}]), pfd.json.dumps(pr()),
+                     pfd.json.dumps(protection())]
+        with patch.object(pfd.sys, "argv", ["pfd_accept.py"]), \
+             patch.object(pfd.Path, "read_text", return_value=pfd.json.dumps(config)), \
+             patch.object(pfd.subprocess, "check_output", side_effect=responses) as output, \
+             patch.object(pfd.subprocess, "run") as run, \
+             patch.object(pfd.subprocess, "Popen") as popen, \
+             patch("builtins.print") as printed:
+            self.assertEqual(pfd.main(), 0)
+            self.assertEqual([call.args[0][:3] for call in output.call_args_list],
+                             [["gh", "pr", "list"], ["gh", "pr", "view"],
+                              ["gh", "api", "repos/Garyu-tt/mojum/branches/plugin%2Fdemo/protection"]])
+            self.assertEqual(pfd.json.loads(printed.call_args.args[0])["result"],
+                             "candidate-only-not-authorized")
+            run.assert_not_called()
+            popen.assert_not_called()
+
     def test_no_merge_without_protection(self):
         with patch.object(pfd,"gh",return_value={}), patch.object(pfd.subprocess,"run") as run:
             self.assertEqual(pfd.inspect(REPO,"demo",CHECKS,pr(),False),"branch-protection-not-verified")
