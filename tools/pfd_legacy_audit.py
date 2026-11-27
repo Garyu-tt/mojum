@@ -13,9 +13,15 @@ def analyze(root):
         if bits[-1] == "__init__":
             bits.pop()
         return ".".join(bits)
-    modules = {module(p): p for p in paths}
+    modules, errors = {}, []
+    for p in paths:
+        m = module(p)
+        if m in modules:
+            errors.append({"module":m,"error":"ambiguous module paths: " + str(modules[m].relative_to(root)) + ", " + str(p.relative_to(root))})
+            continue
+        modules[m] = p
     graph = {m: set() for m in modules}
-    details, errors = {}, []
+    details = {}
     for m, p in modules.items():
         private, dynamic, contracts, external, unresolved = [], [], set(), set(), set()
         try:
@@ -52,7 +58,7 @@ def analyze(root):
                         graph[m].add(candidate)
                     elif not node.module:
                         record(target)
-                    if target.startswith("mojum") and alias.name.startswith("_") and target != m:
+                    if (target == "mojum" or target.startswith("mojum.")) and alias.name.startswith("_") and target != m:
                         private.append({"target":target,"symbol":alias.name,"line":node.lineno})
             elif isinstance(node, ast.Call):
                 f = node.func
