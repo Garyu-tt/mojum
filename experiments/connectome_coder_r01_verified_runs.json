@@ -1,0 +1,43 @@
+{
+  "environment": "isolated CPU container; 5 logical CPUs, 5.8 GiB RAM",
+  "command": "python connectome_coder_r01.py --episodes 30000 --seed SEED",
+  "runs": [
+    {
+      "seed": 42,
+      "episodes": 30000,
+      "reward_successes": 577,
+      "learned_synaptic_weights": 6018,
+      "train_tasks": 66,
+      "heldout_tasks": 17,
+      "learned_beam8_pass": 12,
+      "untrained_beam8_pass": 3,
+      "learned_beam1_pass": 6,
+      "untrained_beam1_pass": 0
+    },
+    {
+      "seed": 43,
+      "episodes": 30000,
+      "reward_successes": 898,
+      "learned_synaptic_weights": 6210,
+      "train_tasks": 66,
+      "heldout_tasks": 17,
+      "learned_beam8_pass": 13,
+      "untrained_beam8_pass": 4,
+      "learned_beam1_pass": 4,
+      "untrained_beam1_pass": 1
+    },
+    {
+      "seed": 44,
+      "episodes": 30000,
+      "reward_successes": 1098,
+      "learned_synaptic_weights": 6024,
+      "train_tasks": 66,
+      "heldout_tasks": 17,
+      "learned_beam8_pass": 10,
+      "untrained_beam8_pass": 3,
+      "learned_beam1_pass": 2,
+      "untrained_beam1_pass": 0
+    }
+  ],
+  "materialized_10b": false
+}
