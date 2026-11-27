@@ -1,0 +1,27 @@
+name: Plugin artifact loader contract
+on:
+  pull_request:
+    branches: [dev/core/plugin-sdk-r01, core/v2]
+permissions:
+  contents: read
+jobs:
+  loader-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run migrated contract suite
+        env:
+          PYTHONPATH: src:legacy/src
+        run: python -m unittest discover -s tests -v
