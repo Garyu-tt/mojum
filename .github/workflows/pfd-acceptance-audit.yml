@@ -12,10 +12,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact auditor revision
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          actual=$(git rev-parse HEAD)
+          printf "Expected: %s\nActual: %s\n" "$EXPECTED_SHA" "$actual"
+          test "$actual" = "$EXPECTED_SHA"
       - run: python -m unittest discover -s tests -p 'test_pfd*.py' -v
       - run: python tools/pfd_migration_audit.py
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Checkout proposed merge for compatibility
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify proposed merge and run PFD unit tests
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          python -m unittest discover -s tests -p 'test_pfd*.py' -v
