@@ -59,12 +59,14 @@ def evaluate(pr, lane, files, runs, reviews, protected):
     blockers=[]
     head=pr["head"]["sha"]
     base=pr["base"]["sha"]
-    if (pr["state"]!="open" or pr["draft"] or
+    if (pr["state"]!="open" or
         pr["base"]["ref"]!=lane["base"] or pr["head"]["ref"]!=lane["head"] or
         pr["head"]["repo"]["full_name"]!=lane["repo"] or
         pr["base"]["repo"]["full_name"]!=lane["repo"] or
         not SHA.fullmatch(head) or not SHA.fullmatch(base)):
         blockers.append("unexpected-pr-identity")
+    if pr["draft"]:
+        blockers.append("draft-not-ready")
     if head!=lane["candidate_sha"] or base!=lane["base_sha"]:
         blockers.append("pin-changed-reapproval-required")
     if pr.get("mergeable") is not True:

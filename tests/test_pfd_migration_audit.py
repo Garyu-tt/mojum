@@ -23,6 +23,13 @@ class MigrationAuditTests(unittest.TestCase):
         result=audit.evaluate(*fixture(),True)
         self.assertEqual(result["decision"],"HOLD")
         self.assertIn("trusted-ci-provenance-not-verified",result["blockers"])
+    def test_draft_is_explicit_hold_not_identity_mismatch(self):
+        pr,lane,files,runs,reviews=fixture()
+        pr["draft"]=True
+        result=audit.evaluate(pr,lane,files,runs,reviews,True)
+        self.assertEqual(result["decision"],"HOLD")
+        self.assertIn("draft-not-ready",result["blockers"])
+        self.assertNotIn("unexpected-pr-identity",result["blockers"])
     def test_drift_scope_and_protection(self):
         pr,lane,files,runs,reviews=fixture()
         pr["head"]["sha"]="c"*40

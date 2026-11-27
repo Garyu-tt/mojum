@@ -158,6 +158,30 @@
           {
             "context": "genesis-integration (3.13)",
             "integration_id": 15368
+          },
+          {
+            "context": "atomic-plugin (reference, Python 3.11)",
+            "integration_id": 15368
+          },
+          {
+            "context": "atomic-plugin (reference, Python 3.12)",
+            "integration_id": 15368
+          },
+          {
+            "context": "atomic-plugin (reference, Python 3.13)",
+            "integration_id": 15368
+          },
+          {
+            "context": "atomic-plugin (candidate, Python 3.11)",
+            "integration_id": 15368
+          },
+          {
+            "context": "atomic-plugin (candidate, Python 3.12)",
+            "integration_id": 15368
+          },
+          {
+            "context": "atomic-plugin (candidate, Python 3.13)",
+            "integration_id": 15368
           }
         ]
       }
