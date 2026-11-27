@@ -31,4 +31,4 @@ jobs:
       - name: Run migrated contract suite
         env:
           PYTHONPATH: src:legacy/src
-        run: python -m unittest discover -s tests -v
+        run: python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" tests
