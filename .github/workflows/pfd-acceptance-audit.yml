@@ -6,6 +6,7 @@ permissions:
   contents: read
   pull-requests: read
   checks: read
+  actions: read
 jobs:
   acceptance-audit:
     runs-on: ubuntu-latest
