@@ -74,3 +74,31 @@ def advisory_receipt(lease, snapshot, current_base, now, result, run_id):
             "status": "ADVISORY_INCOMPLETE" if any(coverage.values()) else "ADVISORY_UNVERIFIED",
             "review_sha256": hashlib.sha256(raw).hexdigest(),
             "result": json.loads(raw), "merge_authorized": False}
+
+
+def run_provenance(metadata, run_id, attempt, trusted_revision):
+    """Validate metadata fetched by the supervisor from authenticated GitHub API.
+
+    This does not prove that a separately supplied result came from this run.
+    Never use the run's own revision as the trusted_revision argument.
+    """
+    if type(run_id) is not int or run_id <= 0 or type(attempt) is not int or attempt <= 0:
+        raise ValueError("invalid run identity")
+    if type(trusted_revision) is not str or not SHA.fullmatch(trusted_revision):
+        raise ValueError("invalid trusted revision")
+    if type(metadata) is not dict:
+        raise ValueError("invalid metadata")
+    for key in ("repository", "head_repository"):
+        if type(metadata.get(key)) is not dict or metadata[key].get("full_name") != REPO:
+            return "RUN_UNTRUSTED"
+    expected = {"id": run_id, "run_attempt": attempt, "workflow_id": 433060184,
+                "head_branch": "qa/pr-agent-local-pilot",
+                "head_sha": trusted_revision, "event": "push",
+                "path": ".github/workflows/qa-pr-agent-local-pilot.yml"}
+    if any(type(metadata.get(k)) is not type(v) or metadata[k] != v for k,v in expected.items()):
+        return "RUN_UNTRUSTED"
+    if metadata.get("status") != "completed":
+        return "RUN_PENDING"
+    if metadata.get("conclusion") != "success":
+        return "RUN_FAILED"
+    return "RUN_METADATA_MATCH"
