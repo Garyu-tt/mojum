@@ -97,9 +97,16 @@ class AcceptanceTest(unittest.TestCase):
              patch.object(pfd.subprocess, "Popen") as popen, \
              patch("builtins.print") as printed:
             self.assertEqual(pfd.main(), 0)
-            self.assertEqual([call.args[0][:3] for call in output.call_args_list],
-                             [["gh", "pr", "list"], ["gh", "pr", "view"],
-                              ["gh", "api", "repos/Garyu-tt/mojum/branches/plugin%2Fdemo/protection"]])
+            self.assertEqual([call.args[0] for call in output.call_args_list], [
+                ["gh", "pr", "list", "-R", REPO, "--state", "open",
+                 "--base", "plugin/demo", "--limit", "100", "--json", "number"],
+                ["gh", "pr", "view", "1", "-R", REPO, "--json",
+                 "number,headRefOid,headRefName,baseRefName,isDraft,isCrossRepository,"
+                 "headRepository,reviewDecision,mergeStateStatus,statusCheckRollup"],
+                ["gh", "api", "repos/Garyu-tt/mojum/branches/plugin%2Fdemo/protection"],
+            ])
+            self.assertEqual([call.kwargs for call in output.call_args_list],
+                             [{"text": True, "timeout": 60}] * 3)
             self.assertEqual(pfd.json.loads(printed.call_args.args[0])["result"],
                              "candidate-only-not-authorized")
             run.assert_not_called()
