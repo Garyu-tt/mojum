@@ -61,7 +61,7 @@ jobs:
         env:
           PYTHONPATH: runtime/src:legacy/src
         run: >-
-          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
           harness/tests test_genesis_integration.py
       - name: Candidate core unit regressions
         if: matrix.core == 'candidate'
@@ -69,7 +69,7 @@ jobs:
           PYTHONPATH: runtime/src:legacy/src
         run: |
           cp -a legacy runtime/legacy
-          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)" runtime/tests
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)" runtime/tests
   updated-plugin:
     name: updated-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
@@ -126,7 +126,7 @@ jobs:
         env:
           PYTHONPATH: runtime/src:legacy/src
         run: >-
-          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
           harness/integration_tests test_genesis_updated.py
   atomic-plugin:
     name: atomic-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
@@ -184,5 +184,5 @@ jobs:
         env:
           PYTHONPATH: runtime/src:legacy/src
         run: >-
-          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
           harness/integration_tests test_genesis_atomic.py
