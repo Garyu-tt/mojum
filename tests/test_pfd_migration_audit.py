@@ -65,13 +65,19 @@ class MigrationAuditTests(unittest.TestCase):
         stream=io.StringIO()
         opener=MagicMock()
         response=opener.open.return_value.__enter__.return_value
-        # CPython 3.13's C decoder may exceed the Python recursion limit.
-        depth=max(20000,sys.getrecursionlimit()+100)
-        response.read.side_effect=[b"["*depth+b"0"+b"]"*depth,b'{"pr":2,"decision":"HOLD"}']
+        # Exercise the decoder's documented failure deterministically; the
+        # C decoder's actual nesting threshold varies across Python builds.
+        nested=b"["*20000+b"0"+b"]"*20000
+        response.read.side_effect=[nested,b'{"pr":2,"decision":"HOLD"}']
+        real_loads=json.loads
+        def decode(payload,*args,**kwargs):
+            if payload is nested:
+                raise RecursionError("synthetic decoder limit")
+            return real_loads(payload,*args,**kwargs)
         response.headers={}
         def inspect(repo,lane):
             return audit.get_page("https://api.github.com/repos/owner/repo/pulls/"+str(lane["pr"]))[0]
-        with patch.object(sys,"argv",["audit"]), patch.object(Path,"read_text",return_value=json.dumps(cfg)), patch.object(audit,"build_opener",return_value=opener), patch.object(audit,"audit",side_effect=inspect), redirect_stdout(stream):
+        with patch.object(sys,"argv",["audit"]), patch.object(Path,"read_text",return_value=json.dumps(cfg)), patch.object(audit,"build_opener",return_value=opener), patch.object(audit,"audit",side_effect=inspect), patch.object(json,"loads",side_effect=decode), redirect_stdout(stream):
             self.assertEqual(audit.main(),1)
         rows=[json.loads(line) for line in stream.getvalue().splitlines()]
         self.assertEqual([(row["pr"],row["decision"]) for row in rows],[(1,"HOLD"),(2,"HOLD")])
