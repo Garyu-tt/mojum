@@ -83,6 +83,20 @@ def fetch_reviews(number):
     return [item for page in json.loads(raw) for item in page]
 
 
+def classify_review_process(proc):
+    """Exit zero does not imply valid or complete model output."""
+    if proc.returncode:
+        return "REVIEW_COMMAND_FAILED"
+    output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+    if any(marker in output for marker in (
+        "failed schema validation", "finding data is invalid",
+        "error during llm inference", "failed to process the command",
+        "review finding state is blocked",
+    )):
+        return "REVIEW_QUALITY_GATE_FAILED"
+    return "COMMAND_OK_REVIEW_UNVERIFIED"
+
+
 def review(number, sha, agent, execute):
     pr = fetch(number)
     if not eligible(pr, sha):
@@ -103,6 +117,13 @@ def review(number, sha, agent, execute):
         "CONFIG__USE_REPO_SETTINGS_FILE": "false",
         "CONFIG__USE_GLOBAL_SETTINGS_FILE": "false",
         "CONFIG__ENABLE_AUTO_APPROVAL": "false",
+        "CONFIG__PUBLISH_OUTPUT": "false",
+        "CONFIG__PUBLISH_OUTPUT_PROGRESS": "false",
+        "CONFIG__AI_TIMEOUT": "360",
+        "CONFIG__RETRY_SAME_MODEL_ON_TIMEOUT": "false",
+        "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY": "false",
+        "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT": "false",
+        "PR_REVIEWER__REQUIRE_TICKET_ANALYSIS_REVIEW": "false",
         "CONFIG__PROPAGATE_TOOL_ERRORS": "true",
         "GITHUB__DEPLOYMENT_TYPE": "user",
         "OLLAMA__API_BASE": "http://127.0.0.1:11434",
@@ -121,12 +142,13 @@ def review(number, sha, agent, execute):
     try:
         proc = subprocess.run(
             [agent, "--pr_url", f"https://github.com/{REPO}/pull/{number}", "review"],
-            env=env, timeout=600, check=False
+            env=env, timeout=600, check=False, capture_output=True, text=True
         )
     except subprocess.TimeoutExpired:
         return "TIMEOUT_UNVERIFIED"
-    if proc.returncode:
-        return "REVIEW_COMMAND_FAILED"
+    outcome = classify_review_process(proc)
+    if outcome != "COMMAND_OK_REVIEW_UNVERIFIED":
+        return outcome
     if not eligible(fetch(number), sha):
         return "HEAD_CHANGED_REVIEW_STALE"
     # CLI success alone does not prove a valid review was published.
@@ -210,7 +232,7 @@ def main():
         except (subprocess.SubprocessError, OSError, ValueError, RuntimeError) as exc:
             status = "ERROR_" + type(exc).__name__
         print(json.dumps({"pr": number, "head": sha, "status": status}), flush=True)
-        failed |= status not in {"DRY_RUN_ELIGIBLE", "COMMAND_OK_REVIEW_UNVERIFIED", "ROUTE_EXISTING_APPROVAL_TO_QA", "ROUTE_EXISTING_CHANGES_REQUESTED"}
+        failed |= status not in {"DRY_RUN_ELIGIBLE", "ROUTE_EXISTING_APPROVAL_TO_QA", "ROUTE_EXISTING_CHANGES_REQUESTED"}
     return int(failed)
 
 
