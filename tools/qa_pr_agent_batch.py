@@ -75,6 +75,44 @@ def integration_hint(pr):
     return "VERIFY_REQUIRED_CHECKS"
 
 
+def ci_hint(runs, sha):
+    """Observed Actions evidence only; never imply required checks are satisfied."""
+    if type(runs) is not dict or type(runs.get("workflow_runs")) is not list:
+        raise ValueError("invalid Actions response")
+    items = runs["workflow_runs"]
+    latest = {}
+    for item in items:
+        if item.get("head_sha") != sha:
+            continue
+        key = (item.get("workflow_id"), item.get("event"), item.get("head_branch"))
+        rank = (item.get("run_number", 0), item.get("run_attempt", 0), item.get("id", 0))
+        if key not in latest or rank > latest[key][0]:
+            latest[key] = (rank, item)
+    observed = [v[1] for v in latest.values()]
+    if not observed:
+        status = "CI_NO_EVIDENCE"
+    elif any(r.get("status") == "completed" and r.get("conclusion") in {"failure", "timed_out", "action_required", "startup_failure"} for r in observed):
+        status = "CI_FAILURE_OBSERVED"
+    elif any(r.get("status") != "completed" for r in observed):
+        status = "CI_PENDING_OBSERVED"
+    elif any(r.get("conclusion") != "success" for r in observed):
+        status = "CI_NON_SUCCESS_OBSERVED"
+    elif runs.get("total_count") != len(items):
+        status = "CI_PARTIAL_EVIDENCE"
+    else:
+        status = "CI_OBSERVED_SUCCESS"
+    return {"ci_hint": status, "observed_workflows": len(observed),
+            "required_checks_verified": False, "merge_authorized": False}
+
+
+def fetch_ci(sha):
+    raw = subprocess.check_output(
+        ["gh", "api", f"repos/{REPO}/actions/runs?head_sha={sha}&per_page=100"],
+        text=True, timeout=30
+    )
+    return ci_hint(json.loads(raw), sha)
+
+
 def fetch_reviews(number):
     raw = subprocess.check_output(
         ["gh", "api", "--paginate", "--slurp", f"repos/{REPO}/pulls/{number}/reviews?per_page=100"],
@@ -216,22 +254,34 @@ def main():
     parser.add_argument("--scan", type=int, choices=range(1, 31), help="read-only queue scan (max 30 PRs)")
     parser.add_argument("--agent", default="pr-agent")
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--ci", action="store_true", help="read-only Actions evidence for explicit pairs")
     args = parser.parse_args()
     if args.scan is not None:
-        if args.pairs or args.execute:
+        if args.pairs or args.execute or args.ci:
             parser.error("scan is read-only and cannot be combined with pairs or execute")
         return scan(args.scan)
     try:
         pairs = parse_pairs(args.pairs)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.ci and args.execute:
+        parser.error("--ci cannot be combined with --execute")
     failed = False
     for number, sha in pairs.items():
         try:
             status = review(number, sha, args.agent, args.execute)
         except (subprocess.SubprocessError, OSError, ValueError, RuntimeError) as exc:
             status = "ERROR_" + type(exc).__name__
-        print(json.dumps({"pr": number, "head": sha, "status": status}), flush=True)
+        row = {"pr": number, "head": sha, "status": status}
+        if args.ci:
+            try:
+                row.update(fetch_ci(sha))
+                if not eligible(fetch(number), sha):
+                    row["ci_hint"] = "STALE_OR_INELIGIBLE"
+            except (subprocess.SubprocessError, OSError, ValueError, RuntimeError):
+                row["ci_hint"] = "CI_READ_ERROR"
+                failed = True
+        print(json.dumps(row), flush=True)
         failed |= status not in {"DRY_RUN_ELIGIBLE", "ROUTE_EXISTING_APPROVAL_TO_QA", "ROUTE_EXISTING_CHANGES_REQUESTED"}
     return int(failed)
 
