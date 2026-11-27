@@ -150,3 +150,45 @@ class CheckpointCompatibility(unittest.TestCase):
         old.restore(before)
         self.assertEqual(sim.step(),old.step())
         self.assertEqual(sim.snapshot(),old.snapshot())
+
+    def test_late_restore_failure_preserves_state_and_allows_retry(self):
+        for sinks in (0,1,2):
+            g=graph_sinks(sinks)
+            target=LegacySimulation(g)
+            for _ in range(5): target.step()
+            candidate=target.snapshot()
+            for error in (MemoryError,KeyboardInterrupt,GraphError):
+                with self.subTest(sinks=sinks,error=error.__name__):
+                    sim=LegacySimulation(g)
+                    sim.step()
+                    before=sim.snapshot()
+                    replay=sim._new_executor()
+                    original=replay.step
+                    calls=[]
+                    def fail_late():
+                        calls.append(None)
+                        if len(calls)==5: raise error("late replay")
+                        return original()
+                    with patch.object(replay,"step",side_effect=fail_late), patch.object(sim,"_new_executor",return_value=replay):
+                        with self.assertRaises(error): sim.restore(candidate)
+                    self.assertEqual(len(calls),5)
+                    self.assertEqual(sim.snapshot(),before)
+                    sim.restore(candidate)
+                    self.assertEqual(sim.snapshot(),candidate)
+                    reference=LegacySimulation(g)
+                    reference.restore(candidate)
+                    self.assertEqual(sim.step(),reference.step())
+                    self.assertEqual(sim.snapshot(),reference.snapshot())
+
+    def test_restored_history_does_not_alias_snapshot_or_public_reads(self):
+        g=graph_sinks(2)
+        source=LegacySimulation(g)
+        source.step()
+        candidate=source.snapshot()
+        expected=copy.deepcopy(candidate)
+        sim=LegacySimulation(g)
+        sim.restore(candidate)
+        candidate["state"]["episodes"][0]["brain_observation"]["action"]={"changed":1}
+        sim.episodes[0]["brain_observation"]["action"]={"changed":2}
+        sim.snapshot()["state"]["episodes"][0]["brain_observation"]["action"]={"changed":3}
+        self.assertEqual(sim.snapshot(),expected)
