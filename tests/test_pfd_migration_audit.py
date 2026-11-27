@@ -12,7 +12,7 @@ def fixture():
     head={"ref":"dev/demo/r1","sha":"a"*40,"repo":{"full_name":repo}}
     base={"ref":"plugin/demo","sha":"b"*40,"repo":{"full_name":repo}}
     pr={"number":1,"state":"open","draft":False,"head":head,"base":base,"mergeable":True,"changed_files":1,"user":{"login":"author"}}
-    lane={"repo":repo,"base":base["ref"],"head":head["ref"],"candidate_sha":head["sha"],"base_sha":base["sha"],"allowed_files":["plugin.py"],"checks":["contract"]}
+    lane={"pr":1,"repo":repo,"base":base["ref"],"head":head["ref"],"candidate_sha":head["sha"],"base_sha":base["sha"],"allowed_files":["plugin.py"],"checks":["contract"]}
     files=[{"filename":"plugin.py"}]
     runs=[{"name":"contract","app":{"id":15368},"status":"completed","conclusion":"success"}]
     reviews=[{"state":"APPROVED","commit_id":head["sha"],"user":{"login":"reviewer"}}]
