@@ -60,7 +60,9 @@ jobs:
       - name: Run identical pinned compatibility harness
         env:
           PYTHONPATH: runtime/src:legacy/src
-        run: python -m unittest discover -s harness/tests -p test_genesis_integration.py -v
+        run: >-
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          harness/tests test_genesis_integration.py
       - name: Candidate core unit regressions
         if: matrix.core == 'candidate'
         env:
@@ -123,7 +125,9 @@ jobs:
       - name: Run updated plugin compatibility harness
         env:
           PYTHONPATH: runtime/src:legacy/src
-        run: python -m unittest discover -s harness/integration_tests -p test_genesis_updated.py -v
+        run: >-
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          harness/integration_tests test_genesis_updated.py
   atomic-plugin:
     name: atomic-plugin (${{ matrix.core }}, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
@@ -179,4 +183,6 @@ jobs:
       - name: Run atomic plugin compatibility harness
         env:
           PYTHONPATH: runtime/src:legacy/src
-        run: python -m unittest discover -s harness/integration_tests -p test_genesis_atomic.py -v
+        run: >-
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          harness/integration_tests test_genesis_atomic.py
