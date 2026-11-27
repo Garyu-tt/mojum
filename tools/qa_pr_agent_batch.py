@@ -123,27 +123,51 @@ def review(number, sha, agent, execute):
 
 
 def discover(limit):
-    """Bounded read-only scan, oldest first, preserving exact head identity."""
-    raw = subprocess.check_output(
-        ["gh", "api", f"repos/{REPO}/pulls?state=open&base=main&sort=created&direction=asc&per_page={limit}"],
-        text=True, timeout=30
-    )
-    items = json.loads(raw)
-    if not isinstance(items, list):
-        raise ValueError("unexpected pull list response")
-    return [(p["number"], p["head"]["sha"]) for p in items[:limit]
-            if eligible(p, p.get("head", {}).get("sha"))
-            and isinstance(p.get("number"), int)
-            and PAIR.fullmatch(f'{p["number"]}:{p["head"]["sha"]}')]
+    """Read at most 3 pages; report skipped drafts and incomplete scans."""
+    candidates = []
+    seen = set()
+    scanned = 0
+    skipped = 0
+    exhausted = False
+    for page in range(1, 4):
+        raw = subprocess.check_output(
+            ["gh", "api", f"repos/{REPO}/pulls?state=open&base=main&sort=created&direction=asc&per_page=30&page={page}"],
+            text=True, timeout=30
+        )
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            raise ValueError("unexpected pull list response")
+        for p in items:
+            scanned += 1
+            number = p.get("number")
+            sha = (p.get("head") or {}).get("sha")
+            if (not isinstance(number, int) or not isinstance(sha, str)
+                    or not PAIR.fullmatch(f"{number}:{sha}")
+                    or number in seen or not eligible(p, sha)):
+                skipped += 1
+                continue
+            seen.add(number)
+            candidates.append((number, sha))
+            if len(candidates) >= limit:
+                return candidates, {"scanned": scanned, "skipped": skipped, "exhausted": False}
+        if len(items) < 30:
+            exhausted = True
+            break
+    return candidates, {"scanned": scanned, "skipped": skipped, "exhausted": exhausted}
 
 
 def scan(limit):
     totals = {}
-    for number, sha in discover(limit):
-        status = review(number, sha, "pr-agent", False)
+    candidates, meta = discover(limit)
+    for number, sha in candidates:
+        try:
+            status = review(number, sha, "pr-agent", False)
+        except (subprocess.SubprocessError, OSError, ValueError, RuntimeError) as exc:
+            status = "ERROR_" + type(exc).__name__
         totals[status] = totals.get(status, 0) + 1
         print(json.dumps({"pr": number, "head": sha, "status": status}), flush=True)
-    print(json.dumps({"scan_summary": totals}), flush=True)
+    print(json.dumps({"scan_summary": totals, "scan_meta": meta, "requested": limit}), flush=True)
+    return int(any(key.startswith("ERROR_") for key in totals))
 
 
 def main():
@@ -156,8 +180,7 @@ def main():
     if args.scan is not None:
         if args.pairs or args.execute:
             parser.error("scan is read-only and cannot be combined with pairs or execute")
-        scan(args.scan)
-        return 0
+        return scan(args.scan)
     try:
         pairs = parse_pairs(args.pairs)
     except ValueError as exc:
