@@ -34,5 +34,5 @@ jobs:
         env:
           PYTHONPATH: src:legacy/src
         run: >-
-          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)"
+          python -c "import sys, unittest; suite = unittest.defaultTestLoader.discover(sys.argv[1], pattern=sys.argv[2]); result = unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) + len(result.expectedFailures) else 1)"
           tests 'test*.py'
