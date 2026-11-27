@@ -1,0 +1,56 @@
+name: Core backward compatibility
+on:
+  pull_request:
+    branches: [dev/core/genesis-integration-r01, core/v2]
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    name: compatibility (${{ matrix.core }}, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [reference, candidate]
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        if: matrix.core == 'candidate'
+        with:
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        if: matrix.core == 'reference'
+        with:
+          ref: bd91fa15da9a3399c6ba5752a0dc30cf3755caa3
+          path: runtime
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 763030e9dab8ee72c25fb7d8a407fc7bf587db87
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5b1ba837969eb8bbafd9714ed46701d23bfec130
+          path: harness/plugin-candidate
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record actual core and pinned inputs
+        run: |
+          git -C runtime rev-parse HEAD
+          test "$(git -C harness rev-parse HEAD)" = "763030e9dab8ee72c25fb7d8a407fc7bf587db87"
+          test "$(git -C harness/plugin-candidate rev-parse HEAD)" = "5b1ba837969eb8bbafd9714ed46701d23bfec130"
+          test "$(git -C legacy rev-parse HEAD)" = "074b14c152c8c5e3291e6e56595255386a751af9"
+      - name: Run identical pinned compatibility harness
+        env:
+          PYTHONPATH: runtime/src:legacy/src
+        run: python -m unittest discover -s harness/tests -p test_genesis_integration.py -v
