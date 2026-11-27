@@ -65,6 +65,11 @@ jobs:
           assert q.integration_hint({"mergeable":None,"mergeable_state":"unknown"}) == "MERGEABILITY_UNKNOWN"
           assert q.integration_hint({"mergeable":True,"mergeable_state":"clean"}) == "VERIFY_REQUIRED_CHECKS"
           assert q.integration_hint({"mergeable":True,"mergeable_state":"blocked"}) == "VERIFY_REQUIRED_CHECKS"
+          from subprocess import CompletedProcess
+          for warning in ("Review output failed schema validation", "Review finding data is invalid", "Error during LLM inference", "Failed to process the command", "Review finding state is blocked"):
+              assert q.classify_review_process(CompletedProcess([],0,"",warning)) == "REVIEW_QUALITY_GATE_FAILED"
+          assert q.classify_review_process(CompletedProcess([],1,"","")) == "REVIEW_COMMAND_FAILED"
+          assert q.classify_review_process(CompletedProcess([],0,"","")) == "COMMAND_OK_REVIEW_UNVERIFIED"
           print("validation PASS")
           PY
       - name: Inspect three real PRs without writes or inference
