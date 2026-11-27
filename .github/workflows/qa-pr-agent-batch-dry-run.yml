@@ -91,7 +91,7 @@ jobs:
           import tempfile
           from pathlib import Path
           from qa_work_queue import QAWorkQueue
-          from qa_pr_agent_shadow_adapter import job_spec, shadow_dispatch, advisory_receipt, REPO
+          from qa_pr_agent_shadow_adapter import job_spec, shadow_dispatch, advisory_receipt, run_provenance, REPO
           head, base = "a"*40, "b"*40
           p = {"pr":42,"head":head,"base":base}
           snapshot = {"number":42,"state":"open","draft":False,"head":{"sha":head},"base":{"sha":base,"ref":"main","repo":{"full_name":REPO}}}
@@ -129,5 +129,13 @@ jobs:
                       continue
                   raise AssertionError("accepted invalid evidence")
               assert q.get(job.id).status == "leased"
+          meta = {"repository":{"full_name":REPO},"head_repository":{"full_name":REPO},"id":123,"run_attempt":1,"workflow_id":433060184,"head_branch":"qa/pr-agent-local-pilot","head_sha":head,"event":"push","path":".github/workflows/qa-pr-agent-local-pilot.yml","status":"completed","conclusion":"success"}
+          assert run_provenance(meta,123,1,head) == "RUN_METADATA_MATCH"
+          assert run_provenance(dict(meta,status="in_progress"),123,1,head) == "RUN_PENDING"
+          assert run_provenance(dict(meta,conclusion="failure"),123,1,head) == "RUN_FAILED"
+          assert run_provenance(meta,123,2,head) == "RUN_UNTRUSTED"
+          assert run_provenance(meta,123,1,base) == "RUN_UNTRUSTED"
+          assert run_provenance(dict(meta,head_repository={"full_name":"other/repo"}),123,1,head) == "RUN_UNTRUSTED"
+          assert run_provenance(dict(meta,event="pull_request"),123,1,head) == "RUN_UNTRUSTED"
           print("canonical queue shadow contract PASS")
           PY
