@@ -1,0 +1,30 @@
+name: PFD legacy architecture audit
+on:
+  push:
+    branches: [migration/audit-r01]
+    paths:
+      - tools/pfd_legacy_audit.py
+      - .github/workflows/pfd-legacy-audit.yml
+permissions:
+  contents: read
+jobs:
+  static-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 074b14c152c8c5e3291e6e56595255386a751af9
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python tools/pfd_legacy_audit.py legacy --output legacy-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: legacy-architecture-audit
+          path: legacy-audit.json
+          if-no-files-found: error
