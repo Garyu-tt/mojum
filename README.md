@@ -1,3 +1,6 @@
-# Mojum 2.0 core migration lane
+# Core extraction R01 (audit candidate)
+Baseline: 074b14c152c8c5e3291e6e56595255386a751af9. No product features or legacy updates.
 
-Experimental; not the stable main. Audit-first migration under #1543.
+The executable wire remains mechanicus.universal-graph/1. The v2 bridge is audit-only; do not conflate Mojum product version 2.0 with IR wire v2. Preserve canonical UTF-8 JSON, five root keys, typed DAG and size limits, exact endpoints, deterministic topological order, and existing rejection behavior. Domain kinds must be supplied as declarative registry data by an external composition layer; the core does not name any provider. This candidate copies the v1 validator with required explicit ports injection; _json_nesting.py is unchanged. Differential tests use the pinned legacy fixture and rejection cases, plus an arbitrary non-domain registry.
+
+Not implemented: executor lifecycle, signed plugin release registry, plugin loading, state/replay migration, manifest compatibility API, or v2 execution. Existing full regression suite remains in legacy. The differential tests here are only a small first slice. Keep legacy sim.py unchanged until effect staging and replay semantics are covered. Registry input is trusted configuration, not a sandbox for executing Python. No claims of runtime isolation or compatibility with all plugins. Independent review and expanded contract tests required before promotion.
