@@ -23,7 +23,13 @@
         "contract (3.11)",
         "contract (3.12)",
         "contract (3.13)"
-      ]
+      ],
+      "observed_run": {
+        "id": 46058181665,
+        "workflow": ".github/workflows/genesis-ledger.yml",
+        "merge_sha": "8810c60a79f78174195b0988c05744d3af6770ef",
+        "test_step": "Standalone legacy contract tests"
+      }
     },
     {
       "pr": 1545,
@@ -44,7 +50,13 @@
         "graph-contract (3.11)",
         "graph-contract (3.12)",
         "graph-contract (3.13)"
-      ]
+      ],
+      "observed_run": {
+        "id": 46058747165,
+        "workflow": ".github/workflows/core-graph-contract.yml",
+        "merge_sha": "223a98b797564a772ce16b3bc998ca7ec27fb5b0",
+        "test_step": "Differential extraction tests"
+      }
     },
     {
       "pr": 1552,
@@ -65,7 +77,13 @@
         "compatibility (candidate, Python 3.11)",
         "compatibility (candidate, Python 3.12)",
         "compatibility (candidate, Python 3.13)"
-      ]
+      ],
+      "observed_run": {
+        "id": 46060029760,
+        "workflow": ".github/workflows/core-compatibility.yml",
+        "merge_sha": "2c9d9569fda7e8cb8080e766c92e11adfa195570",
+        "test_step": "Run identical pinned compatibility harness"
+      }
     }
   ]
 }

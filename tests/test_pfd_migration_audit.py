@@ -55,3 +55,23 @@ class MigrationAuditTests(unittest.TestCase):
         with patch.object(audit,"MAX_PAGES",2), patch.object(audit,"get_page",return_value=([],'rel="next"')):
             with self.assertRaisesRegex(ValueError,"pagination budget"):
                 audit.api("x/y","branches?protected=true&per_page=100",True)
+
+    def test_observed_run_correlation_is_not_trust(self):
+        pr,lane,files,runs,reviews=fixture()
+        sha="d"*40
+        pr["merge_commit_sha"]=sha
+        lane["observed_run"]={"id":9,"workflow":".github/workflows/test.yml","merge_sha":sha,"test_step":"Tests"}
+        run={"id":9,"path":".github/workflows/test.yml","event":"pull_request","head_sha":"a"*40,
+             "status":"completed","conclusion":"success","pull_requests":[{"number":1,
+             "head":{"sha":"a"*40},"base":{"sha":"b"*40}}]}
+        jobs=[{"name":"contract","run_id":9,"head_sha":"a"*40,"status":"completed",
+               "conclusion":"success","steps":[{"name":"Tests","conclusion":"success"}]}]
+        merge={"sha":sha,"parents":[{"sha":"b"*40},{"sha":"a"*40}]}
+        good=audit.observe_run(pr,lane,run,jobs,merge)
+        self.assertTrue(good["metadata_consistent"])
+        self.assertFalse(good["trust_verified"])
+        for bad in (dict(run,event="push"),dict(run,head_sha="e"*40),dict(run,path="other.yml")):
+            self.assertFalse(audit.observe_run(pr,lane,bad,jobs,merge)["metadata_consistent"])
+        self.assertFalse(audit.observe_run(pr,lane,run,jobs+jobs,merge)["metadata_consistent"])
+        self.assertFalse(audit.observe_run(pr,lane,run,jobs,dict(merge,parents=[]))["metadata_consistent"])
+        self.assertFalse(audit.observe_run(pr,lane,run,[dict(jobs[0],steps=[])],merge)["metadata_consistent"])

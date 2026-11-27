@@ -10,7 +10,7 @@ SHA = re.compile(r"[0-9a-f]{40}")
 ROOT = Path(__file__).resolve().parents[1]
 
 REPO = re.compile(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+")
-ENDPOINT = re.compile(r"(?:pulls/[1-9][0-9]*(?:/(?:files|reviews)\?per_page=100)?|commits/[0-9a-f]{40}/check-runs\?filter=all&per_page=100|branches\?protected=true&per_page=100)")
+ENDPOINT = re.compile(r"(?:actions/runs/[1-9][0-9]*(?:/jobs\?per_page=100)?|git/commits/[0-9a-f]{40}|pulls/[1-9][0-9]*(?:/(?:files|reviews)\?per_page=100)?|commits/[0-9a-f]{40}/check-runs\?filter=all&per_page=100|branches\?protected=true&per_page=100)")
 MAX_RESPONSE = 8 * 1024 * 1024
 MAX_PAGES = 100
 
@@ -91,6 +91,38 @@ def evaluate(pr, lane, files, runs, reviews, protected):
     return {"pr":pr["number"],"head":head,"base":base,"decision":"HOLD",
             "blockers":blockers,"checks_seen":len(runs)}
 
+def observe_run(pr, lane, run, jobs, merge):
+    """Correlate server metadata, not runner execution or workflow trust."""
+    head, base = lane["candidate_sha"], lane["base_sha"]
+    expected = lane["observed_run"]
+    reasons = []
+    if (pr["head"]["sha"] != head or pr["base"]["sha"] != base
+        or pr.get("merge_commit_sha") != expected["merge_sha"]
+        or merge.get("sha") != expected["merge_sha"]
+        or [p.get("sha") for p in merge.get("parents", [])] != [base, head]):
+        reasons.append("merge-parent-mismatch")
+    links = [p for p in run.get("pull_requests", [])
+             if p.get("number") == lane["pr"] and
+             (p.get("head") or {}).get("sha") == head and
+             (p.get("base") or {}).get("sha") == base]
+    if (run.get("id") != expected["id"] or run.get("path") != expected["workflow"]
+        or run.get("event") != "pull_request" or run.get("head_sha") != head
+        or run.get("status") != "completed" or run.get("conclusion") != "success"
+        or len(links) != 1):
+        reasons.append("workflow-run-mismatch")
+    for name in lane["checks"]:
+        matches = [j for j in jobs if j.get("name") == name]
+        if len(matches) != 1 or not all(
+            j.get("run_id") == expected["id"] and j.get("head_sha") == head
+            and j.get("status") == "completed" and j.get("conclusion") == "success"
+            and sum(step.get("name") == expected["test_step"] and
+                    step.get("conclusion") == "success" for step in j.get("steps", [])) == 1
+            for j in matches):
+            reasons.append("job-metadata-mismatch:"+name)
+    return {"run_id":expected["id"],"merge_sha":expected["merge_sha"],
+            "metadata_consistent":not reasons,"reasons":reasons,
+            "trust_verified":False}
+
 def audit(repo,lane):
     n=lane["pr"]
     if type(n) is not int or n < 1:
@@ -103,7 +135,20 @@ def audit(repo,lane):
         raise ValueError("invalid check pagination")
     runs=[r for page in pages for r in page["check_runs"]]
     branches=flatten(api(repo,"branches?protected=true&per_page=100",True))
-    return evaluate(pr,lane,files,runs,reviews,any(b["name"]==lane["base"] for b in branches))
+    result = evaluate(pr,lane,files,runs,reviews,any(b["name"]==lane["base"] for b in branches))
+    observed = lane.get("observed_run")
+    if observed:
+        run_id = observed["id"]
+        if type(run_id) is not int or run_id < 1:
+            raise ValueError("invalid run ID")
+        run = api(repo,f"actions/runs/{run_id}")
+        job_pages = api(repo,f"actions/runs/{run_id}/jobs?per_page=100",True)
+        jobs = [j for page in job_pages for j in page["jobs"]]
+        merge = api(repo,f"git/commits/{observed['merge_sha']}")
+        result["observed_run"] = observe_run(pr,lane,run,jobs,merge)
+        if not result["observed_run"]["metadata_consistent"]:
+            result["blockers"].append("run-metadata-inconsistent")
+    return result
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
